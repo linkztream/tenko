@@ -13613,7 +13613,7 @@ export interface components {
          * @description Whether a member votes.
          * @enum {string}
          */
-        MemberRole: "voter" | "learner" | "superseded";
+        MemberRole: "voter" | "learner" | "superseded" | "unknown";
         /** @description One member of the controller cluster. */
         MemberView: {
             /** @description Its cluster port as `host:port`. */

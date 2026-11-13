@@ -705,7 +705,11 @@ The rules for fixtures:
   needs. The limit was 4 MiB until format 4 (WP7.0): the fixtures of formats 1 to 3 held
   3.42 MiB, most of it the space each redb file sets aside, so the limit was raised once
   rather than the fixtures compressed, which would need a decompressing step in the test
-  and change the committed fixtures of earlier formats.
+  and change the committed fixtures of earlier formats. From format 7 on the generator
+  compacts the redb files of a new fixture before it is kept
+  (`tenko_store::format::compact_closed_store`), which leaves about 0.4 MiB instead of
+  1.2 MiB; the fixtures of formats 1 to 6 stay as their binaries wrote them, since a
+  compaction by a newer redb would no longer prove that the files of the older one open.
 
 ### 4.6 Migrations larger than one batch
 

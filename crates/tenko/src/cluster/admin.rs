@@ -275,14 +275,6 @@ fn counted(count: usize, noun: &str) -> String {
     }
 }
 
-fn role_name(role: MemberRole) -> &'static str {
-    match role {
-        MemberRole::Voter => "voter",
-        MemberRole::Learner => "learner",
-        MemberRole::Superseded => "superseded",
-    }
-}
-
 /// A number or text that may be unknown.
 fn known(value: Option<impl ToString>) -> String {
     value.map_or_else(|| "-".to_owned(), |value| value.to_string())
@@ -373,7 +365,7 @@ fn member_row(member: &MemberView) -> Vec<String> {
     vec![
         member.node.to_string(),
         known(member.name.as_deref()),
-        role_name(member.role).to_owned(),
+        member.role.as_str().to_owned(),
         if member.leader { "*" } else { "" }.to_owned(),
         known(member.address.as_deref()),
         known(member.matched),

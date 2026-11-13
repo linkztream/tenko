@@ -65,14 +65,16 @@ pub(crate) fn active_file(dir: &Path) -> io::Result<String> {
 /// Makes a rename in `dir` durable where the platform allows it (directories cannot be
 /// opened for syncing on Windows; NTFS journals the rename).
 #[cfg(unix)]
-pub(crate) fn sync_dir(dir: &Path) {
+pub fn sync_dir(dir: &Path) {
     if let Ok(dir) = fs::File::open(dir) {
         let _ = dir.sync_all();
     }
 }
 
+/// Makes a rename in `dir` durable where the platform allows it (directories cannot be
+/// opened for syncing on Windows; NTFS journals the rename).
 #[cfg(not(unix))]
-pub(crate) fn sync_dir(_dir: &Path) {}
+pub fn sync_dir(_dir: &Path) {}
 
 #[cfg(test)]
 mod tests {

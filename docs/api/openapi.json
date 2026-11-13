@@ -60542,7 +60542,8 @@
         "enum": [
           "voter",
           "learner",
-          "superseded"
+          "superseded",
+          "unknown"
         ]
       },
       "MemberView": {

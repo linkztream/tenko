@@ -14,6 +14,9 @@ pub const CONFIG_KIND: &str = "node.config.kind";
 /// The controller cannot reach the revision the node holds yet (503); the node tries
 /// another controller.
 pub const CONFIG_BEHIND: &str = "node.config.behind";
+/// The node refuses the configuration of a controller whose generation of the cluster's
+/// history is older than the one the node holds (the cluster recovery, 409).
+pub const CONFIG_SUPERSEDED: &str = "node.config.superseded";
 /// The node's configuration could not be written to its disk (500).
 pub const CONFIG_FILES: &str = "node.config.files";
 /// The node secrets cannot be served: no vault, or the audit record could not be written

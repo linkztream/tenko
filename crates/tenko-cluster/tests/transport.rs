@@ -462,6 +462,7 @@ async fn revoke_on_another_controller(controller: &Controller, node: NodeId) {
                     node,
                     revoked_at: Timestamp::now(),
                     not_after: cert.not_after,
+                    controller: false,
                 },
             )
             .expect("row");

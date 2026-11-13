@@ -1229,6 +1229,7 @@ export type MessageKey =
   | "cluster.remove.title"
   | "cluster.role.learner"
   | "cluster.role.superseded"
+  | "cluster.role.unknown"
   | "cluster.role.voter"
   | "cluster.step_down.confirm"
   | "cluster.step_down.intro"
@@ -11233,6 +11234,7 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.remove.title",
   "cluster.role.learner",
   "cluster.role.superseded",
+  "cluster.role.unknown",
   "cluster.role.voter",
   "cluster.step_down.confirm",
   "cluster.step_down.intro",

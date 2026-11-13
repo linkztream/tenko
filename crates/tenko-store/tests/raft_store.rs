@@ -1000,3 +1000,56 @@ async fn journal_byte_limit_is_applied_identically_on_every_replica() {
     follower.shutdown().await.expect("shutdown");
     leader.shutdown().await.expect("shutdown");
 }
+
+/// A fenced store (the cluster recovery) refuses every write, ends its leadership, reports
+/// the fence as its quorum state and keeps serving reads; a later, weaker fence does not
+/// replace a stricter one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_fenced_store_refuses_writes_and_keeps_reads() {
+    use tenko_store::{FenceReason, QuorumState};
+
+    let store = RaftStore::open_temp(config(Path::new("unused")))
+        .await
+        .expect("open");
+    let before = put(&store, 1, "kept").await;
+    assert!(
+        store.leadership().borrow().is_some(),
+        "a single voter leads"
+    );
+
+    store.fence(FenceReason::Conflict).await;
+    store.fence(FenceReason::Superseded).await;
+    store.fence(FenceReason::MajorityAlive).await;
+    assert_eq!(store.fenced(), Some(FenceReason::Superseded));
+    assert!(
+        store.leadership().borrow().is_none(),
+        "the leadership ended"
+    );
+    match store.status().quorum {
+        QuorumState::Fenced {
+            reason, applied, ..
+        } => {
+            assert_eq!(reason, FenceReason::Superseded);
+            assert_eq!(applied, before);
+        }
+        other => panic!("not fenced: {other:?}"),
+    }
+    assert!(!store.status().quorum.accepts_writes());
+
+    let mut write = batch();
+    write.put(ROWS, key(2), Bytes::from_static(b"refused"));
+    let refused = store
+        .propose(write)
+        .await
+        .expect_err("a fenced store writes nothing");
+    assert!(matches!(refused, StoreError::NoQuorum), "{refused:?}");
+    let view = store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("a local read");
+    assert_eq!(view.revision(), before);
+    assert_eq!(
+        rows(view.as_ref()).get(&key(1)),
+        Some(&Bytes::from_static(b"kept"))
+    );
+}

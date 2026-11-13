@@ -695,7 +695,7 @@ impl NodeRegistry {
         for (serial, revocation, revision) in
             view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
         {
-            if revocation.not_after <= now {
+            if revocation.not_after <= now && !revocation.controller {
                 batch.expect_typed(&tables::REVOCATIONS, &serial, Some(revision));
                 batch.delete_typed(&tables::REVOCATIONS, &serial);
                 removed += 1;
@@ -1872,6 +1872,7 @@ impl NodeRegistry {
                         node,
                         revoked_at: cx.now,
                         not_after: *until,
+                        controller: record.roles.contains(&Role::Controller),
                     },
                 )?;
             }

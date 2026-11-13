@@ -201,10 +201,10 @@ fn refusal(state: &QuorumState, staleness: Staleness, queueable: bool) -> Respon
 fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Response {
     let why = match reason {
         FenceReason::Conflict => {
-            "a competing forced history of the cluster was seen, and an operator chooses which              one stays"
+            "a competing forced history of the cluster was seen, and an operator chooses which one stays"
         }
         FenceReason::MajorityAlive => {
-            "the forced step found the old cluster alive at its first start and this              controller did not take office"
+            "the forced step found the old cluster alive at its first start and this controller did not take office"
         }
         FenceReason::Superseded | FenceReason::Unknown => {
             "a newer generation of the cluster superseded this controller's history"
@@ -214,7 +214,7 @@ fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Respons
         reason.code(),
         503,
         format!(
-            "this controller stopped writing on {}: {why}; the change was not made: use a              controller of the current history",
+            "this controller stopped writing on {}: {why}; the change was not made: use a controller of the current history",
             staleness.since.to_rfc3339()
         ),
     )
@@ -397,6 +397,39 @@ mod tests {
         assert!(!writes(&Method::DELETE, Some("/queue/{id}"), None));
         // The conflicts of the queue live in the store.
         assert!(writes(&Method::DELETE, Some("/queue/conflicts/{id}"), None));
+    }
+
+    #[tokio::test]
+    async fn a_fenced_controller_refuses_with_the_reason_and_no_retry() {
+        let since = at("2026-11-13T09:00:00Z");
+        let staleness = Staleness {
+            since,
+            revision: Revision(9),
+        };
+        for (reason, code) in [
+            (FenceReason::Superseded, "cluster.superseded"),
+            (FenceReason::Conflict, "cluster.recover.conflict"),
+            (FenceReason::MajorityAlive, "cluster.recover.majority_alive"),
+            (FenceReason::Unknown, "cluster.superseded"),
+        ] {
+            let state = QuorumState::Fenced {
+                since,
+                applied: Revision(9),
+                reason,
+            };
+            assert_eq!(Staleness::of(&state, Revision(12)), Some(staleness));
+            let response = refusal(&state, staleness, false);
+            assert_eq!(response.status(), 503);
+            assert!(response.headers().get(header::RETRY_AFTER).is_none());
+            let body = axum::body::to_bytes(response.into_body(), 64 * 1024)
+                .await
+                .expect("body");
+            let problem: serde_json::Value = serde_json::from_slice(&body).expect("json");
+            assert_eq!(problem["code"], code, "{problem}");
+            assert_eq!(problem["params"]["state"], "fenced", "{problem}");
+            let detail = problem["detail"].as_str().expect("detail");
+            assert!(!detail.contains("  "), "{detail}");
+        }
     }
 
     #[test]

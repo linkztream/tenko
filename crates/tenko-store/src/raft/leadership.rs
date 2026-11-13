@@ -68,6 +68,17 @@ struct Clock {
     leader_since: Option<(RaftNodeId, u64, Moment)>,
 }
 
+/// How strict a fence is: a later fence never weakens an earlier one. Superseded, and a
+/// reason this build does not know, rank above a conflict, which ranks above a live old
+/// majority.
+fn strictness(reason: FenceReason) -> u8 {
+    match reason {
+        FenceReason::MajorityAlive => 0,
+        FenceReason::Conflict => 1,
+        FenceReason::Superseded | FenceReason::Unknown => 2,
+    }
+}
+
 /// What the metrics follower publishes.
 pub(super) struct LeadershipState {
     sender: watch::Sender<Option<Leadership>>,
@@ -95,21 +106,21 @@ impl LeadershipState {
     }
 
     /// Stops this member for good: no leadership from now on, and the quorum state is
-    /// [`QuorumState::Fenced`]. A second fence keeps the first one's time and takes the
-    /// stricter reason ([`FenceReason::Superseded`] over the others).
+    /// [`QuorumState::Fenced`]. A second fence keeps the first one's time and the stricter
+    /// reason ([`strictness`]). The leadership is cleared under the fence's lock, which
+    /// [`LeadershipState::publish`] holds while it sends, so a metrics snapshot taken before
+    /// the fence cannot restore it.
     pub(super) fn fence(&self, reason: FenceReason, applied: Revision) {
-        let (since, reason) = {
-            let mut fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
-            let (since, current) = fence.unwrap_or((Timestamp::now(), reason));
-            let reason = if current == FenceReason::Superseded {
-                current
-            } else {
-                reason
-            };
-            *fence = Some((since, reason));
-            (since, reason)
+        let mut fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
+        let (since, current) = fence.unwrap_or((Timestamp::now(), reason));
+        let reason = if strictness(current) >= strictness(reason) {
+            current
+        } else {
+            reason
         };
+        *fence = Some((since, reason));
         self.sender.send_replace(None);
+        drop(fence);
         self.quorum.send_replace(QuorumState::Fenced {
             since,
             applied,
@@ -155,11 +166,7 @@ impl LeadershipState {
 
     /// Records one metrics snapshot.
     fn publish(&self, metrics: &Metrics, applied: Revision) {
-        let leadership = if self.fenced().is_some() {
-            None
-        } else {
-            leadership_of(metrics)
-        };
+        let leadership = leadership_of(metrics);
         {
             let mut clock = self.clock();
             match (metrics.current_leader, clock.leaderless_since) {
@@ -176,6 +183,8 @@ impl LeadershipState {
                 (None, _) => clock.leader_since = None,
             }
         }
+        let fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
+        let leadership = if fence.is_some() { None } else { leadership };
         self.sender.send_if_modified(|current| {
             if *current == leadership {
                 false
@@ -184,6 +193,7 @@ impl LeadershipState {
                 true
             }
         });
+        drop(fence);
         self.refresh_quorum(metrics, applied);
     }
 

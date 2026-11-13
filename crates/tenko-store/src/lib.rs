@@ -68,6 +68,7 @@ pub use api::{
     Store, StoreError, StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch,
     downcast_image, fence, tables,
 };
+pub use layout::sync_dir;
 pub use mem::{MemStore, MemStoreConfig};
 pub use tenko_core::{CounterKey, TableName};
 

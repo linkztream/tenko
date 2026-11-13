@@ -221,7 +221,7 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
-fn io_error(path: &Path, error: &impl std::fmt::Display) -> ClusterError {
+pub(crate) fn files_error(path: &Path, error: &impl std::fmt::Display) -> ClusterError {
     ClusterError::new(
         "cluster.node.files",
         500,
@@ -251,11 +251,11 @@ pub fn create_private_dir(dir: &Path) -> Result<(), ClusterError> {
             .recursive(true)
             .mode(0o700)
             .create(dir)
-            .map_err(|error| io_error(dir, &error))
+            .map_err(|error| files_error(dir, &error))
     }
     #[cfg(not(unix))]
     {
-        fs::create_dir_all(dir).map_err(|error| io_error(dir, &error))
+        fs::create_dir_all(dir).map_err(|error| files_error(dir, &error))
     }
 }
 
@@ -275,9 +275,9 @@ pub fn create_private_dir(dir: &Path) -> Result<(), ClusterError> {
 /// `cluster.node.files`.
 pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ClusterError> {
     if let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty()) {
-        let is_link = fs::symlink_metadata(dir).map_err(|error| io_error(dir, &error))?;
+        let is_link = fs::symlink_metadata(dir).map_err(|error| files_error(dir, &error))?;
         if is_link.file_type().is_symlink() {
-            return Err(io_error(
+            return Err(files_error(
                 dir,
                 &"the directory is a link, which is not followed",
             ));
@@ -285,9 +285,9 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ClusterError> {
     }
     let tmp = with_suffix(path, ".tmp");
     match fs::symlink_metadata(&tmp) {
-        Ok(_) => fs::remove_file(&tmp).map_err(|error| io_error(&tmp, &error))?,
+        Ok(_) => fs::remove_file(&tmp).map_err(|error| files_error(&tmp, &error))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(io_error(&tmp, &error)),
+        Err(error) => return Err(files_error(&tmp, &error)),
     }
     let mut options = fs::OpenOptions::new();
     options.write(true).create_new(true);
@@ -296,16 +296,23 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> Result<(), ClusterError> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600);
     }
-    let mut file = options.open(&tmp).map_err(|error| io_error(&tmp, &error))?;
+    let mut file = options
+        .open(&tmp)
+        .map_err(|error| files_error(&tmp, &error))?;
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
-        .map_err(|error| io_error(&tmp, &error))?;
+        .map_err(|error| files_error(&tmp, &error))?;
     drop(file);
-    fs::rename(&tmp, path).map_err(|error| io_error(path, &error))
+    fs::rename(&tmp, path).map_err(|error| files_error(path, &error))?;
+    // The rename itself is durable only once the directory is.
+    if let Some(dir) = path.parent() {
+        tenko_store::sync_dir(dir);
+    }
+    Ok(())
 }
 
 fn read(path: &Path) -> Result<Vec<u8>, ClusterError> {
-    fs::read(path).map_err(|error| io_error(path, &error))
+    fs::read(path).map_err(|error| files_error(path, &error))
 }
 
 #[cfg_attr(
@@ -358,9 +365,9 @@ fn unseal_key(bytes: &[u8]) -> Result<SecretBytes, ClusterError> {
 fn parse_chain(pem: &[u8], path: &Path) -> Result<Vec<CertificateDer<'static>>, ClusterError> {
     let chain = CertificateDer::pem_slice_iter(pem)
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| io_error(path, &error))?;
+        .map_err(|error| files_error(path, &error))?;
     if chain.is_empty() {
-        return Err(io_error(path, &"no certificate in the file"));
+        return Err(files_error(path, &"no certificate in the file"));
     }
     Ok(chain)
 }
@@ -384,9 +391,9 @@ impl Credentials {
             return Err(not_enrolled());
         }
         let identity: NodeIdentity = serde_json::from_slice(&read(&paths.identity())?)
-            .map_err(|error| io_error(&paths.identity(), &error))?;
+            .map_err(|error| files_error(&paths.identity(), &error))?;
         let ca_root = CertificateDer::from_pem_slice(&read(&paths.ca_root())?)
-            .map_err(|error| io_error(&paths.ca_root(), &error))?;
+            .map_err(|error| files_error(&paths.ca_root(), &error))?;
         match Self::pair(paths, &identity, &ca_root, "") {
             Ok(credentials) => Ok(credentials),
             Err(error) => Self::pair(paths, &identity, &ca_root, ".old").map_err(|_| error),
@@ -468,7 +475,7 @@ impl Credentials {
             crate::ca::pem_block("CERTIFICATE", &self.ca_root).as_bytes(),
         )?;
         let identity = serde_json::to_vec_pretty(&self.identity)
-            .map_err(|error| io_error(&paths.identity(), &error))?;
+            .map_err(|error| files_error(&paths.identity(), &error))?;
         write_private(&paths.identity(), &identity)
     }
 
@@ -501,11 +508,11 @@ impl Credentials {
             (&key_file, with_suffix(&key_file, ".old")),
         ] {
             if current.exists() {
-                fs::rename(current, &old).map_err(|error| io_error(current, &error))?;
+                fs::rename(current, &old).map_err(|error| files_error(current, &error))?;
             }
         }
-        fs::rename(&key_new, &key_file).map_err(|error| io_error(&key_file, &error))?;
-        fs::rename(&cert_new, &cert).map_err(|error| io_error(&cert, &error))?;
+        fs::rename(&key_new, &key_file).map_err(|error| files_error(&key_file, &error))?;
+        fs::rename(&cert_new, &cert).map_err(|error| files_error(&cert, &error))?;
         Ok(next)
     }
 
@@ -532,7 +539,7 @@ impl Credentials {
         let mut identity = self.identity.clone();
         identity.endpoints = endpoints;
         let bytes = serde_json::to_vec_pretty(&identity)
-            .map_err(|error| io_error(&paths.identity(), &error))?;
+            .map_err(|error| files_error(&paths.identity(), &error))?;
         write_private(&paths.identity(), &bytes)?;
         Ok(Some(Self {
             identity,
@@ -652,9 +659,9 @@ impl AgentStatus {
         match fs::read(&path) {
             Ok(bytes) => serde_json::from_slice(&bytes)
                 .map(Some)
-                .map_err(|error| io_error(&path, &error)),
+                .map_err(|error| files_error(&path, &error)),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(io_error(&path, &error)),
+            Err(error) => Err(files_error(&path, &error)),
         }
     }
 
@@ -664,8 +671,8 @@ impl AgentStatus {
     ///
     /// `cluster.node.files`.
     pub fn save(&self, paths: &NodePaths) -> Result<(), ClusterError> {
-        let bytes =
-            serde_json::to_vec_pretty(self).map_err(|error| io_error(&paths.status(), &error))?;
+        let bytes = serde_json::to_vec_pretty(self)
+            .map_err(|error| files_error(&paths.status(), &error))?;
         write_private(&paths.status(), &bytes)
     }
 }

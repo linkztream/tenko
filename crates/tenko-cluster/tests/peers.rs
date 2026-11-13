@@ -1391,6 +1391,7 @@ async fn the_fenced_prune_needs_the_current_epoch() {
                 node: NodeId(1005),
                 revoked_at: "2025-01-01T00:00:00Z".parse().expect("time"),
                 not_after: "2025-02-01T00:00:00Z".parse().expect("time"),
+                controller: false,
             },
         )
         .expect("revocation");

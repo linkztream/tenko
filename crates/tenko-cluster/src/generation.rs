@@ -6,32 +6,71 @@
 //! numbered one above the highest generation the copy has seen, naming its parent (the hash
 //! of the record of the history whose data the copy holds; none for generation 0), the
 //! forced controller, the fork point and the voters it supersedes. The forced controller
-//! signs the record's body with its cluster-port key and carries its certificate chain, so
-//! any holder of the installation's CA can check it without trusting whoever passes it on.
+//! signs the record with its cluster-port key and carries its certificate chain, so any
+//! holder of the installation's CA can check it without trusting whoever passes it on.
 //!
-//! Two histories never merge: a controller that learns of a record whose parent is its own
-//! history (a **descendant**, [`Relation::Descendant`]) fences itself; two records with the
-//! same parent (**siblings**) both stop writing until an operator chooses, and
-//! [`suggested_winner`] names the same one on every member.
+//! # What a receiver does with an offered record
+//!
+//! A record offered by a peer reaches no decision unchecked: [`Lineage::admit`] is the only
+//! way from offered bytes to a [`Relation`], and [`Signed`] has no public constructor for a
+//! record that came from outside. The offer is a lineage, the records of the sender's
+//! history from older to newer (at most [`MAX_LINEAGE`]), so a controller several
+//! generations behind can link the newest record to its own. Every record must verify
+//! (chain to the CA at the record's time, a controller's certificate naming the forced
+//! node, the signature over [`SIGNING_CONTEXT`] and the body), carry a time not after the
+//! receiver's clock plus [`MAX_CLOCK_SKEW`], and be signed by a certificate the receiver's
+//! store does not revoke. Then:
+//!
+//! - **Known** ([`Relation::Known`]): every record is in the receiver's own lineage, or the
+//!   newest one is older than the receiver's own. Nothing to do; the other side learns of
+//!   this history from the receiver.
+//! - **Descendant**: the offer links to the receiver's own record (the first new record's
+//!   parent is it) with a higher number, signed by a voter of the receiver's history that
+//!   is neither superseded nor revoked there and holds the certificate that signed. The
+//!   receiver's history was superseded: it fences itself.
+//! - **Sibling**: the first new record shares the receiver's parent, is not older, and is
+//!   signed by a voter of that parent history: a competing forced history. Both stop
+//!   writing; an operator chooses, and [`suggested_winner`] names the same one everywhere.
+//! - **Unplaced**: anything else that is not older than the receiver's own: a parent the
+//!   receiver does not know, a lineage longer than an offer carries, a descendant signed by
+//!   a certificate the receiver's store does not know. The receiver stops writing too and
+//!   shows the records to an operator, never ignores them: a history it cannot place may
+//!   be one that superseded it.
+//!
+//! A record signed by a revoked certificate, by a controller superseded in the receiver's
+//! store (except as a sibling), or by a node that was not a voter, is refused and fences
+//! nothing.
 //!
 //! # Byte layouts
 //!
-//! - The body ([`GenerationBody`]) is canonical CBOR (`tenko_core::codec::to_canonical_cbor`),
-//!   and the record's hash is the SHA-256 of exactly those bytes; the signature covers them.
-//!   A body is decoded tolerantly (unknown fields are ignored), since the hash and the
-//!   signature already bind every byte of it.
-//! - The record is CBOR of [`GenerationRecord`]: the body bytes, the signature (ECDSA P-256
-//!   with SHA-256, ASN.1 DER) and the signer's certificate chain (DER, leaf first). It is
-//!   the value of the store row [`GENERATION`] and of the metadata entry
-//!   [`RECORD_METADATA`].
+//! - The body ([`GenerationBody`]) is canonical CBOR (`tenko_core::codec::to_canonical_cbor`)
+//!   and is read exactly: a body whose bytes are not the canonical form of what they decode
+//!   to is refused. The record's hash is the SHA-256 of the body bytes; the signature is
+//!   ECDSA P-256 with SHA-256 (ASN.1 DER) over [`SIGNING_CONTEXT`] followed by the body, so
+//!   no other message signed with the same key can pass for a record. The algorithm belongs
+//!   to the layout: another key type is a new layout.
+//! - Every layout, present and future, keeps the keys `layout`, `number`, `parent`, `forced`
+//!   and `at` with their meaning ([`Header`]): a receiver of an older version can then place
+//!   a record of a newer layout and stop writing, although it cannot read the rest.
+//! - The record is CBOR of [`GenerationRecord`]: the body bytes, the signature and the
+//!   signer's certificate chain (DER, leaf first), read exactly as well. The store row
+//!   [`GENERATION`] holds every record of the store's history by number; the metadata entry
+//!   [`RECORD_METADATA`] carries a lineage (a CBOR array of records, oldest first).
 //! - The wire claim ([`Claim`], metadata entry [`GENERATION_METADATA`]) is
-//!   `<number>:<first 16 bytes of the hash in hex>`; a call without it claims generation 0.
-//! - A controller that learned of a newer or competing history keeps the record in
-//!   `<data_dir>/node/` ([`FenceFile`]) and reads it before its Raft core starts.
+//!   `<number>:<first 16 bytes of the hash in lower-case hex>`; a call without it claims
+//!   generation 0.
+//! - A controller that stopped writing keeps the records that stopped it in
+//!   `<data_dir>/node/` ([`FenceFile`]) and reads them before its Raft core starts.
 //!
-//! The golden tests below pin every layout.
+//! The golden tests below pin every layout and one signed record byte for byte.
 
-use std::{cmp::Ordering, fs, io, path::Path, time::Duration};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, BTreeSet},
+    fs, io,
+    path::Path,
+    time::Duration,
+};
 
 use aws_lc_rs::{
     rand::SystemRandom,
@@ -39,33 +78,45 @@ use aws_lc_rs::{
         ECDSA_P256_SHA256_ASN1, ECDSA_P256_SHA256_ASN1_SIGNING, EcdsaKeyPair, UnparsedPublicKey,
     },
 };
-use rustls::{
-    pki_types::{CertificateDer, UnixTime},
-    server::ParsedCertificate,
-};
-use serde::{Deserialize, Serialize};
+use rustls::pki_types::{CertificateDer, UnixTime};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
     NodeId, Revision, Role, Timestamp,
     audit::{ChainHead, Digest},
     codec::{from_cbor, to_canonical_cbor, to_cbor},
-    serde_util::{HexBytes, from_hex, to_hex},
+    serde_util::{HexBytes, to_hex},
     table::TableDef,
 };
-use tenko_store::FenceReason;
+use tenko_store::{FenceReason, KeyRange, ReadView, ReadViewExt as _};
 use tenko_vault::SecretBytes;
 
 use crate::{
     error::ClusterError,
-    identity::{NODE_DIR, write_private},
+    identity::{NODE_DIR, files_error, write_private},
+    model::tables,
     mtls::PeerIdentity,
 };
 
-/// The layout version of [`GenerationBody`] this build writes and reads.
+/// The layout version of [`GenerationBody`] this build writes and reads in full.
 pub const LAYOUT: u8 = 1;
 
-/// The largest encoded record accepted from the network or a file: a body of a few hundred
-/// bytes, a signature and a chain of two certificates fit many times over.
-pub const MAX_RECORD_BYTES: usize = 16 * 1024;
+/// What the signature covers before the body: a fixed context, so that a signature the
+/// same key makes for any other purpose never verifies as a generation record.
+pub const SIGNING_CONTEXT: &[u8] = b"tenko generation record v1\0";
+
+/// The largest encoded record: a body of a few hundred bytes, a signature and a leaf
+/// certificate fit several times over.
+pub const MAX_RECORD_BYTES: usize = 8 * 1024;
+
+/// The most records an offered lineage carries; a receiver further behind cannot link the
+/// newest and stops writing ([`Relation::Unplaced`]).
+pub const MAX_LINEAGE: usize = 8;
+
+/// The largest encoded lineage (a binary metadata entry of about 22 KiB in base64).
+pub const MAX_LINEAGE_BYTES: usize = 16 * 1024;
+
+/// How far a record's time may be ahead of the receiver's clock.
+pub const MAX_CLOCK_SKEW: Duration = Duration::from_secs(300);
 
 /// Bytes of the hash a [`Claim`] carries: enough to tell two signed records apart.
 pub const CLAIM_HASH_BYTES: usize = 16;
@@ -73,12 +124,13 @@ pub const CLAIM_HASH_BYTES: usize = 16;
 /// Metadata entry of every `Raft` and `Cluster` call and answer: the sender's [`Claim`].
 pub const GENERATION_METADATA: &str = "tenko-generation";
 
-/// Binary metadata entry with a whole [`GenerationRecord`]: on a refusal by the newer side,
-/// and on the calls a newer side makes to a controller it knows is behind.
+/// Binary metadata entry with a lineage of records ([`encode_lineage`]): on a refusal by
+/// the newer side, and on the calls a newer side makes to a controller it knows is behind.
 pub const RECORD_METADATA: &str = "tenko-generation-record-bin";
 
-/// The generation record of the history this store holds; absent at generation 0.
-pub const GENERATION: TableDef<(), GenerationRecord> = TableDef::new("cluster.generation");
+/// The generation records of the history this store holds, by number; empty at
+/// generation 0. The highest one is the store's own record.
+pub const GENERATION: TableDef<u64, GenerationRecord> = TableDef::new("cluster.generation");
 
 /// The marks of the controllers a forced step superseded, by node id. Their member records
 /// stay; a controller of the current history refuses every call of a node marked here
@@ -122,8 +174,6 @@ pub mod codes {
     pub const SUPERSEDED_UNREACHED: &str = "cluster.recover.superseded_unreached";
     /// Warning: a superseded controller is neither rejoined nor removed.
     pub const SUPERSEDED_PENDING: &str = "cluster.recover.superseded_pending";
-    /// A node refuses the configuration of a controller of an older generation.
-    pub const NODE_CONFIG_SUPERSEDED: &str = "node.config.superseded";
 }
 
 /// Audit actions of the recovery.
@@ -157,12 +207,13 @@ impl ForkPoint {
     }
 }
 
-/// What a generation record says. Its canonical CBOR is what is signed and hashed.
+/// What a generation record says (layout 1). Its canonical CBOR is what is hashed and,
+/// after [`SIGNING_CONTEXT`], signed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationBody {
     /// [`LAYOUT`].
     pub layout: u8,
-    /// The generation: one above the highest the forced copy had seen.
+    /// The generation: one above the highest the forced copy had seen; never 0.
     pub number: u64,
     /// The hash of the record of the history whose data the copy holds; `None` for
     /// generation 0.
@@ -181,7 +232,7 @@ pub struct GenerationBody {
 }
 
 impl GenerationBody {
-    /// The canonical bytes that are signed and hashed.
+    /// The canonical bytes that are hashed.
     ///
     /// # Errors
     ///
@@ -191,12 +242,29 @@ impl GenerationBody {
     }
 }
 
+/// The part of a body every layout keeps with the same meaning: enough to verify the record
+/// and to place it among histories, read tolerantly from a layout this build does not know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub struct Header {
+    /// The layout of the whole body.
+    pub layout: u8,
+    /// The generation.
+    pub number: u64,
+    /// The parent record's hash.
+    pub parent: Option<Digest>,
+    /// The forced controller.
+    pub forced: NodeId,
+    /// When the record was made.
+    pub at: Timestamp,
+}
+
 /// A signed generation record.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GenerationRecord {
-    /// The canonical CBOR of the [`GenerationBody`].
+    /// The canonical CBOR of the body.
     pub body: HexBytes,
-    /// ECDSA P-256 SHA-256 (ASN.1 DER) over `body` with the forced controller's key.
+    /// ECDSA P-256 SHA-256 (ASN.1 DER) over [`SIGNING_CONTEXT`] and `body` with the forced
+    /// controller's key.
     pub signature: HexBytes,
     /// The forced controller's certificate chain, DER, leaf first.
     pub chain: Vec<HexBytes>,
@@ -212,6 +280,32 @@ impl std::fmt::Debug for GenerationRecord {
 
 fn invalid(detail: impl Into<String>) -> ClusterError {
     ClusterError::new(codes::RECORD_INVALID, 403, detail)
+}
+
+/// Decodes CBOR whose bytes must be exactly the encoding of what they decode to: no
+/// trailing bytes, no second form of the same value.
+fn exact<T: Serialize + DeserializeOwned>(
+    bytes: &[u8],
+    canonical: bool,
+    what: &str,
+) -> Result<T, ClusterError> {
+    let value: T = from_cbor(bytes)
+        .map_err(|error| invalid(format!("the {what} does not decode: {error}")))?;
+    let again = if canonical {
+        to_canonical_cbor(&value)?
+    } else {
+        to_cbor(&value)?.to_vec()
+    };
+    if again != bytes {
+        return Err(invalid(format!(
+            "the {what} is not in its exact encoding (trailing or non-canonical bytes)"
+        )));
+    }
+    Ok(value)
+}
+
+fn signed_message(body: &[u8]) -> Vec<u8> {
+    [SIGNING_CONTEXT, body].concat()
 }
 
 impl GenerationRecord {
@@ -235,7 +329,7 @@ impl GenerationRecord {
         let pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_ASN1_SIGNING, key.expose())
             .map_err(|error| invalid(format!("the controller key cannot sign: {error}")))?;
         let signature = pair
-            .sign(&SystemRandom::new(), &bytes)
+            .sign(&SystemRandom::new(), &signed_message(&bytes))
             .map_err(|error| invalid(format!("signing failed: {error}")))?;
         Ok(Self {
             body: HexBytes(bytes),
@@ -252,21 +346,38 @@ impl GenerationRecord {
         Digest(out)
     }
 
-    /// The body, read tolerantly; a layout this build does not know is refused.
+    /// The part of the body every layout keeps, read tolerantly.
     ///
     /// # Errors
     ///
     /// `cluster.recover.record_invalid`.
-    pub fn body(&self) -> Result<GenerationBody, ClusterError> {
-        let body: GenerationBody = from_cbor(&self.body.0)
-            .map_err(|error| invalid(format!("the generation record does not decode: {error}")))?;
-        if body.layout != LAYOUT {
-            return Err(invalid(format!(
-                "the generation record has layout {}, this build reads {LAYOUT}",
-                body.layout
-            )));
+    pub fn header(&self) -> Result<Header, ClusterError> {
+        from_cbor(&self.body.0).map_err(|error| {
+            invalid(format!(
+                "the generation record's header does not decode: {error}"
+            ))
+        })
+    }
+
+    /// The body of layout [`LAYOUT`], read exactly; `None` for a later layout.
+    ///
+    /// # Errors
+    ///
+    /// `cluster.recover.record_invalid` for a body of this layout that is not exactly its
+    /// canonical encoding, or that breaks a rule of the layout (number 0, a nonce that is
+    /// not 16 bytes, the forced controller among the superseded ones).
+    pub fn body(&self) -> Result<Option<GenerationBody>, ClusterError> {
+        if self.header()?.layout != LAYOUT {
+            return Ok(None);
         }
-        Ok(body)
+        let body: GenerationBody = exact(&self.body.0, true, "generation record's body")?;
+        if body.number == 0 || body.nonce.0.len() != 16 || body.superseded.contains(&body.forced) {
+            return Err(invalid(
+                "the generation record breaks a rule of its layout (number 0, nonce length, or \
+                 the forced controller among the superseded ones)",
+            ));
+        }
+        Ok(Some(body))
     }
 
     /// The record's CBOR.
@@ -278,7 +389,7 @@ impl GenerationRecord {
         Ok(to_cbor(self)?.to_vec())
     }
 
-    /// Reads a record of at most [`MAX_RECORD_BYTES`].
+    /// Reads a record of at most [`MAX_RECORD_BYTES`], exactly.
     ///
     /// # Errors
     ///
@@ -287,26 +398,25 @@ impl GenerationRecord {
         if bytes.len() > MAX_RECORD_BYTES {
             return Err(invalid("the generation record is too large"));
         }
-        from_cbor(bytes)
-            .map_err(|error| invalid(format!("the generation record does not decode: {error}")))
+        exact(bytes, false, "generation record")
     }
 
-    /// Checks the signature and the chain against `ca_root` at the record's own time (a
-    /// returning controller may meet a record whose signer renewed its certificate since)
-    /// and that the leaf is a controller's. Who the signer may be is the receiver's
-    /// question ([`Relation`] and its store), not this one's.
-    ///
-    /// # Errors
-    ///
-    /// `cluster.recover.record_invalid`.
-    pub fn verify(&self, ca_root: &CertificateDer<'_>) -> Result<Signed, ClusterError> {
+    /// Checks the chain against `ca_root` at the record's own time (a returning controller
+    /// may meet a record whose signer renewed its certificate since; how far that time may
+    /// lie is bounded by [`Lineage::admit`]), the leaf as the forced controller's, and the
+    /// signature.
+    fn verify(&self, ca_root: &CertificateDer<'_>) -> Result<Signed, ClusterError> {
+        let header = self.header()?;
+        if header.number == 0 {
+            return Err(invalid("a generation record is never numbered 0"));
+        }
         let body = self.body()?;
-        let leaf = self
+        let (leaf, intermediates) = self
             .chain
-            .first()
+            .split_first()
             .ok_or_else(|| invalid("the generation record carries no certificate"))?;
         let leaf = CertificateDer::from(leaf.0.as_slice());
-        let intermediates: Vec<CertificateDer<'_>> = self.chain[1..]
+        let intermediates: Vec<CertificateDer<'_>> = intermediates
             .iter()
             .map(|cert| CertificateDer::from(cert.0.as_slice()))
             .collect();
@@ -314,58 +424,30 @@ impl GenerationRecord {
         roots
             .add(ca_root.clone().into_owned())
             .map_err(|error| invalid(format!("the CA root is unusable: {error}")))?;
-        let parsed = ParsedCertificate::try_from(&leaf)
-            .map_err(|error| invalid(format!("the signer's certificate: {error}")))?;
-        let seconds = u64::try_from(body.at.0.unix_timestamp())
+        let seconds = u64::try_from(header.at.0.unix_timestamp())
             .map_err(|_| invalid("the generation record's time is before 1970"))?;
-        rustls::client::verify_server_cert_signed_by_trust_anchor(
-            &parsed,
+        let signer = crate::mtls::verify_controller(
             &roots,
+            &leaf,
             &intermediates,
             UnixTime::since_unix_epoch(Duration::from_secs(seconds)),
-            crate::mtls::provider()
-                .signature_verification_algorithms
-                .all,
+            &crate::mtls::provider().signature_verification_algorithms,
         )
         .map_err(|error| invalid(format!("the signer's certificate does not verify: {error}")))?;
-        let signer = PeerIdentity::from_der(&leaf)
-            .map_err(|_| invalid("the signer's certificate names no node"))?;
-        if !signer.roles.contains(Role::Controller) || signer.node != body.forced {
+        if signer.node != header.forced {
             return Err(invalid(
                 "the generation record is not signed by the forced controller's certificate",
             ));
         }
         let point = public_key(&leaf)?;
         UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, point)
-            .verify(&self.body.0, &self.signature.0)
+            .verify(&signed_message(&self.body.0), &self.signature.0)
             .map_err(|_| invalid("the generation record's signature does not verify"))?;
         Ok(Signed {
             hash: self.hash(),
+            header,
             body,
             signer,
-            record: self.clone(),
-        })
-    }
-}
-
-impl GenerationRecord {
-    /// The record as [`Signed`] without checking the signature: for a record this
-    /// controller holds itself (its store's row, its fence file), which was checked before
-    /// it was kept.
-    ///
-    /// # Errors
-    ///
-    /// `cluster.recover.record_invalid` when the body or the certificate does not decode.
-    pub fn trusted(&self) -> Result<Signed, ClusterError> {
-        let leaf = self
-            .chain
-            .first()
-            .ok_or_else(|| invalid("the generation record carries no certificate"))?;
-        Ok(Signed {
-            hash: self.hash(),
-            body: self.body()?,
-            signer: PeerIdentity::from_der(&leaf.0)
-                .map_err(|_| invalid("the signer's certificate names no node"))?,
             record: self.clone(),
         })
     }
@@ -378,75 +460,430 @@ fn public_key(leaf: &[u8]) -> Result<Vec<u8>, ClusterError> {
     Ok(cert.public_key().subject_public_key.data.to_vec())
 }
 
-/// A record whose signature and chain verified.
+/// Encodes a lineage for [`RECORD_METADATA`]: the records, oldest first.
+///
+/// # Errors
+///
+/// A codec error.
+pub fn encode_lineage(records: &[GenerationRecord]) -> Result<Vec<u8>, ClusterError> {
+    Ok(to_cbor(records)?.to_vec())
+}
+
+/// Reads a lineage of [`RECORD_METADATA`], exactly, with at most [`MAX_LINEAGE`] records
+/// and [`MAX_LINEAGE_BYTES`].
+///
+/// # Errors
+///
+/// `cluster.recover.record_invalid`.
+pub fn decode_lineage(bytes: &[u8]) -> Result<Vec<GenerationRecord>, ClusterError> {
+    if bytes.len() > MAX_LINEAGE_BYTES {
+        return Err(invalid("the offered lineage is too large"));
+    }
+    let records: Vec<GenerationRecord> = exact(bytes, false, "offered lineage")?;
+    if records.is_empty() || records.len() > MAX_LINEAGE {
+        return Err(invalid(format!(
+            "an offered lineage holds 1 to {MAX_LINEAGE} records"
+        )));
+    }
+    Ok(records)
+}
+
+/// A record whose signature and chain verified, or one this controller keeps itself.
+/// Fields are private: a record from outside becomes one only through [`Lineage::admit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Signed {
-    /// The record's hash.
-    pub hash: Digest,
-    /// Its body.
-    pub body: GenerationBody,
-    /// The certificate that signed it.
-    pub signer: PeerIdentity,
-    /// The record itself.
-    pub record: GenerationRecord,
+    hash: Digest,
+    header: Header,
+    body: Option<GenerationBody>,
+    signer: PeerIdentity,
+    record: GenerationRecord,
 }
 
 impl Signed {
+    /// A record this controller wrote or admitted itself (its store's rows, its fence
+    /// file), read without checking the signature again.
+    ///
+    /// # Errors
+    ///
+    /// `cluster.recover.record_invalid` when the body or the certificate does not decode.
+    pub fn kept(record: &GenerationRecord) -> Result<Self, ClusterError> {
+        let leaf = record
+            .chain
+            .first()
+            .ok_or_else(|| invalid("the generation record carries no certificate"))?;
+        Ok(Self {
+            hash: record.hash(),
+            header: record.header()?,
+            body: record.body()?,
+            signer: PeerIdentity::from_der(&leaf.0)
+                .map_err(|_| invalid("the signer's certificate names no node"))?,
+            record: record.clone(),
+        })
+    }
+
+    /// The record's hash.
+    pub fn hash(&self) -> Digest {
+        self.hash
+    }
+
+    /// The generation.
+    pub fn number(&self) -> u64 {
+        self.header.number
+    }
+
+    /// The parent record's hash.
+    pub fn parent(&self) -> Option<Digest> {
+        self.header.parent
+    }
+
+    /// The forced controller.
+    pub fn forced(&self) -> NodeId {
+        self.header.forced
+    }
+
+    /// When the record was made.
+    pub fn at(&self) -> Timestamp {
+        self.header.at
+    }
+
+    /// The whole body, when its layout is this build's.
+    pub fn body(&self) -> Option<&GenerationBody> {
+        self.body.as_ref()
+    }
+
+    /// The certificate that signed.
+    pub fn signer(&self) -> &PeerIdentity {
+        &self.signer
+    }
+
+    /// The record.
+    pub fn record(&self) -> &GenerationRecord {
+        &self.record
+    }
+
     /// The claim of this history on the wire.
     pub fn claim(&self) -> Claim {
-        Claim::of(self.body.number, &self.hash)
+        Claim::of(self.number(), &self.hash)
     }
 }
 
-/// How a record stands to the history a receiver holds.
+/// How an offered lineage stands to the history a receiver holds ([`Lineage::admit`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Relation {
-    /// It is the receiver's own record.
-    Same,
-    /// Its parent is the receiver's history: the receiver was superseded.
+    /// Nothing new: every record is the receiver's own, or the newest is older than the
+    /// receiver's own.
+    Known,
+    /// It supersedes the receiver's history: the receiver fences itself.
     Descendant,
-    /// It shares the receiver's parent and is not older: a competing forced history.
+    /// A competing forced history from the receiver's parent: both stop writing.
     Sibling,
-    /// Anything else (an older record, or one of a history the receiver cannot place).
-    Unrelated,
+    /// A newer or equal history the receiver cannot place: it stops writing too.
+    Unplaced,
 }
 
-/// How `other` stands to `own` (the record of the receiver's history; `None` at generation
-/// 0). Log ids are never compared here: they belong to one history (plan section 3.1).
-pub fn relation(own: Option<&Signed>, other: &Signed) -> Relation {
-    let own_hash = own.map(|own| own.hash);
-    if own_hash == Some(other.hash) {
-        return Relation::Same;
-    }
-    if other.body.parent == own_hash {
-        return Relation::Descendant;
-    }
-    match own {
-        Some(own)
-            if other.body.parent == own.body.parent && other.body.number >= own.body.number =>
-        {
-            Relation::Sibling
+impl Relation {
+    /// What the receiver does: the fence it raises, or nothing.
+    pub fn fence(self) -> Option<FenceReason> {
+        match self {
+            Self::Known => None,
+            Self::Descendant => Some(FenceReason::Superseded),
+            Self::Sibling | Self::Unplaced => Some(FenceReason::Conflict),
         }
-        _ => Relation::Unrelated,
     }
 }
 
-/// The record two sibling histories should keep, the same on every member: the higher
-/// number; at equal numbers and the same parent the fresher fork point; then the lower
-/// node id; then the lower hash. Returns the order with the suggested winner first
-/// (`Ordering::Less` when `a` wins).
-pub fn suggested_winner(a: &Signed, b: &Signed) -> Ordering {
-    b.body
-        .number
-        .cmp(&a.body.number)
-        .then_with(|| {
-            if a.body.parent == b.body.parent {
-                b.body.fork.log_order(&a.body.fork)
-            } else {
-                Ordering::Equal
+/// The outcome of an admitted offer.
+#[derive(Debug, Clone)]
+pub struct Admission {
+    /// How it stands.
+    pub relation: Relation,
+    /// Its records that the receiver's lineage does not hold, oldest first; the last is
+    /// the newest record offered.
+    pub new: Vec<Signed>,
+}
+
+/// What the receiver's store says about the signers: the voters of its history, the
+/// controllers it marks superseded, the revoked certificates and nodes, and the
+/// certificates each node record holds.
+#[derive(Debug, Clone)]
+pub struct Standing {
+    voters: BTreeSet<NodeId>,
+    superseded: BTreeSet<NodeId>,
+    revoked_serials: BTreeSet<String>,
+    revoked_nodes: BTreeSet<NodeId>,
+    serials: BTreeMap<NodeId, BTreeSet<String>>,
+    now: Timestamp,
+}
+
+impl Default for Standing {
+    /// A store that knows no controller, at the current time: every signer lacks standing.
+    fn default() -> Self {
+        Self {
+            voters: BTreeSet::new(),
+            superseded: BTreeSet::new(),
+            revoked_serials: BTreeSet::new(),
+            revoked_nodes: BTreeSet::new(),
+            serials: BTreeMap::new(),
+            now: Timestamp::now(),
+        }
+    }
+}
+
+impl Standing {
+    /// The standing in `view`, with `voters` the voters of the receiver's membership and
+    /// `now` its clock.
+    ///
+    /// # Errors
+    ///
+    /// A store error.
+    pub fn read(
+        view: &dyn ReadView,
+        voters: BTreeSet<NodeId>,
+        now: Timestamp,
+    ) -> Result<Self, ClusterError> {
+        let mut standing = Self {
+            voters,
+            now,
+            ..Self::default()
+        };
+        for (node, _, _) in view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)? {
+            standing.superseded.insert(NodeId(node));
+        }
+        for (serial, revocation, _) in
+            view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+        {
+            standing.revoked_serials.insert(serial);
+            standing.revoked_nodes.insert(revocation.node);
+        }
+        for (node, record, _) in
+            view.scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)?
+        {
+            if record.roles.contains(&Role::Controller) {
+                standing.serials.insert(
+                    NodeId(node),
+                    record.serials.into_iter().map(|cert| cert.serial).collect(),
+                );
             }
-        })
-        .then_with(|| a.body.forced.0.cmp(&b.body.forced.0))
+        }
+        Ok(standing)
+    }
+
+    fn revoked(&self, signer: &PeerIdentity) -> bool {
+        self.revoked_serials.contains(&signer.serial) || self.revoked_nodes.contains(&signer.node)
+    }
+
+    fn holds(&self, signer: &PeerIdentity) -> bool {
+        self.serials
+            .get(&signer.node)
+            .is_some_and(|serials| serials.contains(&signer.serial))
+    }
+}
+
+fn refused(signer: NodeId, why: &str) -> ClusterError {
+    invalid(format!(
+        "a generation record signed by controller {signer} was refused: {why}"
+    ))
+    .with_param("node", signer.to_string())
+}
+
+/// The records of the history a store holds, oldest first; empty at generation 0.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Lineage {
+    records: Vec<Signed>,
+}
+
+impl Lineage {
+    /// The lineage of `view` ([`GENERATION`]).
+    ///
+    /// # Errors
+    ///
+    /// A store error, or a stored record that does not read.
+    pub fn read(view: &dyn ReadView) -> Result<Self, ClusterError> {
+        let records = view
+            .scan_typed(&GENERATION, KeyRange::all(), usize::MAX, false)?
+            .iter()
+            .map(|(_, record, _)| Signed::kept(record))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Self { records })
+    }
+
+    /// A lineage of records this controller keeps itself, in any order.
+    ///
+    /// # Errors
+    ///
+    /// A record that does not read.
+    pub fn kept(records: &[GenerationRecord]) -> Result<Self, ClusterError> {
+        let mut records = records
+            .iter()
+            .map(Signed::kept)
+            .collect::<Result<Vec<_>, _>>()?;
+        records.sort_by_key(Signed::number);
+        Ok(Self { records })
+    }
+
+    /// The records, oldest first.
+    pub fn records(&self) -> &[Signed] {
+        &self.records
+    }
+
+    /// The store's own record: the newest; `None` at generation 0.
+    pub fn tip(&self) -> Option<&Signed> {
+        self.records.last()
+    }
+
+    /// The claim of this history.
+    pub fn claim(&self) -> Claim {
+        self.tip().map_or(Claim::ZERO, Signed::claim)
+    }
+
+    /// The generation of this history.
+    pub fn number(&self) -> u64 {
+        self.tip().map_or(0, Signed::number)
+    }
+
+    /// The newest records that fit an offer ([`MAX_LINEAGE`], [`MAX_LINEAGE_BYTES`]),
+    /// oldest first.
+    pub fn offer(&self) -> Vec<GenerationRecord> {
+        let mut offer = Vec::new();
+        let mut bytes = 16;
+        for signed in self.records.iter().rev().take(MAX_LINEAGE) {
+            let size = signed
+                .record
+                .encode()
+                .map_or(usize::MAX, |encoded| encoded.len());
+            if bytes + size > MAX_LINEAGE_BYTES {
+                break;
+            }
+            bytes += size;
+            offer.push(signed.record.clone());
+        }
+        offer.reverse();
+        offer
+    }
+
+    /// Checks an offered lineage against this one and the receiver's `standing` (see the
+    /// module documentation for the rules).
+    ///
+    /// # Errors
+    ///
+    /// `cluster.recover.record_invalid` for an offer that does not verify, is not one
+    /// lineage, lies in the future, or is signed by a controller this receiver may not take
+    /// a record from; the offer then changes nothing.
+    pub fn admit(
+        &self,
+        offered: &[GenerationRecord],
+        ca_root: &CertificateDer<'_>,
+        standing: &Standing,
+    ) -> Result<Admission, ClusterError> {
+        if offered.is_empty() || offered.len() > MAX_LINEAGE {
+            return Err(invalid(format!(
+                "an offered lineage holds 1 to {MAX_LINEAGE} records"
+            )));
+        }
+        let latest = standing
+            .now
+            .checked_add(MAX_CLOCK_SKEW)
+            .unwrap_or(standing.now);
+        let mut checked = Vec::with_capacity(offered.len());
+        for record in offered {
+            let signed = record.verify(ca_root)?;
+            if signed.at() > latest {
+                return Err(invalid("a generation record carries a time in the future"));
+            }
+            if standing.revoked(&signed.signer) {
+                return Err(refused(signed.forced(), "its certificate is revoked"));
+            }
+            checked.push(signed);
+        }
+        checked.sort_by_key(Signed::number);
+        for pair in checked.windows(2) {
+            if pair[1].parent() != Some(pair[0].hash)
+                || pair[1].number() <= pair[0].number()
+                || pair[1].at() < pair[0].at()
+            {
+                return Err(invalid("the offered records are not one lineage"));
+            }
+        }
+        let known: BTreeSet<Digest> = self.records.iter().map(|own| own.hash).collect();
+        let new: Vec<Signed> = checked
+            .into_iter()
+            .filter(|signed| !known.contains(&signed.hash))
+            .collect();
+        let (Some(first), Some(newest)) = (new.first(), new.last()) else {
+            return Ok(Admission {
+                relation: Relation::Known,
+                new,
+            });
+        };
+        let own = self.tip();
+        let own_hash = own.map(|own| own.hash);
+        let own_number = self.number();
+        if newest.number() < own_number {
+            return Ok(Admission {
+                relation: Relation::Known,
+                new,
+            });
+        }
+        let signer = first.signer();
+        let relation = if first.parent() == own_hash && first.number() > own_number {
+            if !standing.voters.contains(&signer.node) {
+                return Err(refused(signer.node, "it is not a voter of this history"));
+            }
+            if standing.superseded.contains(&signer.node) {
+                return Err(refused(signer.node, "it is superseded in this history"));
+            }
+            if own.is_some_and(|own| first.at() < own.at()) {
+                return Err(refused(signer.node, "its record is older than its parent"));
+            }
+            if standing.holds(signer) {
+                Relation::Descendant
+            } else {
+                // A voter in good standing whose certificate this store does not know: a
+                // renewal this copy missed, or a certificate minted elsewhere. Neither is
+                // ignored; an operator decides.
+                Relation::Unplaced
+            }
+        } else if let Some(own) = own.filter(|own| first.parent() == own.parent()) {
+            let parent_voters = own.body().map(|body| {
+                body.superseded
+                    .iter()
+                    .copied()
+                    .chain([own.forced()])
+                    .collect::<BTreeSet<_>>()
+            });
+            if parent_voters.is_some_and(|voters| !voters.contains(&signer.node)) {
+                return Err(refused(
+                    signer.node,
+                    "it was not a voter of the parent history",
+                ));
+            }
+            Relation::Sibling
+        } else {
+            if standing.superseded.contains(&signer.node) {
+                return Err(refused(signer.node, "it is superseded in this history"));
+            }
+            Relation::Unplaced
+        };
+        Ok(Admission { relation, new })
+    }
+}
+
+/// The order of competing histories, the same on every member and transitive: the higher
+/// number; then the parent (none first, then the lower hash); then, within one parent, the
+/// fresher fork point; then the lower node id of the forced controller; then the lower hash.
+/// `Ordering::Less` when `a` is the suggested winner. A record of a later layout has no
+/// readable fork point and ranks as the oldest one at its place.
+pub fn suggested_winner(a: &Signed, b: &Signed) -> Ordering {
+    let fork = |signed: &Signed| {
+        signed
+            .body()
+            .map_or((0, 0), |body| (body.fork.term, body.fork.index))
+    };
+    b.number()
+        .cmp(&a.number())
+        .then_with(|| a.parent().cmp(&b.parent()))
+        .then_with(|| fork(b).cmp(&fork(a)))
+        .then_with(|| a.forced().0.cmp(&b.forced().0))
         .then_with(|| a.hash.cmp(&b.hash))
 }
 
@@ -482,26 +919,38 @@ impl Claim {
         (*self != Self::ZERO).then(|| format!("{}:{}", self.number, to_hex(&self.hash)))
     }
 
-    /// Reads a metadata value; `None` when it is malformed.
+    /// Reads a metadata value in the one form [`Claim::render`] writes; `None` otherwise.
     pub fn parse(text: &str) -> Option<Self> {
         let (number, hash) = text.split_once(':')?;
-        let number = number.parse().ok()?;
-        if hash.len() != CLAIM_HASH_BYTES * 2 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        let digits = !number.is_empty()
+            && !number.starts_with('0')
+            && number.bytes().all(|byte| byte.is_ascii_digit());
+        let lower_hex = hash.len() == CLAIM_HASH_BYTES * 2
+            && hash
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+        if !digits || !lower_hex {
             return None;
         }
-        let hash = from_hex(hash)?.try_into().ok()?;
-        Some(Self { number, hash })
+        let mut out = [0; CLAIM_HASH_BYTES];
+        for (index, pair) in hash.as_bytes().chunks(2).enumerate() {
+            out[index] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+        }
+        Some(Self {
+            number: number.parse().ok()?,
+            hash: out,
+        })
     }
 }
 
 /// The fence a controller keeps under `<data_dir>/node/` ([`FENCE_FILE`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FenceFile {
-    /// Why: [`FenceReason::Superseded`] for a descendant record, [`FenceReason::Conflict`]
-    /// for a sibling.
+    /// Why: [`FenceReason::Superseded`] for a descendant, [`FenceReason::Conflict`] for a
+    /// history that competes or that this controller could not place.
     pub kind: FenceReason,
-    /// The record that fenced it.
-    pub record: GenerationRecord,
+    /// The records that stopped it, oldest first.
+    pub records: Vec<GenerationRecord>,
     /// When.
     pub at: Timestamp,
 }
@@ -525,7 +974,8 @@ impl FenceFile {
             .map_err(|error| files_error(&path, &error))
     }
 
-    /// Writes the fence (private to the service account, replaced atomically).
+    /// Writes the fence: private to the service account, replaced atomically and durable
+    /// before this returns.
     ///
     /// # Errors
     ///
@@ -533,20 +983,8 @@ impl FenceFile {
     pub fn save(&self, data_dir: &Path) -> Result<(), ClusterError> {
         let dir = data_dir.join(NODE_DIR);
         crate::identity::create_private_dir(&dir)?;
-        let part = dir.join(format!("{FENCE_FILE}.part"));
-        write_private(&part, &to_cbor(self)?)?;
-        let path = dir.join(FENCE_FILE);
-        fs::rename(&part, &path).map_err(|error| files_error(&path, &error))
+        write_private(&dir.join(FENCE_FILE), &to_cbor(self)?)
     }
-}
-
-fn files_error(path: &Path, error: &impl std::fmt::Display) -> ClusterError {
-    ClusterError::new(
-        "cluster.node.files",
-        500,
-        format!("{}: {error}", path.display()),
-    )
-    .with_param("path", path.display().to_string())
 }
 
 /// What the store records about a member that a forced step superseded.
@@ -563,262 +1001,4 @@ pub struct SupersededMark {
 }
 
 #[cfg(test)]
-mod tests {
-    use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
-
-    use super::*;
-
-    fn body(number: u64, parent: Option<Digest>, forced: u64) -> GenerationBody {
-        GenerationBody {
-            layout: LAYOUT,
-            number,
-            parent,
-            forced: NodeId(forced),
-            fork: ForkPoint {
-                term: 7,
-                leader: 1,
-                index: 88530,
-                revision: Revision(88412),
-                audit: ChainHead::default(),
-            },
-            superseded: vec![NodeId(1), NodeId(3)],
-            at: Timestamp::from_unix_nanos(1_789_000_000_000_000_000).expect("time"),
-            nonce: HexBytes(vec![7; 16]),
-        }
-    }
-
-    #[test]
-    fn the_body_layout_is_pinned() {
-        let bytes = body(1, None, 2).canonical().expect("cbor");
-        // The canonical CBOR of the body above: a map of eight fields in the canonical
-        // key order; a change here is a change of the signed contract.
-        assert_eq!(
-            to_hex(&bytes),
-            concat!(
-                "a862617474323032362d30392d31305430303a32363a34305a64666f726ba5647465726d",
-                "07656175646974a263736571006468617368582000000000000000000000000000000000",
-                "0000000000000000000000000000000065696e6465781a000159d2666c65616465720168",
-                "7265766973696f6e1a0001595c656e6f6e63655007070707070707070707070707070707",
-                "66666f7263656402666c61796f757401666e756d6265720166706172656e74f66a737570",
-                "65727365646564820103",
-            )
-        );
-    }
-
-    #[test]
-    fn a_claim_round_trips_and_generation_zero_is_absent() {
-        let hash = Digest([0xab; 32]);
-        let claim = Claim::of(4, &hash);
-        let text = claim.render().expect("a claim");
-        assert_eq!(text, format!("4:{}", "ab".repeat(16)));
-        assert!(text.len() < 64);
-        assert_eq!(Claim::parse(&text), Some(claim));
-        assert_eq!(Claim::ZERO.render(), None);
-        for bad in ["", "4", "x:ab", "4:abc", &format!("4:{}", "ab".repeat(17))] {
-            assert_eq!(Claim::parse(bad), None, "{bad}");
-        }
-    }
-
-    struct Ca {
-        root: CertificateDer<'static>,
-        issuer: rcgen::Issuer<'static, KeyPair>,
-    }
-
-    fn ca() -> Ca {
-        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
-        let mut params = CertificateParams::new(Vec::new()).expect("params");
-        params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let root = params.self_signed(&key).expect("root");
-        Ca {
-            root: root.der().clone(),
-            issuer: rcgen::Issuer::new(params, key),
-        }
-    }
-
-    fn leaf(ca: &Ca, node: u64, role: &str) -> (Vec<CertificateDer<'static>>, SecretBytes) {
-        let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
-        let mut params = CertificateParams::new(Vec::new()).expect("params");
-        params.subject_alt_names = vec![
-            rcgen::SanType::URI(format!("urn:tenko:node:{node}").try_into().expect("uri")),
-            rcgen::SanType::URI(format!("urn:tenko:role:{role}").try_into().expect("uri")),
-        ];
-        params.not_before = rcgen::date_time_ymd(2020, 1, 1);
-        params.not_after = rcgen::date_time_ymd(2099, 1, 1);
-        let cert = params.signed_by(&key, &ca.issuer).expect("leaf");
-        (
-            vec![cert.der().clone()],
-            SecretBytes::from_slice(&key.serialize_der()),
-        )
-    }
-
-    #[test]
-    fn a_signed_record_verifies_and_round_trips() {
-        let ca = ca();
-        let (chain, key) = leaf(&ca, 2, "controller");
-        let record = GenerationRecord::sign(&body(1, None, 2), &chain, &key).expect("sign");
-        let decoded = GenerationRecord::decode(&record.encode().expect("cbor")).expect("decode");
-        assert_eq!(decoded, record);
-        let signed = decoded.verify(&ca.root).expect("verify");
-        assert_eq!(signed.body, body(1, None, 2));
-        assert_eq!(signed.signer.node, NodeId(2));
-        assert_eq!(signed.hash, record.hash());
-    }
-
-    /// The refusal of a record, with its code and the reason in its detail.
-    #[track_caller]
-    fn refused<T: std::fmt::Debug>(result: Result<T, ClusterError>, why: &str) {
-        let error = result.expect_err(why);
-        assert_eq!(error.code(), codes::RECORD_INVALID);
-        assert!(error.detail().contains(why), "{}", error.detail());
-    }
-
-    #[test]
-    fn a_forged_record_does_not_verify() {
-        let ca = ca();
-        let (chain, key) = leaf(&ca, 2, "controller");
-        let good = GenerationRecord::sign(&body(1, None, 2), &chain, &key).expect("sign");
-
-        // The body changed after signing.
-        let mut changed = good.clone();
-        changed.body = HexBytes(body(9, None, 2).canonical().expect("cbor"));
-        refused(changed.verify(&ca.root), "signature does not verify");
-        // Signed by a certificate of another CA.
-        let other = super::tests::ca();
-        refused(good.verify(&other.root), "certificate does not verify");
-        // Signed by a certificate that is not a controller's.
-        let (probe_chain, probe_key) = leaf(&ca, 2, "probe");
-        let probe =
-            GenerationRecord::sign(&body(1, None, 2), &probe_chain, &probe_key).expect("sign");
-        refused(
-            probe.verify(&ca.root),
-            "not signed by the forced controller",
-        );
-        // Signed by another controller than the one the body names.
-        let (chain3, key3) = leaf(&ca, 3, "controller");
-        let other_signer = GenerationRecord::sign(&body(1, None, 2), &chain3, &key3).expect("sign");
-        refused(
-            other_signer.verify(&ca.root),
-            "not signed by the forced controller",
-        );
-        // Garbage and oversized input.
-        refused(GenerationRecord::decode(&[0xff; 8]), "does not decode");
-        refused(
-            GenerationRecord::decode(&vec![0; MAX_RECORD_BYTES + 1]),
-            "too large",
-        );
-    }
-
-    #[allow(
-        clippy::needless_pass_by_value,
-        reason = "the tests build bodies inline"
-    )]
-    fn signed(ca: &Ca, body: GenerationBody) -> Signed {
-        let (chain, key) = leaf(ca, body.forced.0, "controller");
-        GenerationRecord::sign(&body, &chain, &key)
-            .expect("sign")
-            .verify(&ca.root)
-            .expect("verify")
-    }
-
-    #[test]
-    fn relations_follow_the_parent() {
-        let ca = ca();
-        let first = signed(&ca, body(1, None, 2));
-        assert_eq!(relation(None, &first), Relation::Descendant);
-        assert_eq!(relation(Some(&first), &first), Relation::Same);
-        let child = signed(&ca, body(2, Some(first.hash), 3));
-        assert_eq!(relation(Some(&first), &child), Relation::Descendant);
-        let twin = signed(&ca, body(1, None, 3));
-        assert_eq!(relation(Some(&first), &twin), Relation::Sibling);
-        let later_twin = signed(&ca, body(2, None, 3));
-        assert_eq!(relation(Some(&first), &later_twin), Relation::Sibling);
-        assert_eq!(relation(Some(&child), &first), Relation::Unrelated);
-        assert_eq!(relation(Some(&later_twin), &first), Relation::Unrelated);
-    }
-
-    #[test]
-    fn the_suggested_winner_is_one_total_order() {
-        let ca = ca();
-        let a = signed(&ca, body(1, None, 2));
-        let mut fresher = body(1, None, 3);
-        fresher.fork.index += 1;
-        let b = signed(&ca, fresher);
-        let higher = signed(&ca, body(2, None, 5));
-        assert_eq!(suggested_winner(&higher, &a), Ordering::Less);
-        assert_eq!(suggested_winner(&b, &a), Ordering::Less);
-        assert_eq!(suggested_winner(&a, &b), Ordering::Greater);
-        // Equal number and fork: the lower node id, then the lower hash; never equal.
-        let c = signed(&ca, body(1, None, 2));
-        let mut other_nonce = body(1, None, 2);
-        other_nonce.nonce = HexBytes(vec![8; 16]);
-        let d = signed(&ca, other_nonce);
-        let order = suggested_winner(&c, &d);
-        assert_ne!(order, Ordering::Equal);
-        assert_eq!(suggested_winner(&d, &c), order.reverse());
-        assert_eq!(order, c.hash.cmp(&d.hash));
-    }
-
-    #[test]
-    fn the_fence_file_round_trips_and_an_unknown_kind_is_strict() {
-        let ca = ca();
-        let dir = tenko_core::testing::TempDir::new("generation-fence");
-        assert_eq!(FenceFile::load(dir.path()).expect("load"), None);
-        let fence = FenceFile {
-            kind: FenceReason::Superseded,
-            record: signed(&ca, body(1, None, 2)).record,
-            at: Timestamp::now(),
-        };
-        fence.save(dir.path()).expect("save");
-        assert_eq!(FenceFile::load(dir.path()).expect("load"), Some(fence));
-        let unknown: FenceReason = from_cbor(&to_cbor("later_kind").expect("cbor")).expect("kind");
-        assert_eq!(unknown.code(), codes::SUPERSEDED);
-        fs::write(dir.path().join(NODE_DIR).join(FENCE_FILE), b"\xff").expect("write");
-        let error = FenceFile::load(dir.path()).expect_err("an unreadable fence");
-        assert_eq!(error.code(), "cluster.node.files");
-        assert!(error.detail().contains(FENCE_FILE), "{}", error.detail());
-    }
-
-    #[test]
-    fn the_superseded_mark_layout_is_pinned() {
-        let mark = SupersededMark {
-            generation: 1,
-            record: Digest([1; 32]),
-            rejoin: true,
-        };
-        let bytes = to_cbor(&mark).expect("cbor");
-        assert_eq!(
-            to_hex(&bytes),
-            format!(
-                "a36a67656e65726174696f6e01667265636f72645820{}6672656a6f696ef5",
-                "01".repeat(32)
-            )
-        );
-        assert_eq!(from_cbor::<SupersededMark>(&bytes).expect("decode"), mark);
-    }
-
-    #[test]
-    fn the_record_and_fence_layouts_are_pinned() {
-        let record = GenerationRecord {
-            body: HexBytes(vec![0xa0]),
-            signature: HexBytes(vec![9; 4]),
-            chain: vec![HexBytes(vec![1, 2])],
-        };
-        assert_eq!(
-            to_hex(&record.encode().expect("cbor")),
-            "a364626f647941a0697369676e6174757265440909090965636861696e81420102"
-        );
-        let fence = FenceFile {
-            kind: FenceReason::Conflict,
-            record,
-            at: Timestamp::from_unix_nanos(1_789_000_000_000_000_000).expect("time"),
-        };
-        assert_eq!(
-            to_hex(&to_cbor(&fence).expect("cbor")),
-            concat!(
-                "a3646b696e6468636f6e666c696374667265636f7264a364626f647941a0697369676e",
-                "6174757265440909090965636861696e8142010262617474323032362d30392d313054",
-                "30303a32363a34305a",
-            )
-        );
-    }
-}
+mod tests;

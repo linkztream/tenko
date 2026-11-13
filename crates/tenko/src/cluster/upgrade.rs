@@ -168,11 +168,7 @@ pub fn evaluate(view: &ClusterView, status: &SystemStatus, binary: &BinaryInfo) 
             MemberCheck {
                 node: member.node,
                 name: member.name.clone(),
-                role: match member.role {
-                    MemberRole::Voter => "voter",
-                    MemberRole::Learner => "learner",
-                    MemberRole::Superseded => "superseded",
-                },
+                role: member.role.as_str(),
                 leader: member.leader,
                 version: member.version.clone(),
                 protocol_majors: member.protocol_majors.clone(),
@@ -194,14 +190,21 @@ pub fn evaluate(view: &ClusterView, status: &SystemStatus, binary: &BinaryInfo) 
     }
 }
 
-/// The rolling order: learners, then the voters that follow, then the leader.
+/// The rolling order: learners, then the voters that follow, then the leader. A superseded
+/// controller, or one in a role this build does not know, is not in the cluster and gets no
+/// place in the order.
 fn order(view: &ClusterView) -> Vec<NodeId> {
     let rank = |member: &tenko_cluster::admin::MemberView| match (member.role, member.leader) {
-        (MemberRole::Learner | MemberRole::Superseded, _) => 0,
+        (MemberRole::Learner, _) => 0,
         (MemberRole::Voter, false) => 1,
         (MemberRole::Voter, true) => 2,
+        (MemberRole::Superseded | MemberRole::Unknown, _) => 3,
     };
-    let mut members: Vec<_> = view.members.iter().collect();
+    let mut members: Vec<_> = view
+        .members
+        .iter()
+        .filter(|member| matches!(member.role, MemberRole::Voter | MemberRole::Learner))
+        .collect();
     members.sort_by_key(|member| (rank(member), member.node));
     members.into_iter().map(|member| member.node).collect()
 }

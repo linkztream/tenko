@@ -2139,6 +2139,7 @@ mod tests {
                     node: revoked,
                     revoked_at: now,
                     not_after: now,
+                    controller: false,
                 },
             )
             .expect("row");

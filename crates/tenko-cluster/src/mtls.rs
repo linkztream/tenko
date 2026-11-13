@@ -246,22 +246,13 @@ impl ServerCertVerifier for ControllerVerifier {
         _ocsp_response: &[u8],
         now: UnixTime,
     ) -> Result<ServerCertVerified, TlsErr> {
-        let cert = ParsedCertificate::try_from(end_entity)?;
-        rustls::client::verify_server_cert_signed_by_trust_anchor(
-            &cert,
+        verify_controller(
             &self.roots,
+            end_entity,
             intermediates,
             now,
-            self.algorithms.all,
+            &self.algorithms,
         )?;
-        let peer = PeerIdentity::from_der(end_entity).map_err(|_| {
-            TlsErr::InvalidCertificate(CertificateError::ApplicationVerificationFailure)
-        })?;
-        if !peer.roles.contains(Role::Controller) {
-            return Err(TlsErr::InvalidCertificate(
-                CertificateError::ApplicationVerificationFailure,
-            ));
-        }
         Ok(ServerCertVerified::assertion())
     }
 
@@ -286,6 +277,40 @@ impl ServerCertVerifier for ControllerVerifier {
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
         self.algorithms.supported_schemes()
     }
+}
+
+/// Checks a controller's certificate: it chains to one of `roots` at `time`, names a node and
+/// carries the role `controller`. Shared by a node's check of its controller and by the
+/// check of a signed generation record (`crate::generation`).
+///
+/// # Errors
+///
+/// The TLS error of the chain, or `ApplicationVerificationFailure` for a certificate that
+/// names no node or is not a controller's.
+pub fn verify_controller(
+    roots: &RootCertStore,
+    end_entity: &CertificateDer<'_>,
+    intermediates: &[CertificateDer<'_>],
+    time: UnixTime,
+    algorithms: &WebPkiSupportedAlgorithms,
+) -> Result<PeerIdentity, TlsErr> {
+    let cert = ParsedCertificate::try_from(end_entity)?;
+    rustls::client::verify_server_cert_signed_by_trust_anchor(
+        &cert,
+        roots,
+        intermediates,
+        time,
+        algorithms.all,
+    )?;
+    let peer = PeerIdentity::from_der(end_entity).map_err(|_| {
+        TlsErr::InvalidCertificate(CertificateError::ApplicationVerificationFailure)
+    })?;
+    if !peer.roles.contains(Role::Controller) {
+        return Err(TlsErr::InvalidCertificate(
+            CertificateError::ApplicationVerificationFailure,
+        ));
+    }
+    Ok(peer)
 }
 
 fn config_error(error: &impl fmt::Display) -> ClusterError {

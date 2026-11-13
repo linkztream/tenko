@@ -160,6 +160,8 @@ fn regenerate(format: u64) {
     server.stop().assert_code(0);
     let _ = fs::remove_dir_all(&target);
     copy_dir(&node.data_dir().join("store"), &target.join("store"));
+    // The fixture stays in the repository for good: only the pages in use.
+    tenko_store::format::compact_closed_store(&target.join("store")).expect("compact the fixture");
     let key = fs::read(node.kek_path()).expect("the key file");
     let hex: String = if key.len() == 32 {
         key.iter().fold(String::new(), |mut text, byte| {
@@ -217,10 +219,11 @@ fn every_earlier_format_opens_with_its_objects() {
         .iter()
         .map(|format| dir_size(&fixtures().join(format!("v{format}"))))
         .sum();
-    // Each fixture holds about 1.2 MiB, a redb store pre-allocating most of its megabyte
-    // (docs/upgrades.md section 4.5): seven formats held 8.2 MiB, so the bound leaves room
-    // for two more before a fixture has to shrink or an old one to go.
-    assert!(size < 11 * 1024 * 1024, "the fixtures grew to {size} bytes");
+    // WP7.0: 8 MiB since format 4. A fixture written before format 7 holds about 1.2 MiB,
+    // its redb files keeping most of their pre-allocated megabyte (docs/upgrades.md section
+    // 4.5); from format 7 on the generator compacts the files and a fixture holds about
+    // 0.4 MiB.
+    assert!(size < 8 * 1024 * 1024, "the fixtures grew to {size} bytes");
     let migrated: Vec<u64> = formats
         .into_iter()
         .filter(|format| opens(*format, current))

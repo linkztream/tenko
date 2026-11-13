@@ -205,6 +205,21 @@ pub enum MemberRole {
     /// A former voter that a forced step superseded: no longer in the Raft group, refused
     /// by the current history until it rejoins or is removed.
     Superseded,
+    /// A role a newer controller reports that this build does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+impl MemberRole {
+    /// The role as the API spells it.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Voter => "voter",
+            Self::Learner => "learner",
+            Self::Superseded => "superseded",
+            Self::Unknown => "unknown",
+        }
+    }
 }
 
 /// One member of the controller cluster.

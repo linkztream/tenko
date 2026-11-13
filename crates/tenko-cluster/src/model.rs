@@ -222,8 +222,13 @@ pub struct Revocation {
     pub node: NodeId,
     /// When it was revoked.
     pub revoked_at: Timestamp,
-    /// When it expires; the entry is removed after that.
+    /// When it expires; the entry is removed after that, unless it is a controller's.
     pub not_after: Timestamp,
+    /// A controller's certificate. Its entry stays after it expires: a generation record
+    /// that the certificate signed can be offered at any time, and its time is the
+    /// signer's choice (the cluster recovery).
+    #[serde(default)]
+    pub controller: bool,
 }
 
 /// The certificate a controller presents on the cluster port.

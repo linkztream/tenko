@@ -396,6 +396,35 @@ fn lock_existing(path: &Path) -> Result<Option<File>, FormatError> {
     }
 }
 
+/// Compacts the log and the state file of a closed store in place (redb keeps the pages it
+/// once allocated; this hands back the free ones). For files that are kept as they are,
+/// such as the data-directory fixtures of the tests. Returns the bytes saved.
+///
+/// # Errors
+///
+/// [`FormatError::NoStore`], [`FormatError::InUse`], or the error of the database.
+#[cfg(feature = "raft")]
+pub fn compact_closed_store(store_dir: &Path) -> Result<u64, FormatError> {
+    let held = hold_closed(store_dir)?;
+    let names: Vec<String> = held.files.iter().map(|(name, _)| name.clone()).collect();
+    drop(held);
+    let size = |path: &Path| fs::metadata(path).map_or(0, |metadata| metadata.len());
+    let mut saved = 0;
+    for name in names {
+        let path = store_dir.join(name);
+        let before = size(&path);
+        let mut database = redb::Database::open(&path)
+            .map_err(|error| FormatError::io(&path, io::Error::other(error)))?;
+        while database
+            .compact()
+            .map_err(|error| FormatError::io(&path, io::Error::other(error)))?
+        {}
+        drop(database);
+        saved += before.saturating_sub(size(&path));
+    }
+    Ok(saved)
+}
+
 /// The total size of the files [`copy_closed_store`] would copy, for a free-space check.
 ///
 /// # Errors

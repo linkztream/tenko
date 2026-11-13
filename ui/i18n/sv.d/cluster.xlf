@@ -22,6 +22,10 @@
         <notes><note category="description">Role of a former voter that a forced step on another controller superseded; it no longer belongs to the cluster.</note></notes>
         <segment><source>Superseded</source><target>Ersatt</target></segment>
       </unit>
+      <unit id="cluster.role.unknown">
+        <notes><note category="description">Role of a cluster member that a newer controller reports and this version does not know.</note></notes>
+        <segment><source>Unknown role</source><target>Okänd roll</target></segment>
+      </unit>
       <unit id="cluster.health.leader">
         <notes><note category="description">State of the member that leads the cluster.</note></notes>
         <segment><source>Leader</source><target>Ledare</target></segment>

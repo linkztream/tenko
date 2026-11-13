@@ -646,17 +646,23 @@ pub fn fuzz_request(data: &[u8]) {
     }
 }
 
-/// The generation metadata of a `Raft` or `Cluster` call: the record, its body, a check
-/// against the record's own first certificate as the root, the claim and a fence file.
+/// The generation metadata of a `Raft` or `Cluster` call: a record, its header and body,
+/// an offered lineage admitted against the first record's own certificate as the root, the
+/// claim and a fence file.
 fn fuzz_generation(input: &[u8]) {
-    use crate::generation::{Claim, FenceFile, GenerationRecord};
+    use crate::generation::{
+        Claim, FenceFile, GenerationRecord, Lineage, Standing, decode_lineage,
+    };
 
     if let Ok(record) = GenerationRecord::decode(input) {
+        drop(record.header());
         drop(record.body());
-        if let Some(first) = record.chain.first() {
-            let root = rustls::pki_types::CertificateDer::from(first.0.as_slice());
-            drop(record.verify(&root));
-        }
+    }
+    if let Ok(records) = decode_lineage(input)
+        && let Some(first) = records.first().and_then(|record| record.chain.first())
+    {
+        let root = rustls::pki_types::CertificateDer::from(first.0.as_slice());
+        drop(Lineage::default().admit(&records, &root, &Standing::default()));
     }
     let _ = Claim::parse(&String::from_utf8_lossy(input));
     drop(tenko_core::codec::from_cbor::<FenceFile>(input));

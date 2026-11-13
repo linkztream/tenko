@@ -108,7 +108,10 @@ pub const FORMATS: &[FormatInfo] = &[
     FormatInfo {
         version: 7,
         since: "0.0.12",
-        summary: "the cluster recovery contract format, raised so that a format 6 binary refuses                   a data directory that may hold a generation record (cluster.generation) or                   controllers marked superseded (cluster.superseded), which it would ignore;                   the migration changes no row",
+        summary: "the cluster recovery contract format, raised so that a format 6 binary refuses \
+                  a data directory that may hold the generation records of a forced recovery \
+                  (cluster.generation) or controllers marked superseded (cluster.superseded), \
+                  which it would ignore; the migration changes no row",
     },
 ];
 

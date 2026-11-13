@@ -1,6 +1,5 @@
 {
   "admin": "admin",
-  "password": "plover quartz mitten ember",
   "format": 7,
   "objects": {
     "addresses": [
@@ -18,5 +17,6 @@
       42
     ]
   },
+  "password": "plover quartz mitten ember",
   "written_by": "0.0.11"
 }

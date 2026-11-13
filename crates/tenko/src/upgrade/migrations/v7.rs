@@ -2,8 +2,8 @@
 //! section 3.1), an empty migration.
 //!
 //! A forced step starts a new generation of a cluster's history: it writes the signed
-//! generation record (`cluster.generation`) and marks the controllers it superseded
-//! (`cluster.superseded`). A binary of format 6 reads neither table: it would open such a
+//! generation records of the history (`cluster.generation`, by number) and marks the
+//! controllers it superseded (`cluster.superseded`). A binary of format 6 reads neither table: it would open such a
 //! store as if nothing had happened, take calls from the superseded controllers and let a
 //! superseded controller of its own history write on. The fence is a property of the
 //! stored data, so a format 6 binary must not open a directory that may hold it. A store
@@ -24,7 +24,7 @@ impl Migration for V7 {
 
     fn summary(&self) -> &'static str {
         "raises the format to 7, the cluster recovery contract format, so that a format 6 \
-         binary refuses a data directory that may hold a generation record \
+         binary refuses a data directory that may hold generation records \
          (cluster.generation) or controllers marked superseded (cluster.superseded); no \
          stored row changes"
     }
