@@ -1612,6 +1612,26 @@ pub struct ResetData {
     pub revision: Revision,
 }
 
+/// Why the server ended an event stream with an `end` event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EndReason {
+    /// The session or token the stream was opened with no longer acts: it was signed out,
+    /// revoked or expired, the password changed, or the account was disabled or deleted. A
+    /// new stream with it is refused with 401, as any request is: sign in again.
+    AccessEnded,
+    /// What the credential may read changed (a role or a grant), or could not be confirmed:
+    /// open the stream again to receive what it may read now.
+    AccessChanged,
+}
+
+/// The `data` of an `end` event, the last event of a stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct EndData {
+    /// Why the stream ended.
+    pub reason: EndReason,
+}
+
 #[cfg(test)]
 mod tests {
     use tenko_core::ObjectKind;

@@ -503,22 +503,28 @@ const MAX_ROWS: usize = 1_000_000;
 /// Largest number of language packs read when the index is built.
 const MAX_PACKS: usize = 10_000;
 
+/// The tables the authorization index derives from: a commit that changes none of them changes
+/// no decision of authorization.
+pub fn authorization_tables() -> [TableName; 8] {
+    [
+        USERS.name().clone(),
+        crate::model::SETTINGS.name().clone(),
+        OPERATOR_INDEX.name().clone(),
+        PACKS.name().clone(),
+        GRANTS.name().clone(),
+        ROLE_POLICIES.name().clone(),
+        TOKENS.name().clone(),
+        SCOPED_TOKENS.name().clone(),
+    ]
+}
+
 impl DerivedIndex for AuthIndex {
     fn name(&self) -> &'static str {
         "auth.index"
     }
 
     fn filter(&self) -> WatchFilter {
-        WatchFilter::tables([
-            USERS.name().clone(),
-            crate::model::SETTINGS.name().clone(),
-            OPERATOR_INDEX.name().clone(),
-            PACKS.name().clone(),
-            GRANTS.name().clone(),
-            ROLE_POLICIES.name().clone(),
-            TOKENS.name().clone(),
-            SCOPED_TOKENS.name().clone(),
-        ])
+        WatchFilter::tables(authorization_tables())
     }
 
     fn build(&self, view: &dyn ReadView) -> Result<Box<dyn IndexImage>, StoreError> {

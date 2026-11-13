@@ -26,6 +26,7 @@ mod admin;
 pub mod devices;
 mod end;
 mod guard;
+mod hold;
 mod login;
 mod misses;
 mod pins;
@@ -40,6 +41,7 @@ pub use devices::{
     DEVICE_COOKIE, DeviceCookie, DeviceMarks, HOST_DEVICE_COOKIE, device_cookie_name,
 };
 pub use guard::default_hash_memory_mib;
+pub use hold::{Follow, Hold};
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
@@ -713,46 +715,20 @@ impl AuthService {
         secret: &str,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
-        if !looks_like_session_secret(secret) {
-            return Err(AuthError::Unauthenticated);
-        }
-        let hash = hash_secret(secret);
-        let mut view = self.view().await?;
-        let mut found = view.get_typed(&SESSIONS, &hash)?;
-        if found.is_none() {
-            // A session created on another controller may not have reached this one's copy
-            // yet: read once more at the leader's commit index before refusing it, unless
-            // the value was refused there a moment ago or too many such reads are under way.
-            if let Some(confirmed) = self.confirmed_view_for_miss(&hash, now).await {
-                found = confirmed.get_typed(&SESSIONS, &hash)?;
-                if found.is_none() {
-                    self.misses.remember(&hash, now);
-                }
-                view = confirmed;
-            }
-        }
-        let Some((mut session, revision)) = found else {
-            return Err(AuthError::Unauthenticated);
-        };
+        let (hash, mut session, revision, view) = self.session_of(secret, now).await?;
         let settings = self.settings();
-        let (expires_at, _) = effective_expiry(&session, &settings);
-        if now >= expires_at {
-            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
-            batch.delete_typed(&SESSIONS, &hash);
-            batch.delete_typed(&USER_SESSIONS, &(session.user, session.id));
-            if let Err(error) = self.store.propose(batch).await {
-                tracing::warn!(%error, "could not remove an expired session");
+        let user = match Self::session_holds(view.as_ref(), &session, &settings, now) {
+            Err(AuthError::SessionExpired) => {
+                let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+                batch.delete_typed(&SESSIONS, &hash);
+                batch.delete_typed(&USER_SESSIONS, &(session.user, session.id));
+                if let Err(error) = self.store.propose(batch).await {
+                    tracing::warn!(%error, "could not remove an expired session");
+                }
+                return Err(AuthError::SessionExpired);
             }
-            return Err(AuthError::SessionExpired);
-        }
-        let (user, _) = Self::holder(
-            view.as_ref(),
-            session.user,
-            Issued::Session(session.generation),
-        )?;
-        if user.is_service() || (session.break_glass && !user.break_glass) {
-            return Err(AuthError::Unauthenticated);
-        }
+            held => held?.0,
+        };
         let idle = if session.break_glass {
             BREAK_GLASS_IDLE
         } else {
@@ -804,101 +780,150 @@ impl AuthService {
         token: &str,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
-        if !token.starts_with(crate::secret::TOKEN_PREFIX) || token.len() > 128 {
-            return Err(AuthError::Unauthenticated);
-        }
-        let hash = hash_secret(token);
-        let (found, view) = self.lookup_token(&hash, now).await?;
+        let (hash, found, view) = self.token_of(token, now).await?;
         let settings = self.settings();
-        match found {
-            None => Err(AuthError::Unauthenticated),
-            Some(FoundToken::Personal(mut record, revision)) => {
-                if token_expired(record.created_at, record.expires_at, &settings, now) {
-                    return Err(AuthError::SessionExpired);
-                }
-                let (user, _) = Self::holder(
-                    view.as_ref(),
-                    record.owner,
-                    Issued::Token(record.generation),
-                )?;
-                if user.break_glass || user.is_service() {
-                    return Err(AuthError::Unauthenticated);
-                }
-                let principal = Principal::Token {
-                    id: record.id,
-                    owner: user.id,
-                };
-                if record
-                    .last_used_at
-                    .is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
-                {
-                    record.last_used_at = Some(now);
-                    let mut batch = WriteBatch::new(principal.clone(), now);
-                    batch.expect_typed(&TOKENS, &hash, Some(revision));
-                    batch.put_typed(&TOKENS, &hash, &record)?;
-                    self.record_token_use(batch).await;
-                }
-                Ok(Authenticated {
-                    principal,
-                    user: Some(user.id),
-                    roles: role_names(&user.roles),
-                    strength: record.issued_with,
-                    expires_at: effective_token_expiry(
-                        record.created_at,
-                        record.expires_at,
-                        &settings,
-                    ),
-                    flags: AuthFlags::default(),
-                })
-            }
-            Some(FoundToken::Scoped(mut record, revision)) => {
-                if token_expired(record.created_at, record.expires_at, &settings, now) {
-                    return Err(AuthError::SessionExpired);
-                }
-                let (user, _) = Self::holder(
-                    view.as_ref(),
-                    record.owner,
-                    Issued::Token(record.generation),
-                )?;
-                if user.break_glass {
-                    return Err(AuthError::Unauthenticated);
-                }
-                let principal = Principal::Token {
-                    id: record.id,
-                    owner: user.id,
-                };
-                if record
-                    .last_used_at
-                    .is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
-                {
-                    record.last_used_at = Some(now);
-                    let mut batch = WriteBatch::new(principal.clone(), now);
-                    batch.expect_typed(&SCOPED_TOKENS, &hash, Some(revision));
-                    batch.put_typed(&SCOPED_TOKENS, &hash, &record)?;
-                    self.record_token_use(batch).await;
-                }
-                // The global roles the token acts with: its global grants the owner covers.
-                let roles: Vec<RoleName> = record
+        let (user, expires_at) = Self::token_holds(view.as_ref(), &found, &settings, now)?;
+        let (id, strength, roles) = match &found {
+            FoundToken::Personal(record, _) => (record.id, record.issued_with, user.roles.clone()),
+            // The global roles the token acts with: its global grants the owner covers.
+            FoundToken::Scoped(record, _) => (
+                record.id,
+                record.issued_with,
+                record
                     .grants
                     .iter()
                     .filter(|grant| grant.scope.is_none())
                     .map(|grant| grant.role)
                     .filter(|role| user.roles.iter().any(|held| held.covers(*role)))
-                    .collect();
-                Ok(Authenticated {
-                    principal,
-                    user: Some(user.id),
-                    roles: role_names(&roles),
-                    strength: record.issued_with,
-                    expires_at: effective_token_expiry(
-                        record.created_at,
-                        record.expires_at,
-                        &settings,
-                    ),
-                    flags: AuthFlags::default(),
-                })
+                    .collect(),
+            ),
+        };
+        let principal = Principal::Token { id, owner: user.id };
+        let mut batch = WriteBatch::new(principal.clone(), now);
+        let due = |last: Option<Timestamp>| {
+            last.is_none_or(|last| now.saturating_since(last) >= Duration::from_secs(3_600))
+        };
+        match found {
+            FoundToken::Personal(mut record, revision) if due(record.last_used_at) => {
+                record.last_used_at = Some(now);
+                batch.expect_typed(&TOKENS, &hash, Some(revision));
+                batch.put_typed(&TOKENS, &hash, &record)?;
             }
+            FoundToken::Scoped(mut record, revision) if due(record.last_used_at) => {
+                record.last_used_at = Some(now);
+                batch.expect_typed(&SCOPED_TOKENS, &hash, Some(revision));
+                batch.put_typed(&SCOPED_TOKENS, &hash, &*record)?;
+            }
+            _ => {}
         }
+        if !batch.mutations.is_empty() {
+            self.record_token_use(batch).await;
+        }
+        Ok(Authenticated {
+            principal,
+            user: Some(user.id),
+            roles: role_names(&roles),
+            strength,
+            expires_at,
+            flags: AuthFlags::default(),
+        })
+    }
+
+    /// The session a presented secret names, with its hash, its revision and the view it was
+    /// found in: this controller's copy, else (a session created on another controller that
+    /// has not reached this one yet) the leader's commit index, within the bound of
+    /// [`AuthService::confirmed_view_for_miss`].
+    async fn session_of(&self, secret: &str, now: Timestamp) -> Result<FoundSession, AuthError> {
+        if !looks_like_session_secret(secret) {
+            return Err(AuthError::Unauthenticated);
+        }
+        let hash = hash_secret(secret);
+        let mut view = self.view().await?;
+        let mut found = view.get_typed(&SESSIONS, &hash)?;
+        if found.is_none()
+            && let Some(confirmed) = self.confirmed_view_for_miss(&hash, now).await
+        {
+            found = confirmed.get_typed(&SESSIONS, &hash)?;
+            if found.is_none() {
+                self.misses.remember(&hash, now);
+            }
+            view = confirmed;
+        }
+        let (session, revision) = found.ok_or(AuthError::Unauthenticated)?;
+        Ok((hash, session, revision, view))
+    }
+
+    /// The token a presented bearer secret names, with its hash and the view it was found in
+    /// ([`AuthService::lookup_token`]).
+    async fn token_of(
+        &self,
+        token: &str,
+        now: Timestamp,
+    ) -> Result<(Vec<u8>, FoundToken, Arc<dyn ReadView>), AuthError> {
+        if !token.starts_with(crate::secret::TOKEN_PREFIX) || token.len() > 128 {
+            return Err(AuthError::Unauthenticated);
+        }
+        let hash = hash_secret(token);
+        let (found, view) = self.lookup_token(&hash, now).await?;
+        Ok((hash, found.ok_or(AuthError::Unauthenticated)?, view))
+    }
+
+    /// The account a session acts for at `now` and when the session ends: the rules every
+    /// request with the session meets, and every check of a stream it opened
+    /// ([`AuthService::standing`]). [`AuthError::SessionExpired`] once its time is over.
+    fn session_holds(
+        view: &dyn ReadView,
+        session: &SessionRecord,
+        settings: &SecuritySettings,
+        now: Timestamp,
+    ) -> Result<(UserRecord, Timestamp), AuthError> {
+        let (expires_at, _) = effective_expiry(session, settings);
+        if now >= expires_at {
+            return Err(AuthError::SessionExpired);
+        }
+        let (user, _) = Self::holder(view, session.user, Issued::Session(session.generation))?;
+        if user.is_service() || (session.break_glass && !user.break_glass) {
+            return Err(AuthError::Unauthenticated);
+        }
+        Ok((user, expires_at))
+    }
+
+    /// The account a personal or scoped token acts for at `now` and when the token ends, as
+    /// [`AuthService::session_holds`] for sessions. Service accounts act through scoped tokens
+    /// only, the break-glass account through none.
+    fn token_holds(
+        view: &dyn ReadView,
+        token: &FoundToken,
+        settings: &SecuritySettings,
+        now: Timestamp,
+    ) -> Result<(UserRecord, Option<Timestamp>), AuthError> {
+        let (owner, generation, created_at, expires_at, scoped) = match token {
+            FoundToken::Personal(record, _) => (
+                record.owner,
+                record.generation,
+                record.created_at,
+                record.expires_at,
+                false,
+            ),
+            FoundToken::Scoped(record, _) => (
+                record.owner,
+                record.generation,
+                record.created_at,
+                record.expires_at,
+                true,
+            ),
+        };
+        if token_expired(created_at, expires_at, settings, now) {
+            return Err(AuthError::SessionExpired);
+        }
+        let (user, _) = Self::holder(view, owner, Issued::Token(generation))?;
+        if user.break_glass || (!scoped && user.is_service()) {
+            return Err(AuthError::Unauthenticated);
+        }
+        Ok((
+            user,
+            effective_token_expiry(created_at, expires_at, settings),
+        ))
     }
 
     /// The account a session or token acts for, if the credential may still act: the one
@@ -1138,6 +1163,15 @@ fn effective_expiry(
     );
     (absolute_end.min(idle_end), absolute_end)
 }
+
+/// A session found by its secret: its hash, the record, its revision and the view it was
+/// found in.
+type FoundSession = (
+    Vec<u8>,
+    SessionRecord,
+    tenko_core::Revision,
+    Arc<dyn ReadView>,
+);
 
 /// A token found by its hash.
 enum FoundToken {

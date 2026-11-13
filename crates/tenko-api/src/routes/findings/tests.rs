@@ -268,8 +268,10 @@ async fn a_decision_on_a_proposal_reaches_the_counts_and_the_findings_topic() {
             None,
             TopicSet::parse("findings").expect("topics"),
             Principal::system(SystemComponent::Api),
+            None,
         )
-        .await,
+        .await
+        .expect("a stream without a credential opens"),
     );
     proposals::reject(&lab.service, id, None, &person(), None)
         .await

@@ -2796,7 +2796,7 @@ export interface paths {
         };
         /**
          * Subscribe to server-sent events
-         * @description A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds.
+         * @description A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds. A stream lasts only as long as the session or token that opened it acts: `end` (data `EndData`) is its last event when that credential no longer acts (`access_ended`: signed out, revoked, expired, ended by a password change or reset, or the account disabled or deleted; a new stream with it is refused with 401) or no longer reads a topic of the stream (`access_changed`: open a new one). No event of the commit that ends the access, or of a later commit, comes before `end`, on whichever controller the stream is open.
          */
         get: operations["events"];
         put?: never;
@@ -9915,6 +9915,16 @@ export interface components {
          * @enum {string}
          */
         EncryptionType: "aes128-cts-hmac-sha1" | "aes256-cts-hmac-sha1";
+        /** @description The `data` of an `end` event, the last event of a stream. */
+        EndData: {
+            /** @description Why the stream ended. */
+            reason: components["schemas"]["EndReason"];
+        };
+        /**
+         * @description Why the server ended an event stream with an `end` event.
+         * @enum {string}
+         */
+        EndReason: "access_ended" | "access_changed";
         /** @description One end of a link. */
         Endpoint: {
             /** @description The device, as the source names it. */
@@ -39440,7 +39450,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The event stream; each `data` field is an `EventData` (or a `ResetData` for `reset`) */
+            /** @description The event stream; each `data` field is an `EventData` (a `ResetData` for `reset`, an `EndData` for `end`) */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -39458,7 +39468,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not authenticated */
+            /** @description Not authenticated, or the credential ended while the stream opened */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -39467,7 +39477,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The server is shutting down */
+            /** @description The server is shutting down, or the credential could not be read (`auth.unavailable`) */
             503: {
                 headers: {
                     [name: string]: unknown;

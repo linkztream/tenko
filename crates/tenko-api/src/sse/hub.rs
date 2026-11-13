@@ -4,6 +4,7 @@
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     convert::Infallible,
+    pin::Pin,
     sync::{
         Arc, Mutex, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -14,20 +15,25 @@ use std::{
 use arc_swap::ArcSwap;
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, StreamExt, future::BoxFuture, stream};
-use tenko_core::{ObjectRef, Principal, Revision, codec::decode_key};
+use tenko_auth::AuthError;
+use tenko_core::{ObjectRef, Principal, Revision, Timestamp, codec::decode_key};
 use tenko_store::{
     ChangeSet, KeyRange, ReadConsistency, Store, StoreError, WatchError, WatchFilter, tables,
 };
-use tokio::sync::{
-    broadcast::{self, error::RecvError},
-    watch,
+use tokio::{
+    sync::{
+        broadcast::{self, error::RecvError},
+        watch,
+    },
+    time::Sleep,
 };
 use uuid::Uuid;
 
 use super::{
     Admission, AdmitAll, EventData, EventFilter, EventRoutes, ResetData, ResetReason, SseConfig,
+    access::{AccessChange, AccessTables, Check, Held},
 };
-use crate::dto::events::{Topic, TopicSet};
+use crate::dto::events::{EndData, EndReason, Topic, TopicSet};
 
 const KEEPALIVE_FRAME: Bytes = Bytes::from_static(b": keep-alive\n\n");
 const SHUTDOWN_FRAME: Bytes = Bytes::from_static(b"event: shutdown\ndata: {}\n\n");
@@ -56,6 +62,8 @@ enum Msg {
     KeepAlive,
     /// Every subscriber must reload (`reset` frame, revision to reload at).
     Reset(Bytes),
+    /// A commit changed credentials or authorization; sent before the commit's frames.
+    Access(Arc<AccessChange>),
     Shutdown,
 }
 
@@ -110,6 +118,7 @@ struct Inner {
     ring: Mutex<Ring>,
     config: SseConfig,
     routes: EventRoutes,
+    access: AccessTables,
     filter: ArcSwap<Box<dyn EventFilter>>,
     shutting_down: AtomicBool,
     subscribers: AtomicUsize,
@@ -146,6 +155,7 @@ impl EventHub {
                 }),
                 config,
                 routes,
+                access: AccessTables::default(),
                 filter: ArcSwap::from_pointee(Box::new(AdmitAll)),
                 shutting_down: AtomicBool::new(false),
                 subscribers: AtomicUsize::new(0),
@@ -210,13 +220,19 @@ impl EventHub {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Publishes the events of one journal change set, in revision order.
+    /// Publishes the events of one journal change set, in revision order. A change of
+    /// credentials or authorization goes out first and at once, also when coalescing, so a
+    /// stream checks its access before it takes any frame of the commit.
     pub fn publish_change_set(&self, changes: &ChangeSet) {
         let frames = self.frames_for(changes);
+        let access = self.inner.access.change(changes);
         let mut ring = self.ring();
         if changes.revision <= ring.pending_newest.unwrap_or(ring.newest) {
             // Already published (a feeder restart replays from its last position).
             return;
+        }
+        if let Some(access) = access {
+            let _ = self.inner.tx.send(Msg::Access(Arc::new(access)));
         }
         for frame in &frames {
             ring.push(frame);
@@ -598,6 +614,12 @@ struct Subscriber {
     hub: EventHub,
     /// After a lag reset: frames at or below this revision are stale.
     skip_upto: Option<Revision>,
+    /// The credential the stream was opened with; `None` without authentication.
+    held: Option<Arc<dyn Held>>,
+    /// When the credential expires, as its last check found.
+    expiry: Option<Pin<Box<Sleep>>>,
+    /// The topics the principal read when the stream opened.
+    readable: TopicSet,
     done: bool,
     _guard: SubscriberGuard,
 }
@@ -627,6 +649,84 @@ impl Subscriber {
         }
     }
 
+    /// The topics of the stream `principal` reads now: those the filter admits without naming
+    /// an object.
+    fn readable(&self) -> TopicSet {
+        let filter = self.hub.inner.filter.load();
+        let mut readable = TopicSet::EMPTY;
+        for topic in self.topics.topics() {
+            if filter.select(&self.principal, topic, &[]) != Admission::None {
+                readable.insert(topic);
+            }
+        }
+        readable
+    }
+
+    /// Reads the credential again at revision `at` or later, when `check` asks it, then the
+    /// topics it reads: `Err` with the reason the stream ends, else the stream goes on until
+    /// the credential's expiry, if it has one.
+    async fn check(&mut self, at: Revision, check: Check) -> Result<(), EndReason> {
+        let Some(held) = self.held.clone() else {
+            return Ok(());
+        };
+        let standing = match check {
+            Check::None => return Ok(()),
+            Check::Reads => Ok(()),
+            Check::Credential => held
+                .standing(at, Timestamp::now())
+                .await
+                .map(|until| self.expire_at(until)),
+        };
+        match standing {
+            Ok(()) => {
+                let readable = self.readable();
+                if self.readable.topics().all(|topic| readable.contains(topic)) {
+                    Ok(())
+                } else {
+                    Err(EndReason::AccessChanged)
+                }
+            }
+            Err(
+                AuthError::Unauthenticated
+                | AuthError::SessionExpired
+                | AuthError::PasswordChangeRequired,
+            ) => Err(EndReason::AccessEnded),
+            Err(error) => {
+                tracing::debug!(%error, "an event stream could not read its credential again");
+                Err(EndReason::AccessChanged)
+            }
+        }
+    }
+
+    /// Checks the credential again when it expires, if it does.
+    fn expire_at(&mut self, until: Option<Timestamp>) {
+        self.expiry = until
+            .map(|until| Box::pin(tokio::time::sleep(until.saturating_since(Timestamp::now()))));
+    }
+
+    /// The next message of the hub, or the credential's expiry.
+    async fn next_message(&mut self) -> Result<Msg, RecvError> {
+        let Some(expiry) = self.expiry.as_mut() else {
+            return self.rx.recv().await;
+        };
+        // The expiry first: frames waiting in the channel are not delivered past it.
+        tokio::select! {
+            biased;
+            () = expiry => {
+                self.expiry = None;
+                Ok(Msg::Access(Arc::new(AccessChange::all(self.hub.newest()))))
+            }
+            message = self.rx.recv() => message,
+        }
+    }
+
+    /// The `end` frame, after which the stream closes.
+    fn end(&mut self, reason: EndReason) -> Bytes {
+        self.done = true;
+        let data = serde_json::to_string(&EndData { reason }).unwrap_or_else(|_| "{}".to_owned());
+        Bytes::from(format!("event: end\ndata: {data}\n\n"))
+    }
+
     async fn next_chunk(&mut self) -> Option<Bytes> {
         if let Some(first) = self.first.take() {
             return Some(first);
@@ -635,7 +735,16 @@ impl Subscriber {
             return None;
         }
         loop {
-            match self.rx.recv().await {
+            match self.next_message().await {
+                Ok(Msg::Access(change)) => {
+                    let check = self
+                        .held
+                        .as_deref()
+                        .map_or(Check::None, |held| change.check(held));
+                    if let Err(reason) = self.check(change.revision, check).await {
+                        return Some(self.end(reason));
+                    }
+                }
                 Ok(Msg::Frame(frame)) => {
                     if let Some(bytes) = self.render(&frame) {
                         return Some(bytes);
@@ -651,7 +760,12 @@ impl Subscriber {
                     }
                 }
                 Ok(Msg::KeepAlive) => return Some(KEEPALIVE_FRAME),
+                // The hub skipped commits (it lost its journal position) or this stream did
+                // (it lagged): either may have been an end of the access.
                 Ok(Msg::Reset(frame)) => {
+                    if let Err(reason) = self.check(self.hub.newest(), Check::Credential).await {
+                        return Some(self.end(reason));
+                    }
                     self.skip_upto = None;
                     return Some(frame);
                 }
@@ -661,6 +775,9 @@ impl Subscriber {
                 }
                 Err(RecvError::Lagged(_)) => {
                     let newest = self.hub.newest();
+                    if let Err(reason) = self.check(newest, Check::Credential).await {
+                        return Some(self.end(reason));
+                    }
                     self.skip_upto = Some(newest);
                     return Some(reset_frame(ResetReason::Lagged, newest));
                 }
@@ -672,14 +789,22 @@ impl Subscriber {
 
 /// Builds the byte stream of one subscriber: the hello and replay chunk, then live frames.
 ///
-/// `last` is the position the client resumes after (`Last-Event-ID` or `from`).
+/// `last` is the position the client resumes after (`Last-Event-ID` or `from`); `held` the
+/// credential the stream follows ([`super::access`]), checked once more right after the
+/// subscription.
+///
+/// # Errors
+///
+/// The refusal of that check: the credential ended between the request's authentication and
+/// the subscription, or could not be read.
 pub(crate) async fn event_stream(
     hub: &EventHub,
     store: &dyn Store,
     last: Option<Revision>,
     topics: TopicSet,
     principal: Principal,
-) -> impl Stream<Item = Result<Bytes, Infallible>> + Send + use<> {
+    held: Option<Arc<dyn Held>>,
+) -> Result<impl Stream<Item = Result<Bytes, Infallible>> + Send + use<>, AuthError> {
     let mut topics = topics;
     // The metrics snapshots go only to principals that read the metrics; a stream that may
     // not does not count as a listener, so it does not start the publisher either.
@@ -695,6 +820,19 @@ pub(crate) async fn event_stream(
     }
     let guard = SubscriberGuard::new(&hub.inner, topics);
     let (rx, replay) = hub.subscribe(last);
+    let mut subscriber = Subscriber {
+        rx,
+        first: None,
+        topics,
+        principal,
+        hub: hub.clone(),
+        skip_upto: None,
+        held,
+        expiry: None,
+        readable: TopicSet::EMPTY,
+        done: false,
+        _guard: guard,
+    };
     // Right after subscribing and before the replay: the topic's live events follow the first
     // frame without a hole, and none older than it waits behind a slow replay.
     let source = hub
@@ -711,16 +849,6 @@ pub(crate) async fn event_stream(
     };
     let retry = hub.inner.config.retry.as_millis();
     let mut first = BytesMut::from(format!("retry: {retry}\n: connected\n\n").as_bytes());
-    let mut subscriber = Subscriber {
-        rx,
-        first: None,
-        topics,
-        principal,
-        hub: hub.clone(),
-        skip_upto: None,
-        done: false,
-        _guard: guard,
-    };
     let frames = match replay {
         Replay::Nothing => Vec::new(),
         Replay::Frames(frames) => frames,
@@ -745,13 +873,20 @@ pub(crate) async fn event_stream(
     {
         first.extend_from_slice(&bytes);
     }
+    // Last before the first byte, after every await of the opening: a commit the hub published
+    // before the subscription is in this view, every later one reaches the subscriber.
+    if let Some(held) = subscriber.held.clone() {
+        let until = held.standing(hub.newest(), Timestamp::now()).await?;
+        subscriber.expire_at(until);
+    }
+    subscriber.readable = subscriber.readable();
     subscriber.first = Some(first.freeze());
-    stream::unfold(subscriber, |mut subscriber| async move {
+    Ok(stream::unfold(subscriber, |mut subscriber| async move {
         subscriber
             .next_chunk()
             .await
             .map(|chunk| (Ok(chunk), subscriber))
-    })
+    }))
 }
 
 #[cfg(test)]
@@ -953,8 +1088,11 @@ mod tests {
         let store = tenko_store::MemStore::default();
         let principal = Principal::system(SystemComponent::Api);
         let jobs_only = TopicSet::parse("jobs").expect("topics");
-        let mut stream =
-            Box::pin(event_stream(&hub, &store, None, jobs_only, principal.clone()).await);
+        let mut stream = Box::pin(
+            event_stream(&hub, &store, None, jobs_only, principal.clone(), None)
+                .await
+                .expect("opens"),
+        );
         let hello = stream.next().await.expect("hello").expect("ok");
         assert!(hello.starts_with(b"retry: 3000\n"));
         assert_eq!(hub.subscribers(), 1);
@@ -1017,7 +1155,11 @@ mod tests {
         let store = tenko_store::MemStore::default();
         let principal = Principal::system(SystemComponent::Api);
         let ipam = TopicSet::parse("ipam").expect("topics");
-        let mut stream = Box::pin(event_stream(&hub, &store, None, ipam, principal).await);
+        let mut stream = Box::pin(
+            event_stream(&hub, &store, None, ipam, principal, None)
+                .await
+                .expect("opens"),
+        );
         stream.next().await.expect("hello").expect("ok");
 
         hub.publish_change_set(&change_set(
@@ -1066,8 +1208,10 @@ event: ipam
                 None,
                 TopicSet::ALL,
                 Principal::system(SystemComponent::Api),
+                None,
             )
-            .await,
+            .await
+            .expect("opens"),
         );
         let _hello = stream.next().await;
         for revision in 11..=20 {
@@ -1102,8 +1246,10 @@ event: ipam
             None,
             TopicSet::parse("jobs").expect("topics"),
             principal.clone(),
+            None,
         )
-        .await;
+        .await
+        .expect("opens");
         assert_eq!(hub.subscribers_of(Topic::Jobs), 1);
         assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
         let metrics = event_stream(
@@ -1112,8 +1258,10 @@ event: ipam
             None,
             TopicSet::parse("metrics,jobs").expect("topics"),
             principal.clone(),
+            None,
         )
-        .await;
+        .await
+        .expect("opens");
         assert_eq!(hub.subscribers_of(Topic::Metrics), 1);
         assert_eq!(hub.subscribers_of(Topic::Jobs), 2);
         drop(metrics);
@@ -1131,8 +1279,10 @@ event: ipam
             None,
             TopicSet::parse("metrics").expect("topics"),
             principal,
+            None,
         )
-        .await;
+        .await
+        .expect("opens");
         assert_eq!(hub.subscribers(), 1);
         assert_eq!(hub.subscribers_of(Topic::Metrics), 0);
         drop(refused);

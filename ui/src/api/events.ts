@@ -10,7 +10,16 @@
 // by every browser at the same instant. The browser's own EventSource retry is not used:
 // the stream is closed on error and reopened with `from=<id>` in the query (EventSource
 // cannot set the Last-Event-ID header on a new connection; the server treats both alike).
+//
+// A stream lasts as long as the session that opened it. The server ends it with an `end`
+// event: `access_changed` (what the session may read changed) reopens it after the first
+// backoff step; `access_ended` also asks the server whether the session still acts, as a
+// request would: a 401 takes the user to the sign-in page (the unauthorized handler of the
+// API client) and the stream stops instead of reconnecting. A connection that fails before it opens asks the same
+// question, since EventSource does not tell a 401 from a network failure.
 import { createSignal, type Accessor } from "solid-js";
+import { api } from "./client";
+import { isApiError } from "./problem";
 
 /**
  * Topics of GET /events; `admin` covers users, sessions, tokens and security settings,
@@ -84,12 +93,29 @@ export interface EventStreamOptions {
   random?: () => number;
   /** Injected for tests. */
   createEventSource?: (url: string) => EventSource;
+  /**
+   * Whether the session still acts; `false` stops the stream. By default a request for the
+   * session, whose 401 also sends the user to the sign-in page.
+   */
+  sessionActs?: () => Promise<boolean>;
+}
+
+/** Asks the server for the session, as any request would: a 401 says it ended. */
+async function sessionActs(): Promise<boolean> {
+  try {
+    // A session that must change its password may make no other request: its stream neither.
+    const session = await api.get("/api/v1/auth/session");
+    return !session.flags.password_change_required;
+  } catch (err) {
+    return !(isApiError(err) && err.status === 401);
+  }
 }
 
 type Handler = (event: ApiEvent) => void;
 
 const RESET = "reset";
 const SHUTDOWN = "shutdown";
+const END = "end";
 
 export class EventStream {
   readonly state: Accessor<ConnectionState>;
@@ -103,6 +129,7 @@ export class EventStream {
   private readonly backoff: BackoffOptions;
   private readonly random: () => number;
   private readonly create: (url: string) => EventSource;
+  private readonly sessionActs: () => Promise<boolean>;
 
   private readonly supported: boolean;
   private source: EventSource | undefined;
@@ -111,6 +138,8 @@ export class EventStream {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private topicTimer: ReturnType<typeof setTimeout> | undefined;
   private running = false;
+  /** Counts the stops, so that an answer that arrives after one is not taken for this run. */
+  private run = 0;
   private lastId: string | null = null;
   private readonly handlers = new Map<Topic, Set<Handler>>();
   private readonly resetHandlers = new Map<Topic, Set<() => void>>();
@@ -126,6 +155,7 @@ export class EventStream {
     this.backoff = options.backoff ?? { baseMs: 1000, maxMs: 30_000 };
     this.random = options.random ?? Math.random;
     this.create = options.createEventSource ?? ((u) => new EventSource(u, { withCredentials: true }));
+    this.sessionActs = options.sessionActs ?? sessionActs;
     this.supported = options.createEventSource !== undefined || typeof EventSource !== "undefined";
     const [state, setState] = createSignal<ConnectionState>("idle");
     const [lastEventAt, setLastEventAt] = createSignal<number | null>(null);
@@ -169,6 +199,7 @@ export class EventStream {
 
   stop(): void {
     this.running = false;
+    this.run += 1;
     clearTimeout(this.timer);
     clearTimeout(this.topicTimer);
     this.timer = undefined;
@@ -228,8 +259,10 @@ export class EventStream {
     this.setState(this.attempt === 0 ? "connecting" : "reconnecting");
     const es = this.create(`${this.url}?${params.toString()}`);
     this.source = es;
+    let opened = false;
     es.onopen = () => {
       if (this.source !== es) return;
+      opened = true;
       this.attempt = 0;
       this.setState("live");
     };
@@ -237,11 +270,14 @@ export class EventStream {
       if (this.source !== es) return;
       this.close();
       this.scheduleReconnect();
+      // Refused before it opened: perhaps a 401, which EventSource does not report.
+      if (!opened) this.stopUnlessSessionActs();
     };
     const listener = (e: Event) => this.dispatch(e as MessageEvent<string>);
     es.addEventListener("message", listener);
     es.addEventListener(RESET, listener);
     es.addEventListener(SHUTDOWN, listener);
+    es.addEventListener(END, listener);
     for (const topic of topics) es.addEventListener(topic, listener);
   }
 
@@ -291,6 +327,16 @@ export class EventStream {
       this.scheduleReconnect();
       return;
     }
+    if (e.type === END) {
+      // `{ reason }`: what the session reads changed (reopen and read what it may), or the
+      // session no longer acts (stop, unless the server says otherwise). The reopening waits
+      // the first backoff step, so the streams a change ended do not all return at once.
+      this.close();
+      this.attempt = 0;
+      this.scheduleReconnect();
+      if (data.reason !== "access_changed") this.stopUnlessSessionActs();
+      return;
+    }
     const topic = isTopic(data.topic) ? data.topic : isTopic(e.type) ? e.type : undefined;
     if (!topic) return;
     // A store event names its revision in its data. An event whose data names a topic but no
@@ -308,6 +354,14 @@ export class EventStream {
       data,
     };
     for (const h of [...(this.handlers.get(topic) ?? [])]) h(event);
+  }
+
+  /** Stops the stream when the session no longer acts; an answer for an earlier run is ignored. */
+  private stopUnlessSessionActs(): void {
+    const run = this.run;
+    void this.sessionActs().then((acts) => {
+      if (!acts && this.running && run === this.run) this.stop();
+    });
   }
 
   private reset(): void {

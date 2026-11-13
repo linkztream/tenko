@@ -14,6 +14,10 @@
 //! - **Topics and authorization**: `?topics=ipam,jobs` selects topics ([`Topic`]); every
 //!   frame also passes the [`EventFilter`] of the hub (all frames until RBAC scopes land).
 //!   Events carry references, never bodies. `reset` and `shutdown` reach every subscriber.
+//! - **The end of access** (`access`): a stream follows the session or token that opened it
+//!   and ends with an `end` event when that credential no longer acts or no longer reads a
+//!   topic of the stream; no event of the commit that ends the access, or of a later one,
+//!   reaches it.
 //! - **One keep-alive timer** for all streams (15 s by default), **optional coalescing**
 //!   (events published within a window go out as one write), and **shutdown** ends every
 //!   stream with a `shutdown` event so the HTTP server can drain.
@@ -33,6 +37,7 @@
 //! built once and shared by every new stream). RBAC scopes
 //! install their [`EventFilter`] with [`EventHub::set_filter`].
 
+mod access;
 pub mod filter;
 mod hub;
 pub mod metrics;
@@ -44,10 +49,13 @@ use std::{
 
 use tenko_core::{ObjectKind, ObjectRef, Principal, TableName};
 
+pub(crate) use access::{Credential, Held};
 pub(crate) use hub::event_stream;
 pub use hub::{EventHub, FirstFrame, SystemFrame};
 
-pub use crate::dto::events::{EventData, ResetData, ResetReason, Topic, TopicSet};
+pub use crate::dto::events::{
+    EndData, EndReason, EventData, ResetData, ResetReason, Topic, TopicSet,
+};
 
 /// Settings of the event hub.
 #[derive(Debug, Clone, PartialEq, Eq)]

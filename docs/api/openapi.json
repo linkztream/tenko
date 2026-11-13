@@ -17895,7 +17895,7 @@
           "events"
         ],
         "summary": "Subscribe to server-sent events",
-        "description": "A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds.",
+        "description": "A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds. A stream lasts only as long as the session or token that opened it acts: `end` (data `EndData`) is its last event when that credential no longer acts (`access_ended`: signed out, revoked, expired, ended by a password change or reset, or the account disabled or deleted; a new stream with it is refused with 401) or no longer reads a topic of the stream (`access_changed`: open a new one). No event of the commit that ends the access, or of a later commit, comes before `end`, on whichever controller the stream is open.",
         "operationId": "events",
         "parameters": [
           {
@@ -17933,7 +17933,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The event stream; each `data` field is an `EventData` (or a `ResetData` for `reset`)",
+            "description": "The event stream; each `data` field is an `EventData` (a `ResetData` for `reset`, an `EndData` for `end`)",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -17953,7 +17953,7 @@
             }
           },
           "401": {
-            "description": "Not authenticated",
+            "description": "Not authenticated, or the credential ended while the stream opened",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17963,7 +17963,7 @@
             }
           },
           "503": {
-            "description": "The server is shutting down",
+            "description": "The server is shutting down, or the credential could not be read (`auth.unavailable`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -50837,6 +50837,27 @@
         "enum": [
           "aes128-cts-hmac-sha1",
           "aes256-cts-hmac-sha1"
+        ]
+      },
+      "EndData": {
+        "type": "object",
+        "description": "The `data` of an `end` event, the last event of a stream.",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/EndReason",
+            "description": "Why the stream ended."
+          }
+        }
+      },
+      "EndReason": {
+        "type": "string",
+        "description": "Why the server ended an event stream with an `end` event.",
+        "enum": [
+          "access_ended",
+          "access_changed"
         ]
       },
       "Endpoint": {

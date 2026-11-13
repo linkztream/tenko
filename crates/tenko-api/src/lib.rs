@@ -120,16 +120,23 @@ pub fn api_with(
 }
 
 /// Adds the schemas that travel inside the event stream rather than as a response body
-/// (`reset` data), so that clients generate types for them too.
+/// (`reset` and `end` data), so that clients generate types for them too.
 #[cfg(feature = "server")]
 fn add_stream_schemas(document: &mut utoipa::openapi::OpenApi) {
     use utoipa::{PartialSchema as _, ToSchema};
 
-    let mut schemas = vec![(
-        dto::events::ResetData::name().into_owned(),
-        dto::events::ResetData::schema(),
-    )];
+    let mut schemas = vec![
+        (
+            dto::events::ResetData::name().into_owned(),
+            dto::events::ResetData::schema(),
+        ),
+        (
+            dto::events::EndData::name().into_owned(),
+            dto::events::EndData::schema(),
+        ),
+    ];
     dto::events::ResetData::schemas(&mut schemas);
+    dto::events::EndData::schemas(&mut schemas);
     let components = document.components.get_or_insert_with(Default::default);
     for (name, schema) in schemas {
         components.schemas.entry(name).or_insert(schema);
@@ -214,7 +221,14 @@ mod tests {
         assert!(json.lines().count() > 1);
         let value: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
         assert_eq!(value["info"]["title"], "Tenko DDI API");
-        for schema in ["ResetData", "ResetReason", "EventData", "SystemStatus"] {
+        for schema in [
+            "ResetData",
+            "ResetReason",
+            "EndData",
+            "EndReason",
+            "EventData",
+            "SystemStatus",
+        ] {
             assert!(
                 value["components"]["schemas"].get(schema).is_some()
                     || json.contains(&format!("\"{schema}\"")),

@@ -7,23 +7,27 @@
 //! the last event it saw (`Last-Event-ID`). See [`crate::sse`] for replay, `reset` and
 //! `shutdown`.
 
+use std::sync::Arc;
+
 use axum::{
+    Extension,
     body::Body,
     extract::State,
     http::{HeaderMap, HeaderName, HeaderValue, header},
     response::Response,
 };
 use serde::Deserialize;
-use tenko_core::Revision;
+use tenko_auth::{AuthError, AuthService};
+use tenko_core::{Revision, Timestamp};
 use utoipa::IntoParams;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
     dto::events::{EventData, TopicSet},
-    extract::Ctx,
+    extract::{ClientInfo, Ctx, credentials_for},
     list::Filters,
     problem::{ApiError, ProblemDetails, codes},
-    sse::event_stream,
+    sse::{Credential, Held, event_stream},
     state::AppState,
 };
 
@@ -58,21 +62,29 @@ struct EventsQuery {
     description = "A `text/event-stream`. Data events have the topic as event name, the store \
         revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells \
         the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` \
-        comment arrives every 15 seconds.",
+        comment arrives every 15 seconds. A stream lasts only as long as the session or token \
+        that opened it acts: `end` (data `EndData`) is its last event when that credential no \
+        longer acts (`access_ended`: signed out, revoked, expired, ended by a password change \
+        or reset, or the account disabled or deleted; a new stream with it is refused with \
+        401) or no longer reads a topic of the stream (`access_changed`: open a new one). No \
+        event of the commit that ends the access, or of a later commit, comes before `end`, \
+        on whichever controller the stream is open.",
     params(
         EventsQuery,
         ("Last-Event-ID" = Option<String>, Header, description = "Revision of the last event the client received")
     ),
     responses(
-        (status = 200, description = "The event stream; each `data` field is an `EventData` (or a `ResetData` for `reset`)", content_type = "text/event-stream", body = EventData),
+        (status = 200, description = "The event stream; each `data` field is an `EventData` (a `ResetData` for `reset`, an `EndData` for `end`)", content_type = "text/event-stream", body = EventData),
         (status = 400, description = "Unknown topic or malformed parameter", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "The server is shutting down", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 401, description = "Not authenticated, or the credential ended while the stream opened", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "The server is shutting down, or the credential could not be read (`auth.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn events(
     State(state): State<AppState>,
     Ctx(ctx): Ctx,
+    client: ClientInfo,
+    auth: Option<Extension<Arc<AuthService>>>,
     filters: Filters,
     headers: HeaderMap,
 ) -> Result<Response, ApiError> {
@@ -102,7 +114,23 @@ async fn events(
             "the server is shutting down; reconnect shortly",
         ));
     }
-    let stream = event_stream(hub, state.store.as_ref(), last, topics, ctx.principal).await;
+    // The stream follows the credential that opened it and ends with it. A server that
+    // authenticates always runs the service; without it a stream is refused rather than left
+    // unbounded.
+    let held: Option<Arc<dyn Held>> = match (&state.auth, auth) {
+        (None, _) => None,
+        (Some(_), None) => {
+            return Err(
+                AuthError::Unavailable("event streams need the authentication service").into(),
+            );
+        }
+        (Some(_), Some(Extension(service))) => {
+            let credentials = credentials_for(&headers, client.https);
+            let hold = service.hold(&credentials, Timestamp::now()).await?;
+            Some(Arc::new(Credential { service, hold }))
+        }
+    };
+    let stream = event_stream(hub, state.store.as_ref(), last, topics, ctx.principal, held).await?;
     let mut response = Response::new(Body::from_stream(stream));
     let headers = response.headers_mut();
     headers.insert(

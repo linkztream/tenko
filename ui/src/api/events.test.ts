@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WAIT_LIMIT_MS } from "../app/testing/setup";
+import { setUnauthorizedHandler } from "./client";
 import { backoffDelay, EventStream, type ApiEvent } from "./events";
 
 /** A scriptable stand-in for EventSource. */
@@ -43,16 +45,23 @@ class FakeSource {
   }
 }
 
+/** The answer of the session check. */
+let sessionAnswer = true;
+const sessionActs = vi.fn(() => Promise.resolve(sessionAnswer));
+
 function stream(random = () => 0.5) {
   return new EventStream({
     createEventSource: (url) => new FakeSource(url) as unknown as EventSource,
     random,
     backoff: { baseMs: 1000, maxMs: 30_000 },
+    sessionActs,
   });
 }
 
 beforeEach(() => {
   FakeSource.all = [];
+  sessionAnswer = true;
+  sessionActs.mockClear();
   vi.useFakeTimers();
 });
 
@@ -232,5 +241,147 @@ describe("EventStream", () => {
     expect(s.state()).toBe("connecting");
     expect(FakeSource.all).toHaveLength(2);
     s.stop();
+  });
+});
+
+describe("the end of a stream's access", () => {
+  it("stops, without reconnecting, when the session that opened the stream ended", async () => {
+    sessionAnswer = false;
+    const s = stream();
+    s.start();
+    const src = FakeSource.last();
+    src.open();
+    src.emit("end", { reason: "access_ended" });
+    expect(src.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sessionActs).toHaveBeenCalledTimes(1);
+    expect(FakeSource.all).toHaveLength(1);
+    expect(s.state()).toBe("idle");
+  });
+
+  it("reopens after the first backoff step, from the last event, when what the session reads changed", () => {
+    const s = stream();
+    s.subscribe("ipam", () => undefined);
+    s.start();
+    const src = FakeSource.last();
+    src.open();
+    src.emit("ipam", { topic: "ipam", revision: 77 }, "77");
+    src.emit("end", { reason: "access_changed" });
+    expect(src.closed).toBe(true);
+    expect(FakeSource.all).toHaveLength(1);
+    vi.advanceTimersByTime(1000);
+    expect(FakeSource.all).toHaveLength(2);
+    expect(FakeSource.last().query.get("from")).toBe("77");
+    expect(sessionActs).not.toHaveBeenCalled();
+    s.stop();
+  });
+
+  it("reopens when the server says the session still acts", async () => {
+    const s = stream();
+    s.start();
+    FakeSource.last().open();
+    FakeSource.last().emit("end", { reason: "access_ended" });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(FakeSource.all).toHaveLength(2);
+    s.stop();
+  });
+
+  it("stops when a reconnect is refused and the session ended", async () => {
+    const s = stream(() => 0);
+    s.start();
+    const first = FakeSource.last();
+    first.open();
+    // A dropped connection that was open: a network matter, no question to the server.
+    first.fail();
+    expect(sessionActs).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeSource.all).toHaveLength(2);
+    // The reconnect is refused before it opens (a 401 looks like this to EventSource).
+    sessionAnswer = false;
+    FakeSource.last().fail();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sessionActs).toHaveBeenCalledTimes(1);
+    expect(FakeSource.all).toHaveLength(2);
+    expect(s.state()).toBe("idle");
+  });
+
+  it("keeps reconnecting with backoff while the server cannot be reached", async () => {
+    const s = stream(() => 0);
+    s.start();
+    FakeSource.last().fail();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeSource.all).toHaveLength(2);
+    expect(sessionActs).toHaveBeenCalledTimes(1);
+    s.stop();
+  });
+});
+
+describe("the end of a stream's access, as the server answers it", () => {
+  afterEach(() => {
+    setUnauthorizedHandler(undefined);
+    vi.unstubAllGlobals();
+  });
+
+  it("asks for the session like any request, so a 401 takes the user to sign-in", async () => {
+    const signIn = vi.fn();
+    setUnauthorizedHandler(signIn);
+    const asked: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        asked.push(url);
+        const body = { type: "about:blank", status: 401, code: "auth.unauthenticated", title: "t", detail: "d", params: {} };
+        return Promise.resolve(new Response(JSON.stringify(body), { status: 401, headers: { "content-type": "application/problem+json" } }));
+      }),
+    );
+    const s = new EventStream({ createEventSource: (url) => new FakeSource(url) as unknown as EventSource });
+    s.start();
+    FakeSource.last().open();
+    FakeSource.last().emit("end", { reason: "access_ended" });
+    await vi.waitFor(() => expect(signIn).toHaveBeenCalledTimes(1), { timeout: WAIT_LIMIT_MS });
+    expect(asked).toEqual(["/api/v1/auth/session"]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSource.all).toHaveLength(1);
+    expect(s.state()).toBe("idle");
+  });
+});
+
+describe("the end of a stream's access, across runs and flags", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ignores a late answer about the session of an earlier run", async () => {
+    let answer: (acts: boolean) => void = () => undefined;
+    const s = new EventStream({
+      createEventSource: (url) => new FakeSource(url) as unknown as EventSource,
+      sessionActs: () => new Promise<boolean>((resolve) => (answer = resolve)),
+    });
+    s.start();
+    FakeSource.last().open();
+    FakeSource.last().emit("end", { reason: "access_ended" });
+    // Signed out and in again before the answer arrives.
+    s.stop();
+    s.start();
+    FakeSource.last().open();
+    answer(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.state()).toBe("live");
+    s.stop();
+  });
+
+  it("stops when the session must change its password before anything else", async () => {
+    const session = { flags: { password_change_required: true, mfa_enrollment_required: false, break_glass: false } };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(new Response(JSON.stringify(session), { status: 200, headers: { "content-type": "application/json" } }))),
+    );
+    const s = new EventStream({ createEventSource: (url) => new FakeSource(url) as unknown as EventSource });
+    s.start();
+    FakeSource.last().open();
+    FakeSource.last().emit("end", { reason: "access_ended" });
+    await vi.waitFor(() => expect(s.state()).toBe("idle"), { timeout: WAIT_LIMIT_MS });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeSource.all).toHaveLength(1);
   });
 });

@@ -866,8 +866,10 @@ mod tests {
             None,
             TopicSet::parse("metrics").expect("topics"),
             Principal::system(SystemComponent::Api),
+            None,
         )
         .await
+        .expect("a stream without a credential opens")
     }
 
     /// The events of a chunk of the stream.
