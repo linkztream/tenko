@@ -1095,8 +1095,7 @@ const CHAIN_NAMES: usize = 64;
 /// after another, each once. Empty, and not allocated, for an answer without an alias;
 /// `None` when a record does not read or there are more than [`CHAIN_NAMES`].
 fn chain_names(message: &[u8], answers: u16, question_end: usize) -> Option<Box<[u8]>> {
-    const TYPE_CNAME: u16 = 5;
-    const TYPE_DNAME: u16 = 39;
+    use self::denial::order::{TYPE_CNAME, TYPE_DNAME};
     let qname = &message[HEADER_LEN..question_end - 4];
     let mut names: Vec<u8> = Vec::new();
     let mut count = 0;
