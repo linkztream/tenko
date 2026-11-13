@@ -12,7 +12,7 @@ use tenko_core::metrics::{Counter, CounterVec, Desc, Gauge, Histogram, Registry}
 use crate::metrics as families;
 
 /// The reasons of `tenko_dhcp_dropped_total`, in series order.
-pub const DROP_REASONS: [&str; 9] = [
+pub const DROP_REASONS: [&str; 10] = [
     "malformed",
     "filtered",
     "no_scope",
@@ -22,6 +22,7 @@ pub const DROP_REASONS: [&str; 9] = [
     "rate_limited",
     "untrusted_relay",
     "limited",
+    "wrong_network",
 ];
 
 /// The series of a drop reason in [`DROPPED`].
@@ -68,6 +69,7 @@ pub static DROPPED: CounterVec = CounterVec::fixed(
         &["rate_limited"],
         &["untrusted_relay"],
         &["limited"],
+        &["wrong_network"],
     ],
 );
 
@@ -127,7 +129,11 @@ mod tests {
             "store_refused"
         );
         assert_eq!(DROP_REASONS[DropReason::Queue as usize], "queue");
-        assert_eq!(DROP_REASONS.len(), DropReason::Limited as usize + 1);
+        // The engine's reasons go on past the lease path's own.
+        let engine = crate::v4::engine::DropReason::WrongNetwork;
+        assert_eq!(DROP_REASONS.len(), engine as usize + 1);
+        assert_eq!(DROP_REASONS[engine as usize], "wrong_network");
+        assert_eq!(DROPPED.len(), DROP_REASONS.len());
         for desc in [EXPIRED_DESC, HISTORY_ROWS_DESC, HISTORY_PURGED_DESC] {
             assert!(desc.name.starts_with("tenko_dhcp_"));
             assert!(families::ALL.iter().all(|known| known.name != desc.name));

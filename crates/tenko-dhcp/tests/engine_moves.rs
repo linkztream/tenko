@@ -16,7 +16,7 @@ use tenko_dhcp::{
     moving::Activity,
     v4::{
         Message, MessageType,
-        engine::{Action, Answer, Destination, Scratch},
+        engine::{Action, Answer, Destination, IgnoreReason, Scratch},
     },
 };
 
@@ -171,13 +171,12 @@ fn the_rebinding_on_the_new_network_is_refused_and_noted_as_the_reconnection() {
 
 /// Why the move job never waits for a NAK at T1 (`docs/moves.md` section 5): a moved
 /// client's unicast renewal at T1 never leaves it (it cannot reach its old gateway), and
-/// if it did, the server would select the old scope by `ciaddr` and acknowledge it. The
-/// only NAK of a unicast renewal without `giaddr` goes out as a broadcast on the server's
-/// own link, which the moved client is not on. A move that wants the client back sooner
+/// if it did, the server would select the old scope by `ciaddr` and acknowledge it. A
+/// unicast renewal from another network than the server's gets no NAK at all: the server
+/// answers it only for the client's own lease. A move that wants the client back sooner
 /// shortens its lease before the network changes instead.
 #[test]
-fn no_nak_at_t1_reaches_a_moved_client_a_unicast_renewal_is_nakked_by_broadcast_on_the_servers_link()
- {
+fn no_nak_at_t1_reaches_a_moved_client_a_unicast_renewal_is_answered_only_for_its_own_lease() {
     let world = World::new();
     let mut scratch = Scratch::new();
     // The client's own renewal of its old address is acknowledged to that address.
@@ -193,19 +192,9 @@ fn no_nak_at_t1_reaches_a_moved_client_a_unicast_renewal_is_nakked_by_broadcast_
         ),
         "{own:?}"
     );
-    // A unicast renewal the server refuses: the NAK is a broadcast on the server's link.
+    // The same renewal by another client: nothing is sent.
     let mut other = renewal();
     other.client = 0x32;
     let refused = world.run(&other.bytes(), t0(), &mut scratch);
-    assert!(
-        matches!(
-            refused.action,
-            Action::Reply {
-                kind: MessageType::Nak,
-                dest: Destination::Broadcast(68),
-                ..
-            }
-        ),
-        "{refused:?}"
-    );
+    assert_eq!(refused.action, Action::Ignore(IgnoreReason::NoRecord));
 }

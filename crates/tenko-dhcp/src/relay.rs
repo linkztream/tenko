@@ -21,10 +21,12 @@
 //!   (`tenko_dhcp_dropped_total{reason="untrusted_relay"}`); option 82 and option 118 of a
 //!   request that is not relayed are not used to select a scope, a class or a server
 //!   identifier (option 82 is still echoed, RFC 3046 section 2.2).
-//! - **What the operator is told** ([`UNTRUSTED`], [`LINK_REFUSED`], [`ANY_LINK`]).
-//!   [`RelayLog`] keeps the senders it refused ([`MAX_REFUSED`], the ones refused most often
-//!   stay), with the relay address they named, the link a trusted relay named outside its
-//!   links, and how often, and the networks whose lease rows say that they came through a
+//! - **What the operator is told** ([`UNTRUSTED`], [`LINK_REFUSED`], [`ANY_LINK`],
+//!   [`WRONG_NETWORK`]). [`RelayLog`] keeps the senders it refused ([`MAX_REFUSED`], the
+//!   ones refused most often stay), with the relay address they named, the link a trusted
+//!   relay named outside its links, and how often; in a room of the same size, the senders of
+//!   requests that were not relayed and came from another network than the one they would
+//!   be served on (`docs/dhcp.md` section 9.1), and the networks whose lease rows say that they came through a
 //!   relay, with the relay addresses seen, so that an installation that relied on relays
 //!   before the list existed sees them at the first start, before any client is refused.
 //!   The list of seen relays trusts nothing: only the operator's list does.
@@ -57,6 +59,11 @@ pub const LINK_REFUSED: &str = "dhcp.relay.link_refused";
 
 /// The warning while the list holds relays that may name every link.
 pub const ANY_LINK: &str = "dhcp.relay.any_link";
+
+/// The warning while requests that were not relayed came from another network than the one
+/// they would be served on (a client address, `ciaddr`, of another network, or a source
+/// address outside the listener's network).
+pub const WRONG_NETWORK: &str = "dhcp.client.wrong_network";
 
 /// The refused senders the log keeps.
 pub const MAX_REFUSED: usize = 32;
@@ -193,17 +200,18 @@ fn canonical(addr: IpAddr) -> IpAddr {
     }
 }
 
-/// A sender the server refused as a relay.
+/// A sender the server refused as a relay, or a client whose own address named another
+/// network ([`RelayReport::wrong_network`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefusedRelay {
     /// The datagram's source: the address to trust (or, for an inner DHCPv6 relay, the
     /// peer address its enclosing relay recorded).
     pub source: IpAddr,
     /// The relay address the request named: `giaddr`, or the link address of the refused
-    /// DHCPv6 relay.
+    /// DHCPv6 relay; for a client, the `ciaddr` it named.
     pub relay: IpAddr,
-    /// For a trusted relay refused because its data selected a scope outside its links:
-    /// that scope's network. None for a sender that is not trusted.
+    /// For a trusted relay refused because its data selected a scope outside its links,
+    /// and for a client: that scope's network. None for a sender that is not trusted.
     pub link: Option<IpNet>,
     /// Refusals since the first.
     pub count: u64,
@@ -253,6 +261,12 @@ pub struct RelayReport {
     pub any_link: Vec<AnyLinkRelay>,
     /// Whether the profile is Hardened (which refuses such an entry when it is written).
     pub hardened: bool,
+    /// The senders of requests that were not relayed and came from another network than
+    /// the one they were served on, the most refused first: `relay` the address each named
+    /// (unspecified when none), `link` the network.
+    pub wrong_network: Vec<RefusedRelay>,
+    /// Such refusals not kept in [`RelayReport::wrong_network`] (the room was full or busy).
+    pub wrong_network_unlogged: u64,
 }
 
 impl RelayReport {
@@ -274,7 +288,7 @@ impl RelayReport {
 /// A health row of the report: its code, the English text and its parameters.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelayWarning {
-    /// [`TRUST_ANY`], [`UNTRUSTED`], [`LINK_REFUSED`] or [`ANY_LINK`].
+    /// [`TRUST_ANY`], [`UNTRUSTED`], [`LINK_REFUSED`], [`ANY_LINK`] or [`WRONG_NETWORK`].
     pub code: &'static str,
     /// What it means and what to do, in English.
     pub detail: String,
@@ -319,7 +333,69 @@ impl RelayReport {
         if self.untrusted() {
             out.push(self.untrusted_warning());
         }
+        if let Some(row) = self.wrong_network_warning() {
+            out.push(row);
+        }
         out
+    }
+
+    fn wrong_network_warning(&self) -> Option<RelayWarning> {
+        let refused = &self.wrong_network;
+        if refused.is_empty() {
+            return None;
+        }
+        let named = refused
+            .iter()
+            .take(NAMED)
+            .map(|refused| {
+                let named = if refused.relay.is_unspecified() {
+                    String::new()
+                } else {
+                    format!("address {} of ", refused.relay)
+                };
+                format!(
+                    "{} ({named}{}, {} time(s))",
+                    refused.source,
+                    refused
+                        .link
+                        .map(|link| link.to_string())
+                        .unwrap_or_default(),
+                    refused.count
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut params = BTreeMap::new();
+        params.insert(
+            "senders".to_owned(),
+            refused
+                .iter()
+                .take(NAMED)
+                .map(|refused| refused.source.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        params.insert(
+            "refused".to_owned(),
+            refused
+                .iter()
+                .map(|refused| refused.count)
+                .sum::<u64>()
+                .saturating_add(self.wrong_network_unlogged)
+                .to_string(),
+        );
+        Some(RelayWarning {
+            code: WRONG_NETWORK,
+            detail: format!(
+                "requests that were not relayed came from an address outside the network \
+                 they would be served on, and were dropped: {}{}; a client sends from no \
+                 address, a link-local address or its address on that network, so these came \
+                 from a host on another network, which reaches the server through its relay \
+                 agent instead, or from a host that is not that client",
+                named.join(", "),
+                more(refused.len()),
+            ),
+            params,
+        })
     }
 
     fn any_link_warning(&self) -> Option<RelayWarning> {
@@ -516,38 +592,25 @@ impl RelayReport {
     }
 }
 
-/// The refused senders and the relayed networks of one node.
+/// The refusals of one kind: at most [`MAX_REFUSED`] senders, the ones refused most often
+/// staying, and a count of the refusals not kept.
 #[derive(Debug, Default)]
-pub struct RelayLog {
-    refused: Mutex<Vec<RefusedRelay>>,
+struct Room {
+    entries: Mutex<Vec<RefusedRelay>>,
     unlogged: AtomicU64,
-    relayed: Mutex<Vec<RelayedNetwork>>,
 }
 
-impl RelayLog {
-    /// An empty log.
-    pub const fn new() -> Self {
+impl Room {
+    const fn new() -> Self {
         Self {
-            refused: Mutex::new(Vec::new()),
+            entries: Mutex::new(Vec::new()),
             unlogged: AtomicU64::new(0),
-            relayed: Mutex::new(Vec::new()),
         }
-    }
-
-    /// Notes a refusal of `source`, which named `relay`, as a relay that is not trusted.
-    pub fn refuse(&self, source: IpAddr, relay: IpAddr, now: Timestamp) {
-        self.note(source, relay, None, now);
-    }
-
-    /// Notes a refusal of the trusted relay `source`, which named `relay` and selected a
-    /// scope of `link`, outside its links.
-    pub fn refuse_link(&self, source: IpAddr, relay: IpAddr, link: IpNet, now: Timestamp) {
-        self.note(source, relay, Some(link), now);
     }
 
     fn note(&self, source: IpAddr, relay: IpAddr, link: Option<IpNet>, now: Timestamp) {
         let source = canonical(source);
-        let Ok(mut refused) = self.refused.try_lock() else {
+        let Ok(mut refused) = self.entries.try_lock() else {
             self.unlogged.fetch_add(1, Ordering::Relaxed);
             return;
         };
@@ -592,6 +655,57 @@ impl RelayLog {
         }
     }
 
+    /// The entries, the most refused first, and the refusals not kept.
+    fn entries(&self) -> (Vec<RefusedRelay>, u64) {
+        let mut entries = self
+            .entries
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        entries.sort_by(|a, b| b.count.cmp(&a.count).then(a.source.cmp(&b.source)));
+        (entries, self.unlogged.load(Ordering::Relaxed))
+    }
+}
+
+/// The refused senders and the relayed networks of one node.
+#[derive(Debug, Default)]
+pub struct RelayLog {
+    /// Senders refused as relays.
+    relays: Room,
+    /// Senders of requests that were not relayed and came from another network than the
+    /// one they were served on: a room of their own, so that they never push out a relay.
+    clients: Room,
+    relayed: Mutex<Vec<RelayedNetwork>>,
+}
+
+impl RelayLog {
+    /// An empty log.
+    pub const fn new() -> Self {
+        Self {
+            relays: Room::new(),
+            clients: Room::new(),
+            relayed: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Notes a refusal of `source`, which named `relay`, as a relay that is not trusted.
+    pub fn refuse(&self, source: IpAddr, relay: IpAddr, now: Timestamp) {
+        self.relays.note(source, relay, None, now);
+    }
+
+    /// Notes a refusal of the trusted relay `source`, which named `relay` and selected a
+    /// scope of `link`, outside its links.
+    pub fn refuse_link(&self, source: IpAddr, relay: IpAddr, link: IpNet, now: Timestamp) {
+        self.relays.note(source, relay, Some(link), now);
+    }
+
+    /// Notes a request from `source` that was not relayed and was refused for `network`,
+    /// another network than the one it came from; `named` is the address it named there
+    /// (`ciaddr` or the requested address), unspecified when it named none.
+    pub fn refuse_client(&self, source: IpAddr, named: IpAddr, network: IpNet, now: Timestamp) {
+        self.clients.note(source, named, Some(network), now);
+    }
+
     /// Replaces the relayed networks (the role reads them from the lease rows at each
     /// install of its tables).
     pub fn set_relayed(&self, mut networks: Vec<RelayedNetwork>) {
@@ -601,17 +715,15 @@ impl RelayLog {
 
     /// The report, given whether a list is set and what an unset one means.
     pub fn report(&self, listed: bool, trust_any: bool) -> RelayReport {
-        let mut refused = self
-            .refused
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        refused.sort_by(|a, b| b.count.cmp(&a.count).then(a.source.cmp(&b.source)));
+        let (refused, unlogged) = self.relays.entries();
+        let (wrong_network, wrong_network_unlogged) = self.clients.entries();
         RelayReport {
+            wrong_network,
+            wrong_network_unlogged,
+            refused,
             listed,
             trust_any,
-            refused,
-            unlogged: self.unlogged.load(Ordering::Relaxed),
+            unlogged,
             relayed: if listed {
                 Vec::new()
             } else {
@@ -844,6 +956,51 @@ mod tests {
         assert_eq!(report.refused[0].count, 5);
         assert!(report.unlogged >= 100 - (MAX_REFUSED as u64 - 1));
         assert!(report.untrusted());
+    }
+
+    #[test]
+    fn client_refusals_have_a_room_and_a_row_of_their_own() {
+        let log = RelayLog::default();
+        let now = Timestamp::now();
+        let relay: IpAddr = Ipv4Addr::new(198, 51, 100, 1).into();
+        let known: IpAddr = Ipv4Addr::new(192, 0, 2, 1).into();
+        let ciaddr: IpAddr = Ipv4Addr::new(192, 0, 2, 140).into();
+        for _ in 0..5 {
+            log.refuse(known, relay, now);
+        }
+        for n in 0..100u8 {
+            log.refuse_client(
+                Ipv4Addr::new(203, 0, 113, n).into(),
+                ciaddr,
+                net("192.0.2.0/24"),
+                now,
+            );
+        }
+        let report = log.report(true, false);
+        assert_eq!(report.refused.len(), 1, "the relay stays: {report:?}");
+        assert_eq!(report.refused[0].count, 5);
+        assert_eq!(report.unlogged, 0);
+        assert_eq!(report.wrong_network.len(), MAX_REFUSED);
+        assert_eq!(report.wrong_network_unlogged, 100 - MAX_REFUSED as u64);
+        let rows = report.warnings();
+        let codes: Vec<_> = rows.iter().map(|row| row.code).collect();
+        assert_eq!(codes, [UNTRUSTED, WRONG_NETWORK]);
+        assert!(!rows[1].detail.contains("  "), "{rows:?}");
+        assert!(
+            rows[1].detail.contains(" more;"),
+            "the rest are counted: {rows:?}"
+        );
+        assert_eq!(rows[1].params["refused"], "100");
+        // The same sender refused as a relay and as a client: two entries.
+        log.refuse_client(known, ciaddr, net("192.0.2.0/24"), now);
+        let report = log.report(true, false);
+        assert_eq!(report.refused[0].source, known);
+        assert!(
+            report
+                .wrong_network
+                .iter()
+                .any(|entry| entry.source == known)
+        );
     }
 
     #[test]

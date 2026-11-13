@@ -75,7 +75,7 @@ pub const DDNS: Desc =
 pub const DDNS_QUEUE: Desc = Desc::gauge("tenko_dhcp_ddns_queue", "DHCP DDNS requests waiting");
 
 /// Requests dropped, by reason (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`,
-/// `store_refused`, `rate_limited`, `untrusted_relay`, `limited`).
+/// `store_refused`, `rate_limited`, `untrusted_relay`, `limited`, `wrong_network`).
 pub const DROPPED: Desc =
     Desc::counter("tenko_dhcp_dropped", "DHCP requests dropped").labels(&["reason"]);
 

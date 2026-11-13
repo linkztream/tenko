@@ -16,18 +16,9 @@ pub const TYPE_LABELS: [&str; 9] = [
 /// The outcomes counted, in the order of [`OUTCOME_LABELS`].
 pub const OUTCOME_LABELS: [&str; 4] = ["answered", "nak", "dropped", "ignored"];
 
-/// The drop reasons, in the order of [`DropReason`] and of the `reason` label.
-pub const DROP_LABELS: [&str; 9] = [
-    "malformed",
-    "filtered",
-    "no_scope",
-    "pool_full",
-    "queue",
-    "store_refused",
-    "rate_limited",
-    "untrusted_relay",
-    "limited",
-];
+/// The drop reasons, in the order of [`DropReason`] and of the `reason` label: the series of
+/// `tenko_dhcp_dropped_total`, which the lease path counts on as well.
+pub const DROP_LABELS: [&str; 10] = crate::lease::metrics::DROP_REASONS;
 
 /// The steps of `tenko_dhcp_exchange_duration_seconds`.
 pub const STEP_LABELS: [&str; 2] = ["offer", "ack"];

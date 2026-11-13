@@ -161,14 +161,10 @@ impl World {
 
     /// The same world with the clients of move jobs in its image (ADR 0027): `moving` gets
     /// the VRF of every scope and the prefix of scope B.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "the world of the module comment, scope by scope"
-    )]
     pub fn moving(
         moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
     ) -> Self {
-        Self::build(moving, None, None)
+        Self::build(moving, None, None, false)
     }
 
     /// The world of the module comment with `dhcp.settings.trusted_relays` set to `relays`
@@ -176,7 +172,7 @@ impl World {
     pub fn trusting(profile: DhcpProfile, relays: Option<&[&str]>) -> Self {
         let relays: Option<Vec<tenko_core::dhcp::TrustedRelay>> =
             relays.map(|list| list.iter().map(|text| trusted_relay(text)).collect());
-        let world = Self::build(|_, _| Vec::new(), relays.as_deref(), None);
+        let world = Self::build(|_, _| Vec::new(), relays.as_deref(), None, false);
         world.guard.set_profile(profile);
         world
     }
@@ -186,7 +182,7 @@ impl World {
         profile: DhcpProfile,
         relays: Option<&[tenko_core::dhcp::TrustedRelay]>,
     ) -> Self {
-        let world = Self::build(|_, _| Vec::new(), relays, None);
+        let world = Self::build(|_, _| Vec::new(), relays, None, false);
         world.guard.set_profile(profile);
         world
     }
@@ -194,15 +190,26 @@ impl World {
     /// The world under `profile` with the relay trusted and `limits` stored.
     pub fn limited(profile: DhcpProfile, limits: tenko_core::dhcp::DhcpLimits) -> Self {
         let relays = vec![trusted_relay("192.0.2.1/32")];
-        let world = Self::build(|_, _| Vec::new(), Some(&relays), Some(limits));
+        let world = Self::build(|_, _| Vec::new(), Some(&relays), Some(limits), false);
         world.guard.set_profile(profile);
         world
     }
 
+    /// The world of the module comment with scope D `198.51.100.192/26` inside scope B, a
+    /// network of its own behind a relay (pool .200 to .250).
+    pub fn nested() -> Self {
+        Self::build(|_, _| Vec::new(), None, None, true)
+    }
+
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the world of the module comment, scope by scope"
+    )]
     fn build(
         moving: impl FnOnce(VrfId, PrefixId) -> Vec<tenko_core::dhcp::MovingClient>,
         relays: Option<&[tenko_core::dhcp::TrustedRelay]>,
         limits: Option<tenko_core::dhcp::DhcpLimits>,
+        nested: bool,
     ) -> Self {
         let vrf = VrfId::generate();
         let (a, b, c) = (
@@ -249,6 +256,16 @@ impl World {
                 text(code::DOMAIN_NAME, "example.test"),
             ],
         ));
+        if nested {
+            builder.scope(scope(
+                PrefixId::generate(),
+                vrf,
+                "198.51.100.192/26",
+                (200, 250),
+                true,
+                Vec::new(),
+            ));
+        }
         builder.scope(scope(
             c,
             vrf,

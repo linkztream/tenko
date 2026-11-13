@@ -285,28 +285,28 @@ fn rows() -> Vec<Row> {
             ip("198.51.100.1"),
             67,
         ))),
+        // A renewal routed from another network than the listener's acts only on the
+        // client's own lease (tests/client_address.rs has the listener's link and the relay).
         row(
-            "renewing another client's address is refused by broadcast",
+            "renewing another client's address from another network is ignored",
             with(ask(Request, 0x32), |a| {
                 a.giaddr = None;
                 a.ciaddr = Some(ip("192.0.2.110"));
             }),
-            Expect::Reply(Nak),
-        )
-        .dest(Destination::Broadcast(68)),
+            Expect::Ignore(IgnoreReason::NoRecord),
+        ),
         row(
-            "renewing a free address without a record recreates the lease",
+            "renewing a free address without a record from another network is ignored",
             with(ask(Request, 0x32), |a| {
                 a.giaddr = None;
                 a.ciaddr = Some(ip("192.0.2.140"));
             }),
-            Expect::AfterCommit(Ack),
-        )
-        .yiaddr("192.0.2.140"),
+            Expect::Ignore(IgnoreReason::NoRecord),
+        ),
         row(
-            "renewing on a scope that is not authoritative is not refused",
+            "rebinding another client's address on a scope that is not authoritative is not refused",
             with(ask(Request, 0x33), |a| {
-                a.giaddr = None;
+                a.giaddr = Some(ip("203.0.113.1"));
                 a.ciaddr = Some(ip("203.0.113.120"));
             }),
             Expect::Ignore(IgnoreReason::NotAuthoritative),

@@ -19,8 +19,9 @@
 //! - **The scope** ([`select`]): the relay's Interface-Id when a scope names it, else the
 //!   link address of the innermost relay that sends one (RFC 6221: a lightweight relay
 //!   sends zero and the relay above names the link), else, for a client on the listener's
-//!   link, the listener's address. A scope of a shared network brings its siblings into the
-//!   choice of address.
+//!   link, the listener's address, when the message comes from a link-local address or one
+//!   of the listener's network ([`from_listener_link`]). A scope of a shared network brings
+//!   its siblings into the choice of address.
 //! - **The message** (RFC 8415 section 18.3): SOLICIT gets an ADVERTISE and writes nothing
 //!   (the address is held in [`Offers6`]), or with Rapid Commit, where the scope allows it,
 //!   a REPLY after the commit; REQUEST, RENEW and REBIND get a REPLY after the commit, with
@@ -385,6 +386,37 @@ pub fn relays_may_name(
     Ok(())
 }
 
+/// Whether a message that was not relayed came from the listener's link: a client sends from
+/// its link-local address (RFC 8415 section 13.1; this server sends no Server Unicast
+/// option), so its source must be link-local or on the network of the listener's scope or
+/// its shared network, else the sender goes to the relay log and the message is dropped as
+/// `wrong_network`, as DHCPv4 does (`docs/dhcp.md` section 9.1).
+fn from_listener_link(
+    ctx: &Context6<'_>,
+    chain: &RelayChain<'_>,
+    received: &Received6<'_>,
+    scope: &Scope6Image,
+) -> Result<(), DropReason> {
+    let source = *received.source.ip();
+    let v6 = ctx.image.v6();
+    let on_link = || {
+        v6.select(source).is_some_and(|found| {
+            v6.siblings(scope)
+                .any(|sibling| sibling.prefix == found.prefix)
+        })
+    };
+    if chain.is_relayed() || source.is_unicast_link_local() || on_link() {
+        return Ok(());
+    }
+    ctx.guard.refuse_client_address(
+        IpAddr::V6(source),
+        IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+        ipnet::IpNet::V6(scope.network),
+        ctx.now,
+    );
+    Err(DropReason::WrongNetwork)
+}
+
 /// The client's link-layer address: the RFC 6939 option of the relay on its link, else the
 /// one of its DUID.
 fn link_layer_of<'a>(
@@ -474,8 +506,11 @@ pub fn handle(ctx: &Context6<'_>, received: &Received6<'_>, scratch: &mut Scratc
     let Some((scope, selector)) = select(ctx.image, &chain, received.local) else {
         return answer(request, Action6::Drop(DropReason::NoScope));
     };
-    // A trusted relay's word counts only for the links it is bound to.
-    if let Err(reason) = relays_may_name(ctx, &chain, *received.source.ip(), scope) {
+    // A trusted relay's word counts only for the links it is bound to, and a message that
+    // was not relayed comes from the listener's link.
+    if let Err(reason) = relays_may_name(ctx, &chain, *received.source.ip(), scope)
+        .and_then(|()| from_listener_link(ctx, &chain, received, scope))
+    {
         return Answer6 {
             request,
             action: Action6::Drop(reason),

@@ -176,14 +176,14 @@ fn replies_go_to_the_sender_and_never_to_an_address_the_request_only_names() {
     let mut inform = Ask::new(MessageType::Inform, 0x30);
     inform.giaddr = None;
     inform.ciaddr = Some(victim);
+    // From another network than the one it names: no reply at all (tests/client_address.rs).
     let answer = world.run_from(
         &inform.bytes(),
         SocketAddrV4::new(sender, 68),
         t0(),
         &mut scratch,
     );
-    let (_, dest) = reply(&answer, &scratch);
-    assert_eq!(dest, Destination::Client(SocketAddrV4::new(sender, 68)));
+    assert_eq!(answer.action, Action::Drop(DropReason::WrongNetwork));
     // From its own address, the client gets the reply there (RFC 2131 section 4.1).
     let answer = world.run_from(
         &inform.bytes(),
@@ -434,10 +434,14 @@ fn a_relay_list_stored_before_relays_had_links_works_as_before_and_raises_its_he
 
 #[test]
 fn a_trusted_relay_s_option_82_without_giaddr_counts_only_on_its_own_links() {
-    // An INFORM from the relay's address with no giaddr selects its scope by ciaddr. The
-    // relay is bound to scope A; on scope C its option 82 (here the server identifier
-    // override) counts for nothing, on scope A it counts.
-    let world = World::trusting(DhcpProfile::Standard, Some(&["192.0.2.1/32=192.0.2.0/24"]));
+    // An INFORM from a relay's address with no giaddr selects its scope by ciaddr, which
+    // must lie on the sender's network. Both relays are bound to scope A; on scope C the
+    // option 82 of the relay there (here the server identifier override) counts for
+    // nothing, on scope A the option 82 of the relay there counts.
+    let world = World::trusting(
+        DhcpProfile::Standard,
+        Some(&["192.0.2.1/32=192.0.2.0/24", "203.0.113.1/32=192.0.2.0/24"]),
+    );
     let mut scratch = Scratch::new();
     let inform = |client: u8, ciaddr: &str| {
         let mut ask = Ask::new(MessageType::Inform, client);
@@ -447,9 +451,17 @@ fn a_trusted_relay_s_option_82_without_giaddr_counts_only_on_its_own_links() {
         ask.bytes()
     };
     let from_relay = SocketAddrV4::new(RELAY, 68);
+    // The relay of scope A naming an address of scope C: not its network.
     let answer = world.run_from(
         &inform(0x80, "203.0.113.50"),
         from_relay,
+        t0(),
+        &mut scratch,
+    );
+    assert_eq!(answer.action, Action::Drop(DropReason::WrongNetwork));
+    let answer = world.run_from(
+        &inform(0x80, "203.0.113.50"),
+        SocketAddrV4::new(ip("203.0.113.1"), 68),
         t0(),
         &mut scratch,
     );

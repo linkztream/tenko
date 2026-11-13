@@ -195,6 +195,18 @@ impl Guard {
         self.relays.refuse_link(sender, relay, link, now);
     }
 
+    /// Notes that a request from `sender` that was not relayed was refused for `network`,
+    /// another network than the one it came from; `named` is the address it named there.
+    pub fn refuse_client_address(
+        &self,
+        sender: IpAddr,
+        named: IpAddr,
+        network: ipnet::IpNet,
+        now: Timestamp,
+    ) {
+        self.relays.refuse_client(sender, named, network, now);
+    }
+
     /// The relay log.
     pub fn relays(&self) -> &RelayLog {
         &self.relays

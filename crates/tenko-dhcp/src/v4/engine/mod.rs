@@ -20,8 +20,9 @@
 //!   server's, decide the options, the address range, the lease times and the DDNS settings
 //!   of the request; a scope or pool that names classes admits only their clients. A boot
 //!   client gets its boot file in the reply ([`boot`]).
-//! - **The scope** ([`select`]): the link selection sub-option of option 82 (RFC 3527), then
-//!   option 118 (RFC 3011), then `giaddr`, then `ciaddr` of a client that has an address, then
+//! - **The scope** ([`select`], whose table says what selects and what is checked): the link
+//!   selection sub-option of option 82 (RFC 3527), then option 118 (RFC 3011), then
+//!   `giaddr`, then `ciaddr` of a client that sends from an address on that network, then
 //!   the address of the listener the request arrived on. A scope of a shared network extends
 //!   the choice to its siblings. The server identifier is the relay's override (RFC 5107,
 //!   sub-option 11), else the scope's, else the listener's address.
@@ -206,6 +207,9 @@ pub enum DropReason {
     UntrustedRelay = 7,
     /// A limit per client or per scope (`dhcp.settings.limits`, [`crate::limits`]).
     Limited = 8,
+    /// A request that was not relayed named a client address (`ciaddr`) of another network
+    /// than the one it came from ([`select`]).
+    WrongNetwork = 9,
 }
 
 /// Why a request got no answer although it was well formed.
@@ -217,7 +221,9 @@ pub enum IgnoreReason {
     OtherType,
     /// A REQUEST, DECLINE or RELEASE for another server (option 54).
     OtherServer,
-    /// An INIT-REBOOT of a client the server has no record of (RFC 2131 section 4.3.2).
+    /// An INIT-REBOOT of a client the server has no record of (RFC 2131 section 4.3.2), or
+    /// a renewal routed from another network than the listener's of an address the client
+    /// holds no lease on.
     NoRecord,
     /// A NAK case on a scope that is not authoritative.
     NotAuthoritative,
@@ -327,6 +333,9 @@ struct Inbound<'m, 'i> {
     source: Ipv4Addr,
     /// Whether the client has a reservation in the scope or its shared network.
     reserved: bool,
+    /// Whether its `ciaddr` selected a scope of another network than the listener's: a
+    /// renewal routed to the server, which acts only on a lease the client holds.
+    remote: bool,
 }
 
 fn answer(request: Option<MessageType>, action: Action) -> Answer {
@@ -398,9 +407,8 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
     else {
         return answer(request, Action::Drop(DropReason::NoScope));
     };
-    // A trusted relay's word counts only for the links it is bound to.
-    let trusted = match relay_link_gate(ctx, &message, received, scope, selector, trusted) {
-        Ok(bound) => bound,
+    let (trusted, remote) = match gate(ctx, &message, received, scope, selector, trusted) {
+        Ok(gated) => gated,
         Err(reason) => return dropped(request, reason, selector),
     };
     let relay = relay.filter(|_| trusted);
@@ -444,6 +452,7 @@ pub fn handle(ctx: &Context<'_>, received: &Received<'_>, scratch: &mut Scratch)
         server_id,
         source: *received.source.ip(),
         reserved,
+        remote,
     };
     let action = match kind {
         MessageType::Discover => discover(ctx, &client, scope, scratch),
@@ -500,6 +509,23 @@ pub(super) fn relay_gate(
     Ok(true)
 }
 
+/// What selected the scope, checked against where the request came from (the table of
+/// [`select`]): whether the sender's relay data counts ([`relay_link_gate`]), and whether the
+/// client's own address selected another network than the listener's
+/// ([`client_address_gate`]).
+fn gate(
+    ctx: &Context<'_>,
+    message: &Message<'_>,
+    received: &Received<'_>,
+    scope: &ScopeImage,
+    selector: Selector,
+    trusted: bool,
+) -> Result<(bool, bool), DropReason> {
+    let bound = relay_link_gate(ctx, message, received, scope, selector, trusted)?;
+    let remote = client_address_gate(ctx, message, received, scope, selector)?;
+    Ok((bound, remote))
+}
+
 /// Whether the sender's relay data counts for `scope`: the sender is trusted and the scope's
 /// network is one of the links of its entry in the trusted relays
 /// ([`crate::relay::RelayTrust::may_name`]). When relay data selected the scope (the link
@@ -532,6 +558,53 @@ fn relay_link_gate(
     ctx.guard
         .refuse_relay_link(sender, IpAddr::V4(message.giaddr()), network, ctx.now);
     Err(DropReason::UntrustedRelay)
+}
+
+/// Whether a request that was not relayed came from the network of its scope. A client
+/// sends from no address until it has one and from its address after (RFC 2131 section
+/// 4.1), so a request from an address must come from the network that its `ciaddr`, or for
+/// a request without one the listener's address, selected; else the sender goes to the
+/// relay log with the address it named there (`ciaddr`, else option 50) and the request is
+/// dropped as `wrong_network`. Whether a scope that `ciaddr` selected is on another network
+/// than the listener's: a renewal routed to the server, which acts only on a lease the
+/// client holds there, since its source address is all that says where it came from.
+fn client_address_gate(
+    ctx: &Context<'_>,
+    message: &Message<'_>,
+    received: &Received<'_>,
+    scope: &ScopeImage,
+    selector: Selector,
+) -> Result<bool, DropReason> {
+    let source = *received.source.ip();
+    let named = match selector {
+        Selector::ClientAddress => message.ciaddr(),
+        Selector::Interface if !source.is_unspecified() => message
+            .requested_address()
+            .ok()
+            .flatten()
+            .unwrap_or(Ipv4Addr::UNSPECIFIED),
+        _ => return Ok(false),
+    };
+    if !on_link(ctx.image, scope, source) {
+        ctx.guard.refuse_client_address(
+            IpAddr::V4(source),
+            IpAddr::V4(named),
+            ipnet::IpNet::V4(scope.network),
+            ctx.now,
+        );
+        return Err(DropReason::WrongNetwork);
+    }
+    Ok(selector == Selector::ClientAddress && !on_link(ctx.image, scope, received.local))
+}
+
+/// Whether `addr` is on the network of `scope`: the scope it selects is `scope` or a sibling
+/// of its shared network (a nested scope around or inside `scope` is another network).
+fn on_link(image: &ConfigImage, scope: &ScopeImage, addr: Ipv4Addr) -> bool {
+    image.select(addr).is_some_and(|found| {
+        image
+            .siblings(scope)
+            .any(|sibling| sibling.prefix == found.prefix)
+    })
 }
 
 /// Whether `addr` can be a relay's or a client's own address: not a broadcast, multicast,
@@ -804,7 +877,17 @@ fn request(
             Action::Ignore(IgnoreReason::NotAuthoritative)
         }
     };
-    let Some(home) = home(ctx.image, scope, target) else {
+    let home = home(ctx.image, scope, target);
+    let bound = home
+        .and_then(|home| ctx.leases.get(home.vrf, target))
+        .filter(|lease| lease.is_bound(ctx.now) && is_holder(lease, client.identity));
+    // A renewal routed from another network than the listener's renews only the client's
+    // own lease: anything else waits for its rebinding through the relay of its link. A NAK
+    // would be broadcast on the listener's link, which the client is not on.
+    if client.remote && bound.is_none() {
+        return Action::Ignore(IgnoreReason::NoRecord);
+    }
+    let Some(home) = home else {
         return refuse(scratch, b"the address is not on this network");
     };
     if state == State::InitReboot {
@@ -828,10 +911,6 @@ fn request(
     if choice.addr() != target {
         return refuse(scratch, b"the address is not available");
     }
-    let bound = ctx
-        .leases
-        .get(home.vrf, target)
-        .filter(|lease| lease.is_bound(ctx.now) && is_holder(lease, client.identity));
     let (times, pool) = times_of(home, target, client.decision);
     let host = host_options(ctx, client, home, choice);
     let levels = assemble::Levels {
