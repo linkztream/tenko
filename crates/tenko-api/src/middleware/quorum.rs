@@ -28,7 +28,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_core::{Revision, Timestamp};
-use tenko_store::QuorumState;
+use tenko_store::{FenceReason, QuorumState};
 
 use crate::{API_BASE, problem::ApiError, state::AppState};
 
@@ -60,7 +60,8 @@ impl Staleness {
         match *quorum {
             QuorumState::Single | QuorumState::Healthy => None,
             QuorumState::Electing { since } => Some(Self { since, revision }),
-            QuorumState::Isolated { since, applied, .. } => Some(Self {
+            QuorumState::Isolated { since, applied, .. }
+            | QuorumState::Fenced { since, applied, .. } => Some(Self {
                 since,
                 revision: applied,
             }),
@@ -162,10 +163,11 @@ impl Quorum {
     }
 }
 
-/// The 503 [`NO_QUORUM`] answer.
+/// The 503 [`NO_QUORUM`] answer, or for a fenced controller the 503 of its reason.
 fn refusal(state: &QuorumState, staleness: Staleness, queueable: bool) -> Response {
     let (name, retry) = match state {
         QuorumState::Electing { .. } => ("electing", RETRY_ELECTING_SECS),
+        QuorumState::Fenced { reason, .. } => return fenced(*reason, staleness, queueable),
         _ => ("isolated", RETRY_ISOLATED_SECS),
     };
     let detail = if queueable {
@@ -192,6 +194,35 @@ fn refusal(state: &QuorumState, staleness: Staleness, queueable: bool) -> Respon
         .headers_mut()
         .insert(header::RETRY_AFTER, HeaderValue::from(retry));
     response
+}
+
+/// The refusal of a controller that stopped writing for good (the cluster recovery): no
+/// `Retry-After`, since only an operator ends the state.
+fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Response {
+    let why = match reason {
+        FenceReason::Conflict => {
+            "a competing forced history of the cluster was seen, and an operator chooses which              one stays"
+        }
+        FenceReason::MajorityAlive => {
+            "the forced step found the old cluster alive at its first start and this              controller did not take office"
+        }
+        FenceReason::Superseded | FenceReason::Unknown => {
+            "a newer generation of the cluster superseded this controller's history"
+        }
+    };
+    ApiError::new(
+        reason.code(),
+        503,
+        format!(
+            "this controller stopped writing on {}: {why}; the change was not made: use a              controller of the current history",
+            staleness.since.to_rfc3339()
+        ),
+    )
+    .with_param("since", staleness.since.to_rfc3339())
+    .with_param("state", "fenced")
+    .with_param("revision", staleness.revision.0.to_string())
+    .with_param("queueable", queueable.to_string())
+    .into_response()
 }
 
 /// A route template relative to [`API_BASE`].

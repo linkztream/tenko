@@ -154,6 +154,7 @@ fn regenerate(format: u64) {
         "format": format,
         "written_by": serve_support::VERSION,
         "admin": serve_support::ADMIN,
+        "password": serve_support::PASSWORD,
         "objects": objects(&api),
     });
     server.stop().assert_code(0);
@@ -216,9 +217,10 @@ fn every_earlier_format_opens_with_its_objects() {
         .iter()
         .map(|format| dir_size(&fixtures().join(format!("v{format}"))))
         .sum();
-    // WP7.0: 8 MiB since format 4; formats 1 to 3 held 3.42 MiB, each redb store
-    // pre-allocating most of its megabyte (docs/upgrades.md section 4.5).
-    assert!(size < 8 * 1024 * 1024, "the fixtures grew to {size} bytes");
+    // Each fixture holds about 1.2 MiB, a redb store pre-allocating most of its megabyte
+    // (docs/upgrades.md section 4.5): seven formats held 8.2 MiB, so the bound leaves room
+    // for two more before a fixture has to shrink or an old one to go.
+    assert!(size < 11 * 1024 * 1024, "the fixtures grew to {size} bytes");
     let migrated: Vec<u64> = formats
         .into_iter()
         .filter(|format| opens(*format, current))
@@ -229,8 +231,9 @@ fn every_earlier_format_opens_with_its_objects() {
     );
 }
 
-/// The password of the administrator in the stored fixtures, which were written when a
-/// PIN was allowed for an administrator.
+/// The password of the administrator in the fixtures of formats 1 to 6, which were written
+/// when a PIN was allowed for an administrator; a later fixture names its password in
+/// `expected.json`.
 const FIXTURE_PASSWORD: &str = "739153";
 
 fn dir_size(dir: &Path) -> u64 {
@@ -281,14 +284,18 @@ fn opens(format: u64, current: u64) -> bool {
 
     let mut server = node.start();
     let mut api = Api::new(&node);
-    api.login_password_with(FIXTURE_PASSWORD);
-    // The stored administrator has a PIN, which the administrator rule no longer allows: the
-    // account must change it before anything else is open to it.
-    api.post_unkeyed(
-        "/auth/password",
-        &json!({ "current_password": FIXTURE_PASSWORD, "new_password": serve_support::PASSWORD }),
-    )
-    .expect(200);
+    if let Some(password) = expected["password"].as_str() {
+        api.login_password_with(password);
+    } else {
+        api.login_password_with(FIXTURE_PASSWORD);
+        // The stored administrator has a PIN, which the administrator rule no longer allows:
+        // the account must change it before anything else is open to it.
+        api.post_unkeyed(
+            "/auth/password",
+            &json!({ "current_password": FIXTURE_PASSWORD, "new_password": serve_support::PASSWORD }),
+        )
+        .expect(200);
+    }
     assert_eq!(
         objects(&api),
         expected["objects"],

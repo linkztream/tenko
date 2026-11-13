@@ -150,7 +150,7 @@ use self::{
     types::{ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
-    ChangeStream, CoalescerConfig, Committed, DerivedIndex, Leadership, QuorumState,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, QuorumState,
     ReadConsistency, ReadView, Store, StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
 };
 
@@ -1438,6 +1438,27 @@ impl RaftStore {
         })
     }
 
+    /// Stops this member for good, without closing the store (cluster recovery, section 3.7
+    /// point 1): the Raft node stops electing and replicating, every write is refused
+    /// ([`StoreError::NoQuorum`]; the API answers with the reason's code), leadership ends,
+    /// and the quorum state is [`QuorumState::Fenced`]. Reads and watches go on from the
+    /// local copy. Nothing lifts it but a new open of the store; the caller keeps the fence
+    /// across restarts.
+    pub async fn fence(&self, reason: FenceReason) {
+        let inner = &self.inner;
+        inner.leadership.fence(reason, inner.sm.meta().revision);
+        let _ = inner.raft.shutdown().await;
+        tracing::error!(
+            code = reason.code(),
+            "this controller stopped writing for good: another history of the cluster supersedes or competes with its own"
+        );
+    }
+
+    /// Why this member stopped writing for good, if it did ([`RaftStore::fence`]).
+    pub fn fenced(&self) -> Option<FenceReason> {
+        self.inner.leadership.fenced()
+    }
+
     /// Stops the store cleanly: refuses new proposals, lets queued entries finish, stops
     /// Raft, makes the state durable and closes both databases once every internal handle
     /// is gone. Read views still held by callers keep `sm.redb` open until they drop.
@@ -1994,6 +2015,9 @@ impl RaftStore {
         let started = Instant::now();
         let inner = &self.inner;
         inner.check_running()?;
+        if inner.leadership.fenced().is_some() {
+            return Err(StoreError::NoQuorum);
+        }
         batch.validate(inner.config.coalescer.max_batch_bytes)?;
         let fingerprint = match &batch.idempotency {
             Some(_) => Some(batch.fingerprint()?),

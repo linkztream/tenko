@@ -59,6 +59,8 @@ describe("the partition store", () => {
   it("refuses writes only while isolated or electing", () => {
     expect(refusesWrites({ state: "isolated" })).toBe(true);
     expect(refusesWrites({ state: "electing" })).toBe(true);
+    expect(refusesWrites({ state: "fenced", reason: "superseded" })).toBe(true);
+    expect(refusesWrites({ state: "unknown" })).toBe(true);
     expect(refusesWrites({ state: "healthy" })).toBe(false);
     expect(refusesWrites(null)).toBe(false);
   });

@@ -964,6 +964,7 @@ impl Peers {
             changing: membership.changing,
             members,
             job_id: None,
+            generation: None,
         })
     }
 

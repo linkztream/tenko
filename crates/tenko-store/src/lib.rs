@@ -63,10 +63,10 @@ pub mod test_hooks;
 
 pub use api::{
     AnchorResolver, ApplyStopped, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed,
-    DerivedIndex, FailedPrecondition, IndexImage, IndexStatus, KeyRange, Leadership, MemberStatus,
-    Mutation, Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
-    StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch, downcast_image, fence,
-    tables,
+    DerivedIndex, FailedPrecondition, FenceReason, IndexImage, IndexStatus, KeyRange, Leadership,
+    MemberStatus, Mutation, Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt,
+    Store, StoreError, StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch,
+    downcast_image, fence, tables,
 };
 pub use mem::{MemStore, MemStoreConfig};
 pub use tenko_core::{CounterKey, TableName};

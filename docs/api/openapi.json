@@ -45441,6 +45441,17 @@
             "type": "boolean",
             "description": "Whether a membership change is in progress (joint consensus)."
           },
+          "generation": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/GenerationView",
+                "description": "The generation of this controller's history after a forced recovery of the cluster,\nand what stopped it, if anything; absent at generation 0 without a fence."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "job_id": {
             "type": [
               "string",
@@ -51756,6 +51767,16 @@
           }
         }
       },
+      "FenceReason": {
+        "type": "string",
+        "description": "Why a controller stopped writing for good (the API's form of `tenko_store::FenceReason`).",
+        "enum": [
+          "superseded",
+          "conflict",
+          "majority_alive",
+          "unknown"
+        ]
+      },
       "FieldChange": {
         "type": "object",
         "description": "One changed field: a diff line or a toggle change.",
@@ -52584,6 +52605,57 @@
       "Fqdn": {
         "type": "string",
         "description": "DNS name"
+      },
+      "GenerationView": {
+        "type": "object",
+        "description": "The generation of a controller's history and what stopped it (the cluster recovery).",
+        "required": [
+          "number"
+        ],
+        "properties": {
+          "forced": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The controller that was forced to start it.",
+            "minimum": 0
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The generation of the history this controller's copy holds; 0 before any forced step.",
+            "minimum": 0
+          },
+          "record": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The SHA-256 of its generation record, hexadecimal; absent at generation 0."
+          },
+          "stopped_by": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OtherHistory",
+                "description": "The other history that stopped this controller: a newer generation that superseded\nit, or a competing forced one."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "unreached": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "description": "The superseded controllers the authority's last offer of its record did not reach\n(warning `cluster.recover.superseded_unreached`)."
+          }
+        }
       },
       "GrantCreate": {
         "type": "object",
@@ -60469,7 +60541,8 @@
         "description": "Whether a member votes.",
         "enum": [
           "voter",
-          "learner"
+          "learner",
+          "superseded"
         ]
       },
       "MemberView": {
@@ -66629,6 +66702,37 @@
           "truth": {
             "$ref": "#/components/schemas/Truth",
             "description": "The truth the source speaks for."
+          }
+        }
+      },
+      "OtherHistory": {
+        "type": "object",
+        "description": "Another history of the cluster, as a generation record names it.",
+        "required": [
+          "number",
+          "record",
+          "forced"
+        ],
+        "properties": {
+          "forced": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The controller forced to start it.",
+            "minimum": 0
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Its generation.",
+            "minimum": 0
+          },
+          "record": {
+            "type": "string",
+            "description": "The SHA-256 of its record, hexadecimal."
+          },
+          "suggested": {
+            "type": "boolean",
+            "description": "For a competing history: whether it, not this controller's, is the one the order of\nthe recovery suggests keeping (the same answer on every member)."
           }
         }
       },
@@ -75642,7 +75746,9 @@
           "single",
           "healthy",
           "electing",
-          "isolated"
+          "isolated",
+          "fenced",
+          "unknown"
         ]
       },
       "QuorumView": {
@@ -75656,7 +75762,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Revision",
-                "description": "The revision the controller applied last, while isolated: the age of its copy."
+                "description": "The revision the controller applied last, while isolated or fenced: the age of its\ncopy."
               },
               {
                 "type": "null"
@@ -75668,6 +75774,17 @@
               {
                 "$ref": "#/components/schemas/Timestamp",
                 "description": "The last contact with a quorum while isolated."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/FenceReason",
+                "description": "Why a fenced controller stopped writing: `superseded`, `conflict` or\n`majority_alive` (its writes are refused with `cluster.superseded`,\n`cluster.recover.conflict` or `cluster.recover.majority_alive`)."
               },
               {
                 "type": "null"

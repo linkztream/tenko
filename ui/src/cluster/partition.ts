@@ -26,9 +26,9 @@ export function quorumOfEvent(event: Pick<ApiEvent, "data">): QuorumView | null 
   return { state: p.state as QuorumKind, since: p.since, applied: p.applied ? +p.applied : null };
 }
 
-/** Whether the controller refuses writes: isolated, or electing a leader. */
+/** Whether the controller refuses writes: isolated, electing a leader, fenced by a forced recovery, or in a state this version does not know. */
 export function refusesWrites(quorum: QuorumView | null | undefined): boolean {
-  return quorum?.state === "isolated" || quorum?.state === "electing";
+  return !!quorum && quorum.state !== "single" && quorum.state !== "healthy";
 }
 
 function createPartition() {

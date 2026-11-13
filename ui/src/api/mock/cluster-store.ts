@@ -130,7 +130,7 @@ export function clusterView(): ClusterView {
 /** The quorum is lost: writes are refused or queued. */
 export function noQuorum(): boolean {
   const kind = clusterState().quorum.state;
-  return kind === "isolated" || kind === "electing";
+  return kind !== "single" && kind !== "healthy";
 }
 
 /** The seed: the cluster of four, or the one member of a fresh installation. */
@@ -217,6 +217,10 @@ function setQuorum(kind: QuorumKind): void {
     quorum.since = now;
     quorum.last_contact = now;
     quorum.applied = db.revision;
+  } else if (kind === "fenced") {
+    quorum.since = now;
+    quorum.applied = db.revision;
+    quorum.reason = "superseded";
   } else if (kind === "electing") {
     quorum.since = now;
   }

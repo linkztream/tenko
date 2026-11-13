@@ -367,6 +367,7 @@ export type MessageKey =
   | "audit.action.cluster.node.revoke"
   | "audit.action.cluster.node.secrets"
   | "audit.action.cluster.node.version_mismatch"
+  | "audit.action.cluster.recover.force"
   | "audit.action.cluster.tls.issue"
   | "audit.action.connect.client.kick"
   | "audit.action.connect.guardrails.update"
@@ -1144,6 +1145,8 @@ export type MessageKey =
   | "cluster.partition.conflicts"
   | "cluster.partition.electing.body"
   | "cluster.partition.electing.title"
+  | "cluster.partition.fenced.body"
+  | "cluster.partition.fenced.title"
   | "cluster.partition.isolated.body"
   | "cluster.partition.isolated.title"
   | "cluster.partition.queue_link"
@@ -1216,13 +1219,16 @@ export type MessageKey =
   | "cluster.queue.unavailable"
   | "cluster.queue.what_unknown"
   | "cluster.quorum.electing"
+  | "cluster.quorum.fenced"
   | "cluster.quorum.healthy"
   | "cluster.quorum.isolated"
   | "cluster.quorum.single"
+  | "cluster.quorum.unknown"
   | "cluster.remove.confirm"
   | "cluster.remove.intro"
   | "cluster.remove.title"
   | "cluster.role.learner"
+  | "cluster.role.superseded"
   | "cluster.role.voter"
   | "cluster.step_down.confirm"
   | "cluster.step_down.intro"
@@ -4352,7 +4358,10 @@ export type MessageKey =
   | "errors.cluster.node.name"
   | "errors.cluster.node.name_taken"
   | "errors.cluster.node.not_found"
+  | "errors.cluster.recover.conflict"
+  | "errors.cluster.recover.majority_alive"
   | "errors.cluster.single"
+  | "errors.cluster.superseded"
   | "errors.connect.guardrail.client_unknown"
   | "errors.connect.guardrail.management_client"
   | "errors.connect.guardrail.management_port"
@@ -8500,6 +8509,7 @@ export interface MessageArgs {
   "cluster.no_quorum.queued": { expires: string | number };
   "cluster.partition.conflicts": { count: number };
   "cluster.partition.electing.body": { duration: string | number };
+  "cluster.partition.fenced.body": { duration: string | number };
   "cluster.partition.isolated.body": { duration: string | number };
   "cluster.partition.stale": { age: string | number };
   "cluster.partition.stale_title": { revision: string | number };
@@ -10361,6 +10371,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.cluster.node.revoke",
   "audit.action.cluster.node.secrets",
   "audit.action.cluster.node.version_mismatch",
+  "audit.action.cluster.recover.force",
   "audit.action.cluster.tls.issue",
   "audit.action.connect.client.kick",
   "audit.action.connect.guardrails.update",
@@ -11138,6 +11149,8 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.partition.conflicts",
   "cluster.partition.electing.body",
   "cluster.partition.electing.title",
+  "cluster.partition.fenced.body",
+  "cluster.partition.fenced.title",
   "cluster.partition.isolated.body",
   "cluster.partition.isolated.title",
   "cluster.partition.queue_link",
@@ -11210,13 +11223,16 @@ export const messageKeys: readonly MessageKey[] = [
   "cluster.queue.unavailable",
   "cluster.queue.what_unknown",
   "cluster.quorum.electing",
+  "cluster.quorum.fenced",
   "cluster.quorum.healthy",
   "cluster.quorum.isolated",
   "cluster.quorum.single",
+  "cluster.quorum.unknown",
   "cluster.remove.confirm",
   "cluster.remove.intro",
   "cluster.remove.title",
   "cluster.role.learner",
+  "cluster.role.superseded",
   "cluster.role.voter",
   "cluster.step_down.confirm",
   "cluster.step_down.intro",
@@ -14346,7 +14362,10 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.node.name",
   "errors.cluster.node.name_taken",
   "errors.cluster.node.not_found",
+  "errors.cluster.recover.conflict",
+  "errors.cluster.recover.majority_alive",
   "errors.cluster.single",
+  "errors.cluster.superseded",
   "errors.connect.guardrail.client_unknown",
   "errors.connect.guardrail.management_client",
   "errors.connect.guardrail.management_port",

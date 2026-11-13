@@ -29,7 +29,7 @@ use tenko_core::{NodeId, Revision, Timestamp};
 use tokio::sync::watch;
 
 use super::{network::ContactBook, types::RaftNodeId};
-use crate::api::{Leadership, MemberStatus, QuorumState};
+use crate::api::{FenceReason, Leadership, MemberStatus, QuorumState};
 
 type Metrics = RaftMetrics<RaftNodeId, openraft::BasicNode>;
 
@@ -75,6 +75,8 @@ pub(super) struct LeadershipState {
     clock: Mutex<Clock>,
     /// The isolation threshold in milliseconds.
     isolation_after: AtomicU64,
+    /// Set once this member stopped writing for good ([`QuorumState::Fenced`]).
+    fence: Mutex<Option<(Timestamp, FenceReason)>>,
 }
 
 impl LeadershipState {
@@ -88,7 +90,39 @@ impl LeadershipState {
             isolation_after: AtomicU64::new(
                 u64::try_from(isolation_after.as_millis()).unwrap_or(u64::MAX),
             ),
+            fence: Mutex::new(None),
         }
+    }
+
+    /// Stops this member for good: no leadership from now on, and the quorum state is
+    /// [`QuorumState::Fenced`]. A second fence keeps the first one's time and takes the
+    /// stricter reason ([`FenceReason::Superseded`] over the others).
+    pub(super) fn fence(&self, reason: FenceReason, applied: Revision) {
+        let (since, reason) = {
+            let mut fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
+            let (since, current) = fence.unwrap_or((Timestamp::now(), reason));
+            let reason = if current == FenceReason::Superseded {
+                current
+            } else {
+                reason
+            };
+            *fence = Some((since, reason));
+            (since, reason)
+        };
+        self.sender.send_replace(None);
+        self.quorum.send_replace(QuorumState::Fenced {
+            since,
+            applied,
+            reason,
+        });
+    }
+
+    /// The fence, if this member stopped writing for good.
+    pub(super) fn fenced(&self) -> Option<FenceReason> {
+        self.fence
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .map(|(_, reason)| reason)
     }
 
     /// Changes the isolation threshold.
@@ -121,7 +155,11 @@ impl LeadershipState {
 
     /// Records one metrics snapshot.
     fn publish(&self, metrics: &Metrics, applied: Revision) {
-        let leadership = leadership_of(metrics);
+        let leadership = if self.fenced().is_some() {
+            None
+        } else {
+            leadership_of(metrics)
+        };
         {
             let mut clock = self.clock();
             match (metrics.current_leader, clock.leaderless_since) {
@@ -168,6 +206,13 @@ impl LeadershipState {
 
     /// The quorum state for a metrics snapshot.
     pub(super) fn quorum(&self, metrics: &Metrics, applied: Revision) -> QuorumState {
+        if let Some((since, reason)) = *self.fence.lock().unwrap_or_else(PoisonError::into_inner) {
+            return QuorumState::Fenced {
+                since,
+                applied,
+                reason,
+            };
+        }
         let membership = metrics.membership_config.membership();
         let voters: Vec<RaftNodeId> = membership.voter_ids().collect();
         if voters == [metrics.id] {

@@ -171,6 +171,7 @@ pub fn evaluate(view: &ClusterView, status: &SystemStatus, binary: &BinaryInfo) 
                 role: match member.role {
                     MemberRole::Voter => "voter",
                     MemberRole::Learner => "learner",
+                    MemberRole::Superseded => "superseded",
                 },
                 leader: member.leader,
                 version: member.version.clone(),
@@ -196,7 +197,7 @@ pub fn evaluate(view: &ClusterView, status: &SystemStatus, binary: &BinaryInfo) 
 /// The rolling order: learners, then the voters that follow, then the leader.
 fn order(view: &ClusterView) -> Vec<NodeId> {
     let rank = |member: &tenko_cluster::admin::MemberView| match (member.role, member.leader) {
-        (MemberRole::Learner, _) => 0,
+        (MemberRole::Learner | MemberRole::Superseded, _) => 0,
         (MemberRole::Voter, false) => 1,
         (MemberRole::Voter, true) => 2,
     };
@@ -402,10 +403,12 @@ mod tests {
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             changing: false,
             members,
             job_id: None,
+            generation: None,
         }
     }
 

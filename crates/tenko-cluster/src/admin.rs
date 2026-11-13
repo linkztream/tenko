@@ -49,6 +49,49 @@ pub struct ClusterView {
     /// The inline job `cluster.edit` of a promotion or removal; absent on a plain view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub job_id: Option<JobId>,
+    /// The generation of this controller's history (the cluster recovery); absent at
+    /// generation 0 without a fence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<Box<GenerationView>>,
+}
+
+/// The generation of a controller's history and what stopped it (the cluster recovery).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct GenerationView {
+    /// The generation of the history this controller's copy holds; 0 before any forced step.
+    pub number: u64,
+    /// The SHA-256 of its generation record, hexadecimal; absent at generation 0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record: Option<String>,
+    /// The controller that was forced to start it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<u64>)]
+    pub forced: Option<NodeId>,
+    /// The other history that stopped this controller: a newer generation that superseded
+    /// it, or a competing forced one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stopped_by: Option<OtherHistory>,
+    /// The superseded controllers the authority's last offer of its record did not reach
+    /// (warning `cluster.recover.superseded_unreached`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<u64>)]
+    pub unreached: Vec<NodeId>,
+}
+
+/// Another history of the cluster, as a generation record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct OtherHistory {
+    /// Its generation.
+    pub number: u64,
+    /// The SHA-256 of its record, hexadecimal.
+    pub record: String,
+    /// The controller forced to start it.
+    #[schema(value_type = u64)]
+    pub forced: NodeId,
+    /// For a competing history: whether it, not this controller's, is the one the order of
+    /// the recovery suggests keeping (the same answer on every member).
+    #[serde(default)]
+    pub suggested: bool,
 }
 
 /// The kind of quorum state (the API's schema is `tenko_api::dto::system::QuorumKind`).
@@ -63,6 +106,14 @@ pub enum QuorumKind {
     Electing,
     /// Out of contact with a quorum: reads serve the local copy, writes are refused.
     Isolated,
+    /// Stopped for good by another history of the cluster (the cluster recovery): reads
+    /// serve the local copy, writes are refused with the code in `reason`, until an
+    /// operator acts.
+    Fenced,
+    /// A state a newer controller reports that this build does not know: read like
+    /// `isolated`.
+    #[serde(other)]
+    Unknown,
 }
 
 /// The quorum state of a controller (OPS-26; the API's schema is
@@ -76,8 +127,14 @@ pub struct QuorumView {
     pub since: Option<Timestamp>,
     /// The last contact with a quorum while isolated.
     pub last_contact: Option<Timestamp>,
-    /// The revision the controller applied last, while isolated: the age of its copy.
+    /// The revision the controller applied last, while isolated or fenced: the age of its
+    /// copy.
     pub applied: Option<Revision>,
+    /// Why a fenced controller stopped writing: `superseded`, `conflict` or
+    /// `majority_alive` (its writes are refused with `cluster.superseded`,
+    /// `cluster.recover.conflict` or `cluster.recover.majority_alive`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<tenko_store::FenceReason>,
 }
 
 impl Default for QuorumView {
@@ -95,18 +152,21 @@ impl From<QuorumState> for QuorumView {
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             QuorumState::Healthy => Self {
                 state: QuorumKind::Healthy,
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             QuorumState::Electing { since } => Self {
                 state: QuorumKind::Electing,
                 since: Some(since),
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             QuorumState::Isolated {
                 since,
@@ -117,6 +177,18 @@ impl From<QuorumState> for QuorumView {
                 since: Some(since),
                 last_contact,
                 applied: Some(applied),
+                reason: None,
+            },
+            QuorumState::Fenced {
+                since,
+                applied,
+                reason,
+            } => Self {
+                state: QuorumKind::Fenced,
+                since: Some(since),
+                last_contact: None,
+                applied: Some(applied),
+                reason: Some(reason),
             },
         }
     }
@@ -130,6 +202,9 @@ pub enum MemberRole {
     Voter,
     /// Replicates without voting (catching up, or kept for reads).
     Learner,
+    /// A former voter that a forced step superseded: no longer in the Raft group, refused
+    /// by the current history until it rejoins or is removed.
+    Superseded,
 }
 
 /// One member of the controller cluster.

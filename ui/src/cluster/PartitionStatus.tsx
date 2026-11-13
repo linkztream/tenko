@@ -97,6 +97,14 @@ function PartitionBanner() {
         body: t("cluster.partition.isolated.body", { duration }),
       };
     }
+    if (quorum?.state === "fenced") {
+      return {
+        state: "fenced",
+        kind: "danger",
+        title: t("cluster.partition.fenced.title"),
+        body: t("cluster.partition.fenced.body", { duration }),
+      };
+    }
     if (quorum?.state === "electing") {
       return {
         state: "electing",
@@ -148,7 +156,7 @@ export function StaleStatus() {
     const header = parseStaleness(partition.staleness());
     if (header) return header;
     const quorum = partition.quorum();
-    return quorum?.state === "isolated" ? { since: quorum.since, revision: quorum.applied ?? null } : null;
+    return quorum?.state === "isolated" || quorum?.state === "fenced" ? { since: quorum.since, revision: quorum.applied ?? null } : null;
   };
   return (
     <Show when={stale()}>

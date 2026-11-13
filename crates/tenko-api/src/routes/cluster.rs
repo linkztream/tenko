@@ -125,6 +125,10 @@ pub struct ClusterView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = Uuid)]
     pub job_id: Option<JobId>,
+    /// The generation of this controller's history after a forced recovery of the cluster,
+    /// and what stopped it, if anything; absent at generation 0 without a fence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation: Option<admin::GenerationView>,
 }
 
 impl From<admin::ClusterView> for ClusterView {
@@ -137,13 +141,15 @@ impl From<admin::ClusterView> for ClusterView {
             changing: view.changing,
             members: view.members,
             job_id: view.job_id,
+            generation: view.generation.map(|generation| *generation),
         }
     }
 }
 
 /// Shows the controller cluster as this controller sees it: the leader it knows, the Raft
-/// term, whether it is in contact with a quorum (`single`, `healthy`, `electing` or
-/// `isolated`, with the time it began and, while isolated, the age of its copy), whether a
+/// term, whether it is in contact with a quorum (`single`, `healthy`, `electing`,
+/// `isolated` or `fenced`, with the time it began and, while isolated or fenced, the age of
+/// its copy), the generation of its history after a forced recovery, whether a
 /// membership change is in progress and every member with its role, address, version and,
 /// from the leader, its replication state (matched index, lag in entries and milliseconds
 /// since the last contact).
@@ -493,6 +499,7 @@ mod tests {
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             changing: false,
             members: vec![
@@ -501,6 +508,7 @@ mod tests {
                 member(1002, "controller-3", MemberRole::Learner, false),
             ],
             job_id: None,
+            generation: None,
         }
     }
 

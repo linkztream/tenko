@@ -279,6 +279,7 @@ fn role_name(role: MemberRole) -> &'static str {
     match role {
         MemberRole::Voter => "voter",
         MemberRole::Learner => "learner",
+        MemberRole::Superseded => "superseded",
     }
 }
 
@@ -308,7 +309,11 @@ fn render_status(view: &ClusterView) -> String {
         .iter()
         .filter(|member| member.role == MemberRole::Voter)
         .count();
-    let learners = view.members.len() - voters;
+    let learners = view
+        .members
+        .iter()
+        .filter(|member| member.role == MemberRole::Learner)
+        .count();
     let leader = match view.leader {
         Some(leader) if leader == view.node => format!("{leader} (this controller)"),
         Some(leader) => leader.to_string(),
@@ -323,6 +328,13 @@ fn render_status(view: &ClusterView) -> String {
         QuorumKind::Healthy => "healthy".to_owned(),
         QuorumKind::Electing => since("electing"),
         QuorumKind::Isolated => since("isolated"),
+        QuorumKind::Fenced => since(&format!(
+            "fenced, writes refused with {}",
+            view.quorum
+                .reason
+                .map_or("cluster.superseded", tenko_store::FenceReason::code)
+        )),
+        QuorumKind::Unknown => since("a state this build does not know"),
     };
     let mut lines = vec![
         ("controller", view.node.to_string()),
@@ -330,7 +342,7 @@ fn render_status(view: &ClusterView) -> String {
         ("term", view.term.to_string()),
         ("quorum", quorum),
     ];
-    if view.quorum.state == QuorumKind::Isolated {
+    if matches!(view.quorum.state, QuorumKind::Isolated | QuorumKind::Fenced) {
         lines.push((
             "last contact",
             view.quorum
@@ -497,6 +509,7 @@ mod tests {
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             changing: false,
             members: vec![
@@ -505,6 +518,7 @@ mod tests {
                 learner,
             ],
             job_id: None,
+            generation: None,
         }
     }
 
@@ -552,10 +566,12 @@ mod tests {
                 since: None,
                 last_contact: None,
                 applied: None,
+                reason: None,
             },
             changing: false,
             members: vec![member(1, "controller-1", MemberRole::Voter, true)],
             job_id: None,
+            generation: None,
         };
         assert_eq!(
             render_status(&view),
@@ -576,6 +592,7 @@ mod tests {
             since: Some(at("2026-10-10T08:05:00Z")),
             last_contact: None,
             applied: None,
+            reason: None,
         };
         let text = render_status(&electing);
         assert!(text.contains("leader      none known\n"), "{text}");
@@ -591,6 +608,7 @@ mod tests {
             since: Some(at("2026-10-10T08:10:00Z")),
             last_contact: Some(at("2026-10-10T08:09:30Z")),
             applied: Some(Revision(77)),
+            reason: None,
         };
         assert_eq!(
             render_status(&isolated),

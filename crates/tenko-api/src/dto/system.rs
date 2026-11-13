@@ -328,6 +328,42 @@ pub enum QuorumKind {
     Electing,
     /// Out of contact with a quorum: reads serve the local copy, writes are refused.
     Isolated,
+    /// Stopped for good by another history of the cluster (the cluster recovery): reads
+    /// serve the local copy, writes are refused with the code in `reason`, until an
+    /// operator acts.
+    Fenced,
+    /// A state a newer controller reports that this build does not know: read like
+    /// `isolated`.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Why a controller stopped writing for good (the API's form of `tenko_store::FenceReason`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum FenceReason {
+    /// A newer generation of the cluster superseded this controller's history.
+    Superseded,
+    /// A competing forced generation was seen; an operator chooses which one stays.
+    Conflict,
+    /// The first start after a forced step found the old cluster alive.
+    MajorityAlive,
+    /// A reason a newer controller reports that this build does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+#[cfg(feature = "server")]
+impl From<tenko_store::FenceReason> for FenceReason {
+    fn from(reason: tenko_store::FenceReason) -> Self {
+        use tenko_store::FenceReason as Store;
+        match reason {
+            Store::Superseded => Self::Superseded,
+            Store::Conflict => Self::Conflict,
+            Store::MajorityAlive => Self::MajorityAlive,
+            Store::Unknown => Self::Unknown,
+        }
+    }
 }
 
 /// The quorum state of a controller (OPS-26), for `GET /system/status` and `/cluster`.
@@ -340,8 +376,14 @@ pub struct QuorumView {
     pub since: Option<Timestamp>,
     /// The last contact with a quorum while isolated.
     pub last_contact: Option<Timestamp>,
-    /// The revision the controller applied last, while isolated: the age of its copy.
+    /// The revision the controller applied last, while isolated or fenced: the age of its
+    /// copy.
     pub applied: Option<Revision>,
+    /// Why a fenced controller stopped writing: `superseded`, `conflict` or
+    /// `majority_alive` (its writes are refused with `cluster.superseded`,
+    /// `cluster.recover.conflict` or `cluster.recover.majority_alive`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<FenceReason>,
 }
 
 impl Default for QuorumView {
@@ -352,6 +394,7 @@ impl Default for QuorumView {
             since: None,
             last_contact: None,
             applied: None,
+            reason: None,
         }
     }
 }
@@ -380,6 +423,18 @@ impl From<tenko_store::QuorumState> for QuorumView {
                 since: Some(since),
                 last_contact,
                 applied: Some(applied),
+                ..Self::default()
+            },
+            QuorumState::Fenced {
+                since,
+                applied,
+                reason,
+            } => Self {
+                state: QuorumKind::Fenced,
+                since: Some(since),
+                applied: Some(applied),
+                reason: Some(reason.into()),
+                ..Self::default()
             },
         }
     }
@@ -395,10 +450,13 @@ impl From<tenko_cluster::admin::QuorumView> for QuorumView {
                 Kind::Healthy => QuorumKind::Healthy,
                 Kind::Electing => QuorumKind::Electing,
                 Kind::Isolated => QuorumKind::Isolated,
+                Kind::Fenced => QuorumKind::Fenced,
+                Kind::Unknown => QuorumKind::Unknown,
             },
             since: view.since,
             last_contact: view.last_contact,
             applied: view.applied,
+            reason: view.reason.map(Into::into),
         }
     }
 }

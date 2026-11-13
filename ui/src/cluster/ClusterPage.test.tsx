@@ -182,6 +182,13 @@ describe("the cluster page", () => {
     expect(screen.getByTestId("cluster-changing").textContent).toContain("A membership change is in progress");
   });
 
+  it("says when a forced recovery stopped this controller", async () => {
+    mockCluster.setQuorum("fenced");
+    await openLoaded();
+    expect(screen.getByTestId("cluster-quorum").dataset.state).toBe("fenced");
+    expect(screen.getByTestId("cluster-quorum").textContent).toContain("Stopped by a recovery");
+  });
+
   it("follows the cluster topic", async () => {
     stopBridge = bridgeMockEvents();
     await openLoaded();

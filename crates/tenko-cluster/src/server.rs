@@ -593,7 +593,7 @@ pub fn fuzz_request(data: &[u8]) {
     let Some((&kind, input)) = data.split_first() else {
         return;
     };
-    match kind % 7 {
+    match kind % 8 {
         0 => {
             if let Ok(hello) = v1::HelloRequest::decode(input) {
                 for ours in [&[1][..], &[1, 2, 4]] {
@@ -641,8 +641,25 @@ pub fn fuzz_request(data: &[u8]) {
             drop(v1::SnapshotRequest::decode(input));
             drop(v1::HistoryRequest::decode(input));
         }
+        7 => fuzz_generation(input),
         _ => drop(PeerIdentity::from_der(input)),
     }
+}
+
+/// The generation metadata of a `Raft` or `Cluster` call: the record, its body, a check
+/// against the record's own first certificate as the root, the claim and a fence file.
+fn fuzz_generation(input: &[u8]) {
+    use crate::generation::{Claim, FenceFile, GenerationRecord};
+
+    if let Ok(record) = GenerationRecord::decode(input) {
+        drop(record.body());
+        if let Some(first) = record.chain.first() {
+            let root = rustls::pki_types::CertificateDer::from(first.0.as_slice());
+            drop(record.verify(&root));
+        }
+    }
+    let _ = Claim::parse(&String::from_utf8_lossy(input));
+    drop(tenko_core::codec::from_cbor::<FenceFile>(input));
 }
 
 #[cfg(test)]
@@ -770,7 +787,38 @@ mod tests {
                 .encode_to_vec(),
             ),
             ("peer-certificate", 6, peer_certificate()),
+            ("generation-record", 7, generation_record()),
         ]
+    }
+
+    /// A generation record as a refusal carries it (not signed: the target reads it before
+    /// any signature check).
+    fn generation_record() -> Vec<u8> {
+        use crate::generation::{ForkPoint, GenerationBody, GenerationRecord, LAYOUT};
+        use tenko_core::{Revision, Timestamp, audit::ChainHead, serde_util::HexBytes};
+        let body = GenerationBody {
+            layout: LAYOUT,
+            number: 1,
+            parent: None,
+            forced: NodeId(2),
+            fork: ForkPoint {
+                term: 3,
+                leader: 1,
+                index: 40,
+                revision: Revision(38),
+                audit: ChainHead::default(),
+            },
+            superseded: vec![NodeId(1), NodeId(3)],
+            at: Timestamp::from_unix_nanos(1_789_000_000_000_000_000).expect("time"),
+            nonce: HexBytes(vec![1; 16]),
+        };
+        GenerationRecord {
+            body: HexBytes(body.canonical().expect("body")),
+            signature: HexBytes(Vec::new()),
+            chain: Vec::new(),
+        }
+        .encode()
+        .expect("record")
     }
 
     /// The check a seed is meant to pass.
@@ -789,6 +837,8 @@ mod tests {
             5 => v1::SubscribeRequest::decode(input).is_ok(),
             6 => PeerIdentity::from_der(input)
                 .is_ok_and(|peer| peer.node == NodeId(1001) && peer.roles.contains(Role::Probe)),
+            7 => crate::generation::GenerationRecord::decode(input)
+                .is_ok_and(|record| record.body().is_ok()),
             _ => false,
         }
     }
@@ -796,7 +846,7 @@ mod tests {
     #[test]
     fn the_fuzz_entry_point_survives_garbage() {
         fuzz_request(&[]);
-        for kind in 0..7_u8 {
+        for kind in 0..8_u8 {
             for data in [
                 &b""[..],
                 b"\x00",
@@ -817,7 +867,7 @@ mod tests {
     fn fuzz_seeds_pass() {
         let seeds = seeds();
         let kinds: std::collections::BTreeSet<u8> = seeds.iter().map(|seed| seed.1).collect();
-        assert_eq!(kinds.len(), 7, "every selector has a seed");
+        assert_eq!(kinds.len(), 8, "every selector has a seed");
         let out = std::env::var_os("TENKO_FUZZ_SEEDS").map(std::path::PathBuf::from);
         for (name, kind, payload) in seeds {
             assert!(passes(kind, &payload), "the seed {name} does not pass");

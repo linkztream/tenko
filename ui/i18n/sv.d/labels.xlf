@@ -250,6 +250,10 @@
         <notes><note category="description">What the audit action cluster.node.version_mismatch is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Refuse a node with an incompatible version</source><target>Neka en nod med inkompatibel version</target></segment>
       </unit>
+      <unit id="audit.action.cluster.recover.force">
+        <notes><note category="description">What the audit action cluster.recover.force is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Force a new generation of the cluster</source><target>Tvinga fram en ny generation av klustret</target></segment>
+      </unit>
       <unit id="audit.action.cluster.tls.issue">
         <notes><note category="description">What the audit action cluster.tls.issue is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Issue a server certificate</source><target>Utfärda ett servercertifikat</target></segment>

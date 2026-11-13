@@ -15,9 +15,9 @@ import { memberHealth, type MemberHealth } from "./health";
 
 type S = components["schemas"];
 
-/** `single` (one voter, never isolated), `healthy`, `electing` or `isolated`. */
+/** `single` (one voter, never isolated), `healthy`, `electing`, `isolated`, `fenced` (stopped by a forced recovery), or `unknown` (a newer server's state). */
 export type QuorumKind = S["QuorumKind"];
-export const QUORUM_KINDS: readonly QuorumKind[] = ["single", "healthy", "electing", "isolated"];
+export const QUORUM_KINDS: readonly QuorumKind[] = ["single", "healthy", "electing", "isolated", "fenced", "unknown"];
 /** Whether a controller is in contact with a quorum (OPS-26). */
 export type QuorumView = S["QuorumView"];
 export type MemberRole = S["MemberRole"];
@@ -238,7 +238,7 @@ export function shortDigest(hex: string | null | undefined): string {
 // Words
 
 export function roleWord(role: MemberRole): string {
-  return role === "voter" ? t("cluster.role.voter") : t("cluster.role.learner");
+  return t(`cluster.role.${role}`);
 }
 
 export function healthWord(health: MemberHealth): string {

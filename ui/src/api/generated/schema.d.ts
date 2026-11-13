@@ -7685,6 +7685,7 @@ export interface components {
         ClusterView: {
             /** @description Whether a membership change is in progress (joint consensus). */
             changing: boolean;
+            generation?: components["schemas"]["GenerationView"] | null;
             /**
              * Format: uuid
              * @description The inline job `cluster.edit` of a promotion or removal; absent on `GET`.
@@ -10273,6 +10274,11 @@ export interface components {
             /** @description Registered passkeys and security keys. */
             webauthn: number;
         };
+        /**
+         * @description Why a controller stopped writing for good (the API's form of `tenko_store::FenceReason`).
+         * @enum {string}
+         */
+        FenceReason: "superseded" | "conflict" | "majority_alive" | "unknown";
         /** @description One changed field: a diff line or a toggle change. */
         FieldChange: {
             /** @description The field or toggle, for example `status` or `TGL-02`. */
@@ -10614,6 +10620,27 @@ export interface components {
         };
         /** @description DNS name */
         Fqdn: string;
+        /** @description The generation of a controller's history and what stopped it (the cluster recovery). */
+        GenerationView: {
+            /**
+             * Format: int64
+             * @description The controller that was forced to start it.
+             */
+            forced?: number | null;
+            /**
+             * Format: int64
+             * @description The generation of the history this controller's copy holds; 0 before any forced step.
+             */
+            number: number;
+            /** @description The SHA-256 of its generation record, hexadecimal; absent at generation 0. */
+            record?: string | null;
+            stopped_by?: components["schemas"]["OtherHistory"] | null;
+            /**
+             * @description The superseded controllers the authority's last offer of its record did not reach
+             *     (warning `cluster.recover.superseded_unreached`).
+             */
+            unreached?: number[];
+        };
         /** @description `POST /access/grants`. */
         GrantCreate: {
             /** @description Whether the holder may delegate it. */
@@ -13586,7 +13613,7 @@ export interface components {
          * @description Whether a member votes.
          * @enum {string}
          */
-        MemberRole: "voter" | "learner";
+        MemberRole: "voter" | "learner" | "superseded";
         /** @description One member of the controller cluster. */
         MemberView: {
             /** @description Its cluster port as `host:port`. */
@@ -16151,6 +16178,26 @@ export interface components {
             source: string;
             /** @description The truth the source speaks for. */
             truth: components["schemas"]["Truth"];
+        };
+        /** @description Another history of the cluster, as a generation record names it. */
+        OtherHistory: {
+            /**
+             * Format: int64
+             * @description The controller forced to start it.
+             */
+            forced: number;
+            /**
+             * Format: int64
+             * @description Its generation.
+             */
+            number: number;
+            /** @description The SHA-256 of its record, hexadecimal. */
+            record: string;
+            /**
+             * @description For a competing history: whether it, not this controller's, is the one the order of
+             *     the recovery suggests keeping (the same answer on every member).
+             */
+            suggested?: boolean;
         };
         /**
          * @description How a name got its owner.
@@ -19686,11 +19733,12 @@ export interface components {
          * @description The kind of quorum state of a controller.
          * @enum {string}
          */
-        QuorumKind: "single" | "healthy" | "electing" | "isolated";
+        QuorumKind: "single" | "healthy" | "electing" | "isolated" | "fenced" | "unknown";
         /** @description The quorum state of a controller (OPS-26), for `GET /system/status` and `/cluster`. */
         QuorumView: {
             applied?: components["schemas"]["Revision"] | null;
             last_contact?: components["schemas"]["Timestamp"] | null;
+            reason?: components["schemas"]["FenceReason"] | null;
             since?: components["schemas"]["Timestamp"] | null;
             /** @description The state. */
             state: components["schemas"]["QuorumKind"];

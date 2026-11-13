@@ -939,6 +939,45 @@ pub enum QuorumState {
         /// The last revision this member applied: the age of its local copy.
         applied: Revision,
     },
+    /// Stopped for good by a record of another history of the cluster (the cluster
+    /// recovery): reads serve the local copy, writes are refused with the reason's code, the
+    /// Raft node no longer elects or replicates. Only an operator lifts it (a restart after
+    /// the rejoin or the undo of a forced step).
+    Fenced {
+        /// When this member stopped writing.
+        since: Timestamp,
+        /// The last revision this member applied.
+        applied: Revision,
+        /// Why.
+        reason: FenceReason,
+    },
+}
+
+/// Why a member stopped writing for good ([`QuorumState::Fenced`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FenceReason {
+    /// A newer generation of the cluster superseded this member's history.
+    Superseded,
+    /// A competing forced generation was seen; an operator chooses which one stays.
+    Conflict,
+    /// The first start after a forced step found the old cluster alive and did not take
+    /// office.
+    MajorityAlive,
+    /// A reason this build does not know: as strict as [`FenceReason::Superseded`].
+    #[serde(other)]
+    Unknown,
+}
+
+impl FenceReason {
+    /// The error code of a write refused for this reason.
+    pub const fn code(self) -> &'static str {
+        match self {
+            Self::Superseded | Self::Unknown => "cluster.superseded",
+            Self::Conflict => "cluster.recover.conflict",
+            Self::MajorityAlive => "cluster.recover.majority_alive",
+        }
+    }
 }
 
 impl QuorumState {

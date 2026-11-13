@@ -24,6 +24,7 @@
 //! | [`wire`] | the payloads of the controller-to-controller services and their encodings |
 //! | [`trace`] | the W3C trace context of the controller-to-controller calls and their spans (OPS-05) |
 //! | [`error`] | the coded error of the registry and the transport |
+//! | [`generation`] | the generation of a cluster's history: the signed record, its order, the fence (cluster recovery) |
 //!
 //! `docs/cluster.md` describes enrollment, certificates, revocation, the versioning rule,
 //! the buffer and the ports.
@@ -33,6 +34,7 @@ pub mod buffer;
 pub mod ca;
 pub mod client;
 pub mod error;
+pub mod generation;
 pub mod identity;
 pub mod kek;
 pub mod metrics;

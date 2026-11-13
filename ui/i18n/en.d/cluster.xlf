@@ -18,6 +18,10 @@
         <notes><note category="description">Role of a cluster member that replicates without voting.</note></notes>
         <segment><source>Learner</source></segment>
       </unit>
+      <unit id="cluster.role.superseded">
+        <notes><note category="description">Role of a former voter that a forced step on another controller superseded; it no longer belongs to the cluster.</note></notes>
+        <segment><source>Superseded</source></segment>
+      </unit>
       <unit id="cluster.health.leader">
         <notes><note category="description">State of the member that leads the cluster.</note></notes>
         <segment><source>Leader</source></segment>
@@ -53,6 +57,14 @@
       <unit id="cluster.quorum.isolated">
         <notes><note category="description">Quorum state: out of contact with a majority of the voters.</note></notes>
         <segment><source>Isolated</source></segment>
+      </unit>
+      <unit id="cluster.quorum.fenced">
+        <notes><note category="description">Quorum state: this controller stopped writing for good because another history of the cluster supersedes or competes with its own.</note></notes>
+        <segment><source>Stopped by a recovery</source></segment>
+      </unit>
+      <unit id="cluster.quorum.unknown">
+        <notes><note category="description">Quorum state that a newer controller reports and this version does not know.</note></notes>
+        <segment><source>Unknown state</source></segment>
       </unit>
       <unit id="cluster.tolerance">
         <notes><note category="description">How many controller failures a cluster of this many voters survives.</note></notes>
@@ -138,6 +150,14 @@
         <notes><note category="description">Banner text while a leader is elected; duration is the time since the election started.</note></notes>
         <segment><source>Changes are refused until a leader is elected ({duration} so far).</source></segment>
       </unit>
+      <unit id="cluster.partition.fenced.title">
+        <notes><note category="description">Banner title while this controller stopped writing because of a forced recovery of the cluster.</note></notes>
+        <segment><source>This controller no longer writes</source></segment>
+      </unit>
+      <unit id="cluster.partition.fenced.body">
+        <notes><note category="description">Banner text while fenced; duration is the time since it stopped writing.</note></notes>
+        <segment><source>A forced recovery of the cluster superseded or competes with this controller ({duration} ago). Pages show its local copy; changes are refused until an operator acts on its host.</source></segment>
+      </unit>
       <unit id="cluster.partition.conflicts">
         <notes><note category="description">Banner text after the cluster healed: queued changes of this person that did not apply by themselves.</note></notes>
         <segment><source>{count, plural, one {# queued change needs your decision} other {# queued changes need your decision}}</source></segment>
@@ -161,6 +181,18 @@
       <unit id="errors.cluster.no_quorum">
         <notes><note category="description">Error: a write was refused because the controller has no contact with a quorum of the cluster.</note></notes>
         <segment><source>This controller cannot reach the cluster and refuses changes.</source></segment>
+      </unit>
+      <unit id="errors.cluster.superseded">
+        <notes><note category="description">Error: a write was refused because a newer generation of the cluster superseded this controller.</note></notes>
+        <segment><source>A newer generation of the cluster superseded this controller; it refuses changes. Use a controller of the current cluster.</source></segment>
+      </unit>
+      <unit id="errors.cluster.recover.conflict">
+        <notes><note category="description">Error: a write was refused because two forced recoveries of the cluster compete and an operator must choose.</note></notes>
+        <segment><source>Two forced recoveries of the cluster compete; this controller refuses changes until an operator chooses which one stays.</source></segment>
+      </unit>
+      <unit id="errors.cluster.recover.majority_alive">
+        <notes><note category="description">Error: a write was refused because the forced controller found the old cluster still alive at its first start.</note></notes>
+        <segment><source>The old cluster is still alive, so this controller did not take over; it refuses changes until an operator undoes or confirms the recovery.</source></segment>
       </unit>
       <unit id="cluster.no_quorum.title">
         <notes><note category="description">Title of the dialog of a change refused for want of a quorum.</note></notes>

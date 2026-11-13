@@ -742,8 +742,11 @@ fn quorum_event(quorum: QuorumState) -> EventData {
         QuorumKind::Healthy => "healthy",
         QuorumKind::Electing => "electing",
         QuorumKind::Isolated => "isolated",
+        QuorumKind::Fenced => "fenced",
+        QuorumKind::Unknown => "unknown",
     };
     event.params.insert("state".to_owned(), state.to_owned());
+
     if let Some(since) = view.since {
         event.params.insert("since".to_owned(), since.to_rfc3339());
     }
