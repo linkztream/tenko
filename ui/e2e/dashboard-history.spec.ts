@@ -172,13 +172,16 @@ test("M85: the charts glide within the budget, hold under the pointer and stop w
   };
   await writeFile(testInfo.outputPath("m85.json"), JSON.stringify(result, null, 2));
   await testInfo.attach("m85.json", { path: testInfo.outputPath("m85.json"), contentType: "application/json" });
-  // About 10 frames a second: a busy runner drops some, and the pacing never draws more.
-  expect(result.framesPerSecond).toBeGreaterThan(5);
+  // The pacing never draws more than about 10 frames a second, and a page whose frames are slow
+  // five times in a row steps once a second instead (`SLOW_MS` in `HistoryChart.tsx`), which a
+  // slow shared runner reaches: so either rate is the product working, and none is not.
+  expect(result.framesPerSecond).toBeGreaterThan(0.5);
   expect(result.framesPerSecond).toBeLessThan(12);
   // The budget of M85 is a claim about the product on a known machine. A shared runner measures
   // itself as much as the charts, so only the measurement run (`TENKO_E2E_MEASURE=1`, which the
   // gate sets) holds the figures to it; every run records them in `m85.json`.
   if (process.env.TENKO_E2E_MEASURE === "1") {
+    expect(result.framesPerSecond).toBeGreaterThan(5);
     expect(result.frameP99Ms).toBeLessThan(12);
     expect(result.drawingShareOfOneCore).toBeLessThan(10);
   }
