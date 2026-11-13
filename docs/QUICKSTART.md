@@ -31,7 +31,8 @@ one link away (section 5). The node below is 192.0.2.10 in 192.0.2.0/24, the rou
    To serve your own certificate instead of the internal CA's (for example one that an
    ACME client renews), or to see which certificate the node serves, read
    [certificates.md](certificates.md).
-4. Finish the first-run wizard: the profile, the administrator, the host name, the data
+4. Finish the first-run wizard: the profile, the administrator (a password of at least 12
+   characters; an administrator never signs in with a PIN), the host name, the data
    directory, the roles with their modules, and the DNS and DHCP steps (both can be skipped
    and done in section 3).
 5. Done: sign in as the administrator.
@@ -119,6 +120,14 @@ tenko login -u admin
 
    ```bash
    systemctl restart tenko
+   ```
+
+   In relay mode, also trust the router as a relay agent for the network it relays;
+   outside the Lab profile a relayed request from a sender that is not listed is dropped
+   ([dhcp.md](dhcp.md#98-trusted-relay-agents)):
+
+   ```bash
+   tenko dhcp settings set --trusted-relays 192.0.2.1/32=192.0.2.0/24
    ```
 
 9. Switch scanning on for the prefix (no command): Nodes, the node, Scan configuration,

@@ -7,12 +7,14 @@ Requirements and design constraints are cited by ID and defined in [REQUIREMENTS
 | ADR | Decision | Status |
 |---|---|---|
 | [ADR 0001](adr/0001-implementation-language.md) | Implementation language: Rust | Accepted |
-| [ADR 0002](adr/0002-storage-and-replication.md) | Storage and replication: embedded Raft over embedded KV | Proposed, pending the Spike A gate |
+| [ADR 0002](adr/0002-storage-and-replication.md) | Storage and replication: embedded Raft over embedded KV | Accepted with conditions (Spike A passed) |
 | [ADR 0003](adr/0003-embedded-spa-ui.md) | Embedded SPA UI: SolidJS + TypeScript | Accepted |
 | [ADR 0004](adr/0004-single-binary-roles.md) | Single binary with roles | Accepted |
 | [ADR 0005](adr/0005-ipam-intent-hub.md) | IPAM as intent hub | Accepted |
 | [ADR 0006](adr/0006-connector-architecture.md) | Connector architecture | Accepted |
 | [ADR 0007](adr/0007-delivery-order.md) | Delivery order: platform and IPAM, then DNS, DHCP, AD integration and migration, enterprise | Accepted |
+
+The later decisions are indexed in [adr/README.md](adr/README.md).
 
 ## Overview and principles
 
@@ -76,8 +78,8 @@ Roles and modules answer two different questions. **Roles** say where a componen
 | Role | Responsibility |
 |---|---|
 | `controller` | API, UI, Raft member, authentication, vault, IPAM logic, scheduler |
-| `dns` | Authoritative server plus forwarder/cache (recursion in Phase 5), local zone copy |
-| `dhcp` | DHCPv4 and DHCPv6 server, failover partner, node store for leases |
+| `dns` | Authoritative server, forwarder and cache, recursive resolver, local zone copy |
+| `dhcp` | DHCPv4 and DHCPv6 server; failover partner and node store for leases (Slice 12, planned) |
 | `probe` | Passive and active scanning, SNMP polling in its segment |
 
 ARP and ND do not cross routers, so one probe is needed per network segment (SCAN-01). Active scanning needs raw sockets: CAP_NET_RAW on Linux, Npcap on Windows, and explicit configuration inside an unprivileged LXC container (SCAN-04).
@@ -95,7 +97,7 @@ DNS clients do not balance load themselves (CON-04), so replication between `dns
 
 ### Platform integration
 
-- **Windows:** runs as a Windows service with Service Control Manager integration and Windows Event Log output (OPS-10). From Phase 4 it runs as a gMSA or domain account so that Kerberos works (OPS-11).
+- **Windows:** runs as a Windows service with Service Control Manager integration and Windows Event Log output (OPS-10), under its virtual service account. Kerberos uses the keys of its Active Directory computer account from the vault, as on Linux, so neither a gMSA nor a domain account is needed (OPS-11, ADR 0026).
 - **Linux:** systemd unit, capabilities instead of root, seccomp, non-root user (OPS-13).
 - **Containers:** Docker bridge NAT breaks DHCP broadcast and DNS source addresses. Macvlan or host networking is required, and the deployment files document it with examples (OPS-14).
 
@@ -104,6 +106,8 @@ The Linux binary is linked statically against musl so that one file runs on any 
 ## Data plane independence
 
 The data plane never depends on the control plane (OPS-02). This is the central availability property of the design.
+
+Status: what this section describes for nodes of their own is Slice 12 ([ha-plan.md](plans/ha-plan.md), ADR 0025), not built yet. Today the `dns` and `dhcp` roles run in the process of a controller and serve from its copy of the replicated store, and a lease is committed to that store before its ACK (ADR 0030); `tenko serve` refuses `dns` or `dhcp` without `controller`. Only the probe runs as a node of its own.
 
 - Each `dns` and `dhcp` node keeps a durable local copy of zones, leases and configuration.
 - Nodes keep answering queries and serving leases when the database, the UI or all controllers are down.
@@ -131,7 +135,7 @@ The design is an embedded Raft store (`openraft`) over an embedded KV store (`re
 1. **Raft replicates changes, not data.** State lives in an embedded KV store (`redb`). Measured: 6 M RRsets are 862 MiB of raw key and value data, 2.0 GiB in `sm.redb` after an incremental load and 1.0 GiB after a snapshot re-seed. Serving uses an in-memory index per node (about 139 bytes per RRset), so the Raft log is never in the query path.
 2. **All writes are batched into Raft entries.** An AXFR of 1 M records becomes about 100 log entries of 10k records, not 1 M entries, and steady-state updates are coalesced too: openraft 0.9 awaits each log flush before the next client request, so one entry per update saturates at about 120 writes/s, while coalesced entries sustain 1,000 updates/s with p99 write latency around 200 ms. Snapshots are streamed in chunks to new nodes and the log is purged behind the snapshot.
 3. **The write rate is low.** 100k AD clients re-registering every 24 h produce about 1.2 updates per second, three orders of magnitude below what the coalesced write path sustained in Spike A.
-4. **DHCP leases do not go through global Raft.** They are hot, because every DORA is a write. They are synchronized between failover partners with the failover protocol (DHCP-12), kept in the node store of the serving node and published to the controllers' store after the answer (DHCP-07).
+4. **DHCP leases are kept apart from the configuration's write path.** They are hot, because every DORA is a write. Today a lease row and its client index are committed to the replicated store before the ACK, and everything derived from them follows within a second (ADR 0030). With Slice 12 they move to the node store of the serving node, are synchronized between failover partners with the failover protocol (DHCP-12) and are published to the controllers' store after the answer (DHCP-07).
 
 Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and CockroachDB run terabytes through multi-Raft. Tenko stays far below the etcd limit even with several zones of 1 M records.
 
@@ -140,7 +144,7 @@ Precedent: etcd recommends staying under 8 GB per cluster, and TiKV and Cockroac
 | Data | Lives in | Replication |
 |---|---|---|
 | Configuration, IPAM, zones, policies | Embedded KV store (`redb`), on SSD or NVMe only (OPS-19) | Raft group (one; writes coalesced into entries) |
-| DHCP leases | The node store of each serving node; published to the controllers' store | Synchronized between failover partners, not through Raft |
+| DHCP leases | Today the replicated store (ADR 0030); with Slice 12 the node store of each serving node, published to the controllers' store | Today through Raft; with Slice 12 between failover partners, not through Raft |
 | Serving data | In-memory index per node, built from the local copy | Not replicated itself; derived from the replicated state |
 
 Every node also keeps a local cache of the state it needs, which is what makes data plane independence possible.
@@ -164,7 +168,7 @@ Conditions that follow from the measurements (details in ADR 0002):
 - Disk usage is about 4x raw per node; space is reclaimed by snapshot-and-purge and by re-seeding a node from a snapshot, not by online compaction. A snapshot is due after `[store] snapshot_every_entries` (10,000) entries, the log size (`snapshot_every_log_mib`, 1,024) only a sanity bound; it is built from a read view beside the commits and waits up to 30 s while the commit queue is deep. The log records and the snapshot files are compressed on their way to disk (ADR 0030).
 - What is not on the answer's path is not in its batch: a DHCP lease commit holds the lease row and its client index; the lease's history and IPAM facts follow within a second from an asynchronous writer (ADR 0030).
 - A compact index layout is needed before zones beyond about 10 M RRsets per node are supported.
-- Still to build and measure in Phase 1: atomic index swap during snapshot install, crash and restart recovery, failover, and a real network transport.
+- Phase 1 built the atomic index swap during snapshot install, crash and restart recovery, failover and a real network transport, and measured them on one host ([phase-1-exit.md](plans/phase-1-exit.md), M1 to M4): the first three passed; the transport fell short of its write rate (M4), and the runs on separate machines moved to Phase 5 (deviation 74).
 
 Scripts and results live in `bench/spike-a-raft/`. The fallback (Raft for configuration only, zone data via built-in IXFR/NOTIFY) was not needed and is kept in ADR 0002 for reference.
 
@@ -208,7 +212,7 @@ The Lab profile may disable everything except secrets encryption at rest (NEVER-
 The vault (`tenko-vault`) uses envelope encryption (IAM-15, IAM-16):
 
 - A data encryption key (DEK) protects each secret.
-- A key encryption key (KEK) protects the DEKs. The KEK comes from the OS key store: DPAPI on Windows, TPM or keyring on Linux.
+- A key encryption key (KEK) protects the DEKs. The KEK comes from the OS key store: DPAPI on Windows, systemd credentials on Linux (sealed with the host key, and with the TPM2 when there is one); an explicit key file is the loud fallback for containers ([secrets.md](secrets.md)).
 - PKCS#11, cloud KMS and external secrets managers are KEK provider options from Phase 5 (IAM-17).
 - Secrets can be rotated, are zeroized in memory after use, and every reveal is written to the audit log.
 
@@ -219,7 +223,7 @@ The vault (`tenko-vault`) uses envelope encryption (IAM-15, IAM-16):
 | DDNS credentials | DNS updates issued by DHCP (DHCP-13) |
 | Connector credentials | Proxmox API token, UniFi account, Home Assistant token (CONN-03, CONN-04, CONN-07) |
 
-Vault contents are coupled to the authentication policy (CON-07). A 4-digit PIN protecting a vault that holds domain-admin credentials is not defensible. A PIN is allowed as the sole factor only while the vault is empty or disabled. Once it holds secrets, at least a passkey is required, or the PIN becomes a second factor (IAM-07).
+Vault contents are coupled to the authentication policy (CON-07). A PIN protecting a vault that holds domain-admin credentials is not defensible, and an administrator never signs in with a PIN. A PIN is allowed as the sole factor only while the vault holds no operator secrets. Once it holds one, an account that may reveal it needs at least password strength, or a PIN with a second factor (IAM-07, [secrets.md](secrets.md) section 2).
 
 ## Network I/O design
 
@@ -253,7 +257,7 @@ The UI shows live gauges (queries per second, latency percentiles, cache hit rat
 
 The overhead budget is a measured number, not an intention: Spike B's load generator runs with metrics on and off, and the difference at saturation must stay below 2 percent throughput and must not move p99 latency. The result is recorded in `bench/` and tracked per release (OPS-15 covers idle resources, OPS-21 the hot-path cost).
 
-What the first dashboard shows, per node and cluster-wide, is deliberately small: a QPS gauge with a 60 s sparkline, p50/p99 latency, cache hit ratio, RCODE mix, DHCP leases per second and pool utilization per scope, store size on disk and in memory, Raft role and replication lag, and the drop counters of the logging rings. Everything on it is also available at `/metrics` for Prometheus and Grafana, so the built-in view is a convenience for the home user and a first look for the enterprise operator, never the only way to see the numbers.
+What the first dashboard shows, per node and cluster-wide, is deliberately small: a QPS gauge with two days of history (each controller keeps it in memory, [observability.md](observability.md)), p50/p99 latency, cache hit ratio, RCODE mix, DHCP leases per second and pool utilization per scope, store size on disk and in memory, Raft role and replication lag, and the drop counters of the logging rings. Everything on it is also available at `/metrics` for Prometheus and Grafana, so the built-in view is a convenience for the home user and a first look for the enterprise operator, never the only way to see the numbers.
 
 ## IPAM as the intent hub
 
@@ -321,7 +325,7 @@ For a `static` host the job updates only DNS and adds the manual task. For a `dy
 
 ### Reconciliation views
 
-In Phase 3, when Tenko DHCP exists, a unified view compares the four truths: IPAM intent, DHCP leases, DNS records and scans (IPAM-21). It provides ghost, rogue, orphan and PTR-mismatch views, together with "who wins" rules for resolving each kind of conflict.
+Since Phase 3, with Tenko DHCP, a unified view compares the four truths: IPAM intent, DHCP leases, DNS records and scans (IPAM-21). It provides ghost, rogue, orphan and PTR-mismatch views, together with "who wins" rules for resolving each kind of conflict.
 
 ## Device move job
 
@@ -399,7 +403,7 @@ The connector speaks two API families:
 | Integration API | `/proxy/network/integration/v1`, `X-API-Key` header | Official and versioned. Reads sites, devices, clients and networks. Creating networks and VLANs is probably possible. | CRUD is reported by the community, but only GET is verified in the official documentation. Its location on a self-hosted installation is unconfirmed. |
 | Classic API | `/api/s/{site}/rest/...` | Port profiles (`rest/portconf`) and per-client VLAN override (`rest/user`) exist only here. | The per-client override uses `network_id` set to the network's `_id`, not the VLAN number. Whether an API key works on classic endpoints varies between controllers. The fallback is a local admin account stored in the vault. |
 
-A Phase 1 spike against the reference controller decides which writes go through which family and where the Integration API lives on a self-hosted installation.
+The Phase 1 spike against the reference controller decided which writes go through which family; its findings are in [connectors-unifi.md](connectors-unifi.md).
 
 ### Write safety
 
@@ -422,7 +426,7 @@ The topology map is a graph (IPAM-20):
 | Hypervisor connectors | VM-to-host edges |
 | ARP and ND from probes | Hosts and their addresses (SCAN-02) |
 
-The UI shows an interactive map with filters per VLAN and site. Clicking a node opens the host view, a path can be highlighted, and a port can be queried for what is connected to it. The graph library is chosen in a Phase 1 spike: sigma.js with graphology for WebGL rendering at thousands of nodes, and ELK for hierarchical layout.
+The UI shows an interactive map with filters per VLAN and site. Clicking a node opens the host view, a path can be highlighted, and a port can be queried for what is connected to it. The choice of drawing library is in [topology.md](topology.md).
 
 ## Inventory sources
 
@@ -460,7 +464,7 @@ The migration pipeline (`plan`, `apply`, `verify`) lives in `tenko-migrate` on t
 The platform is API first (ADR 0003, API-01 to API-05):
 
 - REST with an OpenAPI specification derived from the Rust types (`utoipa`).
-- The CLI shares its client library with the UI (API-03).
+- The `tenko` CLI calls the same public API as the UI (API-03).
 - Bulk operations and idempotency keys (API-04).
 - Server-Sent Events carry live updates to the UI (API-05).
 - The UI uses only the public API (API-02). Phase 5 adds webhooks, a Terraform provider and an Ansible collection (API-06, API-07).
@@ -477,23 +481,22 @@ UI behavior for changes (API-08, API-09):
 
 Remote access to hosts starts with URI handoff: the UI produces `.rdp` files or `ssh://` URIs with host, port and user, and copies the password from the vault to the clipboard with an audit entry (API-11). An HTML5 RDP/SSH gateway is an opt-in module in Phase 5 (API-12).
 
-## Libraries under evaluation
+## Libraries
 
-These choices are candidates, to be confirmed in the Phase 0 spikes. Final choices are recorded in ADRs.
+The main libraries and where each choice is recorded.
 
-| Concern | Candidates | Notes |
+| Concern | Choice | Notes |
 |---|---|---|
-| DNS wire format, zone files, TSIG, DNSSEC record types | `domain` (NLnet Labs) behind an internal `Codec` trait; `hickory-proto` kept as the second implementation for differential tests | Decided in ADR 0009 after Spike B |
-| DHCPv4 and DHCPv6 wire format | `dhcproto` | Kea is the semantic reference |
+| DNS wire format, TSIG, DNSSEC record types | `domain` (NLnet Labs) behind an internal `Codec` trait; `hickory-proto` kept as the second implementation for differential tests | Decided in ADR 0009 after Spike B; zone files are read and written by Tenko's own reader and writer (DNS-01, MIG-15) |
+| DHCPv4 and DHCPv6 wire format | Tenko's own codec (`tenko_dhcp::v4`, `v6`); `dhcproto` only in a differential test | ADR 0019; Kea is the semantic reference |
 | Raft | `openraft` 0.9 | Confirmed by Spike A (ADR 0002); writes coalesced into entries |
 | Embedded KV store | `redb` | Confirmed by Spike A (ADR 0002); SSD or NVMe required |
-| Kerberos and GSS-TSIG | `cross-krb5` (Linux) and `sspi-rs` (Windows) | Phase 4 (DNS-28) |
-| LDAP | `ldap3` | AD reads for migration |
-| TLS, QUIC, HTTP | `rustls` with `aws-lc-rs`; `quinn` (DoQ); `hyper` and `h3` (DoH) | |
+| Kerberos and GSS-TSIG | None: Tenko's own `tenko-krb` over `aws-lc-rs` | ADR 0026 point 1 (DNS-28) |
+| TLS and HTTP | `rustls` with `aws-lc-rs`; `hyper` (the API and DoH) | DoQ is not built (DNS-16, Phase 5) |
 | Web framework | `axum`, `utoipa`, `tower` | |
 | UI embedding and static serving | `build.rs` with `include_bytes!`, `brotli`, `flate2` | Decided in ADR 0008 after Spike C |
-| Authentication | `webauthn-rs`, `argon2`, a TOTP library | |
-| Scanning | `pnet`, `rasn-snmp` | |
+| Authentication | `argon2`; WebAuthn and TOTP are Tenko's own (`tenko-auth`) | |
+| Scanning | `socket2`, `pnet_datalink` on Linux; SNMPv3 is Tenko's own (`tenko-scan`) | |
 | Windows service | `windows-service` | |
 | Fuzzing | `cargo-fuzz` | On every parser |
 
@@ -523,32 +526,33 @@ tenko/
     tenko-vault/             # envelope encryption, KEK providers
     tenko-ipam/              # address tree, reconciliation, import/export
     tenko-scan/              # probe role, passive/active discovery, SNMP
-    tenko-dns/               # authoritative, forwarder, cache, RPZ, XFR, views
-    tenko-dhcp/              # v4/v6, failover, relay, DDNS
+    tenko-dns/               # authoritative, forwarder, cache, recursive resolver, RPZ, XFR, views
+    tenko-krb/               # Tenko's own Kerberos: acceptor, keys and keytabs, KDC client (ADR 0026)
+    tenko-dhcp/              # v4/v6, relay, DDNS; failover with Slice 12
     tenko-jobs/              # job engine: steps, state, timeouts, rollback
     tenko-connect/           # plugin SDK: protocol, host runner, helper library, manifest, conformance test
     tenko-connect-proxmox/   # reference plugin: inventory (Phase 1), hypervisor actuator (later)
     tenko-connect-unifi/     # reference plugin: read topology and SSIDs, write VLANs and port profiles
-    tenko-connect-windows/   # Phase 4: DNS/DHCP via PowerShell remoting + LDAP, migration source and coexistence actuator
+    tenko-connect-windows/   # a stub; Phase 4: Windows DNS and DHCP as migration source and coexistence actuator
     tenko-connect-hass/      # reference plugin: Home Assistant inventory source
-    tenko-connect-*/         # migration-source plugins: bind, opnsense, dnsmasq, kea, hyperv, vmware (Phase 4 to 5)
-    tenko-migrate/           # plan/apply/verify pipeline on top of connectors
+    tenko-connect-*/         # planned: migration-source plugins for BIND, OPNsense, dnsmasq, Kea, Hyper-V, vSphere (Phase 4 to 5)
+    tenko-migrate/           # a placeholder; Phase 4: the plan/apply/verify pipeline on top of connectors
     tenko-api/               # axum, OpenAPI, SSE
-    tenko-cli/               # `tenko` CLI, shares the client with the UI
-    tenko-server/            # the binary, role orchestration, Windows SCM / systemd
+    tenko/                   # the binary: `tenko serve` with role orchestration, Windows SCM and systemd, and the CLI
   ui/                        # SolidJS + TypeScript + Vite, embedded via build.rs (ADR 0008)
   fuzz/                      # cargo-fuzz targets per parser
   bench/                     # Phase 0 spikes, dnsperf/perfdhcp scenarios
-  deploy/                    # Dockerfile, compose with macvlan, LXC notes, systemd unit, MSI
+  deploy/                    # installers, Dockerfile, compose labs and macvlan examples, Proxmox LXC script, systemd unit, MSI
+  scripts/                   # the repository's checks, the gate and the release tools
   .github/workflows/         # lint, test, audit, fuzz smoke, release
 ```
 
 ## Engineering rules
 
 - **Commits:** conventional commit messages and small commits. Commit hooks are never bypassed.
-- **Memory safety:** `#![forbid(unsafe_code)]` in every crate, except where an ADR allows `unsafe` (the I/O layer) (API-16).
+- **Memory safety:** `#![forbid(unsafe_code)]` in every crate, except where an ADR allows `unsafe` (API-16); today no crate is exempt.
 - **Fuzzing:** every parser of network data has a `cargo-fuzz` target before it is merged (API-15). Targets live in `fuzz/`, and CI runs a fuzz smoke job.
 - **Dependency and license hygiene:** `cargo-deny` (licenses, advisories, duplicates) and `cargo-audit` run in CI and fail the build when they find problems (API-14). Clippy (pedantic) and the test suite are part of the same gate.
 - **Secrets:** never committed to the repository. A `.env.example` file documents the variables instead.
 - **Test data:** uses documentation ranges only: RFC 5737 (IPv4) and RFC 3849 (IPv6) addresses, with the RFC 7042 documentation MAC range and RFC 2606 reserved names (see CONFORMANCE.md).
-- **Licensing and publication:** license headers are left empty until the license decision (API-20). All code is written as if the repository is public (API-13).
+- **Licensing and publication:** the Business Source License 1.1 in `LICENSE.md` governs the whole repository, and files carry no license header (ADR 0022, API-20). All code is written as if the repository is public (API-13).
