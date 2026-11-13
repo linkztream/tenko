@@ -649,12 +649,12 @@ impl Standing {
         for (node, _, _) in view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)? {
             standing.superseded.insert(NodeId(node));
         }
-        for (serial, revocation, _) in
+        for (serial, _, _) in
             view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
         {
             standing.revoked_serials.insert(serial);
-            standing.revoked_nodes.insert(revocation.node);
         }
+        standing.revoked_nodes = crate::registry::revoked_nodes(view)?.into_iter().collect();
         for (node, record, _) in
             view.scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)?
         {

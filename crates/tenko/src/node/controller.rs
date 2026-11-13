@@ -291,6 +291,7 @@ pub async fn start_with(
         if let Some(layer) = &layer {
             tasks.push(tokio::spawn(renew_identity(
                 Arc::clone(&registry),
+                Arc::clone(&vault),
                 layer.clone(),
                 Arc::clone(&port.resolver),
                 NodePaths::new(&resolved.data_dir),
@@ -323,6 +324,18 @@ pub async fn start_with(
             ),
         ));
     }
+    // A single controller keeps its key in the vault until its first join. Keys of other
+    // nodes, and its own when it was a member before (a restore), leave the vault first: no
+    // running controller uses them, and a copy there could be used by anyone holding one.
+    let was_member = registry
+        .record(resolved.node_id)
+        .await
+        .map_err(|error| start_error(&error))?
+        .is_some();
+    registry
+        .retire_vault_keys(vault.as_ref(), &ctx, was_member, true)
+        .await
+        .map_err(|error| start_error(&error))?;
     let material = registry
         .controller_material(vault.as_ref(), &ctx)
         .await
@@ -339,12 +352,18 @@ pub async fn start_with(
         let client = tenko_cluster::mtls::client_config(registry.ca().root_der(), chain, &key)
             .map_err(|error| start_error(&error))?;
         layer.network().set_tls(client);
-        layer.attach_identity(Arc::new(VaultIdentity::new(
-            Arc::clone(&registry),
-            Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
-            NodePaths::new(&resolved.data_dir),
-            format!("controller-{}", resolved.node_id.0),
-        )));
+        let (port, peers) = (Arc::clone(&resolver), layer.clone());
+        layer.attach_identity(Arc::new(
+            VaultIdentity::new(
+                Arc::clone(&registry),
+                Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+                NodePaths::new(&resolved.data_dir),
+                format!("controller-{}", resolved.node_id.0),
+            )
+            .on_switch(Box::new(move |credentials| {
+                switch_to(&port, &peers, credentials);
+            })),
+        ));
     }
     let in_use = registry
         .in_use(Timestamp::now())
@@ -637,6 +656,12 @@ async fn maintenance(
                 let Some(resolver) = &resolver else {
                     continue;
                 };
+                // Once this controller joined a cluster its identity is node-local; a new
+                // vault key would put one back where every controller can read it.
+                let local = registry.config().local_node;
+                if registry.record(local).await.is_ok_and(|record| record.is_some()) {
+                    continue;
+                }
                 let ctx = RequestCtx::system(SystemComponent::Cluster);
                 match registry.controller_material(vault.as_ref(), &ctx).await {
                     Ok(material) => resolver.set(Some(material)),
@@ -777,6 +802,7 @@ const IDENTITY_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 /// and peers.
 async fn renew_identity(
     registry: Arc<NodeRegistry>,
+    vault: Arc<StoreVault>,
     peers: Peers,
     resolver: Arc<TlsResolver>,
     paths: NodePaths,
@@ -789,8 +815,59 @@ async fn renew_identity(
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             _ = tick.tick() => {}
         }
-        if let Err(error) = renew_once(&registry, &peers, &resolver, &paths).await {
+        if let Err(error) =
+            retire_vault_key(&registry, vault.as_ref(), &peers, &resolver, &paths).await
+        {
+            tracing::warn!(code = %error.code(), "the key this controller had in the vault could not be retired yet: {}", error.detail());
+        }
+        if let Err(error) = renew_once(&registry, &peers, &resolver, &paths, false).await {
             tracing::warn!(code = %error.code(), "the cluster certificate of this controller could not be renewed: {}", error.detail());
+        }
+    }
+}
+
+/// Takes this member's key out of the replicated vault (installations whose first
+/// controller moved its vault-held key to `<data_dir>/node/` before keys were retired): when
+/// the identity under `<data_dir>/node/` is still the vault's copy, it is renewed first, so
+/// the controller presents a key no vault holds; then the vault's row goes with its secret
+/// and its certificate is revoked. Runs at the start of every member and with every renewal
+/// check: safe to repeat (nothing is left to do once the row is gone) and to interrupt (a
+/// renewal written but not yet retired is retired at the next run). The keys of other nodes
+/// go too while this controller is the only voter.
+async fn retire_vault_key(
+    registry: &NodeRegistry,
+    vault: &StoreVault,
+    peers: &Peers,
+    resolver: &TlsResolver,
+    paths: &NodePaths,
+) -> Result<(), ClusterError> {
+    let local = registry.config().local_node;
+    if let Some(serial) = registry.vault_serial(local).await?
+        && Credentials::load(paths)?.info.serial == serial
+    {
+        renew_once(registry, peers, resolver, paths, true).await?;
+    }
+    let membership = peers.store().membership();
+    let alone = membership.voters.len() == 1 && membership.learners.is_empty();
+    let ctx = RequestCtx::system(SystemComponent::Cluster);
+    registry.retire_vault_keys(vault, &ctx, true, alone).await?;
+    Ok(())
+}
+
+/// Presents `credentials` on the cluster port and to the peers from now on.
+fn switch_to(resolver: &TlsResolver, peers: &Peers, credentials: &Credentials) {
+    match TlsMaterial::from_der(
+        credentials.chain.clone(),
+        &credentials.key,
+        CertSource::Inline,
+    ) {
+        Ok(material) => resolver.set(Some(material)),
+        Err(error) => tracing::error!("the new cluster certificate cannot be presented: {error}"),
+    }
+    match credentials.client_config() {
+        Ok(client) => peers.network().set_tls(client),
+        Err(error) => {
+            tracing::error!(code = %error.code(), "the new cluster certificate cannot be used toward the peers: {}", error.detail());
         }
     }
 }
@@ -800,10 +877,11 @@ async fn renew_once(
     peers: &Peers,
     resolver: &TlsResolver,
     paths: &NodePaths,
+    force: bool,
 ) -> Result<(), ClusterError> {
     let current = Credentials::load(paths)?;
     let now = Timestamp::now();
-    if !current.needs_renewal(now) {
+    if !force && !current.needs_renewal(now) {
         return Ok(());
     }
     let (key, csr) = generate_csr()?;
@@ -811,12 +889,7 @@ async fn renew_once(
         .renew(current.identity.node, &current.info.serial, &csr, now)
         .await?;
     let renewed = current.renewed(paths, issued.chain, key)?;
-    resolver.set(Some(TlsMaterial::from_der(
-        renewed.chain.clone(),
-        &renewed.key,
-        CertSource::Inline,
-    )?));
-    peers.network().set_tls(renewed.client_config()?);
+    switch_to(resolver, peers, &renewed);
     tracing::info!(not_after = %renewed.info.not_after, "renewed the cluster certificate of this controller");
     Ok(())
 }
@@ -875,17 +948,7 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
         Ok(view) if generation.fence.is_none() && generation.lineage.tip().is_some() => {
             let membership = layer.store().membership();
             // Neither rejoined (a member again) nor removed (revoked).
-            let revoked: Vec<NodeId> = view
-                .scan_typed(
-                    &tenko_cluster::model::tables::REVOCATIONS,
-                    KeyRange::all(),
-                    usize::MAX,
-                    false,
-                )
-                .unwrap_or_default()
-                .into_iter()
-                .map(|(_, revocation, _)| revocation.node)
-                .collect();
+            let revoked = tenko_cluster::registry::revoked_nodes(view.as_ref()).unwrap_or_default();
             view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)
                 .unwrap_or_default()
                 .into_iter()

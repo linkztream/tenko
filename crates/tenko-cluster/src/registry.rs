@@ -619,11 +619,8 @@ impl NodeRegistry {
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
         let count = rows.len();
-        self.revoked_nodes.store(Arc::new(
-            rows.iter()
-                .map(|(_, revocation, _)| revocation.node)
-                .collect(),
-        ));
+        self.revoked_nodes
+            .store(Arc::new(revoked_nodes(view.as_ref())?));
         self.revoked
             .replace(rows.into_iter().map(|(serial, _, _)| serial));
         Ok(count)
@@ -861,6 +858,99 @@ impl NodeRegistry {
             })?;
         let key = vault.get_system(ctx, record.key).await?;
         Ok((chain, key))
+    }
+
+    /// The serial of the cluster-port certificate that the vault keeps for `node`, if it
+    /// keeps one.
+    ///
+    /// # Errors
+    ///
+    /// A store error, or `cluster.internal` for a stored chain that does not read.
+    pub async fn vault_serial(&self, node: NodeId) -> Result<Option<String>, ClusterError> {
+        let view = self.store.read(ReadConsistency::Local).await?;
+        view.get_typed(&tables::CONTROLLER_CERTS, &node.0)?
+            .map(|(record, _)| leaf_of(&record).map(|info| info.serial))
+            .transpose()
+    }
+
+    /// Takes cluster-port keys out of the replicated vault. A controller's key belongs under
+    /// `<data_dir>/node/`, on its own host, once its identity moved there at the first join;
+    /// a copy in the vault is readable by every controller and by every copy of the data
+    /// directory, so anyone holding one could sign and connect as that controller. Retired
+    /// are this controller's row when `own` (its identity is node-local now, or it was a
+    /// member before a restore), and the rows of every other node when `others` (this is
+    /// the only voter, so no running controller uses them). Each retired row goes with its
+    /// vault secret, its certificate is revoked (a controller's revocation is kept for
+    /// good), and its serial leaves the node record, in one write per row. Safe to repeat:
+    /// a row that is gone is not touched again. Returns the revoked serials.
+    ///
+    /// # Errors
+    ///
+    /// A store or codec error; a row that changed meanwhile is left for the next call.
+    pub async fn retire_vault_keys(
+        &self,
+        vault: &dyn Vault,
+        ctx: &RequestCtx,
+        own: bool,
+        others: bool,
+    ) -> Result<Vec<String>, ClusterError> {
+        let local = self.config.local_node;
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let rows = view.scan_typed(
+            &tables::CONTROLLER_CERTS,
+            KeyRange::all(),
+            usize::MAX,
+            false,
+        )?;
+        let mut revoked = Vec::new();
+        for (node, record, revision) in rows {
+            let node = NodeId(node);
+            if !(if node == local { own } else { others }) {
+                continue;
+            }
+            let info = leaf_of(&record)?;
+            let mut batch = WriteBatch::for_request(ctx);
+            batch.expect_typed(&tables::CONTROLLER_CERTS, &node.0, Some(revision));
+            batch.delete_typed(&tables::CONTROLLER_CERTS, &node.0);
+            vault.stage_delete(&mut batch, ctx, record.key);
+            batch.put_typed(
+                &tables::REVOCATIONS,
+                &info.serial,
+                &Revocation {
+                    node,
+                    revoked_at: ctx.now,
+                    not_after: info.not_after,
+                    controller: true,
+                },
+            )?;
+            if let Some((mut held, at)) = view.get_typed(&tables::NODES, &node.0)?
+                && held.serials.iter().any(|cert| cert.serial == info.serial)
+            {
+                held.serials.retain(|cert| cert.serial != info.serial);
+                batch.expect_typed(&tables::NODES, &node.0, Some(at));
+                batch.put_typed(&tables::NODES, &node.0, &held)?;
+            }
+            batch.audit(
+                AuditDraft::success(actions::CONTROLLER_CERT, vec![ObjectRef::node(node)])
+                    .with_context("serial", info.serial.clone())
+                    .with_context(
+                        "retired",
+                        "the key left the vault; the certificate is revoked",
+                    ),
+            );
+            match self.store.propose(batch).await {
+                Ok(_) => {
+                    tracing::info!(node = %node, serial = %info.serial, "a cluster-port key left the replicated vault; its certificate is revoked");
+                    revoked.push(info.serial);
+                }
+                Err(StoreError::PreconditionFailed(_)) => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        if !revoked.is_empty() {
+            self.revoked.insert(revoked.iter().cloned());
+        }
+        Ok(revoked)
     }
 
     async fn reusable(
@@ -1739,15 +1829,15 @@ impl NodeRegistry {
     async fn apply_revocations(&self, known: &mut HashSet<String>) -> Result<(), ClusterError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
+        let nodes = revoked_nodes(view.as_ref())?;
         drop(view);
+        // A node still enrolled keeps its connections: only one of its certificates was
+        // revoked, and the handshake refuses that one.
         let fresh: BTreeSet<NodeId> = rows
             .iter()
             .filter(|(serial, _, _)| !known.contains(serial))
             .map(|(_, revocation, _)| revocation.node)
-            .collect();
-        let nodes: HashSet<NodeId> = rows
-            .iter()
-            .map(|(_, revocation, _)| revocation.node)
+            .filter(|node| nodes.contains(node))
             .collect();
         let serials: HashSet<String> = rows.into_iter().map(|(serial, _, _)| serial).collect();
         // The verifier first: a handshake after this point is refused. A connection whose
@@ -1768,7 +1858,8 @@ impl NodeRegistry {
         Ok(())
     }
 
-    /// Whether `node` was revoked: a row of `cluster.revocations` names it. A controller
+    /// Whether `node` was revoked: a row of `cluster.revocations` names it and it has no
+    /// node record ([`revoked_nodes`]). A controller
     /// that is not enrolled through a token has no node record, so the Raft service checks
     /// this instead of the record for a caller without one.
     pub fn is_revoked_node(&self, node: NodeId) -> bool {
@@ -2655,6 +2746,43 @@ impl StepHandler for WriteStep {
     }
 }
 
+/// The revoked nodes of `view`: those a revocation names and that have no node record. A
+/// revocation of one certificate of a node that is still enrolled (a controller's key that
+/// left the vault, `NodeRegistry::retire_vault_keys`) does not revoke the node; revoking a
+/// node removes its record in the same write.
+///
+/// # Errors
+///
+/// A store error.
+pub fn revoked_nodes(view: &dyn ReadView) -> Result<HashSet<NodeId>, ClusterError> {
+    let mut nodes = HashSet::new();
+    for (_, revocation, _) in
+        view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+    {
+        if !nodes.contains(&revocation.node)
+            && view
+                .get_typed(&tables::NODES, &revocation.node.0)?
+                .is_none()
+        {
+            nodes.insert(revocation.node);
+        }
+    }
+    Ok(nodes)
+}
+
+/// What the leaf of a stored cluster-port chain says.
+fn leaf_of(record: &ControllerCertRecord) -> Result<crate::ca::CertInfo, ClusterError> {
+    let chain = CertificateDer::pem_slice_iter(record.chain_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| {
+            ClusterError::internal(format!("the controller certificate is unreadable: {error}"))
+        })?;
+    let leaf = chain
+        .first()
+        .ok_or_else(|| ClusterError::internal("the controller certificate is empty"))?;
+    Ok(crate::ca::CertInfo::from_der(leaf)?)
+}
+
 /// Stages the revocation of `node` in `batch`: its node record and name go, and every
 /// certificate the record names is put on `cluster.revocations` until it would expire.
 /// Returns the revoked serials.
@@ -2760,6 +2888,214 @@ mod tests {
             RegistryConfig::new(NodeId(1)),
         );
         (store, registry)
+    }
+
+    /// A registry over a store and vault of its own, with the vault returned.
+    async fn registry_with_vault() -> (
+        Arc<tenko_store::mem::MemStore>,
+        Arc<tenko_vault::MemVault>,
+        Arc<NodeRegistry>,
+    ) {
+        let store = Arc::new(tenko_store::mem::MemStore::default());
+        let vault = Arc::new(tenko_vault::MemVault::with_store(store.clone()));
+        let ca = InternalCa::load_or_init(
+            &*store,
+            &*vault,
+            &RequestCtx::system(SystemComponent::Cluster),
+            crate::ca::CaPolicy::default(),
+        )
+        .await
+        .expect("CA");
+        let registry = NodeRegistry::new(
+            store.clone() as Arc<dyn Store>,
+            Arc::new(ca),
+            RegistryConfig::new(NodeId(1)),
+        );
+        (store, vault, registry)
+    }
+
+    /// Records node 1 as a controller holding `chain`'s certificate: the first controller
+    /// after its first join, before keys left the vault.
+    async fn record_member(store: &tenko_store::mem::MemStore, chain: &[CertificateDer<'_>]) {
+        let info = crate::ca::CertInfo::from_der(&chain[0]).expect("certificate");
+        let certificate = crate::peers::certificate_ref(&info);
+        let record = NodeRecord {
+            id: NodeId(1),
+            name: "controller-1".to_owned(),
+            roles: vec![Role::Controller],
+            address: None,
+            vrf: None,
+            certificate: certificate.clone(),
+            serials: vec![certificate],
+            enrolled_at: Timestamp::now(),
+            enrollment: Uuid::nil(),
+            enrolled_by: None,
+            renewed_at: None,
+            last_seen: None,
+            version: None,
+            protocol: crate::model::ProtocolState::default(),
+        };
+        let mut batch = WriteBatch::for_request(&RequestCtx::system(SystemComponent::Cluster));
+        batch
+            .put_typed(&tables::NODES, &1, &record)
+            .expect("record");
+        store.propose(batch).await.expect("write");
+    }
+
+    #[tokio::test]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one sequence: the key, its retirement, and every place it must be gone from"
+    )]
+    async fn a_retired_vault_key_is_gone_revoked_and_signs_nothing() {
+        use crate::generation::{
+            ForkPoint, GenerationBody, GenerationRecord, LAYOUT, Lineage, Standing,
+        };
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let (store, vault, registry) = registry_with_vault().await;
+        let (chain, key) = registry
+            .controller_identity(&*vault, &ctx)
+            .await
+            .expect("the vault identity");
+        record_member(&store, &chain).await;
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        let (row, _) = view
+            .get_typed(&tables::CONTROLLER_CERTS, &1)
+            .expect("read")
+            .expect("a vault-held key");
+        drop(view);
+        let old = GenerationRecord::sign(
+            &GenerationBody {
+                layout: LAYOUT,
+                number: 1,
+                parent: None,
+                forced: NodeId(1),
+                fork: ForkPoint {
+                    term: 1,
+                    leader: 1,
+                    index: 1,
+                    revision: Revision(1),
+                    audit: tenko_core::audit::ChainHead::default(),
+                },
+                superseded: vec![NodeId(2)],
+                at: Timestamp::now(),
+                nonce: tenko_core::serde_util::HexBytes(vec![1; 16]),
+            },
+            &chain,
+            &key,
+        )
+        .expect("sign");
+
+        let revoked = registry
+            .retire_vault_keys(&*vault, &ctx, true, true)
+            .await
+            .expect("retire");
+        assert_eq!(revoked.len(), 1);
+        // Nothing of the key is left in the replicated store: no row names it, and the
+        // vault has no secret under its reference.
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        assert_eq!(
+            view.scan_typed(
+                &tables::CONTROLLER_CERTS,
+                KeyRange::all(),
+                usize::MAX,
+                false
+            )
+            .expect("scan")
+            .len(),
+            0
+        );
+        let gone = vault
+            .get_system(&ctx, row.key)
+            .await
+            .expect_err("the secret is gone");
+        assert!(matches!(gone, VaultError::NotFound { .. }), "{gone:?}");
+        let (revocation, _) = view
+            .get_typed(&tables::REVOCATIONS, &revoked[0])
+            .expect("read")
+            .expect("revoked");
+        assert!(revocation.controller);
+        let (member, _) = view
+            .get_typed(&tables::NODES, &1)
+            .expect("read")
+            .expect("record");
+        assert!(member.serials.iter().all(|cert| cert.serial != revoked[0]));
+        // The node itself is not revoked: it keeps its record and its new certificate.
+        registry.load_revocations().await.expect("load");
+        assert!(!registry.is_revoked_node(NodeId(1)));
+        assert!(
+            revoked_nodes(view.as_ref())
+                .expect("revoked nodes")
+                .is_empty()
+        );
+        // A record signed with the old key is refused as revoked.
+        let standing = Standing::read(
+            view.as_ref(),
+            [NodeId(1)].into_iter().collect(),
+            Timestamp::now(),
+        )
+        .expect("standing");
+        let refused = Lineage::default()
+            .admit(&[old], registry.ca().root_der(), &standing)
+            .expect_err("a revoked signer");
+        assert!(refused.detail().contains("revoked"), "{}", refused.detail());
+        drop(view);
+        // The revocation of a controller outlives its certificate's end.
+        let far = Timestamp(revocation.not_after.0 + time::Duration::days(1));
+        registry.prune_fenced(far, None).await.expect("prune");
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        assert!(
+            view.get_typed(&tables::REVOCATIONS, &revoked[0])
+                .expect("read")
+                .is_some()
+        );
+        // Again: nothing left to do.
+        assert_eq!(
+            registry
+                .retire_vault_keys(&*vault, &ctx, true, true)
+                .await
+                .expect("again"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_key_from_before_the_rotation_does_not_come_back_with_a_restore() {
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        // The store of a backup taken after the first join, before keys left the vault.
+        let (store, vault, registry) = registry_with_vault().await;
+        let (chain, _) = registry
+            .controller_identity(&*vault, &ctx)
+            .await
+            .expect("the vault identity");
+        let old = crate::ca::CertInfo::from_der(&chain[0])
+            .expect("certificate")
+            .serial;
+        record_member(&store, &chain).await;
+        // The restored single controller's start: a member before, so its key leaves first.
+        let was_member = registry.record(NodeId(1)).await.expect("read").is_some();
+        let revoked = registry
+            .retire_vault_keys(&*vault, &ctx, was_member, true)
+            .await
+            .expect("retire");
+        assert_eq!(revoked, vec![old.clone()]);
+        let material = registry
+            .controller_material(&*vault, &ctx)
+            .await
+            .expect("a new certificate");
+        let (chain, _) = registry
+            .controller_identity(&*vault, &ctx)
+            .await
+            .expect("identity");
+        let now = crate::ca::CertInfo::from_der(&chain[0])
+            .expect("certificate")
+            .serial;
+        assert_ne!(now, old, "the old key is not used again");
+        drop(material);
+        assert!(
+            registry.revoked.is_revoked(&old),
+            "the running set refuses it at once"
+        );
     }
 
     /// The failed `cluster.node.enroll` records: their code and context.

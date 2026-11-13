@@ -93,7 +93,7 @@ use uuid::Uuid;
 
 pub use self::{
     generations::{GenerationState, PUSH_INTERVAL},
-    identity::{ControllerIdentity, NodeDirIdentity, VaultIdentity, certificate_ref},
+    identity::{ControllerIdentity, NodeDirIdentity, Switch, VaultIdentity, certificate_ref},
     network::{MAX_APPEND_BYTES, PeerNetwork, PeerTimings},
 };
 use crate::{
@@ -2167,12 +2167,14 @@ fn revoked_in(view: &dyn ReadView, node: NodeId, serial: &str) -> Result<bool, C
     revoked_node(view, node)
 }
 
-/// Whether a row of `cluster.revocations` names `node`.
+/// Whether `node` is revoked: a row of `cluster.revocations` names it and it has no node
+/// record (`crate::registry::revoked_nodes`).
 fn revoked_node(view: &dyn ReadView, node: NodeId) -> Result<bool, ClusterError> {
-    Ok(view
-        .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
-        .iter()
-        .any(|(_, revocation, _)| revocation.node == node))
+    Ok(view.get_typed(&tables::NODES, &node.0)?.is_none()
+        && view
+            .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+            .iter()
+            .any(|(_, revocation, _)| revocation.node == node))
 }
 
 #[cfg(test)]

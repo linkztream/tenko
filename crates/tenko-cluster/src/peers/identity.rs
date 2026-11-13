@@ -5,9 +5,12 @@
 //! A controller that joined keeps its identity under `<data_dir>/node/` from its
 //! enrollment, like a probe ([`NodeDirIdentity`]). The first controller of an installation
 //! starts with its cluster-port key as a system secret of the vault (`cluster.node_key`);
-//! when the first peer joins, [`VaultIdentity::portable`] writes that certificate and key
-//! to `<data_dir>/node/` (the key sealed with DPAPI on Windows, mode 0600 elsewhere), and
-//! from then on it starts like every other member.
+//! when the first peer joins, [`VaultIdentity::portable`] gives it a fresh key and
+//! certificate that only `<data_dir>/node/` holds (the key sealed with DPAPI on Windows,
+//! mode 0600 elsewhere), switches the running controller to them, and takes the old key out
+//! of the vault with its certificate revoked: a key in the replicated vault is readable by
+//! every controller and every copy of the data directory. From then on it starts like every
+//! other member.
 
 use std::sync::Arc;
 
@@ -81,12 +84,17 @@ impl ControllerIdentity for NodeDirIdentity {
     }
 }
 
+/// What the running controller does with the identity it moved to: present it on its port
+/// and to its peers.
+pub type Switch = Box<dyn Fn(&Credentials) + Send + Sync>;
+
 /// The identity of the first controller while its key is a system secret of the vault.
 pub struct VaultIdentity {
     registry: Arc<NodeRegistry>,
     vault: Arc<dyn Vault>,
     paths: NodePaths,
     name: String,
+    switch: Option<Switch>,
 }
 
 impl std::fmt::Debug for VaultIdentity {
@@ -111,7 +119,16 @@ impl VaultIdentity {
             vault,
             paths,
             name: name.into(),
+            switch: None,
         }
+    }
+
+    /// Calls `switch` with the new identity once it is written, before the old key is
+    /// revoked.
+    #[must_use]
+    pub fn on_switch(mut self, switch: Switch) -> Self {
+        self.switch = Some(switch);
+        self
     }
 
     fn local(&self) -> NodeId {
@@ -129,15 +146,13 @@ impl ControllerIdentity for VaultIdentity {
             }
         }
         let ctx = RequestCtx::system(SystemComponent::Cluster);
-        let (chain, key) = self
-            .registry
-            .controller_identity(self.vault.as_ref(), &ctx)
-            .await?;
-        let leaf = chain
-            .first()
-            .ok_or_else(|| ClusterError::internal("the controller certificate is empty"))?;
-        let info = CertInfo::from_der(leaf)?;
         let ca = self.registry.ca();
+        let issued = ca.issue_node_cert_with_key_for(
+            self.local(),
+            [Role::Controller].into_iter().collect(),
+            ctx.now,
+        )?;
+        let (chain, key, info) = (issued.chain, issued.key, issued.info);
         let credentials = Credentials {
             identity: NodeIdentity {
                 node: self.local(),
@@ -156,10 +171,18 @@ impl ControllerIdentity for VaultIdentity {
             ca_root: ca.root_der().clone(),
         };
         credentials.save(&self.paths)?;
+        if let Some(switch) = &self.switch {
+            switch(&credentials);
+        }
+        // A failure here leaves the old key in the vault; the next start retires it.
+        self.registry
+            .retire_vault_keys(self.vault.as_ref(), &ctx, true, false)
+            .await?;
         tracing::info!(
             node = %self.local(),
             dir = %self.paths.root().display(),
-            "the cluster identity of this controller moved out of the vault for the controller cluster"
+            "this controller has a new cluster identity of its own under its data directory; \
+             the key it had in the vault is gone and its certificate revoked"
         );
         Ok(certificate_ref(&info))
     }

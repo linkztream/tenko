@@ -51,7 +51,6 @@ use crate::{
         RECORD_METADATA, Relation, SUPERSEDED, Signed, Standing, codes, decode_lineage,
         encode_lineage, suggested_winner,
     },
-    model::tables,
     mtls::PeerInfo,
     proto::v1,
     server::status_of,
@@ -620,11 +619,7 @@ impl Peers {
 
     async fn push_targets(&self) -> Result<Vec<NodeId>, ClusterError> {
         let view = self.store().read(ReadConsistency::Local).await?;
-        let revoked: HashSet<NodeId> = view
-            .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
-            .into_iter()
-            .map(|(_, revocation, _)| revocation.node)
-            .collect();
+        let revoked = crate::registry::revoked_nodes(view.as_ref())?;
         let informed = lock(&self.generations().informed).clone();
         Ok(view
             .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
