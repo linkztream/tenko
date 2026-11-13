@@ -741,7 +741,7 @@ While a plugin is not running, calls to its instance fail with `connect.plugin.u
 
 There are two kinds of plugins.
 
-**Bundled plugins** are part of the `tenko` binary. The host starts one by running its own executable as `tenko plugin run <name>`, exactly as it would start a third-party plugin, so the contract is exercised in every installation and the home user installs nothing extra. Standard input and output of that command carry the handshake; it is not meant to be run by hand. The sample plugin is bundled, and so are the reference plugins built on the same SDK: `proxmox` (Proxmox VE inventory) and `hass` (Home Assistant inventory), described for operators in [connectors.md](connectors.md). `tenko plugin list` shows the bundled set of a build. Their sources (`crates/tenko-connect-proxmox`, `crates/tenko-connect-hass`) are complete examples of inventory plugins that read a web API: settings with the TLS properties of `tenko_connect::sdk::http`, a secret per call, paging, vendor facts and fixture-based tests against a mock of the remote system.
+**Bundled plugins** are part of the `tenko` binary. The host starts one by running its own executable as `tenko plugin run <name>`, exactly as it would start a third-party plugin, so the contract is exercised in every installation and the home user installs nothing extra. Standard input and output of that command carry the handshake; it is not meant to be run by hand. The sample plugin is bundled, and so are the reference plugins built on the same SDK: `proxmox` (Proxmox VE inventory) and `hass` (Home Assistant inventory), described for operators in [connectors.md](connectors.md), and `unifi` (UniFi Network, inventory and network controller), in [connectors-unifi.md](connectors-unifi.md). `tenko plugin list` shows the bundled set of a build. Their sources (`crates/tenko-connect-proxmox`, `crates/tenko-connect-hass`) are complete examples of inventory plugins that read a web API: settings with the TLS properties of `tenko_connect::sdk::http`, a secret per call, paging, vendor facts and fixture-based tests against a mock of the remote system.
 
 **Installed plugins** live in a directory per plugin under the plugin directory, by default `<data_dir>/plugins/`:
 
@@ -807,7 +807,7 @@ Plugins run with Tenko's identity on the host. A plugin can read the files that 
 
 - Install and publish plugins from trusted sources only.
 - Contact only the network targets the manifest declares. Add a target to the manifest before you add a connection to the code.
-- Keep nothing on disk but temporary files, and remove them. Persistent state belongs to Tenko; carry it in cursors.
+- Keep nothing on disk but temporary files, and remove them. Persistent state belongs to Tenko; carry it in cursors. Under the shipped systemd unit every path the service can write is mounted `noexec` except the update layout and `<data_dir>/plugins`, so a plugin cannot execute a file it wrote elsewhere, in `/tmp` for example.
 - Never weaken TLS verification silently. If you offer a setting to turn certificate verification off, make it explicit, default to verifying, and say in the `Check` detail when it is off. Honor the certificate locations the host passes (`SSL_CERT_FILE`, `SSL_CERT_DIR`).
 - Never put secrets in settings, logs, status messages or answers (section 7).
 - Treat everything the remote system returns as untrusted input: bound sizes, tolerate missing and unexpected members, and do not pass it to a shell, a file path or a query unescaped.

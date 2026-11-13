@@ -4,7 +4,7 @@ This page describes how the controllers of Tenko DDI hand configuration, command
 
 The transport, enrollment, certificates and heartbeats are in [cluster.md](cluster.md); the scanner that the probe runs, the `[scan]` section and the API of scans are in [scanning.md](scanning.md); what the reconciler does with the batches is in [reconciliation.md](reconciliation.md).
 
-Terms used below: a **node** is an enrolled data-plane installation; today only the role `probe` uses configuration and commands. The **subset** of a node is the set of configuration rows that its roles receive. A **revision** is a revision of the replicated store of the controllers; it counts every committed write, not only those of one node. A **frame** is one `ConfigDelta` message of the stream; a **message** is one revision's worth of configuration, sent as one or more frames.
+Terms used below: a **node** is an enrolled data-plane installation; today only the role `probe` takes configuration and commands over the streams; the `dns` and `dhcp` roles of a controller's own process take node commands that the API runs in place and records in the same table (`dns.cache.flush`, `dns.log.read`, `dns.log.stop`, `dns.log.start`, `dns.stats`, `dns.recursion.status`, `dns.recursion.prime`, `dns.infra.list`, `dns.infra.flush`, `dhcp.leases.list`, `dhcp.lease.release`, `dhcp.history.read`, `dhcp.stats`; section 5). The **subset** of a node is the set of configuration rows that its roles receive. A **revision** is a revision of the replicated store of the controllers; it counts every committed write, not only those of one node. A **frame** is one `ConfigDelta` message of the stream; a **message** is one revision's worth of configuration, sent as one or more frames.
 
 Contents:
 
@@ -14,7 +14,7 @@ Contents:
 4. [On the node](#4-on-the-node)
 5. [Commands and results](#5-commands-and-results)
 6. [Secrets](#6-secrets)
-7. [Ingest cursors](#7-ingest-cursors)
+7. [Cursors](#7-cursors)
 8. [The relay buffer](#8-the-relay-buffer)
 9. [The kill switch](#9-the-kill-switch)
 10. [What a partition does](#10-what-a-partition-does)
@@ -198,7 +198,7 @@ The leader runs a service `scan.housekeeping` every hour. It removes finished co
 
 ## 6. Secrets
 
-The only purpose today is `snmp`, used by nodes with the role `probe`. A node cannot ask for a purpose its roles do not use (403 `node.config.secrets_purpose`).
+The only purpose a node uses today is `snmp` (role `probe`); the purposes `tsig`, `dnssec`, `krb` (role `dns`) and `dhcp.failover` (role `dhcp`) are declared for the nodes of Slice 12. A node cannot ask for a purpose its roles do not use (403 `node.config.secrets_purpose`).
 
 A configuration names operator secrets of the vault by id; for a probe the scan control derives the list from `auth_secret` and `privacy_secret` of the SNMP devices and stores it in the field `secrets` of the row, each with the purpose `snmp`. The node asks `Config.Secrets` with the purposes it needs, and the controller answers per request:
 

@@ -270,6 +270,7 @@ Each method has a loop of its own. After the start of the scanner it waits for i
 | `llmnr` | 40 seconds |
 | `tcp_connect` | 90 seconds (and not before the other methods have reported, section 3.4) |
 | `reverse_dns` | 120 seconds (and not before the other methods have reported) |
+| the raw-socket methods | 60 seconds |
 
 A method that is disabled or unavailable has no loop. The interval of a method is `interval_secs`, 30 seconds to seven days (section 12).
 
@@ -308,7 +309,7 @@ A run that takes longer than the deadline of its method is stopped. The scanner 
 |---|---|
 | `arp`, `nd` | 60 seconds |
 | `mdns`, `llmnr` | 30 minutes |
-| `icmp`, `tcp_connect`, `reverse_dns`, `snmp` | 1 hour |
+| `icmp`, `tcp_connect`, `reverse_dns`, `snmp` and the raw-socket methods | 1 hour; `lldp` and `dhcp_snoop` their listen window plus 30 seconds |
 
 ## 5. Blackout windows
 
@@ -338,7 +339,7 @@ The times are wall-clock times in `timezone`, an IANA name; the default is the t
 
 What a window does:
 
-- It holds every method that sends packets: all of them except `arp` and `nd` (and the raw method `lldp`, which only listens). A scheduled run that falls due inside a window does not start; the method shows the state `blackout` and tries again a second after the window ends.
+- It holds every method that sends packets: all of them except `arp` and `nd` (and the raw methods `lldp` and `dhcp_snoop`, which only listen). A scheduled run that falls due inside a window does not start; the method shows the state `blackout` and tries again a second after the window ends.
 - A run in progress when a window begins is stopped at that moment. It is recorded as `canceled` with the error `stopped by a blackout window`, and what it saw goes out as a batch that is not complete.
 - An on-demand run inside a window is refused with `scan.blackout`; `--ignore-blackout` runs it anyway, and then a window that begins during the run does not stop it either (section 7.2).
 - `tenko node scan status` shows the windows, their time zone and, while one is in force, when it ends.
@@ -362,7 +363,7 @@ The profiles map to the settings of the probe's file like this:
 
 ## 7. Kill switch, on-demand runs and status
 
-The commands of this section run on the probe node and read its configuration the way `tenko node status` does. They take `--config FILE` (or `TENKO_CONFIG`), `--data-dir PATH` and `--json`. SCAN-09 asks for on-demand scans from the UI, the API and the CLI. Sections 7.1 to 7.4 describe the CLI on the probe; sections 7.5 to 7.7 describe what the controllers add: the configuration of a probe, the kill switch from the API and scans on demand as jobs. A probe reads the `[scan]` section of its own `tenko.toml` for the CLI commands, also when the controllers hold a configuration for it (section 7.5).
+The commands of this section run on the probe node and read its configuration the way `tenko node status` does, as the account that owns the data directory: run as root over the service account's files they exit with status 2 and `exec.unsafe_owner` and print the command to run instead (for example `runuser -u tenko -- tenko node scan status`; [backup.md](backup.md) section 3). They take `--config FILE` (or `TENKO_CONFIG`), `--data-dir PATH` and `--json`. SCAN-09 asks for on-demand scans from the UI, the API and the CLI. Sections 7.1 to 7.4 describe the CLI on the probe; sections 7.5 to 7.7 describe what the controllers add: the configuration of a probe, the kill switch from the API and scans on demand as jobs. A probe reads the `[scan]` section of its own `tenko.toml` for the CLI commands, also when the controllers hold a configuration for it (section 7.5).
 
 ### 7.1 The kill switch
 
@@ -381,7 +382,7 @@ The commands of this section run on the probe node and read its configuration th
 tenko node scan run <method> [--target ADDRESS|PREFIX] [--ignore-blackout] [--dry-run] [--json]
 ```
 
-`<method>` is one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`; hyphens and underscores are the same. The command runs the method once, now, outside its schedule:
+`<method>` is any method of section 2, the raw-socket ones included; hyphens and underscores are the same. A raw method on a host without the capability is refused with `scan.unavailable` (exit status 2), a disabled one with `scan.disabled`. The command runs the method once, now, outside its schedule:
 
 - It runs in the process of the command, with a scanner of its own that uses the same `[scan]` section, the known addresses from `known.json` and a limiter of its own. It does not write the status file or `known.json`.
 - It checks the same rules as the schedule does: the method must be available on the host, switched on in `[scan]` and allowed by `active`, the kill switch must be off, and no blackout window may be in force unless `--ignore-blackout` is given.
@@ -444,7 +445,7 @@ The rows of `tcp_syn`, `os_fingerprint`, `lldp` and `dhcp_snoop` look like the o
 | `capabilities` | `raw_sockets` with `raw_detail` (section 9), and how ICMP is sent: `datagram_socket`, `ping_command` or `unavailable` |
 | `known_addresses` | Number of known addresses that count now |
 | `methods` | For each method: `method`, `enabled`, `availability` (`ready`, or `unavailable` with a `reason`), `state`, `interval_secs`, `ttl_secs`, `next_run` and `last_run` |
-| `last_run` | `started_at`, `finished_at`, `outcome`, `sightings`, `probes`, `queued` (whether a batch was handed on), `on_demand`, `target`, `error` (what failed or stopped the run), `delivery_error` (why the batch could not be handed on) and `notes` (devices that did not answer and so on, without secrets) |
+| `last_run` | `started_at`, `finished_at`, `outcome`, `sightings`, `probes`, `queued` (whether a batch was handed on), `batches` (how many batches the run queued; a sink splits a batch that is too large), `on_demand`, `target`, `error` (what failed or stopped the run), `delivery_error` (why the batch could not be handed on) and `notes` (devices that did not answer and so on, without secrets) |
 
 ### 7.4 States and outcomes
 
@@ -521,7 +522,7 @@ The switch is a command that the controllers deliver to the probe ([node-sync.md
 | Field | Meaning | Default |
 |---|---|---|
 | `target` | `{"kind", "value"}`. `kind` is `prefix` (the id of a prefix of IPAM), `host` (the id of a host, scanning its addresses), `address` (`192.0.2.10`) or `network` (`192.0.2.0/28`) | Required |
-| `kinds` | What to run: `passive_refresh` (`arp`, `nd`, `mdns`, `llmnr`, `reverse_dns`), `port_scan` (`tcp_connect`), `snmp_poll` (`snmp`) and `os_fingerprint` (`os_fingerprint`, which is a raw-socket method that does not run yet, section 9) | `["passive_refresh"]` |
+| `kinds` | What to run: `passive_refresh` (`arp`, `nd`, `mdns`, `llmnr`, `reverse_dns`), `port_scan` (`tcp_connect`), `snmp_poll` (`snmp`) and `os_fingerprint` (`os_fingerprint`, a raw-socket method that needs `CAP_NET_RAW`, section 9) | `["passive_refresh"]` |
 | `vrf` | The VRF of an `address` or `network` target. A `prefix` or `host` target brings its own | The default VRF |
 | `deadline_secs` | How long the job waits for the probes, 30 to 3,600 (422 `scan.job.invalid` outside) | 600 |
 
@@ -774,4 +775,3 @@ The last column is the exit status of `tenko node scan run` when it ends with th
 - **An IPv6 neighbor-discovery sweep.** `arp_sweep` covers IPv4; IPv6 is left to the passive `nd` method. A neighbor-solicitation sweep and an IPv6 SYN scan are follow-ups.
 - **The DHCPv4 codec for the snoop.** `dhcp_snoop` parses the four fields it needs locally; once `tenko-dhcp`'s DHCPv4 codec merges, the snoop calls it instead, and full lease facts come with Tenko DHCP.
 - **A fresher OUI registry at every release**: the table is regenerated by hand today (section 11); a release step could do it.
-- **The scan scope for the orphan rule.** The probes report their effective scope to the controllers (`applied` in section 7.5), but the reconciler does not yet use it to tell a device that is gone from one that was not scanned (see [reconciliation.md](reconciliation.md#8-what-later-sources-add)).

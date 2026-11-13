@@ -17,7 +17,7 @@ The migration framework ships in Phase 4 (AD integration and migration). Spreads
 
 ## Connector architecture
 
-A migration source is an implementation of the `MigrationSource` trait defined in the `tenko-connect` crate (CONN-01). Each source family has an adapter crate following the `tenko-connect-*` pattern: `tenko-connect-windows` for Windows DNS and DHCP (PowerShell remoting plus LDAP), and one crate each for BIND, OPNsense, dnsmasq and Kea. The IR types live in `tenko-core`. The `plan` / `apply` / `verify` pipeline lives in `tenko-migrate` and is the only migration code that writes to Tenko. Adapters only read from their source.
+A migration source is an implementation of the `MigrationSource` trait defined in the `tenko-connect` crate (CONN-01). Each source family has an adapter crate following the `tenko-connect-*` pattern: `tenko-connect-windows` for Windows DNS (a placeholder today), and one crate each for BIND, OPNsense, dnsmasq and Kea, all planned. Windows DHCP is no adapter: an exporter script on the DHCP server pushes a mirror of it to the API, and Tenko holds no Windows credential ([ADR 0033](adr/0033-mirrored-sources.md), `deploy/windows/mirror/`). The IR types live in `tenko-core`. The `plan` / `apply` / `verify` pipeline lives in `tenko-migrate` and is the only migration code that writes to Tenko. Adapters only read from their source.
 
 | Component | Crate | Responsibility |
 |---|---|---|
@@ -58,31 +58,31 @@ AXFR alone loses what is not part of the zone data on the wire: record ownership
 | Source | Data path | Adapter adds | Requirement |
 |---|---|---|---|
 | Windows DNS, AD-integrated | AXFR, or `Get-DnsServerResourceRecord` | LDAP read of `dnsRecord` in `DomainDnsZones` and `ForestDnsZones`: ownership per RRset, aging timestamps, tombstones. PowerShell remoting (DnsServer module): forwarders, conditional forwarders, root hints, zone scopes, client subnets, recursion scopes, Query Resolution Policies, aging settings, Global Query Block List, RRL | MIG-06 |
-| Windows DNS, file-backed | The same cmdlets (they do not distinguish storage), or `%SystemRoot%\System32\dns\*.dns` | The zone file parser understands the Windows comment `[AGE:n]`, so timestamps are preserved | MIG-07 |
+| Windows DNS, file-backed | The same cmdlets (they do not distinguish storage), or `%SystemRoot%\System32\dns\*.dns` | The zone file parser reads the Windows mark `[AGE:n]` (dialect `windows`): it decides which A, AAAA and PTR names a computer may claim; the timestamp itself is not kept until aging and scavenging (DNS-29) are built | MIG-07 |
 | BIND | AXFR, or zone files (RFC 1035) | `named.conf` parser: `view` becomes Tenko views, `acl` becomes client subnets, plus `forwarders`, `also-notify`, `allow-transfer` and RPZ zones | MIG-09 |
 | OPNsense | REST API, or `config.xml` backup | Unbound host and domain overrides, Dnsmasq, ISC dhcpd static maps, Kea subnets and reservations, interfaces and VLANs as IPAM networks, firewall aliases | MIG-10 |
 | Proxmox VE | REST API | Proxmox runs no DNS of its own. A DNS server in a VM or container on Proxmox is imported through its own adapter (BIND, dnsmasq, Windows). Proxmox itself is an inventory source: VM and container names, MAC addresses, IP addresses via the guest agent, SDN vnets. Later, a NetBox-compatible API lets Proxmox SDN use Tenko as its IPAM plugin | CONN-03, CONN-17 |
 | dnsmasq / Pi-hole | Config files and `/etc/hosts` | `dhcp-host`, `address=`, `host-record`, blocklists (imported as RPZ) | MIG-11 |
 | Kea / ISC dhcpd | Kea JSON plus lease file or database; `dhcpd.conf` plus `dhcpd.leases` | Subnets, pools, reservations, classes, options | MIG-12 |
-| Windows DHCP | `Export-DhcpServer -Leases` (XML) plus `Get-DhcpServerv4*` cmdlets | Scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings, failover relationships, mapped to a Tenko pair (the shared secret is neither exported nor needed) | MIG-08 |
+| Windows DHCP | The exporter of `deploy/windows/mirror/`, scheduled on the DHCP server, runs the `Get-DhcpServerv4*` cmdlets and pushes the mirror every minute (the push route answers 501 `sys.not_implemented` until the server side is built); `Export-DhcpServer` stays the manual backup | Scopes, reservations, options at all levels, policies, filters, superscopes, DNS settings, failover relationships, mapped to a Tenko pair (the shared secret is neither exported nor needed) | MIG-08 |
 | Generic | CSV or Excel (an existing IPAM spreadsheet, Phase 1), hosts files, NetBox and phpIPAM APIs | Hosts, networks and addresses from the foreign inventory | IPAM-11, MIG-13 |
 
 ### Windows DNS (both storage modes)
 
 The `Get-DnsServer*` cmdlets do not distinguish between AD-integrated and file-backed zones, so the PowerShell path is identical for both and yields the same server settings, policies and records (Appendix A). The storage mode only changes what else is available:
 
-- **AD-integrated zones** additionally expose, through LDAP, per-RRset ownership (record owner ACLs, which the cmdlets do not return; see Known non-exportable data), aging timestamps and tombstones. Ownership feeds the per-RRset ownership model used for secure updates (DNS-28).
-- **File-backed zones** can be read either through the cmdlets or by parsing the `.dns` files directly. The parser reads `[AGE:n]` so that aging timestamps survive (MIG-07, DNS-29). File-backed zones have no per-record ACLs.
+- **AD-integrated zones** additionally expose, through LDAP, per-RRset ownership (record owner ACLs, which the cmdlets do not return; see Known non-exportable data), aging timestamps and tombstones. Ownership feeds the per-RRset ownership model used for secure updates (DNS-28). Today Tenko keeps the owners of names in its own table, set by secure updates, by a computer claiming an imported name and by an administrator ([dns.md](dns.md) section 13.12); the LDAP read stays with the later Windows DNS adapter.
+- **File-backed zones** can be read either through the cmdlets or by parsing the `.dns` files directly. The parser reads `[AGE:n]` to decide which names may be claimed; the timestamps are not stored until aging (DNS-29) is built (MIG-07). File-backed zones have no per-record ACLs.
 
 Query Resolution Policies require Windows Server 2016 or later. Older servers have no QRPs or zone scopes to migrate.
 
 ### Windows DHCP
 
-Windows DHCP failover is a proprietary protocol and is not interoperable with any other implementation (CON-05). Tenko therefore cannot join a Windows failover relationship. During coexistence, Tenko and Windows DHCP serve split scopes: the address range of a scope is divided so that the two servers never offer the same address. The Windows failover relationship is read into the IR and re-created as a Tenko pair (DHCP-12); its shared secret is not recreated, because the pair channel is mutually authenticated TLS between enrolled nodes and needs none (ADR 0025).
+Windows DHCP failover is a proprietary protocol and is not interoperable with any other implementation (CON-05). Tenko therefore cannot join a Windows failover relationship. The planned Windows takeover does not split scopes: it switches one scope at a time, the Windows scope deactivated first and Tenko's scope enabled after ([windows-takeover-plan.md](plans/windows-takeover-plan.md)). The Windows failover relationship is to be read into the IR and re-created as a Tenko pair once failover pairs exist (DHCP-12, Slice 12); its shared secret is not recreated, because the pair channel is mutually authenticated TLS between enrolled nodes and needs none (ADR 0025).
 
 ## Pipeline: plan, apply, verify
 
-The same three stages run for every source (MIG-03). Each stage is a job on the job engine, so its steps, status, timeouts and rollback are visible in the UI and the API (IPAM-17, API-05). The CLI mirrors the stages: `tenko migrate plan`, `tenko migrate apply` and `tenko migrate verify`.
+The same three stages run for every source (MIG-03). Each stage is a job on the job engine, so its steps, status, timeouts and rollback are visible in the UI and the API (IPAM-17, API-05). The CLI will mirror the stages (`tenko migrate plan`, `apply`, `verify`; planned). Today `tenko migrate` holds the commands of the Windows takeover (`mirror`, `diff`, `prepare`, `takeover`, `revert`), whose server side answers 501 `sys.not_implemented` until it is built.
 
 | Stage | Command | What it does | Output |
 |---|---|---|---|
@@ -110,9 +110,9 @@ The mode is chosen per zone or scope in the UI (MIG-04). It controls who is auth
 | Forward | Forwards selected zones to the old server while taking over others | Authoritative for the forwarded zones | Allows a zone-by-zone cut-over under a single resolver address. |
 | Flip | Primary | Secondary to Tenko, or switched off after a rollback window | The cut-over. The rollback window keeps the old server available until Tenko is confirmed. |
 
-For DHCP the equivalent is split scopes (CON-05), described under Windows DHCP above. DHCP scopes are moved in the same per-scope fashion: the range handed to Tenko grows while the range left on the old server shrinks. The Tenko scope of a split scope is set non-authoritative, so that it never refuses a client that holds a lease from the old server, and the server that should answer second waits: the offer delay on the Tenko scope, the delay setting on the Windows secondary.
+For DHCP the equivalent is the takeover per scope described under Windows DHCP above: one scope at a time, never two servers answering on one network. Tenko has no offer delay, so split scopes are not used.
 
-During coexistence, changes made in IPAM must still reach the server that clients actually use. The external actuators for coexistence cover this: Windows DHCP via PowerShell and Kea via its Control Agent (CONN-12), and RFC 2136 or Windows DNS via PowerShell (CONN-13). Both ship in Phase 4.
+During coexistence, changes made in IPAM must still reach the server that clients actually use. The external actuators for coexistence cover this: Windows DHCP via PowerShell and Kea via its Control Agent (CONN-12), and RFC 2136 or Windows DNS via PowerShell (CONN-13). Neither is part of the Windows takeover; both stay open.
 
 ## Verification by query replay
 
@@ -128,7 +128,7 @@ Everything Tenko holds can be exported in standard formats, so leaving Tenko is 
 |---|---|---|---|
 | CSV | MIG-14 | 1 | [x] |
 | Standard zone files | MIG-15 | 2 | [x] |
-| Kea-compatible JSON | MIG-16 | 3 | [x] DHCPv4: `tenko dhcp export --format kea` writes Kea 2.6's `kea-dhcp4` configuration, its memfile lease file and a loss report, accepted by `kea-dhcp4 -t` and served by Kea in the DHCP lab (WP9.3, E30's DHCPv4 rows, [dhcp.md](dhcp.md) section 18); [x] DHCPv6: the same command writes the `kea-dhcp6` configuration and its memfile lease file, with the report of both families, accepted by `kea-dhcp6 -t` and served by Kea through a relay in the lab's round `dhcp6` (WP9.3, E30's DHCPv6 rows, section 18.5); delegated prefixes (`pd-pools`) are not exported yet |
+| Kea-compatible JSON | MIG-16 | 3 | [x] DHCPv4: `tenko dhcp export --format kea` writes Kea 2.6's `kea-dhcp4` configuration, its memfile lease file and a loss report, accepted by `kea-dhcp4 -t` and served by Kea in the DHCP lab (WP9.3, E30's DHCPv4 rows, [dhcp.md](dhcp.md) section 18); [x] DHCPv6: the same command writes the `kea-dhcp6` configuration and its memfile lease file, with the report of both families, accepted by `kea-dhcp6 -t` and served by Kea through a relay in the lab's round `dhcp6` (WP9.3, E30's DHCPv6 rows, section 18.5), the delegation pools as `pd-pools` |
 
 The CSV export is the counterpart of the spreadsheet import, so the import/export round trip is testable from Phase 1 (IPAM-11).
 
@@ -150,7 +150,7 @@ The migration framework is accepted when MIG-18 is met in the Windows interop la
 6. Netlogon re-registration of the DC locator SRV records works against Tenko using GSS-TSIG (DNS-28).
 7. Windows DNS is switched off and clients notice nothing.
 
-Criteria 3 to 6 are the AD verification of the lab; criteria 1, 2 and 7 are the migration verification. On Windows, Tenko runs as a gMSA or domain account so that Kerberos works (OPS-11); on Linux it uses a keytab for its computer account (CON-03).
+Criteria 3 to 6 are the AD verification of the lab; criteria 1, 2 and 7 are the migration verification. Tenko is not joined to the domain and runs under its own service account on every platform; Kerberos uses the keys of one pre-staged computer account that Tenko adopts with a one-time password or imports from a keytab (OPS-11, CON-03, ADR 0026; [active-directory.md](active-directory.md) section 4).
 
 ## Runbooks
 
@@ -172,16 +172,16 @@ Runbooks are written and validated in Phase 4 against the interop lab (MIG-17). 
 
 | Runbook | Status |
 |---|---|
-| Windows DNS and DHCP in an AD domain | Manual draft in [active-directory.md](active-directory.md) with today's features (zone transfer, zone file import, RFC 2136 updates from the controllers' addresses, scopes entered by hand); the automated version over the Windows adapter and GSS-TSIG is Phase 4 |
+| Windows DNS and DHCP in an AD domain | The runbook in [active-directory.md](active-directory.md) with today's features (zone transfer, the zone file import in the Windows dialect, secure updates with GSS-TSIG through the Kerberos account, scopes entered by hand); the mirror and the takeover of scopes and the flip of a zone follow with Slice 14 |
 | BIND | Planned |
 | OPNsense | Planned |
 | Pi-hole and dnsmasq | Planned |
 | Kea and ISC dhcpd | Planned |
-| Spreadsheet import (Phase 1) | Planned |
+| Spreadsheet import (Phase 1) | Delivered: the sections on the spreadsheet import above (IPAM-11) |
 
 ## Appendix A: Windows cmdlet inventory
 
-`tenko-connect-windows` collects data through PowerShell remoting and LDAP. All collection is read-only. The `Get-DnsServer*` family is used for both AD-integrated and file-backed zones.
+The cmdlets below are what the inventory of a Windows server reads; the Windows DHCP mirror runs its subset on the server itself (`deploy/windows/mirror/`), and no remoting is used. All collection is read-only. The `Get-DnsServer*` family is used for both AD-integrated and file-backed zones.
 
 ### DNS (DnsServer module)
 

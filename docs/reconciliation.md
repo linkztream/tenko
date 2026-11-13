@@ -2,7 +2,7 @@
 
 This page describes how Tenko DDI keeps what its sources see apart from what IPAM intends, how the reconciler compares the two, and how a difference becomes a proposal that a person, or the adoption policy of a prefix, decides. It is for an operator who reviews proposals and for a developer who adds a source or a rule. It describes the behavior of the `observe`, `reconcile` and `proposals` modules of the `tenko-ipam` crate and of the API routes on top of them; where this page and the code differ, the code is right. The decision behind the design is [ADR 0005](adr/0005-ipam-intent-hub.md), the requirements are IPAM-12 to IPAM-17, IPAM-19 and IPAM-21 in [REQUIREMENTS.md](REQUIREMENTS.md), and the summary is the section "IPAM as the intent hub" in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Terms used below: **intent** is what IPAM records as wanted (hosts, interfaces, addresses, prefixes). A **source** is anything that reports observations: a connector instance, a probe, later the DNS and DHCP engines. A **fact** is one source's latest knowledge of one subject. A **proposal** is a suggested change of intent that the reconciler derives from facts and that waits for a decision.
+Terms used below: **intent** is what IPAM records as wanted (hosts, interfaces, addresses, prefixes). A **source** is anything that reports observations: a connector instance, a probe, the DNS zones and the DHCP leases of Tenko's own engines. A **fact** is one source's latest knowledge of one subject. A **proposal** is a suggested change of intent that the reconciler derives from facts and that waits for a decision.
 
 Contents:
 
@@ -27,7 +27,7 @@ IPAM holds intent: host X has address Y in network Z, with an assignment mode, a
 - **Intent wins for managed hosts** (IPAM-16). A disagreement with a `static` or `reserved` host is a warning for a person, never something a policy applies. A locked host gets no proposal that would change it, and an `unmanaged` host gets none at all (section 4.4).
 - **Every change is a job and is audited** (IPAM-17). Approvals, rejections and adoptions run as inline one-step jobs, and every state change of a proposal writes an audit record (section 5.4).
 
-The reconciler described here works from observation to intent: it proposes changes to intent. It does not call actuators. The direction from intent to DHCP and DNS belongs to the move job today (section 7) and to the Tenko DNS and DHCP engines later (section 8).
+The reconciler described here works from observation to intent: it proposes changes to intent. It calls one actuator, the DNS actuator, which writes the `ipam` records after a run (sections 3.2 and 10). The other direction from intent to DHCP and to the network belongs to the move job (section 7) and to the reservations that IPAM writes for the DHCP role (section 8).
 
 ## 2. The observation layer
 
@@ -39,7 +39,7 @@ An observation names its source. Tenko turns the source into a canonical text, t
 |---|---|---|
 | Inventory connector | `inventory:<connector id>` | The connector host (Phase 1) |
 | Network controller connector | `network_controller:<connector id>` | The connector host (Phase 1) |
-| Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the declared raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp` | Probes (WP2.3, see [scanning.md](scanning.md)) |
+| Probe | `probe:<node>:<method>`, method one of `arp`, `nd`, `icmp`, `tcp_connect`, `reverse_dns`, `mdns`, `llmnr`, `snmp`, and the raw-socket methods `arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`, `dhcp_snoop` (Linux with `CAP_NET_RAW`) | Probes (WP2.3, see [scanning.md](scanning.md)) |
 | DNS zone | `dns:<zone>` (the parent zone for an RFC 2317 zone) | The reconciler, from the zones in the store (Phase 2, section 10) |
 | DHCP node | `dhcp:<node>` | The `dhcp` role's lease tables, read through the lease view; no fact rows (Phase 3, [dhcp.md](dhcp.md) section 12.3, [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md)) |
 
@@ -55,12 +55,12 @@ A fact is stored once per source and subject, under the key (source key, subject
 |---|---|---|---|
 | `host` | `host:<external id>` | Inventory connectors | Name, MAC addresses, IP addresses, OS, platform, parent host, tags, and the power state (`running` or `stopped`) when the source tells it, as the Proxmox VE connector does for its guests |
 | `address` | `address:<vrf>/<ip>` | Probes, DHCP leases | The address, the MAC address behind it when known, and the VRF of the source; for a lease the client's MAC address, `last_seen` the client's last transaction and `expires_at` the end of the binding (for a conflict, the MAC address that answered the probe, if any, until the hold ends) |
-| `attachment` | `attachment:<mac>` | Network controllers, SNMP probes | The client's switch or access point, port, SSID and VLAN |
+| `attachment` | `attachment:<mac>` | Network controllers, SNMP and LLDP probes | The client's switch or access point, port, SSID and VLAN |
 | `services` | `services:<ip>` | Probes | Open TCP ports, and the ones that answered a TLS handshake (SCAN-08) |
 | `os` | `os:<ip>` | Probes | An OS guess and its confidence (SCAN-08) |
 | `name` | `name:<ip>` | Probes, network controllers, DHCP leases | A name found for an address (reverse DNS, mDNS, LLMNR, the `sysName` of a polled device, the name of a client on a network controller, or the FQDN of option 81, else the host name of option 12, of a lease). It is not a sighting of the address |
 | `vendor` | `vendor:<mac>` | Probes, network controllers, inventory connectors | The vendor of a MAC address: the organization its OUI is registered to, the vendor a network controller reports for a client, or the manufacturer an inventory source reports for a device |
-| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
+| `link` | `link:<device>\|<port>\|<device>\|<port>\|<kind>` | Network controllers, SNMP and LLDP probes | A link between two devices (IPAM-20); the same fact whichever end the source names first |
 | `network` | `network:<controller reference>` | Network controllers | A network of the controller (for UniFi the network's `_id`, not the VLAN): its name, subnet without host bits, VLAN id (none for the untagged default network), what the controller does for DHCP on it (`disabled`, `relay` or `server`) and whether Tenko or the controller is reached through it. It names no device and is no sighting of an address; the reconciler compares it with the VLANs and prefixes of intent (section 4.10) |
 
 A fact carries the source and the subject (as structure and as canonical text), `observed` (the latest report with every attribute the source gave), `observation` (the observation that first reported the fact or last changed its attributes), `first_seen` and `last_seen` (the source's own times), `received_at` (when Tenko last wrote the fact), `expires_at`, `sightings` with `counted_at` (the number of counted sightings and the source time of the last one), and the store `revision`. A fact is **current** while `expires_at` is empty or in the future. Expired facts stay readable until retention removes them (section 2.4); the reconciler's rules use current facts only.
@@ -157,7 +157,7 @@ The settings are the same on every controller: they live in the store (`ipam.rec
 
 `max_attempts` (8 repeats of a run or an ingest that loses races with other writers) is a constant of the code, not a setting.
 
-`GET /api/v1/settings/reconciler` (`get_reconciler_settings`) returns the settings with an `ETag`; `PUT /api/v1/settings/reconciler` (`update_reconciler_settings`) replaces all of them, honors `If-Match` (409 when stale), refuses a value outside its limits with 422 `ipam.reconciler.settings.invalid` (parameter `field`), and is audited as `ipam.reconciler.settings.update` with one change per field. Both are for administrators only. The settings page in the web UI comes with a later release; until then the API is the way to change them.
+`GET /api/v1/settings/reconciler` (`get_reconciler_settings`) returns the settings with an `ETag`; `PUT /api/v1/settings/reconciler` (`update_reconciler_settings`) replaces all of them, honors `If-Match` (409 when stale), refuses a value outside its limits with 422 `ipam.reconciler.settings.invalid` (parameter `field`), and is audited as `ipam.reconciler.settings.update` with one change per field. Both are for administrators only. The same settings are on the page Settings, Reconciler of the web UI.
 
 ### 3.2 What a run does
 
@@ -513,11 +513,11 @@ Independently of moves, `Reconciler::ingest` hands the addresses of the ingested
 
 | Source | Phase | What it adds |
 |---|---|---|
-| Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`) are declared and do not run yet |
+| Probes (WP2.3) | 1 | Delivered, see [scanning.md](scanning.md). `address` facts from the neighbor tables, ICMP, mDNS, LLMNR and SNMP (SCAN-02 to SCAN-05), each with the VRF of the probe, so the placement of section 3.3 needs no guess. `services` facts from the TCP connect scan and mDNS, and `os` facts from mDNS and SNMP (SCAN-04, SCAN-08), which fill the open ports and OS of the computed view. `name` facts from reverse DNS, mDNS, LLMNR and SNMP, `vendor` facts from the OUI table of the probe, and `attachment` and `link` facts from SNMP polling (SCAN-05). A `name` or `vendor` fact is never a sighting of an address: it neither wakes a waiting job nor confirms a move, at ingest or in a run, does not refresh the last sighting of section 2.6, and does not by itself make a discovered host, a suggested network or a conflict. A discovered host takes the name a probe found for one of its addresses when no inventory source names it. The `vendors` constraint of adoption policies reads the `vendor` facts (section 6.2). On-demand scans (SCAN-09) ingest like scheduled ones. The scan scopes tell the orphan rule "gone" from "not scanned" (section 4.7). The raw-socket methods (`arp_sweep`, `tcp_syn`, `os_fingerprint`, `lldp`, `dhcp_snoop`) run on Linux with `CAP_NET_RAW` and add `address`, `services`, `os`, `name`, `vendor`, `attachment` and `link` facts ([scanning.md](scanning.md) section 3.1); on Windows they answer `unsupported` |
 | DNS records | 2 | Delivered (section 10): `name` facts of the `ipam` and `manual` A, AAAA and PTR records of the zones, and the DNS findings of the actuator, among them the orphaned `ipam` record |
 | DHCP leases | 3 | Delivered (WP8.1, changed by [ADR 0031](adr/0031-the-lease-table-is-the-observation-source.md)): the lease tables are the source `dhcp:<node>`, and the lease view presents `address`, `name`, `os` and `vendor` facts (and `network` facts of delegated prefixes) without polling (DHCP-16) and without a row written; after the view has taken a lease change in it wakes the reconciler's light run, which confirms waiting moves; reservations are intent ([dhcp.md](dhcp.md) section 12). The `LeaseInPrefix` wake-up of the job engine is not used by moves, whose observation step is a manual task the reconciler completes |
 
-Phase 3 also adds the reconciliation views across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch views with "who wins" rules, built on the same facts and proposals.
+Phase 3 added the reconciliation view across the four truths (IPAM-21): ghost, rogue, orphan and PTR-mismatch rows with "who wins" rules, built on the same facts and proposals (section 11).
 
 ## 9. Tables, endpoints and events
 
@@ -531,7 +531,6 @@ Phase 3 also adds the reconciliation views across the four truths (IPAM-21): gho
 | `ipam.obs.by_name` | (lowercase name, source key, subject key) | Empty; lists the facts that name the host |
 | `ipam.obs.last_seen` | Intent object (address or interface) | `IntentSighting`: time, source key and observation |
 | `ipam.proposals` | Proposal id | `IntentProposal` |
-
 | `ipam.proposal_keys` | Subject key | The id of the open proposal of that key |
 | `ipam.proposal_rejections` | Subject key | `Rejection`: fingerprint, proposal, who and when, reason, and for a kept conflict the MAC addresses kept |
 | `ipam.adoption` | Prefix id | `StoredPolicy`: policy, who set it and when |
@@ -626,7 +625,7 @@ Every row and the host summary carry the OS guess that wins by precedence, with 
 |---|---|---|
 | `GET /api/v1/ipam/reconcile` | `get_ipam_reconcile` | read of observations; filters `prefix` (rows of addresses inside it, in its VRF), `host` (the host's addresses, its MAC addresses and the rows it is named in; the answer then carries `host`, the host's truths with the OS field, every guess and the vendors) and `kind`; paging with `limit` (1 to 1,000, 100 by default) and `cursor`; a scoped reader gets the rows whose address lies in its scope |
 
-`tenko ipam reconcile [--prefix ID_OR_CIDR] [--host ID_OR_NAME] [--kind ghost|rogue|orphan|ptr_mismatch|conflict] [--all] [--json]` prints the rows as a table (address, kind, intent, lease, DNS, scan, winner, rule and the proposal) and, with `--host`, the host's OS field and vendors first. The web UI has the page IPAM → Reconciliation (`/ipam/reconcile`), the evidence view of one network (section 12.6); the host page shows the OS field and the vendors in its observations section.
+`tenko ipam reconcile [--prefix ID_OR_CIDR] [--host ID_OR_NAME] [--kind ghost|rogue|orphan|ptr_mismatch|conflict] [--limit N] [--all] [--json]` prints the rows as a table (address, kind, intent, lease, DNS, scan, winner, rule and the proposal) and, with `--host`, the host's OS field and vendors first. The web UI has the page IPAM → Reconciliation (`/ipam/reconcile`), the evidence view of one network (section 12.6); the host page shows the OS field and the vendors in its observations section.
 
 The system status (`GET /api/v1/system/status`) carries the warning `ipam.lease_conflict` while the view has conflict rows, with their count and up to five addresses and their MAC addresses (`params.count`, `params.addresses`).
 
@@ -636,7 +635,7 @@ The system status (`GET /api/v1/system/status`) carries the warning `ipam.lease_
 
 ## 12. The findings model
 
-A finding is anything Tenko noticed that a person may need to decide on (U1 of the UI proposal; IPAM-10, IPAM-15, IPAM-19, IPAM-21, IPAM-23). The same idea lives in five sources under their own names: the open proposals (section 4), the utilization alarms ([ipam.md](ipam.md) section 3), the rows of the reconciliation view (section 11), the jobs that wait for a person at a manual step, and the health conditions of `GET /api/v1/system/status`. The findings model gives each of them one shape: a `kind`, a `severity`, a `subject` (an address, a host, a prefix, a record, a job, a node or a device known by its MAC address), the `evidence` by reference (the source's record and the API path that reads it), a default `action` the UI maps to a button, `since`, the `area` of the UI it belongs to and the `source`. Every surface (the dashboard, the status bar, the rail badges, the lists) reads the same index through one query and one subscription, so a count never differs between two screens. The sources keep their own tables and routes; nothing about them changes.
+A finding is anything Tenko noticed that a person may need to decide on (U1 of the UI proposal; IPAM-10, IPAM-15, IPAM-19, IPAM-21, IPAM-23). The same idea lives in six sources under their own names: the open proposals (section 4), the utilization alarms ([ipam.md](ipam.md) section 3), the rows of the reconciliation view (section 11), the jobs that wait for a person at a manual step, the health conditions of `GET /api/v1/system/status`, and the topology (its root and the WLAN rules). The findings model gives each of them one shape: a `kind`, a `severity`, a `subject` (an address, a host, a prefix, a record, a job, a node or a device known by its MAC address), the `evidence` by reference (the source's record and the API path that reads it), a default `action` the UI maps to a button, `since`, the `area` of the UI it belongs to and the `source`. Every surface (the dashboard, the status bar, the rail badges, the lists) reads the same index through one query and one subscription, so a count never differs between two screens. The sources keep their own tables and routes; nothing about them changes.
 
 ### 12.1 Severities
 

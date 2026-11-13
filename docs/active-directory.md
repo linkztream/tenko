@@ -618,13 +618,13 @@ Way back: reinstall the role (`Install-WindowsFeature DNS`). Zones that were not
 
 ## 7. The DHCP steps
 
-This part follows section 17 of [dhcp.md](dhcp.md), the home cut-over, step for step; read it first. What is particular to a Windows DHCP server on a domain controller is below. Windows DHCP failover between the controllers is not interoperable (CON-05): Tenko reads the relationship into the loss report in Phase 4, and the cut-over switches off both servers' scopes.
+This part follows section 17 of [dhcp.md](dhcp.md), the home cut-over, step for step; read it first. What is particular to a Windows DHCP server on a domain controller is below. Windows DHCP failover between the controllers is not interoperable (CON-05): the mirror exporter of `deploy/windows/mirror/` reports the relationship as a loss (the server side that reads the mirror is not built yet), and the cut-over switches off both servers' scopes.
 
 ### Step 10. Switch the networks
 
 **Prepare.** Step 2 built the scopes. Per section 17.1: shorten the lease time on the Windows scopes to an hour a lease time ahead (`Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -LeaseDuration 01:00:00`), and know where each network's relay is set on the gateway.
 
-**Name protection.** A Windows scope with Name Protection stores a DHCID record beside the name (RFC 4701) and refuses a registration from a client with another identifier (RFC 4703). The Phase 4 import carries the flag; until then read it in the step 1 output (`NameProtection`, `DynamicUpdates`) and set the same on the scope's DDNS tab, or with `PATCH /api/v1/dhcp/scopes/{prefix}` and its `ddns` object. The mapping the import uses ([dhcp-contracts.md](dhcp-contracts.md)):
+**Name protection.** A Windows scope with Name Protection stores a DHCID record beside the name (RFC 4701) and refuses a registration from a client with another identifier (RFC 4703). The mirror exporter maps the flag, but the server side that imports the mirror is not built yet; until it is, read it in the step 1 output (`NameProtection`, `DynamicUpdates`) and set the same on the scope's DDNS tab, or with `PATCH /api/v1/dhcp/scopes/{prefix}` and its `ddns` object. The mapping the import uses ([dhcp-contracts.md](dhcp-contracts.md)):
 
 | Windows (`Get-DhcpServerv4DnsSetting`) | Tenko (`ddns` of the scope) |
 |---|---|

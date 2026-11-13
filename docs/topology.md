@@ -117,7 +117,7 @@ The clients come from the network controllers only (CONN-05): their topology rea
 - **Inferred links** draw dashed with a question mark, and the panel says "inferred from the MAC table".
 - **Hashed names** (`host-00005e005301`, Tenko's own fallback) get the vendor and the address as a second line.
 - **Not placed.** Devices with no link at all (other than network devices and hypervisors) are not drawn in the forest but listed in a "Not placed" line under the map; a device with the same name or an address of another device is marked as a duplicate there.
-- **Read-only under Hardened.** While the Hardened profile is active and no network controller allows writes (TGL-20), the map and the SSID view offer no write action: no Use this, no Keep on this WLAN, no policy switch and no move (`docs/SECURITY-PROFILES.md`, "Read-only topology in Hardened"). The server still decides every request.
+- **Read-only under Hardened.** While the Hardened profile is active and no network controller allows writes (TGL-20), the map and the SSID view offer no write action: no Use this, no Keep on this WLAN, no policy switch and no move (the TGL-20 row of [SECURITY-PROFILES.md](SECURITY-PROFILES.md)). The server still decides every request.
 
 ### Choice of the drawing library
 
@@ -137,7 +137,7 @@ The in-house layout was chosen (`ui/src/topology/layout.ts`, with `path.ts` for 
 
 - The device tables of controllers are read live and kept for five minutes; a scheduled poll does not hand them to the topology yet, so the first map after a start or after five minutes waits for one read (at most three seconds).
 - Addresses join aliases regardless of their VRF.
-- LLDP neighbors that no source classifies are `device` nodes; LLDP system capabilities and CDP are not read yet ([scanning.md](scanning.md)).
+- LLDP and CDP neighbors that no source classifies are `device` nodes: the probe's `lldp` method reads the system capabilities ([scanning.md](scanning.md) section 2.11), but the topology classifies no node from them yet.
 - Paths are computed in the browser over the graph in view.
 
 ## 8 The VLAN provision job
