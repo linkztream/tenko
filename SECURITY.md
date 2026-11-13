@@ -44,14 +44,14 @@ systems or data, are welcome; nobody is pursued for one.
 
 ## Supported versions
 
-Tenko is released as the 0.0.x line, often (0.0.3 on 2026-10-22, 0.0.10 on 2026-10-31).
+Tenko is released as the 0.0.x line, often (0.0.3 on 2026-10-22, 0.0.11 on 2026-11-03).
 A security fix ships in the next 0.0.x release; there are no backports to earlier releases.
 A report against an older release or commit is checked against the latest release and
 `main` first.
 
 | Version                                  | Supported                       |
 |------------------------------------------|---------------------------------|
-| The latest 0.0.x release (0.0.10 today)  | Yes                             |
+| The latest 0.0.x release ([releases](https://github.com/linkztream/tenko/releases)) | Yes |
 | `main` (latest commit)                   | Yes; a fix lands here first     |
 | Earlier 0.0.x releases                   | No; upgrade to the latest       |
 | Commits that are no release              | No                              |
@@ -77,8 +77,8 @@ Releases after 0.0.10 carry, besides the binaries, the MSI, `install.sh`,
   build provenance attestation for every release file and for the image digest, and an SBOM
   attestation that binds each SBOM to its binary (the UI's to both binaries) or to the image.
 
-The release workflow (`.github/workflows/release.yml`) makes them; its job `attest` is the
-only one that can sign. To check a downloaded file with the
+The release workflow (`.github/workflows/release.yml`) makes them; its jobs `attest` and
+`attest-image` are the only ones that can create attestations. To check a downloaded file with the
 [GitHub CLI](https://cli.github.com/):
 
 ```sh

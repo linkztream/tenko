@@ -1,11 +1,12 @@
 # Tenko DDI Documentation
 
-Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI. It replaces Active Directory-integrated Windows DNS and DHCP and scales from a single home-lab box to enterprise deployments. This directory holds the project's living documentation.
+Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI. Its goal is to replace Active Directory-integrated Windows DNS and DHCP and to scale from a single home-lab box to enterprise deployments; what it does today is in the [README](../README.md). This directory holds the project's living documentation.
 
 ## Documents
 
 | Document | Contents |
 |---|---|
+| [QUICKSTART.md](QUICKSTART.md) | From nothing to a running node with a first network: install, the roles, the first prefix, zone and scope, the firewall ports |
 | [REQUIREMENTS.md](REQUIREMENTS.md) | Living requirements specification: personas, design constraints (CON), and requirements by area with phase and priority |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Roles, data plane independence, storage and replication, IPAM as intent hub, move job, connectors, repository layout |
 | [SECURITY-PROFILES.md](SECURITY-PROFILES.md) | Home, Standard, Hardened and Lab profiles as toggle bundles, the never-off list and the PIN coupling rule |
@@ -14,6 +15,12 @@ Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI.
 | [access.md](access.md) | Who may do what: the four roles, grants over VRFs, sites and prefixes with and without their subtree, anchors and the read-any, write-all rule, delegation, service accounts, scoped API tokens, the sign-in requirement per role, the auditor, what scoped principals see, the `/access` API, error codes and rollback |
 | [secrets.md](secrets.md) | Operator secrets: the model, who may reveal and how (TGL-24, the PIN rule), audit records, the clipboard path and what it does not protect, host credentials, the RDP and SSH hand-off, connectors and imports |
 | [ipam.md](ipam.md) | IPAM utilization and counts: the meter (addresses in use of the usable addresses, for a supernet summed over its tree), a supernet's allocation as a separate figure, what the utilization alarms follow, and what the counts on the prefix page, its Addresses tab and the Hosts page mean |
+| [dns.md](dns.md) | DNS: zones and records, batch changes, zone file import and export, serials and the journal, access lists and TSIG keys, secure dynamic updates with GSS-TSIG and the owners of names, the `dns` role and the engine |
+| [dnssec.md](dnssec.md) | DNSSEC: signing a zone, the DS at the parent, key rollovers, imported signed zones, the trust anchors and RFC 5011 |
+| [dns-resolver.md](dns-resolver.md) | The resolver side: the forwarder with its rules and stub zones, the recursive resolver with validation, the cache, upstreams over DoT and DoH, RPZ and block lists, rate limiting |
+| [dns-contracts.md](dns-contracts.md) | The contracts of the DNS module: store tables, routes, error codes, audit actions, metrics |
+| [dhcp.md](dhcp.md) | DHCP: the wire format, scopes, pools, options, classes and policies, reservations, the `dhcp` role, trusted relay agents, DDNS, DHCPv6 and prefix delegation, the Kea export and the cut-over |
+| [dhcp-contracts.md](dhcp-contracts.md) | The contracts of the DHCP module: the model, store tables, routes, error codes, audit actions, metrics, configuration keys and the migration IR |
 | [reconciliation.md](reconciliation.md) | Intent versus observation: observations per source, the reconciler's proposals, decisions and adoption policies |
 | [certificates.md](certificates.md) | TLS of the API and UI: the four modes (internal CA, imported files, reverse proxy, plain), the Certificates page and `GET /system/tls`, the expiry warnings and their thresholds, whether a certificate replaced on disk is loaded per security profile and the pending state, the runbook for an OPNsense ACME client that uploads renewed certificates over SFTP to a shell-less chrooted account with the ownership and mode of every path, and the distribution of the internal CA's root |
 | [cluster.md](cluster.md) | Controllers and nodes on the cluster port: enrollment tokens, certificates and renewal, revocation, the gRPC protocol and its version negotiation, heartbeats, the disk buffer for probe observations, ports and settings, and the controller cluster (joining, membership, forwarded writes, quorum state, state digests) |
@@ -34,6 +41,10 @@ Tenko DDI is a DNS, DHCP and IPAM stack written in Rust with an embedded web UI.
 | [CONFORMANCE.md](CONFORMANCE.md) | RFC and specification matrix with target phase and status |
 | [ROADMAP.md](ROADMAP.md) | Phases 0 to 5 with deliverables, spikes, "Done when" criteria, verification and open questions |
 | [adr/README.md](adr/README.md) | Architecture Decision Records: process and index |
+| [api/README.md](api/README.md) | The OpenAPI document `openapi.json`: how it is generated, how an operation authenticates, examples |
+| [security/README.md](security/README.md) | The public summary of each release's security checks |
+| [testing/rules.md](testing/rules.md) | The standing rules for tests |
+| [plans/](plans/) | Plans of the slices and phases, their status documents, exit records and requirement traces |
 
 ## Identifiers
 

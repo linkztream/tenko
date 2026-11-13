@@ -2,15 +2,51 @@
 
 Tenko (天狐) is the celestial fox of Japanese folklore, the oldest and wisest of the kitsune, said to watch over everything in its domain.
 
-Tenko DDI is a DNS, DHCP and IPAM stack. It is built to replace Active Directory-integrated
-Windows DNS and DHCP, and to scale from a single home-lab node to a multi-site
-enterprise deployment. It ships as one Rust binary that runs any combination of four
-roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and `probe`
+Tenko DDI is a DNS, DHCP and IPAM stack. Its goal is to replace Active
+Directory-integrated Windows DNS and DHCP, and to scale from a single home-lab node to a
+multi-site enterprise deployment. It ships as one Rust binary that runs any combination of
+four roles: `controller` (API, UI, replicated store, job engine), `dns`, `dhcp`, and `probe`
 (network discovery). The web UI is a SolidJS application embedded in the binary.
 
 New here? [`docs/QUICKSTART.md`](docs/QUICKSTART.md) goes from nothing to a running node with a first network in a few minutes.
 
-**Status:** pre-alpha. Phases 0 to 2 (platform, IPAM, DNS) are complete and Phase 3 (DHCP) and the recursive resolver are in progress; the latest release is on the [releases page](https://github.com/linkztream/tenko/releases) and [`docs/ROADMAP.md`](docs/ROADMAP.md) says where the work stands and what is free to take.
+**Status:** pre-alpha. The latest release is on the [releases page](https://github.com/linkztream/tenko/releases);
+[`docs/ROADMAP.md`](docs/ROADMAP.md) says where the work stands and what is free to take.
+
+What a node does today, each part with its automated tests and, for DNS, DHCP and the
+cluster, a lab in containers:
+
+- **IPAM:** VRFs, prefixes, addresses, hosts, VLANs and sites; spreadsheet and CSV import,
+  CSV export; the reconciliation of what IPAM intends with the leases, DNS records, scans
+  and inventory it observes; device moves between networks, with the VLAN step through
+  UniFi; the topology map.
+- **DNS:** authoritative zones with views, dynamic updates with TSIG and, for Active
+  Directory clients, secure updates with GSS-TSIG over Tenko's own Kerberos (tested against
+  a Samba domain controller; the run against Windows is open); zone transfers in and out;
+  DNSSEC signing; a forwarder and cache with response policy zones and block lists; DNS
+  over TLS and over HTTPS; a recursive resolver with DNSSEC validation.
+- **DHCP:** DHCPv4 and DHCPv6 with prefix delegation, reservations from IPAM, DDNS,
+  classes and policies, PXE, conflict detection, and the export to Kea.
+- **Discovery:** probes that scan their segment (neighbor tables, ICMP, TCP, mDNS, SNMPv3
+  and more), and connector plugins for UniFi, Proxmox VE and Home Assistant.
+- **Platform:** the API, the web UI in English and Swedish, and the `tenko` command-line
+  client; security profiles, passkeys and TOTP, roles with scoped grants, a vault for
+  secrets, an audit log with export; backup and restore; a cluster of controllers; updates
+  of a single node from the web UI (a container updates by its image); metrics and traces.
+  Installers for Linux (also as a Proxmox VE container) and Windows, and a container image.
+
+What does not exist yet (each is planned in the roadmap):
+
+- `dns` and `dhcp` nodes that keep serving without a controller, and DHCP failover pairs.
+- Updates of a cluster from the web UI, one member at a time.
+- Sign-in through OpenID Connect, LDAP or Kerberos: the API routes and commands exist and
+  answer that they are not built yet.
+- The takeover of Windows DHCP scopes and the flip of an Active Directory zone: the
+  export script that mirrors a Windows DHCP server exists, the server side does not.
+- Migration from BIND, Kea, dnsmasq and other sources; notifications; releases signed
+  with a key that a node checks.
+
+The live runs of the Phase 3 exit in the reference network are still open.
 
 > **Pre-release.** Tenko DDI is under development; every release so far is a pre-release,
 > and the data-directory format, the configuration and the API may still change between
@@ -21,10 +57,13 @@ New here? [`docs/QUICKSTART.md`](docs/QUICKSTART.md) goes from nothing to a runn
 
 ## Documentation
 
+- [`docs/README.md`](docs/README.md): the index of every document, the operator's pages
+  per area included
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): system architecture
 - [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md): requirements
 - [`docs/ROADMAP.md`](docs/ROADMAP.md): phases and milestones
-- [`docs/adr/`](docs/adr/): architecture decision records
+- [`docs/adr/`](docs/adr/README.md): architecture decision records
+- [`CHANGELOG.md`](CHANGELOG.md): what each release changed, and what is merged for the next
 - [`SECURITY.md`](SECURITY.md): how to report a vulnerability privately, and what to expect
 
 ## Repository layout
@@ -35,30 +74,18 @@ New here? [`docs/QUICKSTART.md`](docs/QUICKSTART.md) goes from nothing to a runn
 | `ui/`      | SolidJS + TypeScript web UI, built with Vite into `ui/dist`    |
 | `fuzz/`    | `cargo-fuzz` targets, one per parser of network input          |
 | `bench/`   | Spikes and benchmarks, excluded from the workspace             |
-| `deploy/`  | Dockerfile, Compose, systemd and Windows service templates     |
-| `docs/`    | Architecture, requirements, roadmap, ADRs                      |
+| `deploy/`  | Installers, Dockerfile, Compose labs, systemd and Windows service templates |
+| `docs/`    | Architecture, requirements, roadmap, ADRs, the operator's pages |
+| `scripts/` | The repository's checks and release tools                      |
 
 ## Development
 
 Requirements: the stable Rust toolchain (pinned by `rust-toolchain.toml`) and Node.js 22.
+The commands to build, test and lint, and to run the server from source with a subset of
+roles, are in [`CONTRIBUTING.md`](CONTRIBUTING.md#commands).
 
-```sh
-cargo build --workspace
-cargo nextest run --workspace        # or: cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
-cargo deny check
-cargo audit
-cd ui && npm ci && npm run build
-```
-
-Run the server with a subset of roles:
-
-```sh
-cargo run -p tenko -- serve --roles controller,dns --data-dir <dir>
-```
-
-The same `tenko` binary is the command-line client: `tenko login`, `import`, `export`, `prefix` and `audit verify` talk to the public API of a running controller (stubs for now).
+The same `tenko` binary is the command-line client of a running controller's public API;
+`tenko --help` lists its commands.
 
 ## License
 
