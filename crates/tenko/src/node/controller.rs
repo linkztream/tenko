@@ -39,7 +39,7 @@ use tenko_core::cluster::LeaderService;
 use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, VrfId};
 use tenko_jobs::JobEngine;
 use tenko_store::QuorumState;
-use tenko_store::{ChangeStream, ReadViewExt as _, Store, WatchFilter};
+use tenko_store::{ChangeStream, KeyRange, ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tenko_vault::StoreVault;
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -301,7 +301,7 @@ pub async fn start_with(
         tasks.push(tokio::spawn(health(
             Arc::clone(&registry),
             Arc::clone(&state),
-            layer.as_ref().map(|layer| layer.store().quorum()),
+            layer.clone(),
             stop,
         )));
         let nodes = registry
@@ -413,7 +413,7 @@ pub async fn start_with(
     tasks.push(tokio::spawn(health(
         Arc::clone(&registry),
         Arc::clone(&state),
-        layer.as_ref().map(|layer| layer.store().quorum()),
+        layer.clone(),
         stop,
     )));
     let nodes = registry
@@ -659,9 +659,10 @@ async fn maintenance(
 async fn health(
     registry: Arc<NodeRegistry>,
     state: Arc<OnceLock<AppState>>,
-    mut quorum: Option<watch::Receiver<QuorumState>>,
+    layer: Option<Peers>,
     mut stop: watch::Receiver<bool>,
 ) {
+    let mut quorum = layer.as_ref().map(|layer| layer.store().quorum());
     let mut tick = tokio::time::interval(HEALTH_INTERVAL);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let filter = WatchFilter::namespaces(["cluster"]);
@@ -708,6 +709,9 @@ async fn health(
                 continue;
             }
         };
+        if let Some(layer) = &layer {
+            recovery_notices(layer, state).await;
+        }
         let warning = mismatch_warning(&health);
         match &warning {
             Some(warning) => state.set_notice(warning.clone()),
@@ -815,6 +819,100 @@ async fn renew_once(
     peers.network().set_tls(renewed.client_config()?);
     tracing::info!(not_after = %renewed.info.not_after, "renewed the cluster certificate of this controller");
     Ok(())
+}
+
+/// The conditions of the cluster recovery in `GET /system/status` (section 3.14), each set
+/// while it holds and cleared when it ends: this controller stopped writing (the alarm
+/// `cluster.superseded`, or the code of its fence), the authority's first start after a
+/// forced step (the alarm `cluster.recover.force`, while any controller it superseded is
+/// neither rejoined nor removed), and the superseded controllers its lineage did not reach.
+async fn recovery_notices(layer: &Peers, state: &AppState) {
+    use tenko_cluster::generation::{SUPERSEDED, codes};
+    use tenko_store::FenceReason;
+
+    let generation = layer.generation();
+    let notice = |code: &str, detail: String, nodes: &[NodeId]| StatusWarning {
+        code: code.to_owned(),
+        detail,
+        params: [(
+            "nodes".to_owned(),
+            nodes
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        )]
+        .into(),
+    };
+    for reason in [
+        FenceReason::Superseded,
+        FenceReason::Conflict,
+        FenceReason::MajorityAlive,
+    ] {
+        match &generation.fence {
+            Some((current, other))
+                if *current == reason
+                    || (reason == FenceReason::Superseded && *current == FenceReason::Unknown) =>
+            {
+                let forced: Vec<NodeId> = other
+                    .tip()
+                    .map(tenko_cluster::generation::Signed::forced)
+                    .into_iter()
+                    .collect();
+                state.set_notice(notice(
+                    reason.code(),
+                    format!(
+                        "this controller stopped writing ({}): reads serve its copy until an                          operator acts on its host (docs/cluster.md section 12.11)",
+                        reason.code()
+                    ),
+                    &forced,
+                ));
+            }
+            _ => state.clear_notice(reason.code()),
+        }
+    }
+    let pending: Vec<NodeId> = match layer.store().read(ReadConsistency::Local).await {
+        Ok(view) if generation.fence.is_none() && generation.lineage.tip().is_some() => {
+            let membership = layer.store().membership();
+            view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(node, _, _)| NodeId(node))
+                .filter(|node| {
+                    !membership.voters.contains(node) && !membership.learners.contains(node)
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+    if pending.is_empty() {
+        state.clear_notice(codes::SUPERSEDED_PENDING);
+        state.clear_notice(tenko_cluster::generation::actions::FORCE.as_str());
+    } else {
+        state.set_notice(notice(
+            tenko_cluster::generation::actions::FORCE.as_str(),
+            format!(
+                "this controller took over the cluster as generation {} after a forced step",
+                generation.lineage.number()
+            ),
+            &pending,
+        ));
+        state.set_notice(notice(
+            codes::SUPERSEDED_PENDING,
+            "controllers a forced step superseded are neither rejoined nor removed".to_owned(),
+            &pending,
+        ));
+    }
+    let unreached: Vec<NodeId> = layer.unreached().into_iter().collect();
+    if unreached.is_empty() {
+        state.clear_notice(codes::SUPERSEDED_UNREACHED);
+    } else {
+        state.set_notice(notice(
+            codes::SUPERSEDED_UNREACHED,
+            "superseded controllers have not received the generation record yet".to_owned(),
+            &unreached,
+        ));
+    }
 }
 
 /// The warning of nodes that share no protocol major with this controller, if any.

@@ -332,6 +332,10 @@ isolation_after_ms = 3000
 # Controller in a cluster: seconds a start waits for the local store to catch up with the
 # leader before the controller starts isolated (5 to 3600).
 catch_up_timeout_secs = 120
+# Controller in a cluster: seconds the first start after a forced step of the cluster
+# recovery (`tenko cluster recover --force`) asks the old voters whether they still hold a
+# majority before it takes office (1 to 600).
+recover_probe_secs = 30
 # Controller in a cluster: the leader promotes a caught-up learner to a voter on its own,
 # and only to an odd number of voters (two voters are less available than one).
 auto_promote = true

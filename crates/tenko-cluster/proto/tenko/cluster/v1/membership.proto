@@ -123,6 +123,15 @@ message MembersResponse {
   uint64 term = 2;
   // The members.
   repeated Member members = 3;
+  // The callee's quorum state: single, healthy, electing, isolated or fenced; empty from a
+  // binary that does not report it. The first start after a forced step of the cluster
+  // recovery reads it to tell a live old majority.
+  string quorum = 4;
+  // The voters, the callee included, that the callee heard from within the contact window;
+  // 0 when it does not know.
+  uint32 in_contact = 5;
+  // The voters of the callee's membership.
+  uint32 voters = 6;
 }
 
 message DigestRequest {

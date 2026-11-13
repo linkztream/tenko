@@ -987,6 +987,9 @@ async fn start(
     let layout = resolved.layout();
     let mut steps = Steps::new();
     create_data_dir(&resolved.data_dir)?;
+    // A forced step of the cluster recovery that did not finish: the store may be renamed
+    // aside, and a start now would make a new installation out of nothing.
+    crate::cluster::recover::check_start(&resolved.data_dir)?;
     // The data-directory format (OPS-23): a newer format is refused before anything, the
     // keys included, is touched; an older one is copied aside before the store opens and
     // migrated after.

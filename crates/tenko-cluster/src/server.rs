@@ -208,6 +208,72 @@ where
     }
 }
 
+/// A controller service (`Raft`, `Cluster`) behind the generation check of the cluster
+/// recovery (section 3.6): [`Peers::admit`] runs before the service, and an answer carries
+/// this controller's claim.
+struct Generational<S> {
+    peers: Peers,
+    inner: S,
+}
+
+impl<S: Clone> Clone for Generational<S> {
+    fn clone(&self) -> Self {
+        Self {
+            peers: self.peers.clone(),
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<S: NamedService> NamedService for Generational<S> {
+    const NAME: &'static str = S::NAME;
+}
+
+impl<S> tower::Service<http::Request<Body>> for Generational<S>
+where
+    S: tower::Service<http::Request<Body>, Response = http::Response<Body>, Error = Infallible>
+        + Clone
+        + Send
+        + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = http::Response<Body>;
+    type Error = Infallible;
+    type Future = BoxFuture<'static, Result<http::Response<Body>, Infallible>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Infallible>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, request: http::Request<Body>) -> Self::Future {
+        let peers = self.peers.clone();
+        let service = self.inner.clone();
+        Box::pin(async move {
+            use tower::ServiceExt as _;
+            if let Some(peer) = request.extensions().get::<PeerInfo>().cloned() {
+                let metadata =
+                    tonic::metadata::MetadataMap::from_headers(request.headers().clone());
+                let join = request.uri().path().ends_with("/Join");
+                if let Err(status) = peers.admit(&peer, join, &metadata).await {
+                    return Ok(status.into_http());
+                }
+            }
+            let mut response = service.oneshot(request).await?;
+            if let Some(value) = peers
+                .generation()
+                .claim()
+                .render()
+                .and_then(|text| http::HeaderValue::from_str(&text).ok())
+            {
+                response
+                    .headers_mut()
+                    .insert(crate::generation::GENERATION_METADATA, value);
+            }
+            Ok(response)
+        })
+    }
+}
+
 /// The node services of the cluster port, attached by the `nodes` start step.
 #[derive(Clone, Default)]
 pub struct NodeServices {
@@ -328,16 +394,18 @@ fn router(nodes: &NodeServices, peers: Option<&PeerService>) -> tonic::transport
         // An append-entries request stays below the limit (the transport cuts larger
         // ones); a snapshot chunk is 1 MiB and a forwarded batch at most 16 MiB.
         router = router
-            .add_service(
-                v1::raft_server::RaftServer::new(peers.clone())
+            .add_service(Generational {
+                peers: peers.peers.clone(),
+                inner: v1::raft_server::RaftServer::new(peers.clone())
                     .max_decoding_message_size(MAX_MESSAGE_BYTES)
                     .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            )
-            .add_service(
-                v1::cluster_server::ClusterServer::new(peers.clone())
+            })
+            .add_service(Generational {
+                peers: peers.peers.clone(),
+                inner: v1::cluster_server::ClusterServer::new(peers.clone())
                     .max_decoding_message_size(MAX_MESSAGE_BYTES)
                     .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            );
+            });
     }
     router
 }

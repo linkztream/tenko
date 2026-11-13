@@ -148,6 +148,18 @@ struct Inner {
     channels: Mutex<HashMap<String, Channel>>,
     /// The nodes no Raft message goes to ([`PeerNetwork::set_refused`]).
     refused: OnceLock<Refused>,
+    /// The generation of this controller's history on its calls
+    /// ([`PeerNetwork::set_generation`]).
+    generation: OnceLock<Box<dyn GenerationHook>>,
+}
+
+/// What the generation of this controller's history adds to its calls and reads from a
+/// refusal (the cluster recovery, section 3.6).
+pub(crate) trait GenerationHook: Send + Sync {
+    /// Adds this controller's claim, and its record when `target` is known to be behind.
+    fn stamp(&self, metadata: &mut tonic::metadata::MetadataMap, target: NodeId);
+    /// Reads the record a refusal of `from` carries.
+    fn observe(&self, status: &Status, from: NodeId);
 }
 
 /// Whether a node gets no Raft message from this controller.
@@ -181,6 +193,7 @@ impl PeerNetwork {
                 resolved: Mutex::new(HashMap::new()),
                 channels: Mutex::new(HashMap::new()),
                 refused: OnceLock::new(),
+                generation: OnceLock::new(),
             }),
         }
     }
@@ -251,6 +264,25 @@ impl PeerNetwork {
     /// need. Set once.
     pub fn set_refused(&self, refused: impl Fn(NodeId) -> bool + Send + Sync + 'static) {
         let _ = self.inner.refused.set(Box::new(refused));
+    }
+
+    /// Sets the generation layer of the calls; set once.
+    pub(crate) fn set_generation(&self, hook: impl GenerationHook + 'static) {
+        let _ = self.inner.generation.set(Box::new(hook));
+    }
+
+    /// Adds the generation of this controller's history to a call to `target`.
+    pub(crate) fn stamp<T>(&self, request: &mut Request<T>, target: NodeId) {
+        if let Some(hook) = self.inner.generation.get() {
+            hook.stamp(request.metadata_mut(), target);
+        }
+    }
+
+    /// A request to `target` with the gRPC timeout set and the generation added.
+    fn prepared<T>(&self, target: NodeId, timeout: Duration, body: T) -> Request<T> {
+        let mut request = timed(timeout, Request::new(body));
+        self.stamp(&mut request, target);
+        request
     }
 
     /// Forgets the cached endpoint of `node` (its member record changed).
@@ -417,6 +449,7 @@ impl PeerNetwork {
     /// Runs a call with a deadline, as a request with the gRPC timeout set.
     async fn deadline<T>(
         &self,
+        target: NodeId,
         endpoint: &str,
         timeout: Duration,
         call: impl Future<Output = Result<tonic::Response<T>, Status>>,
@@ -424,6 +457,11 @@ impl PeerNetwork {
         match tokio::time::timeout(timeout, call).await {
             Ok(Ok(response)) => Ok(response.into_inner()),
             Ok(Err(status)) => {
+                if let Some(hook) = self.inner.generation.get()
+                    && code_of(&status).is_some()
+                {
+                    hook.observe(&status, target);
+                }
                 if matches!(
                     status.code(),
                     tonic::Code::Unavailable | tonic::Code::Unknown
@@ -509,15 +547,17 @@ impl PeerTransport for PeerNetwork {
             .raft_client(NodeId(target), &node.addr)
             .await
             .map_err(|error| RPCError::Unreachable(unreachable(error)))?;
-        let request = timed(
+        let request = self.prepared(
+            NodeId(target),
             self.inner.timings.append,
-            Request::new(v1::RaftRequest {
+            v1::RaftRequest {
                 wire: RAFT_WIRE.to_owned(),
                 payload,
-            }),
+            },
         );
         let response = self
             .deadline(
+                NodeId(target),
                 &endpoint,
                 self.inner.timings.append,
                 client.append_entries(request),
@@ -546,15 +586,21 @@ impl PeerTransport for PeerNetwork {
             .raft_client(NodeId(target), &node.addr)
             .await
             .map_err(|error| RPCError::Unreachable(unreachable(error)))?;
-        let request = timed(
+        let request = self.prepared(
+            NodeId(target),
             self.inner.timings.vote,
-            Request::new(v1::RaftRequest {
+            v1::RaftRequest {
                 wire: RAFT_WIRE.to_owned(),
                 payload,
-            }),
+            },
         );
         let response = self
-            .deadline(&endpoint, self.inner.timings.vote, client.vote(request))
+            .deadline(
+                NodeId(target),
+                &endpoint,
+                self.inner.timings.vote,
+                client.vote(request),
+            )
             .await
             .map_err(|status| raft_call_error(&status))?;
         decode_raft(&response.wire, &response.payload)
@@ -588,8 +634,9 @@ impl PeerTransport for PeerNetwork {
             .map_err(|error| StreamingError::Unreachable(unreachable(error)))?;
         let chunks = snapshot_chunks(file, vote, meta, digest);
         let call = async {
-            let request = timed(self.inner.timings.snapshot, Request::new(chunks));
+            let request = self.prepared(NodeId(target), self.inner.timings.snapshot, chunks);
             self.deadline(
+                NodeId(target),
                 &endpoint,
                 self.inner.timings.snapshot,
                 client.install_snapshot(request),
@@ -729,15 +776,17 @@ impl LeaderLink for PeerNetwork {
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
         let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "Propose", async {
-            let mut request = timed(
+            let mut request = self.prepared(
+                NodeId(target),
                 self.inner.timings.forward,
-                Request::new(v1::ProposeRequest {
+                v1::ProposeRequest {
                     wire: BATCH_WIRE.to_owned(),
                     batch: batch.to_vec(),
-                }),
+                },
             );
             trace::inject(&mut request);
             self.deadline(
+                NodeId(target),
                 &endpoint,
                 self.inner.timings.forward,
                 client.propose(request),
@@ -770,12 +819,14 @@ impl LeaderLink for PeerNetwork {
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
         let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "ReadIndex", async {
-            let mut request = timed(
+            let mut request = self.prepared(
+                NodeId(target),
                 self.inner.timings.read_index,
-                Request::new(v1::ReadIndexRequest {}),
+                v1::ReadIndexRequest {},
             );
             trace::inject(&mut request);
             self.deadline(
+                NodeId(target),
                 &endpoint,
                 self.inner.timings.read_index,
                 client.read_index(request),

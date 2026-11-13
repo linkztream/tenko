@@ -60,6 +60,8 @@
 //! the first peer joins, it records itself (node and member record) and moves its identity
 //! to `<data_dir>/node/` ([`ControllerIdentity`]).
 
+// The cluster recovery: the generation of this controller's history at run time.
+mod generations;
 mod identity;
 mod network;
 
@@ -90,6 +92,7 @@ use tonic::Status;
 use uuid::Uuid;
 
 pub use self::{
+    generations::{GenerationState, PUSH_INTERVAL},
     identity::{ControllerIdentity, NodeDirIdentity, VaultIdentity, certificate_ref},
     network::{MAX_APPEND_BYTES, PeerNetwork, PeerTimings},
 };
@@ -166,6 +169,9 @@ pub struct PeerConfig {
     pub promote_lag_entries: u64,
     /// How long a learner stays caught up before it is promoted ([`PROMOTE_AFTER`]).
     pub promote_after: Duration,
+    /// The data directory, where a fenced controller keeps its fence (`<data_dir>/node/`);
+    /// `None` keeps the fence in memory only (tests).
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 impl PeerConfig {
@@ -180,6 +186,7 @@ impl PeerConfig {
             auto_promote: true,
             promote_lag_entries: 100,
             promote_after: PROMOTE_AFTER,
+            data_dir: None,
         }
     }
 }
@@ -218,6 +225,8 @@ struct Inner {
     changes: tokio::sync::Mutex<()>,
     /// Revoked members the leader is taking out of the cluster (each logged once).
     removing: Mutex<HashSet<NodeId>>,
+    /// The generation of this controller's history and its fence.
+    generations: generations::Generations,
 }
 
 impl std::fmt::Debug for Peers {
@@ -299,7 +308,7 @@ impl Peers {
     pub fn new(store: RaftStore, network: PeerNetwork, config: PeerConfig) -> Self {
         network.attach(&store);
         store.set_transport(Arc::new(network.clone()));
-        Self {
+        let peers = Self {
             inner: Arc::new(Inner {
                 config,
                 store,
@@ -311,8 +320,13 @@ impl Peers {
                 caught_up: Mutex::new(HashMap::new()),
                 changes: tokio::sync::Mutex::new(()),
                 removing: Mutex::new(HashSet::new()),
+                generations: generations::Generations::default(),
             }),
-        }
+        };
+        peers
+            .network()
+            .set_generation(generations::Hook(Arc::downgrade(&peers.inner)));
+        peers
     }
 
     /// The settings.
@@ -428,7 +442,10 @@ impl Peers {
     /// Starts the leader's background work: promotion of caught-up learners. It ends when
     /// `stop` turns true.
     pub fn spawn(&self, stop: watch::Receiver<bool>) -> Vec<JoinHandle<()>> {
-        vec![tokio::spawn(leader_loop(self.clone(), stop))]
+        vec![
+            tokio::spawn(leader_loop(self.clone(), stop.clone())),
+            tokio::spawn(self.clone().push_loop(stop)),
+        ]
     }
 
     // -----------------------------------------------------------------------------------
@@ -575,6 +592,7 @@ impl Peers {
             return trace::rpc(Some(leader), trace::CLUSTER, "Join", async {
                 let mut request = tonic::Request::new(request);
                 trace::inject(&mut request);
+                self.network().stamp(&mut request, leader);
                 client.join(request).await
             })
             .await
@@ -849,6 +867,7 @@ impl Peers {
             let call = trace::rpc(Some(leader), trace::CLUSTER, "Members", async {
                 let mut request = tonic::Request::new(v1::MembersRequest {});
                 trace::inject(&mut request);
+                self.network().stamp(&mut request, leader);
                 client.members(request).await
             });
             let answer = tokio::time::timeout(Duration::from_secs(2), call)
@@ -908,7 +927,7 @@ impl Peers {
                 })
                 .collect(),
         };
-        let members = membership
+        let mut members = membership
             .voters
             .iter()
             .map(|node| (*node, MemberRole::Voter))
@@ -955,7 +974,8 @@ impl Peers {
                     revoked: self.is_revoked(node),
                 }
             })
-            .collect();
+            .collect::<Vec<_>>();
+        members.extend(self.superseded_views(&records, &names).await?);
         Ok(ClusterView {
             node: self.local(),
             leader: status.leader,
@@ -964,17 +984,39 @@ impl Peers {
             changing: membership.changing,
             members,
             job_id: None,
-            generation: None,
+            generation: self.generation_view(),
         })
     }
 
     /// `Cluster.Members`: the members as this controller sees them.
     pub(crate) async fn members_proto(&self) -> Result<v1::MembersResponse, ClusterError> {
         let view = self.view_local(None).await?;
+        let status = self.store().status();
+        let voters = self.store().membership().voters;
+        let heard = status
+            .members
+            .iter()
+            .filter(|member| {
+                member.voter
+                    && member.node != self.local()
+                    && member
+                        .last_contact_ms
+                        .is_some_and(|ms| Duration::from_millis(ms) <= CONTACT_WINDOW)
+            })
+            .count();
+        let in_contact = if heard == 0 { 0 } else { heard + 1 };
         Ok(v1::MembersResponse {
             leader_id: view.leader.map_or(0, |leader| leader.0),
             term: view.term,
-            members: view.members.iter().map(member_proto).collect(),
+            members: view
+                .members
+                .iter()
+                .filter(|member| member.role != MemberRole::Superseded)
+                .map(member_proto)
+                .collect(),
+            quorum: quorum_name(&status.quorum).to_owned(),
+            in_contact: u32::try_from(in_contact).unwrap_or(u32::MAX),
+            voters: u32::try_from(voters.len()).unwrap_or(u32::MAX),
         })
     }
 
@@ -1534,6 +1576,7 @@ impl Peers {
                     trace::rpc(Some(target), trace::CLUSTER, "Campaign", async {
                         let mut request = tonic::Request::new(v1::CampaignRequest {});
                         trace::inject(&mut request);
+                        network.stamp(&mut request, target);
                         client.campaign(request).await
                     })
                     .await
@@ -1594,6 +1637,7 @@ impl Peers {
         request.set_timeout(CHANGE_FORWARD_TIMEOUT);
         let answer = trace::rpc(Some(leader), trace::CLUSTER, "Change", async {
             trace::inject(&mut request);
+            self.network().stamp(&mut request, leader);
             client.change(request).await
         })
         .await
@@ -1763,6 +1807,18 @@ impl Peers {
 }
 
 /// The number of learners to promote so that the voters stay odd: as many as possible.
+/// The name of a quorum state in `Cluster.Members`.
+fn quorum_name(quorum: &tenko_store::QuorumState) -> &'static str {
+    use tenko_store::QuorumState;
+    match quorum {
+        QuorumState::Single => "single",
+        QuorumState::Healthy => "healthy",
+        QuorumState::Electing { .. } => "electing",
+        QuorumState::Isolated { .. } => "isolated",
+        QuorumState::Fenced { .. } => "fenced",
+    }
+}
+
 fn odd_promotions(voters: usize, eligible: usize) -> usize {
     if eligible == 0 {
         0
@@ -1940,6 +1996,7 @@ impl Peers {
                         let mut request =
                             tonic::Request::new(v1::DigestRequest { revision: target.0 });
                         trace::inject(&mut request);
+                        self.network().stamp(&mut request, node);
                         client.digest(request).await
                     })
                     .await

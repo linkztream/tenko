@@ -97,6 +97,8 @@ pub mod fsync;
 pub mod log;
 pub mod network;
 pub mod types;
+// The cluster recovery: a closed store read and replayed for a forced step.
+pub mod recover;
 
 mod apply;
 // WP9.6: what goes to disk is compressed (ADR 0030).

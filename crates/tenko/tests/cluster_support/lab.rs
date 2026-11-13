@@ -67,6 +67,9 @@ pub struct LabOptions {
     /// Worker threads of each controller's API runtime (`[server] workers`); default the
     /// harness's 1. The measurements use 4, the upper end of the recommendation.
     pub workers: Option<u32>,
+    /// `[cluster] recover_probe_secs` of every controller (the recovery scenarios shorten
+    /// the first start's probe); default the binary's.
+    pub recover_probe_secs: Option<u64>,
 }
 
 /// The state of one controller slot.
@@ -99,6 +102,7 @@ struct Slot {
     state: State,
     binary: Option<PathBuf>,
     workers: Option<u32>,
+    recover_probe_secs: Option<u64>,
 }
 
 impl Slot {
@@ -115,6 +119,9 @@ impl Slot {
         if let Some(workers) = self.workers {
             // Over the harness's `[server] workers = 1` in the file.
             command.env("TENKO_SERVER__WORKERS", workers.to_string());
+        }
+        if let Some(secs) = self.recover_probe_secs {
+            command.env("TENKO_CLUSTER__RECOVER_PROBE_SECS", secs.to_string());
         }
         command
             .arg("serve")
@@ -262,6 +269,7 @@ impl ClusterLab {
                 state: State::Empty,
                 binary: options.binary.clone(),
                 workers: options.workers,
+                recover_probe_secs: options.recover_probe_secs,
             })
             .collect();
         let mut relays = BTreeMap::new();
@@ -490,6 +498,19 @@ impl ClusterLab {
             .arg(&self.ca_file)
             .env("TENKO_TOKEN", &self.token)
             .env("TENKO_CREDENTIALS", self.root().join("no-credentials.json"));
+        run(command, None)
+    }
+
+    /// Runs `tenko cluster recover --config <file of controller id> <args>` with the
+    /// controller's binary, as the operator on its host would.
+    #[track_caller]
+    pub fn recover(&self, id: u64, args: &[&str]) -> Outcome {
+        let slot = &self.slots[self.slot_of(id)];
+        let mut command = program(slot.binary.as_deref());
+        command
+            .args(["cluster", "recover", "--config"])
+            .arg(slot.node().config_path())
+            .args(args);
         run(command, None)
     }
 

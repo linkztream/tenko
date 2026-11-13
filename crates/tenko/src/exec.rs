@@ -350,6 +350,10 @@ pub fn guarded_paths(cli: &Cli) -> Option<Vec<PathBuf>> {
         Command::Cluster { action } => match action {
             // Enrolls, imports key generations and copies the store into the data directory.
             ClusterCommand::Join(args) => node_dir(&args.node).into_iter().collect(),
+            // The forced step renames and writes the store and reads the node's key.
+            ClusterCommand::Recover(args) => {
+                data_dir(&args.config, &args.data_dir).into_iter().collect()
+            }
             ClusterCommand::Status(_)
             | ClusterCommand::Members(_)
             | ClusterCommand::Promote(_)

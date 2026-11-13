@@ -256,6 +256,10 @@ pub struct ClusterSection {
     /// Controller in a cluster: seconds a start waits for the local store to catch up with
     /// the leader before the controller starts isolated (default 120, 5 to 3600).
     pub catch_up_timeout_secs: u64,
+    /// Controller in a cluster: seconds the first start after a forced step of the cluster
+    /// recovery asks the old voters whether they still hold a majority, before it takes
+    /// office (default 30, 1 to 600).
+    pub recover_probe_secs: u64,
     /// Controller in a cluster: the leader promotes a caught-up learner to a voter on its
     /// own, and only to an odd number of voters (default true).
     pub auto_promote: bool,
@@ -283,6 +287,7 @@ impl Default for ClusterSection {
             buffer_mib: 64,
             isolation_after_ms: 3_000,
             catch_up_timeout_secs: 120,
+            recover_probe_secs: 30,
             auto_promote: true,
             promote_lag_entries: 100,
             sync_kbps: 0,
@@ -361,6 +366,11 @@ impl ClusterSection {
         if !(5..=3_600).contains(&self.catch_up_timeout_secs) {
             return Err(ConfigError::invalid(
                 "cluster.catch_up_timeout_secs must be between 5 and 3600",
+            ));
+        }
+        if !(1..=600).contains(&self.recover_probe_secs) {
+            return Err(ConfigError::invalid(
+                "cluster.recover_probe_secs must be between 1 and 600",
             ));
         }
         if !(1..=1_000_000).contains(&self.promote_lag_entries) {

@@ -1843,43 +1843,9 @@ impl NodeRegistry {
                 .record_for_edit(node, attempt)
                 .await?
                 .ok_or_else(|| not_found(node))?;
-            // Every certificate the record names. One that a renewal retired has its end in
-            // the record moved forward but may be valid for longer: its row lives until the
-            // newest certificate expires (an older one never ends later unless the CA's
-            // lifetime was shortened in between).
-            let newest = record.certificate.not_after;
-            let serials: Vec<(&str, Timestamp)> = record
-                .serials
-                .iter()
-                .filter_map(|cert| {
-                    let until = if cert.serial == record.certificate.serial {
-                        cert.not_after
-                    } else {
-                        cert.not_after.max(newest)
-                    };
-                    (until > cx.now).then_some((cert.serial.as_str(), until))
-                })
-                .collect();
             let mut batch = WriteBatch::for_request(cx);
             batch.expect_typed(&tables::NODES, &node.0, Some(revision));
-            batch.delete_typed(&tables::NODES, &node.0);
-            batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
-            for (serial, until) in &serials {
-                batch.put_typed(
-                    &tables::REVOCATIONS,
-                    &(*serial).to_owned(),
-                    &Revocation {
-                        node,
-                        revoked_at: cx.now,
-                        not_after: *until,
-                        controller: record.roles.contains(&Role::Controller),
-                    },
-                )?;
-            }
-            let serial_list: Vec<String> = serials
-                .iter()
-                .map(|(serial, _)| (*serial).to_owned())
-                .collect();
+            let serial_list = revocation(&mut batch, node, &record, cx.now)?;
             batch.audit(
                 AuditDraft::success(actions::NODE_REVOKE, vec![ObjectRef::node(node)])
                     .with_source_ip(cx.source_ip)
@@ -2687,6 +2653,66 @@ impl StepHandler for WriteStep {
     ) -> Result<(), StepError> {
         Err(StepError::NotCompensable)
     }
+}
+
+/// Stages the revocation of `node` in `batch`: its node record and name go, and every
+/// certificate the record names is put on `cluster.revocations` until it would expire.
+/// Returns the revoked serials.
+fn revocation(
+    batch: &mut WriteBatch,
+    node: NodeId,
+    record: &NodeRecord,
+    now: Timestamp,
+) -> Result<Vec<String>, ClusterError> {
+    // Every certificate the record names. One that a renewal retired has its end in the
+    // record moved forward but may be valid for longer: its row lives until the newest
+    // certificate expires (an older one never ends later unless the CA's lifetime was
+    // shortened in between).
+    let newest = record.certificate.not_after;
+    let mut serials = Vec::new();
+    batch.delete_typed(&tables::NODES, &node.0);
+    batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
+    for cert in &record.serials {
+        let until = if cert.serial == record.certificate.serial {
+            cert.not_after
+        } else {
+            cert.not_after.max(newest)
+        };
+        if until > now {
+            batch.put_typed(
+                &tables::REVOCATIONS,
+                &cert.serial,
+                &Revocation {
+                    node,
+                    revoked_at: now,
+                    not_after: until,
+                    controller: record.roles.contains(&Role::Controller),
+                },
+            )?;
+            serials.push(cert.serial.clone());
+        }
+    }
+    Ok(serials)
+}
+
+/// Stages the revocation of `node` as `view` holds it in `batch`, for a write that is not
+/// the registry's own (the forced step of the cluster recovery revokes the controllers its
+/// operator names in the step's one batch). Returns the revoked serials.
+///
+/// # Errors
+///
+/// `cluster.node.not_found` (404) when `view` has no record of `node`; a store error.
+pub fn stage_revocation(
+    view: &dyn tenko_store::ReadView,
+    batch: &mut WriteBatch,
+    node: NodeId,
+    now: Timestamp,
+) -> Result<Vec<String>, ClusterError> {
+    let (record, revision) = view
+        .get_typed(&tables::NODES, &node.0)?
+        .ok_or_else(|| not_found(node))?;
+    batch.expect_typed(&tables::NODES, &node.0, Some(revision));
+    revocation(batch, node, &record, now)
 }
 
 #[cfg(test)]

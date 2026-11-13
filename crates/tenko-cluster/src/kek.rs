@@ -167,11 +167,13 @@ impl KekPeers for PeerKekFetch {
         for node in self.peers.others_leader_first() {
             let answer = async {
                 let mut client = self.peers.network().cluster_client(node).await?;
+                let mut request = tonic::Request::new(v1::TransferKekRequest {
+                    ephemeral_public_key: recipient.to_vec(),
+                    join_token_id: String::new(),
+                });
+                self.peers.network().stamp(&mut request, node);
                 client
-                    .transfer_kek(v1::TransferKekRequest {
-                        ephemeral_public_key: recipient.to_vec(),
-                        join_token_id: String::new(),
-                    })
+                    .transfer_kek(request)
                     .await
                     .map(tonic::Response::into_inner)
                     .map_err(|status| {

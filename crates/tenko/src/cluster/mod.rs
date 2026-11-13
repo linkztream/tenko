@@ -7,9 +7,11 @@
 //! | `join` | `tenko cluster join`: enrollment as a controller, the key transfer, the copy of the cluster's data, the configuration |
 //! | [`admin`] | `tenko cluster status|members|promote|remove|step-down|verify` over `/cluster/*` |
 //! | [`upgrade`] | `tenko cluster upgrade-check`: this binary against every member, and the rolling order |
+//! | [`recover`] | `tenko cluster recover`: a forced step on a stopped survivor after a permanent loss of quorum |
 
 pub mod admin;
 mod join;
+pub mod recover;
 mod start;
 pub mod upgrade;
 
@@ -71,6 +73,10 @@ pub enum ClusterCommand {
     /// List each member's version, protocol majors, Raft wire version and the data formats
     /// it knows, check that this binary can replace them, and print the rolling order.
     UpgradeCheck(upgrade::UpgradeCheckArgs),
+    /// On a stopped controller after the cluster lost its quorum for good: inspect this
+    /// copy, or make it the only voter of a new generation of the cluster (`--force`), or
+    /// undo that before the first start.
+    Recover(recover::RecoverArgs),
 }
 
 impl ClusterCommand {
@@ -85,6 +91,7 @@ impl ClusterCommand {
             Self::StepDown(_) => "cluster step-down",
             Self::Verify(_) => "cluster verify",
             Self::UpgradeCheck(_) => "cluster upgrade-check",
+            Self::Recover(_) => "cluster recover",
         }
     }
 
@@ -99,6 +106,7 @@ impl ClusterCommand {
             Self::StepDown(args) => args.client.json,
             Self::Verify(args) => args.client.json,
             Self::UpgradeCheck(args) => args.client.json,
+            Self::Recover(_) => false,
         }
     }
 }
@@ -132,5 +140,9 @@ pub fn run(action: &ClusterCommand, out: &mut impl Write, err: &mut impl Write) 
             client::block_on(name, json, out, err, admin::step_down(args))
         }
         ClusterCommand::Verify(args) => client::block_on(name, json, out, err, admin::verify(args)),
+        ClusterCommand::Recover(args) => {
+            crate::logging::init_client();
+            recover::block_on(name, out, err, args)
+        }
     }
 }
