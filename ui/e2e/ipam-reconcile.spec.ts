@@ -42,7 +42,7 @@ interface Fake {
 }
 
 /** Answers the reconciliation route of `page` with the rows of the mock; call it before the first navigation. */
-async function fakeReconcile(page: Page, host: Schemas["Host"]): Promise<Fake> {
+async function fakeReconcile(page: Page, api: Api, host: Schemas["Host"]): Promise<Fake> {
   const known = new Map<string, string>();
   const proposal = randomUUID();
   const rows = seedRows({ vrf: randomUUID(), prefix: randomUUID(), host: (name) => known.get(name) ?? (known.set(name, randomUUID()), known.get(name) as string), proposal });
@@ -51,7 +51,10 @@ async function fakeReconcile(page: Page, host: Schemas["Host"]): Promise<Fake> {
     const url = new URL(route.request().url());
     fake.queries.push(url.searchParams);
     const items = filterRows(rows, { kind: url.searchParams.get("kind"), prefix: url.searchParams.get("prefix"), host: url.searchParams.get("host") });
-    const body: Record<string, unknown> = { items, next_cursor: null, revision: 1 };
+    // The revision the real route reads at: a list that claimed an older one would rightly be
+    // told of every change since (the host made for the test) and read again.
+    const { revision } = await api.get<{ revision: number }>("/ipam/reconcile?limit=1");
+    const body: Record<string, unknown> = { items, next_cursor: null, revision };
     if (url.searchParams.get("host") === host.id) body.host = hostTruths({ id: host.id, name: host.name, mode: host.mode }, [MAC], ["192.0.2.150"]);
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
@@ -70,7 +73,7 @@ async function makeHost(api: Api): Promise<Schemas["Host"]> {
 test("shows one grouped table with the rule and the winner of each row, narrows to one kind and opens a row in the side panel", async ({ page, api, signedIn }) => {
   void signedIn;
   const host = await makeHost(api);
-  const fake = await fakeReconcile(page, host);
+  const fake = await fakeReconcile(page, api, host);
 
   await page.goto("/ipam/addresses");
   await page.getByTestId("ipam-nav").locator('[data-tab="reconcile"]').click();
@@ -190,7 +193,7 @@ test("shows one grouped table with the rule and the winner of each row, narrows 
 test("shows the OS field of the DHCP fingerprint and the vendors on the host page", async ({ page, api, signedIn }) => {
   void signedIn;
   const host = await makeHost(api);
-  const fake = await fakeReconcile(page, host);
+  const fake = await fakeReconcile(page, api, host);
 
   await page.goto(`/ipam/hosts/${HOST_NAME}`);
   const observations = page.getByTestId("host-observations");
@@ -212,7 +215,7 @@ test.describe("in Swedish", () => {
 
   test("renders the reconciliation view in Swedish", async ({ page, api, signedIn }, testInfo) => {
     void signedIn;
-    await fakeReconcile(page, await makeHost(api));
+    await fakeReconcile(page, api, await makeHost(api));
     await page.goto("/ipam/reconcile");
     const grid = page.getByTestId("grid-reconcile");
     await expect(withKey(grid, "row", "group:act:conflict").getByTestId("group-count")).toHaveText("2");

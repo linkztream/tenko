@@ -3,20 +3,17 @@
 // comes back older than it (the role's table takes a commit after the store announced it).
 import { createRoot, createSignal } from "solid-js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApiEvent, EventStream } from "../../api/events";
+import { EventStream } from "../../api/events";
 import { createLiveRefresh, LEASE_TABLE } from "./live";
 
+/** The real stream over a stand-in connection; `send` delivers a `dhcp` event at a revision. */
 function fakeStream() {
-  const handlers: ((event: ApiEvent) => void)[] = [];
-  const stream = {
-    subscribe: (_topic: string, handler: (event: ApiEvent) => void) => {
-      handlers.push(handler);
-      return () => undefined;
-    },
-    onReset: () => () => undefined,
-  } as unknown as EventStream;
+  const listeners = new Map<string, (e: Event) => void>();
+  const source = { addEventListener: (type: string, fn: (e: Event) => void) => listeners.set(type, fn), close: () => undefined };
+  const stream = new EventStream({ createEventSource: () => source as unknown as EventSource, sessionActs: () => Promise.resolve(true) });
   const send = (revision: number) => {
-    for (const handler of handlers) handler({ topic: "dhcp", type: "dhcp", objects: [], deleted: [], revision, data: { tables: [LEASE_TABLE] } });
+    const data = JSON.stringify({ topic: "dhcp", revision, tables: [LEASE_TABLE] });
+    listeners.get("dhcp")?.(new MessageEvent("dhcp", { data, lastEventId: String(revision) }));
   };
   return { stream, send };
 }
@@ -33,11 +30,17 @@ function view(start: number, answers: number[]) {
       setRevision(next);
     });
   };
-  let dispose = () => undefined as void;
-  createRoot((done) => {
-    dispose = done;
+  let done = () => undefined as void;
+  createRoot((dispose) => {
+    done = dispose;
     createLiveRefresh({ table: LEASE_TABLE, revision, refresh, stream });
   });
+  // Started after the view subscribed: the first connection carries its topic.
+  stream.start();
+  const dispose = () => {
+    stream.stop();
+    done();
+  };
   return { send, reads: () => reads, dispose };
 }
 
@@ -114,9 +117,13 @@ describe("the live view of a DHCP list", () => {
     };
     let dispose = () => undefined as void;
     createRoot((done) => {
-      dispose = done;
+      dispose = () => {
+        stream.stop();
+        done();
+      };
       createLiveRefresh({ table: LEASE_TABLE, revision, refresh, stream });
     });
+    stream.start();
     send(10);
     await vi.advanceTimersByTimeAsync(0);
     send(12);

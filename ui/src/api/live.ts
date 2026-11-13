@@ -82,11 +82,14 @@ export function createLiveQuery<T>(options: LiveQueryOptions<T>): LiveQuery<T> {
   };
 
   const offs = options.topics.flatMap((topic) => [
-    stream.subscribe(topic, (event) => {
-      if (event.revision !== undefined && revision !== undefined && event.revision <= revision) return;
-      if (options.relevant && !options.relevant(event)) return;
-      schedule(event.revision);
-    }),
+    stream.subscribe(
+      topic,
+      (event) => {
+        if (options.relevant && !options.relevant(event)) return;
+        schedule(event.revision);
+      },
+      () => revision,
+    ),
     stream.onReset(topic, reload),
   ]);
 

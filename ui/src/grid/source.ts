@@ -206,13 +206,15 @@ export function createListSource<T>(options: ListSourceOptions<T>): ListSource<T
 
   const offs = (options.topics ?? []).flatMap((topic) => [
     // eslint-disable-next-line solid/reactivity -- an event callback, like an event handler
-    stream.subscribe(topic, (event) => {
-      const rev = revision();
-      if (event.revision !== undefined && rev !== undefined && event.revision <= rev) return;
-      if (options.relevant && !options.relevant(event)) return;
-      clearTimeout(liveTimer);
-      liveTimer = setTimeout(() => void refresh(event.revision), 150);
-    }),
+    stream.subscribe(
+      topic,
+      (event) => {
+        if (options.relevant && !options.relevant(event)) return;
+        clearTimeout(liveTimer);
+        liveTimer = setTimeout(() => void refresh(event.revision), 150);
+      },
+      revision,
+    ),
     stream.onReset(topic, () => void loadFirst()),
   ]);
 

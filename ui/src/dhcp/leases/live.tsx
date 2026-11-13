@@ -123,18 +123,20 @@ export function createLiveRefresh(options: LiveRefreshOptions): LiveRefresh {
     setFolded(0);
   };
 
-  // eslint-disable-next-line solid/reactivity -- an event callback, like an event handler
-  const off = stream.subscribe("dhcp", (event) => {
-    if (!live() || !touches(event, options.table)) return;
-    const seen = options.revision?.();
-    if (event.revision !== undefined && seen !== undefined && event.revision <= seen) return;
-    if (event.revision !== undefined) {
-      wanted = Math.max(wanted ?? 0, event.revision);
-      // A new change starts the reads again from the shortest pause.
-      behind = 0;
-    }
-    schedule(1);
-  });
+  const off = stream.subscribe(
+    "dhcp",
+    // eslint-disable-next-line solid/reactivity -- an event callback, like an event handler
+    (event) => {
+      if (!live() || !touches(event, options.table)) return;
+      if (event.revision !== undefined) {
+        wanted = Math.max(wanted ?? 0, event.revision);
+        // A new change starts the reads again from the shortest pause.
+        behind = 0;
+      }
+      schedule(1);
+    },
+    options.revision,
+  );
   // eslint-disable-next-line solid/reactivity -- an event callback, like an event handler
   const offReset = stream.onReset("dhcp", () => {
     if (live()) read();

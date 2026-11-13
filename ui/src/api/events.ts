@@ -15,7 +15,9 @@
 // of every change after R. A page subscribes and reads at once, and the server may take the
 // subscription after the read; a connection opened without a position, or at a later one than R,
 // is therefore opened again from R (or from the last id seen, if older), and the server replays
-// what came after it or sends `reset` when it no longer can.
+// what came after it or sends `reset` when it no longer can. Whatever position the shared
+// connection opens at for one view, every subscriber is given each change after the revision its
+// own data was read at exactly once, and none at or before it (`subscribe`, `dispatch`).
 //
 // A stream lasts as long as the session that opened it. The server ends it with an `end`
 // event: `access_changed` (what the session may read changed) reopens it after the first
@@ -119,6 +121,19 @@ async function sessionActs(): Promise<boolean> {
 
 type Handler = (event: ApiEvent) => void;
 
+/**
+ * One subscriber of a topic. A connection reopened at an older position for another view replays
+ * events this one already had: it is given each revision once, and none at or before the revision
+ * its data was read at.
+ */
+interface Subscription {
+  handler: Handler;
+  /** The revision the subscriber's data was read at, if it has one. */
+  since: (() => number | undefined) | undefined;
+  /** The newest revision given to it. */
+  delivered: number;
+}
+
 const RESET = "reset";
 const SHUTDOWN = "shutdown";
 const END = "end";
@@ -153,7 +168,7 @@ export class EventStream {
    * `null` after a connection opened without a position.
    */
   private complete: number | null = null;
-  private readonly handlers = new Map<Topic, Set<Handler>>();
+  private readonly handlers = new Map<Topic, Set<Subscription>>();
   private readonly resetHandlers = new Map<Topic, Set<() => void>>();
   private readonly onOnline = () => this.reconnectNow();
   private readonly onOffline = () => {
@@ -198,9 +213,12 @@ export class EventStream {
     if (this.running && this.source !== undefined) this.reconnectNow();
   }
 
-  /** Calls `handler` for every event of `topic`. Returns the unsubscribe function. */
-  subscribe(topic: Topic, handler: Handler): () => void {
-    return this.add(this.handlers, topic, handler);
+  /**
+   * Calls `handler` for every event of `topic`, each revision once and none at or before
+   * `since()`, the revision the subscriber's data was read at. Returns the unsubscribe function.
+   */
+  subscribe(topic: Topic, handler: Handler, since?: () => number | undefined): () => void {
+    return this.add(this.handlers, topic, { handler, since, delivered: Number.NEGATIVE_INFINITY });
   }
 
   /** Calls `handler` when the server asks every client to reload (a `reset` event). */
@@ -226,6 +244,7 @@ export class EventStream {
     this.complete = null;
     this.lastId = null;
     this.connectedTopics = "";
+    this.forgetDelivered();
     clearTimeout(this.timer);
     clearTimeout(this.topicTimer);
     this.timer = undefined;
@@ -384,7 +403,19 @@ export class EventStream {
       revision: Number.isFinite(revision) ? revision : undefined,
       data,
     };
-    for (const h of [...(this.handlers.get(topic) ?? [])]) h(event);
+    for (const sub of [...(this.handlers.get(topic) ?? [])]) {
+      const rev = event.revision;
+      if (rev !== undefined) {
+        const since = sub.since?.();
+        if (rev <= sub.delivered || (since !== undefined && rev <= since)) continue;
+        sub.delivered = rev;
+      }
+      sub.handler(event);
+    }
+  }
+
+  private forgetDelivered(): void {
+    for (const set of this.handlers.values()) for (const sub of set) sub.delivered = Number.NEGATIVE_INFINITY;
   }
 
   /** Stops the stream when the session no longer acts; an answer for an earlier run is ignored. */
@@ -396,6 +427,8 @@ export class EventStream {
   }
 
   private reset(): void {
+    // The views read again; the revisions after a reset need not continue the ones before it.
+    this.forgetDelivered();
     for (const set of [...this.resetHandlers.values()]) for (const h of [...set]) h();
   }
 }

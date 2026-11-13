@@ -213,6 +213,32 @@ describe("EventStream", () => {
     s.stop();
   });
 
+  it("gives each subscriber every change after its own read once when the connection reopens for another", () => {
+    const s = stream();
+    const newer: number[] = [];
+    const older: number[] = [];
+    let newerAt = 138;
+    s.subscribe("ipam", (e) => newer.push(e.revision ?? -1), () => newerAt);
+    s.start();
+    const first = FakeSource.last();
+    first.emit("ipam", { topic: "ipam", revision: 139 }, "139");
+    first.emit("ipam", { topic: "ipam", revision: 140 }, "140");
+    // A second view read its list at 130: the connection reopens there and the server replays.
+    s.subscribe("ipam", (e) => older.push(e.revision ?? -1), () => 130);
+    s.resumeFrom(130);
+    const replay = FakeSource.last();
+    expect(replay.query.get("from")).toBe("130");
+    for (const revision of [135, 139, 140, 141]) replay.emit("ipam", { topic: "ipam", revision }, String(revision));
+    expect(newer).toEqual([139, 140, 141]);
+    expect(older).toEqual([135, 139, 140, 141]);
+    // A subscriber whose read moved past an event is not given it.
+    newerAt = 145;
+    replay.emit("ipam", { topic: "ipam", revision: 143 }, "143");
+    expect(newer).toEqual([139, 140, 141]);
+    expect(older).toEqual([135, 139, 140, 141, 143]);
+    s.stop();
+  });
+
   it("reopens from the last id seen when a list read is newer than it", () => {
     // The frames after the last id may still be on their way to other views.
     const s = stream();
