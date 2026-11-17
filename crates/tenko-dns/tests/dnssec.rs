@@ -12,7 +12,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, OnceLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use aws_lc_rs::{
@@ -22,14 +22,15 @@ use aws_lc_rs::{
 use hickory_proto::serialize::binary::{BinEncodable, BinEncoder};
 use support::answer::{Query, query};
 use tenko_core::{
-    JobId, RequestCtx, SystemComponent,
+    JobId, RequestCtx, SystemComponent, Timestamp,
     dns::{
         Denial, DnsName, DnssecAlgorithm, DnssecMode, DnssecPolicy, KeyRole, KeyState, Origin,
-        Rdata, RecordData, RrSet, Rtype, ScopeName, SerialPolicy, SoaDefaults, Zone, ZoneId,
-        ZoneKind, codes,
-        tables::{JOURNAL, RRSETS},
+        Rdata, RecordData, RrSet, Rtype, ScopeName, SerialPolicy, SignState, SoaDefaults, Zone,
+        ZoneId, ZoneKind, codes,
+        tables::{JOURNAL, RRSETS, SIGN_STATE},
     },
     serde_util::HexBytes,
+    testing::wait_until_async,
 };
 use tenko_dns::{
     DnsData,
@@ -44,8 +45,9 @@ use tenko_dns::{
     },
 };
 use tenko_jobs::{Job, JobError, JobSpec};
-use tenko_store::{KeyRange, MemStore, ReadView, ReadViewExt, Store};
-use tenko_vault::MemVault;
+use tenko_store::{KeyRange, MemStore, ReadView, ReadViewExt, Store, WriteBatch};
+use tenko_vault::{MemVault, Vault as _};
+use tokio_util::sync::CancellationToken;
 
 fn name(text: &str) -> DnsName {
     DnsName::new(text).expect("name")
@@ -77,6 +79,7 @@ struct Setup {
     zones: Arc<ZoneService>,
     signer: Arc<Signer>,
     jobs: Arc<DirectJobs>,
+    vault: Arc<MemVault>,
 }
 
 fn setup() -> Setup {
@@ -93,7 +96,7 @@ fn setup() -> Setup {
     );
     let signer = Signer::new(
         Arc::clone(&zones),
-        vault as Arc<dyn tenko_vault::Vault>,
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
         SignerConfig::default(),
     );
     let mut direct = DirectJobs::new(Arc::clone(&store) as Arc<dyn Store>);
@@ -109,14 +112,17 @@ fn setup() -> Setup {
         zones,
         signer,
         jobs: direct,
+        vault,
     }
 }
 
 const APEX: &str = "example.test";
 
-/// A zone with TTLs of a second, so a rollover's waits take seconds.
-async fn new_zone(setup: &Setup) -> ZoneId {
-    let mut soa = SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test"));
+/// A zone at `apex` with TTLs of a second, so a rollover's waits take seconds, and one
+/// name server with its address.
+async fn bare_zone(setup: &Setup, apex: &str) -> ZoneId {
+    let server = format!("ns1.{apex}");
+    let mut soa = SoaDefaults::new(name(&server), name(&format!("hostmaster.{apex}")));
     soa.ttl = 1;
     soa.minimum = 1;
     let written = setup
@@ -124,13 +130,13 @@ async fn new_zone(setup: &Setup) -> ZoneId {
         .create(
             &cx(),
             NewZone {
-                name: name(APEX),
+                name: name(apex),
                 kind: ZoneKind::Primary,
                 tenant: None,
                 scopes: Vec::new(),
                 serial: SerialPolicy::Counter,
                 soa,
-                name_servers: vec![name("ns1.example.test")],
+                name_servers: vec![name(&server)],
                 transfer: tenko_core::dns::TransferPolicy::default(),
                 update: tenko_core::dns::UpdatePolicy::default(),
                 dnssec: DnssecPolicy::default(),
@@ -143,8 +149,18 @@ async fn new_zone(setup: &Setup) -> ZoneId {
         .await
         .expect("zone");
     let id = written.zone.id;
+    setup
+        .zones
+        .change_records(&cx(), id, &[set(&server, vec![a("192.0.2.1")])], false)
+        .await
+        .expect("name server");
+    id
+}
+
+/// The zone used by most tests.
+async fn new_zone(setup: &Setup) -> ZoneId {
+    let id = bare_zone(setup, APEX).await;
     let changes = vec![
-        set("ns1.example.test", vec![a("192.0.2.1")]),
         set("www.example.test", vec![a("192.0.2.10"), a("192.0.2.11")]),
         set(
             "example.test",
@@ -1328,4 +1344,112 @@ fn health_warns_when_the_clock_went_back() {
     assert_eq!(findings[0].code, health::CLOCK_SKEW);
     let fine = health::findings(&zone, &state, later);
     assert!(fine.is_empty(), "{fine:?}");
+}
+
+// ---------------------------------------------------------------------------------------
+// The leader loop: its timer and its passes that fail
+
+/// A signer of its own (no keys in memory) with a timer of 100 ms, leading until the token
+/// is canceled.
+fn lead(
+    setup: &Setup,
+) -> (
+    CancellationToken,
+    tokio::task::JoinHandle<Result<(), String>>,
+) {
+    let signer = Signer::new(
+        Arc::clone(&setup.zones),
+        Arc::clone(&setup.vault) as Arc<dyn tenko_vault::Vault>,
+        SignerConfig {
+            tick: Duration::from_millis(100),
+            ..SignerConfig::default()
+        },
+    );
+    let service = signer.leader_service();
+    let stop = CancellationToken::new();
+    let token = stop.clone();
+    (
+        stop,
+        tokio::spawn(async move { service.run(0, token).await }),
+    )
+}
+
+async fn sign_state(setup: &Setup, zone: ZoneId) -> Option<SignState> {
+    ZoneService::sign_state(view(setup).await.as_ref(), zone)
+        .expect("read")
+        .map(|(state, _)| state)
+}
+
+#[tokio::test]
+async fn the_timer_re_signs_the_zones_after_one_that_cannot_be_signed() {
+    let setup = setup();
+    let one = bare_zone(&setup, "one.example.test").await;
+    let two = bare_zone(&setup, "two.example.test").await;
+    for zone in [one, two] {
+        enable(
+            &setup,
+            zone,
+            online(DnssecAlgorithm::EcdsaP256Sha256, Denial::Nsec),
+        )
+        .await;
+    }
+    // The timer looks at the zones in id order: the zone whose keys are gone comes first.
+    let (broken, healthy) = (one.min(two), one.max(two));
+    for key in sign_state(&setup, broken).await.expect("state").keys {
+        setup
+            .vault
+            .delete(&cx(), key.secret)
+            .await
+            .expect("delete the key");
+    }
+    let (stop, leader) = lead(&setup);
+    // The loop runs once a pass of a change has recorded it. The first change may be signed
+    // by the pass at the start; the second comes after that pass, so a change pass signs it.
+    let apex = zone_row(&setup, healthy).await.name;
+    for owner in ["www", "ftp"] {
+        let owner = format!("{owner}.{apex}");
+        setup
+            .zones
+            .change_records(&cx(), healthy, &[set(&owner, vec![a("192.0.2.80")])], false)
+            .await
+            .expect("change");
+        let changed = view(&setup).await.revision();
+        wait_until_async("the change signed", async || {
+            sign_state(&setup, healthy)
+                .await
+                .and_then(|state| state.signed_revision)
+                .is_some_and(|signed| signed >= changed)
+        })
+        .await;
+    }
+    // Both zones are due.
+    let past = Timestamp::from_unix_nanos(0).expect("1970");
+    let mut batch = WriteBatch::for_request(&cx());
+    // Not a retry of the test's earlier writes, which share its request.
+    batch.idempotency = None;
+    for zone in [broken, healthy] {
+        let mut state = sign_state(&setup, zone).await.expect("state");
+        state.next_resign = Some(past);
+        batch.put_typed(&SIGN_STATE, &zone, &state).expect("stage");
+    }
+    setup.zones.store().propose(batch).await.expect("due");
+    wait_until_async("the healthy zone re-signed by the timer", async || {
+        sign_state(&setup, healthy)
+            .await
+            .and_then(|state| state.next_resign)
+            .is_some_and(|due| due > past)
+    })
+    .await;
+    assert_eq!(
+        sign_state(&setup, broken)
+            .await
+            .and_then(|state| state.next_resign),
+        Some(past),
+        "the zone without keys is not signed"
+    );
+    stop.cancel();
+    leader
+        .await
+        .expect("join")
+        .expect("the signer stops cleanly");
 }

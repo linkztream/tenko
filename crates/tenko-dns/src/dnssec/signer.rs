@@ -1089,7 +1089,8 @@ impl Signer {
     }
 
     /// The timer: re-signs zones that are due, starts scheduled rollovers, reads the
-    /// expiry of imported zones again.
+    /// expiry of imported zones again. A zone that fails ([`Signer::sync`] logs it with the
+    /// zone) does not hold up the zones after it.
     async fn on_timer(&self, tracked: &BTreeMap<ZoneId, DnssecMode>) -> ZoneResult<()> {
         let at = now();
         for (id, mode) in tracked {
@@ -1110,14 +1111,16 @@ impl Signer {
                             timer: true,
                             ..Trigger::full(false)
                         };
-                        self.sync(*id, trigger).await?;
+                        if self.sync(*id, trigger).await.is_err() {
+                            continue;
+                        }
                     }
                     if let Some(state) = &state {
                         rollover::schedule(self, &row.zone, state, at).await;
                     }
                 }
                 DnssecMode::Imported if due => {
-                    self.sync(*id, Trigger::default()).await?;
+                    let _ = self.sync(*id, Trigger::default()).await;
                 }
                 _ => {}
             }
