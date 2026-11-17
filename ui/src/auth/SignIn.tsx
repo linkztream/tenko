@@ -9,19 +9,22 @@ import { Mark, Wordmark } from "../components/Mark";
 import { availableLocales, locale, setLocale, storeLocale, t } from "../i18n";
 import { themeLabel } from "../shell/TopBar";
 import { acceptLogin } from "./session";
-import { CeremonyError, signInWithPasskey, webauthnAvailable } from "./webauthn";
+import { CeremonyError, passkeyBlocker, signInWithPasskey, webauthnAvailable } from "./webauthn";
 import "./auth.css";
 
 /** The command for the one administrator of a server who is locked out; it is not translated. */
 const UNLOCK_COMMAND = "tenko user unlock <name>";
 
 type Stage = "passkey" | "password" | "second" | "break-glass";
-type SecondMethod = "totp" | "recovery";
+
+/** The second factors, strongest first: a recovery code is the last resort. */
+const PREFERENCE: SecondFactorMethod[] = ["webauthn", "totp", "recovery"];
 
 /**
  * Sign-in, passkey first (design/mockups/signin.html). A password sign-in continues with
- * the second factor the server asks for: an authenticator code, a recovery code or a
- * passkey. Break-glass access (IAM-09) sits behind a link at the bottom.
+ * the strongest second factor the server lists that works on this page: a passkey, an
+ * authenticator code, then a recovery code. Break-glass access (IAM-09) sits behind a link
+ * at the bottom.
  */
 export default function SignIn() {
   const [params] = useSearchParams();
@@ -33,11 +36,13 @@ export default function SignIn() {
   const [password, setPassword] = createSignal("");
   const [code, setCode] = createSignal("");
   const [challenge, setChallenge] = createSignal<{ id: string; methods: SecondFactorMethod[] } | null>(null);
-  const [method, setMethod] = createSignal<SecondMethod>("totp");
+  // null when no listed factor works here (a passkey alone, on an address it cannot use).
+  const [method, setMethod] = createSignal<SecondFactorMethod | null>(null);
   const [retryIn, setRetryIn] = createSignal(0);
   let passwordInput!: HTMLInputElement;
   let userInput!: HTMLInputElement;
   let codeInput!: HTMLInputElement;
+  let codeSubmit!: HTMLButtonElement;
   let controller: AbortController | undefined;
   let countdown: ReturnType<typeof setInterval> | undefined;
 
@@ -45,6 +50,12 @@ export default function SignIn() {
     controller?.abort();
     clearInterval(countdown);
   });
+
+  const blocker = passkeyBlocker();
+  /** The listed factors that work on this page, in the order of preference. */
+  const usable = () => PREFERENCE.filter((m) => challenge()?.methods.includes(m) && (m !== "webauthn" || !blocker));
+  /** A recovery code is all that is left: the listed passkey does not work here. */
+  const recoveryOnly = () => method() === "recovery" && usable().length === 1;
 
   const describe = (err: unknown): string => {
     if (err instanceof CeremonyError) return t(`auth.signin.ceremony.${err.reason}`);
@@ -128,10 +139,11 @@ export default function SignIn() {
       );
       if (res.status === "second_factor") {
         setChallenge({ id: res.challenge_id, methods: res.methods });
-        setMethod(res.methods.includes("totp") ? "totp" : "recovery");
+        const first = usable()[0] ?? null;
+        setMethod(first);
         setPassword("");
         setStage("second");
-        queueMicrotask(() => codeInput?.focus());
+        queueMicrotask(() => (first === "webauthn" ? codeSubmit : codeInput)?.focus());
       }
     } catch (err) {
       fail(err);
@@ -144,6 +156,7 @@ export default function SignIn() {
     e.preventDefault();
     const ch = challenge();
     if (!ch) return;
+    if (method() === "webauthn") return void passkey();
     if (!code().trim()) {
       codeInput.focus();
       return;
@@ -207,7 +220,11 @@ export default function SignIn() {
                 {stage() === "second"
                   ? method() === "totp"
                     ? t("auth.signin.second_lead_totp")
-                    : t("auth.signin.second_lead_recovery")
+                    : method() === "recovery"
+                      ? recoveryOnly()
+                        ? t("auth.signin.second_lead_recovery_only")
+                        : t("auth.signin.second_lead_recovery")
+                      : t("auth.signin.second_lead_passkey")
                   : stage() === "break-glass"
                     ? t("auth.signin.break_glass_lead")
                     : t("auth.signin.lead")}
@@ -300,23 +317,36 @@ export default function SignIn() {
 
               <Match when={stage() === "second"}>
                 <form class="fields" onSubmit={(e) => void submitCode(e)} novalidate data-testid="signin-code-form">
-                  <div class="field">
-                    <label for="signin-code">
-                      {method() === "totp" ? t("auth.signin.totp_code") : t("auth.signin.recovery_code")}
-                    </label>
-                    <input
-                      ref={codeInput}
-                      id="signin-code"
-                      data-testid="field-code"
-                      class="input mono"
-                      autocomplete="one-time-code"
-                      inputmode={method() === "totp" ? "numeric" : "text"}
-                      autocapitalize="characters"
-                      spellcheck={false}
-                      value={code()}
-                      onInput={(e) => setCode(e.currentTarget.value)}
-                    />
-                  </div>
+                  <Show when={method() === "totp" || method() === "recovery"}>
+                    <div class="field">
+                      <label for="signin-code">
+                        {method() === "totp" ? t("auth.signin.totp_code") : t("auth.signin.recovery_code")}
+                      </label>
+                      {/* Only the authenticator code invites a password manager's stored one-time code. */}
+                      <input
+                        ref={codeInput}
+                        id="signin-code"
+                        data-testid="field-code"
+                        class="input mono"
+                        autocomplete={method() === "totp" ? "one-time-code" : "off"}
+                        inputmode={method() === "totp" ? "numeric" : "text"}
+                        autocapitalize={method() === "totp" ? "off" : "characters"}
+                        spellcheck={false}
+                        value={code()}
+                        onInput={(e) => setCode(e.currentTarget.value)}
+                      />
+                    </div>
+                  </Show>
+                  <Show when={blocker && challenge()?.methods.includes("webauthn")}>
+                    <p class="help" data-testid="signin-passkey-blocked">
+                      {blocker === "unsupported"
+                        ? t("auth.signin.second_passkey_unsupported")
+                        : t("auth.signin.second_passkey_address")}
+                    </p>
+                  </Show>
+                  <Show when={recoveryOnly()}>
+                    <p class="help">{t("auth.signin.second_recovery_advice")}</p>
+                  </Show>
                   <Show when={retryIn() > 0}>
                     <div class="note warn" role="status">
                       <Icon name="clock" size="sm" />
@@ -327,11 +357,22 @@ export default function SignIn() {
                       </span>
                     </div>
                   </Show>
-                  <button type="submit" class="btn primary wide" disabled={busy() || retryIn() > 0} data-testid="form-submit">
-                    {t("auth.signin.verify")}
-                  </button>
+                  <Show when={method()}>
+                    <button
+                      ref={codeSubmit}
+                      type="submit"
+                      class="btn primary wide"
+                      disabled={busy() || retryIn() > 0}
+                      data-testid="form-submit"
+                    >
+                      <Show when={method() === "webauthn"} fallback={t("auth.signin.verify")}>
+                        <Icon name="key" />
+                        {t("auth.signin.passkey")}
+                      </Show>
+                    </button>
+                  </Show>
                   <div class="links">
-                    <For each={challenge()?.methods ?? []}>
+                    <For each={usable()}>
                       {(m) => (
                         <Show when={m !== method()}>
                           <button
@@ -340,13 +381,11 @@ export default function SignIn() {
                             data-testid="signin-method"
                             data-key={m}
                             onClick={() => {
+                              setMethod(m);
+                              setCode("");
+                              setError(null);
                               if (m === "webauthn") void passkey();
-                              else {
-                                setMethod(m);
-                                setCode("");
-                                setError(null);
-                                queueMicrotask(() => codeInput?.focus());
-                              }
+                              else queueMicrotask(() => codeInput?.focus());
                             }}
                           >
                             {m === "totp"

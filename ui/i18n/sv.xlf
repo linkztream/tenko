@@ -225,6 +225,21 @@
       <unit id="auth.signin.second_lead_recovery">
         <segment><source>Enter one of your recovery codes. Each code works once.</source><target>Ange en av dina återställningskoder. Varje kod fungerar en gång.</target></segment>
       </unit>
+      <unit id="auth.signin.second_lead_passkey">
+        <segment><source>Confirm with your passkey.</source><target>Bekräfta med din nyckel.</target></segment>
+      </unit>
+      <unit id="auth.signin.second_lead_recovery_only">
+        <segment><source>Here, only a recovery code can finish this sign-in. Each code works once.</source><target>Här kan inloggningen bara slutföras med en återställningskod. Varje kod fungerar en gång.</target></segment>
+      </unit>
+      <unit id="auth.signin.second_passkey_address">
+        <segment><source>Your passkey cannot be used here: passkeys need HTTPS with a valid certificate and the host name of this installation, not its IP address.</source><target>Din nyckel kan inte användas här: nycklar kräver HTTPS med ett giltigt certifikat och installationens värdnamn, inte dess IP-adress.</target></segment>
+      </unit>
+      <unit id="auth.signin.second_passkey_unsupported">
+        <segment><source>Your passkey cannot be used here: this browser does not support passkeys.</source><target>Din nyckel kan inte användas här: den här webbläsaren stöder inte nycklar.</target></segment>
+      </unit>
+      <unit id="auth.signin.second_recovery_advice">
+        <segment><source>To sign in without spending codes next time, add an authenticator app on your account page, or open Tenko DDI by its host name.</source><target>För att logga in utan att förbruka koder nästa gång: lägg till en autentiseringsapp på din kontosida, eller öppna Tenko DDI via dess värdnamn.</target></segment>
+      </unit>
       <unit id="auth.signin.break_glass_lead">
         <segment><source>For emergencies when no administrator can sign in. Only the registered hardware security key works.</source><target>För nödlägen när ingen administratör kan logga in. Bara den registrerade säkerhetsnyckeln fungerar.</target></segment>
       </unit>
@@ -280,7 +295,7 @@
         <segment><source>Use an authenticator code</source><target>Använd en kod från autentiseringsappen</target></segment>
       </unit>
       <unit id="auth.signin.use_recovery">
-        <segment><source>Use a recovery code</source><target>Använd en återställningskod</target></segment>
+        <segment><source>Use a recovery code (each code works once)</source><target>Använd en återställningskod (varje kod fungerar en gång)</target></segment>
       </unit>
       <unit id="auth.signin.start_over">
         <segment><source>Start over</source><target>Börja om</target></segment>

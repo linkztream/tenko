@@ -36,6 +36,17 @@ export function webauthnAvailable(): boolean {
   return typeof window !== "undefined" && window.isSecureContext !== false && typeof window.PublicKeyCredential === "function";
 }
 
+/**
+ * Why a passkey cannot work on this page, or null when it can: "insecure" outside a secure
+ * context or on an IP address (a relying-party id is a host name, so no passkey matches an
+ * address), "unsupported" in a browser without WebAuthn. A certificate error shows only when
+ * the ceremony fails.
+ */
+export function passkeyBlocker(host = location.hostname): "insecure" | "unsupported" | null {
+  if (window.isSecureContext === false || /^(\d+\.){3}\d+$|^\[/.test(host)) return "insecure";
+  return webauthnAvailable() ? null : "unsupported";
+}
+
 function toDescriptor(c: { id: string; type: string; transports?: string[] | null }): PublicKeyCredentialDescriptor {
   return {
     type: "public-key",
@@ -142,7 +153,8 @@ export async function signInWithPasskey(
     signal?: AbortSignal;
   } = {},
 ): Promise<LoginResponse> {
-  if (!webauthnAvailable()) throw new CeremonyError(window.isSecureContext === false ? "insecure" : "unsupported");
+  const blocked = passkeyBlocker();
+  if (blocked) throw new CeremonyError(blocked);
   const { signal, ...body } = options;
   const start = await api.post("/api/v1/auth/webauthn/login/start", { body, signal });
   let cred: Credential | null;
@@ -159,7 +171,8 @@ export async function signInWithPasskey(
 
 /** Registers a passkey (or, with `securityKey`, a hardware security key) for the signed-in account. */
 export async function registerPasskey(options: { label?: string; securityKey?: boolean; signal?: AbortSignal } = {}): Promise<FactorEnrolled> {
-  if (!webauthnAvailable()) throw new CeremonyError(window.isSecureContext === false ? "insecure" : "unsupported");
+  const blocked = passkeyBlocker();
+  if (blocked) throw new CeremonyError(blocked);
   const start = await api.post("/api/v1/auth/webauthn/register/start", {
     body: { label: options.label ?? null, security_key: options.securityKey ?? false },
     signal: options.signal,

@@ -8,6 +8,7 @@ import { renderRoute } from "../app/testing/render";
 import { locale, setLocale } from "../i18n";
 import { authState, session, setSessionForTest } from "./session";
 import SignIn from "./SignIn";
+import { passkeyBlocker } from "./webauthn";
 
 function bytes(...values: number[]): ArrayBuffer {
   return new Uint8Array(values).buffer;
@@ -91,7 +92,7 @@ describe("sign-in", () => {
   it("accepts a recovery code as the second factor", async () => {
     show();
     signInWithPassword("alex", MOCK_PASSWORDS.alex);
-    fireEvent.click(await screen.findByRole("button", { name: "Use a recovery code" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Use a recovery code (each code works once)" }));
     fireEvent.input(screen.getByLabelText("Recovery code"), { target: { value: MOCK_RECOVERY_CODES[0] } });
     fireEvent.click(screen.getByRole("button", { name: "Verify" }));
     await waitFor(() => expect(authState()).toBe("signed-in"));
@@ -181,5 +182,83 @@ describe("sign-in", () => {
     expect(await axeViolations(container)).toEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "Break-glass access" }));
     expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
+describe("the second step after a password", () => {
+  const PASSKEY = "Sign in with a passkey";
+  const TOTP = "Authenticator code";
+  const RECOVERY = "Recovery code";
+  const USE_TOTP = "Use an authenticator code";
+  const USE_RECOVERY = "Use a recovery code (each code works once)";
+  const ADDRESS = /not its IP address\.$/;
+  const BROWSER = /this browser does not support passkeys\.$/;
+
+  type Env = "available" | "unsupported" | "insecure";
+  // [authenticator app, passkey, recovery codes left, browser, first factor, other factors, why no passkey]
+  const shapes: [boolean, boolean, boolean, Env, string | null, string[], RegExp | null][] = [
+    [true, false, true, "available", TOTP, [USE_RECOVERY], null],
+    [true, false, true, "insecure", TOTP, [USE_RECOVERY], null],
+    [true, false, false, "available", TOTP, [], null],
+    [false, true, true, "available", PASSKEY, [USE_RECOVERY], null],
+    [false, true, true, "insecure", RECOVERY, [], ADDRESS],
+    [false, true, true, "unsupported", RECOVERY, [], BROWSER],
+    [false, true, false, "available", PASSKEY, [], null],
+    [false, true, false, "insecure", null, [], ADDRESS],
+    [true, true, true, "available", PASSKEY, [USE_TOTP, USE_RECOVERY], null],
+    [true, true, true, "insecure", TOTP, [USE_RECOVERY], ADDRESS],
+    [true, true, true, "unsupported", TOTP, [USE_RECOVERY], BROWSER],
+    [true, true, false, "available", PASSKEY, [USE_TOTP], null],
+    [true, true, false, "insecure", TOTP, [], ADDRESS],
+  ];
+
+  it.each(shapes)(
+    "app %s, passkey %s, codes left %s, passkeys %s: asks for %s first",
+    async (totp, passkey, codes, env, first, others, why) => {
+      const alex = db.users.find((u) => u.name === "alex")!;
+      alex.totp = totp;
+      if (!passkey) alex.credentials = [];
+      if (!codes) alex.recovery_codes = [];
+      if (env !== "unsupported") vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {});
+      if (env === "insecure") vi.stubGlobal("isSecureContext", false);
+      const { container } = show();
+      signInWithPassword("alex", MOCK_PASSWORDS.alex);
+      expect(await screen.findByRole("heading", { name: "Confirm it is you" })).toBeTruthy();
+
+      const field = screen.queryByTestId("field-code");
+      const submit = screen.queryByTestId("form-submit");
+      // A code factor is the labeled field; a passkey is the step's button; nothing usable leaves neither.
+      if (field) expect(screen.getByLabelText(first ?? "")).toBe(field);
+      else expect(submit?.textContent ?? null).toBe(first);
+      if (first === TOTP) expect(field?.getAttribute("autocomplete")).toBe("one-time-code");
+      if (first === RECOVERY) {
+        expect(field?.getAttribute("autocomplete")).toBe("off");
+        expect(field?.getAttribute("inputmode")).toBe("text");
+        expect(screen.getByText(/only a recovery code can finish this sign-in/)).toBeTruthy();
+        expect(screen.getByText(/add an authenticator app on your account page/)).toBeTruthy();
+      }
+      if (first) await waitFor(() => expect(document.activeElement).toBe(field ?? submit));
+      expect(screen.queryAllByTestId("signin-method").map((b) => b.textContent)).toEqual(others);
+      const note = screen.queryByTestId("signin-passkey-blocked")?.textContent ?? null;
+      if (why) expect(note).toMatch(why);
+      else expect(note).toBeNull();
+      expect(await axeViolations(container)).toEqual([]);
+    },
+  );
+
+  it("signs in with the passkey it asks for first", async () => {
+    const get = stubPasskey("ok");
+    show();
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
+    await waitFor(() => expect(authState()).toBe("signed-in"));
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("knows a passkey cannot work on an IP address", () => {
+    vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {});
+    expect(passkeyBlocker("192.0.2.10")).toBe("insecure");
+    expect(passkeyBlocker("[2001:db8::1]")).toBe("insecure");
+    expect(passkeyBlocker("ddi.example.test")).toBeNull();
   });
 });

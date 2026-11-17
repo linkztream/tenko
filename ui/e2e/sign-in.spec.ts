@@ -72,7 +72,57 @@ test("password with TOTP, then a passkey enrolled and used to sign in", async ({
   expect((await authenticator.credentials())[0]?.signCount).toBeGreaterThan(0);
 });
 
-test("a TOTP code cannot be used twice", async ({ api, signedIn }) => {
+test("the second step asks for the passkey first, and on an IP address for a recovery code", async ({ page, api, server, signedIn }) => {
+  void signedIn;
+  // An administrator with a passkey and no authenticator app, under a rule that wants a
+  // second factor of administrators (the Standard profile's): the password asks for one.
+  const authenticator = await addPlatformAuthenticator(page);
+  await page.goto("/account");
+  await page.getByTestId("field-passkey-label").fill("Test laptop");
+  await page.getByTestId("account-passkey-add").click();
+  await expect(withKey(page, "account-passkey", "Test laptop")).toBeVisible();
+  const codes = await acknowledgeRecoveryCodes(page);
+  await api.patch("/settings/security", { mfa: "administrators" });
+
+  const signInWithPassword = async () => {
+    await expect(page.getByTestId("page-signin")).toBeVisible();
+    await page.getByTestId("signin-use-password").click();
+    const passwordForm = page.getByTestId("signin-password-form");
+    await passwordForm.getByTestId("field-user-name").fill(ADMIN.name);
+    await passwordForm.getByTestId("field-password").fill(ADMIN.password);
+    await passwordForm.getByTestId("form-submit").click();
+    const codeForm = page.getByTestId("signin-code-form");
+    await expect(codeForm).toBeVisible();
+    return codeForm;
+  };
+
+  // By its IP address no passkey can work: the step says so and asks for a recovery code,
+  // in a field that does not invite a password manager's one-time code.
+  await page.goto(server.url.replace("//localhost:", "//127.0.0.1:"));
+  const byAddress = await signInWithPassword();
+  await expect(page.getByTestId("signin-passkey-blocked")).toBeVisible();
+  await expect(byAddress.getByTestId("signin-method")).toHaveCount(0);
+  const field = byAddress.getByTestId("field-code");
+  await expect(field).toBeFocused();
+  await expect(field).toHaveAttribute("autocomplete", "off");
+  await field.fill(codes[0] ?? "");
+  await byAddress.getByTestId("form-submit").click();
+  await expect(page.getByTestId("page-dashboard")).toBeVisible();
+
+  // By its host name the passkey comes first, and the recovery code is the other way.
+  await page.context().clearCookies();
+  await page.goto(server.url);
+  const byName = await signInWithPassword();
+  await expect(page.getByTestId("signin-passkey-blocked")).toHaveCount(0);
+  await expect(byName.getByTestId("field-code")).toHaveCount(0);
+  await expect(withKey(byName, "signin-method", "recovery")).toBeVisible();
+  await expect(byName.getByTestId("form-submit")).toBeFocused();
+  await byName.getByTestId("form-submit").click();
+  await expect(page.getByTestId("page-dashboard")).toBeVisible();
+  expect((await authenticator.credentials())[0]?.signCount).toBeGreaterThan(0);
+});
+
+test("a TOTP code cannot be used twice",async ({ api, signedIn }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   const { authenticator } = await api.enrollTotp();
   const first = await api.loginPassword();

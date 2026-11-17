@@ -883,8 +883,13 @@ export type MessageKey =
   | "auth.signin.recovery_code"
   | "auth.signin.retry_in"
   | "auth.signin.retry_in_minutes"
+  | "auth.signin.second_lead_passkey"
   | "auth.signin.second_lead_recovery"
+  | "auth.signin.second_lead_recovery_only"
   | "auth.signin.second_lead_totp"
+  | "auth.signin.second_passkey_address"
+  | "auth.signin.second_passkey_unsupported"
+  | "auth.signin.second_recovery_advice"
   | "auth.signin.second_title"
   | "auth.signin.secure"
   | "auth.signin.start_over"
@@ -10891,8 +10896,13 @@ export const messageKeys: readonly MessageKey[] = [
   "auth.signin.recovery_code",
   "auth.signin.retry_in",
   "auth.signin.retry_in_minutes",
+  "auth.signin.second_lead_passkey",
   "auth.signin.second_lead_recovery",
+  "auth.signin.second_lead_recovery_only",
   "auth.signin.second_lead_totp",
+  "auth.signin.second_passkey_address",
+  "auth.signin.second_passkey_unsupported",
+  "auth.signin.second_recovery_advice",
   "auth.signin.second_title",
   "auth.signin.secure",
   "auth.signin.start_over",
