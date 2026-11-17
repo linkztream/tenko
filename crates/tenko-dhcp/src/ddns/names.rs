@@ -14,6 +14,10 @@
 //! Every label keeps to the host-name rules (RFC 952 and RFC 1123: letters, digits and
 //! hyphens, 1 to 63 octets, no hyphen at either end); a name with another label is refused
 //! rather than rewritten. Names are lowercase.
+//!
+//! A name whose first label is a well-known service name (`wpad`, `isatap`:
+//! [`tenko_dns::zone::ownership::is_service_name`]) is refused, as the DNS update path
+//! refuses it to anyone not privileged.
 
 use tenko_core::{dhcp::DdnsPolicy, dns::DnsName};
 
@@ -38,6 +42,9 @@ pub enum NameRefusal {
     /// A label breaks the host-name rules.
     #[error("the name {0} is not a valid host name")]
     Invalid(String),
+    /// The name is a well-known service name that no client may claim.
+    #[error("the name {0} is a service name that no client may claim")]
+    Service(String),
 }
 
 /// Whether `label` keeps to the host-name rules.
@@ -73,6 +80,20 @@ pub fn under(zone: &DnsName, label: &str) -> Result<DnsName, NameRefusal> {
 ///
 /// [`NameRefusal`] when the lease gets no name.
 pub fn forward_name(
+    fqdn: Option<&str>,
+    hostname: Option<&str>,
+    policy: &DdnsPolicy,
+    zone: &DnsName,
+) -> Result<DnsName, NameRefusal> {
+    // Every later cut of the name (here and in the planner) keeps its first label.
+    let name = client_name(fqdn, hostname, policy, zone)?;
+    if tenko_dns::zone::ownership::is_service_name(&name) {
+        return Err(NameRefusal::Service(name.as_str().to_owned()));
+    }
+    Ok(name)
+}
+
+fn client_name(
     fqdn: Option<&str>,
     hostname: Option<&str>,
     policy: &DdnsPolicy,
@@ -204,5 +225,39 @@ mod tests {
         assert!(named(None, Some(&"a".repeat(64)), &policy).starts_with("refused"));
         assert!(named(Some("x_y.lan.example.test"), None, &policy).starts_with("refused"));
         assert!(is_host_label("host-1"));
+    }
+
+    #[test]
+    fn service_names_are_refused() {
+        let policy = DdnsPolicy::default();
+        for (fqdn, hostname, name) in [
+            (Some("wpad"), None, "wpad.lan.example.test"),
+            (Some("ISATAP"), None, "isatap.lan.example.test"),
+            (
+                Some("wpad.lan.example.test."),
+                None,
+                "wpad.lan.example.test",
+            ),
+            (
+                Some("wpad.sub.lan.example.test"),
+                None,
+                "wpad.sub.lan.example.test",
+            ),
+            (
+                Some("WPAD.corp.example.test"),
+                None,
+                "wpad.lan.example.test",
+            ),
+            (None, Some("IsaTap.home"), "isatap.lan.example.test"),
+        ] {
+            assert_eq!(
+                named(fqdn, hostname, &policy),
+                format!("refused: the name {name} is a service name that no client may claim")
+            );
+        }
+        assert_eq!(
+            named(Some("wpad-laptop"), None, &policy),
+            "wpad-laptop.lan.example.test"
+        );
     }
 }
