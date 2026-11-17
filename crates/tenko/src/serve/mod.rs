@@ -835,9 +835,10 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
         Ok(services) => services,
         Err(error) => {
             running.stop().await;
-            if let Some(probation) = &probation
-                && probation.switch_back(&error.code)
-            {
+            if let Some(probation) = &probation {
+                // Switched back now, or already by the watchdog: the previous version
+                // starts next, so the status is a restart, never one that stops the unit.
+                probation.switch_back(&error.code);
                 return Err(ServeError::Restart(format!(
                     "the new version failed to start ({}); switched back",
                     error.code
@@ -1036,6 +1037,24 @@ async fn start(
             let _extension = plan
                 .needs_backup()
                 .then(|| crate::platform::extend_start("copying and migrating the data directory"));
+            // The copy, the open and the migration do not count against the probation
+            // deadline of a new version. A start the watchdog has already switched back
+            // leaves the store as the previous version reads it.
+            let switched_back = || {
+                probation.is_some_and(crate::upgrade::probation::Probation::settled).then(|| {
+                    StartError::new(
+                        "store",
+                        "upgrade.switched_back",
+                        "the watchdog switched back to the previous version; the store is left unchanged",
+                    )
+                })
+            };
+            if let Some(probation) = probation {
+                probation.pause();
+            }
+            if let Some(error) = switched_back() {
+                return Err(error);
+            }
             let backup = if let crate::upgrade::datadir::Plan::Migrate { from, to, .. } = plan {
                 let (data_dir, store_dir) = (resolved.data_dir.clone(), layout.store());
                 let copy = tokio::task::spawn_blocking(move || {
@@ -1056,16 +1075,16 @@ async fn start(
             let store = RaftStore::open(store_config(resolved))
                 .await
                 .map_err(|error| StartError::coded("store", &error))?;
-            // A migration does not count against the probation deadline of a new version.
-            if let Some(probation) = probation {
-                probation.pause();
-            }
             // A member of a controller cluster leaves the migration to the leader, which
             // runs it once every voter's binary knows the format (OPS-08).
             let membership = store.membership();
             let member = membership.voters.len() + membership.learners.len() > 1;
             if let (Some(probation), Some(copy), true) = (probation, &backup, member) {
                 probation.set_backup(copy, member);
+            }
+            if let Some(error) = switched_back() {
+                let _ = store.shutdown().await;
+                return Err(error);
             }
             let finished = crate::upgrade::datadir::finish_with(
                 &store,
@@ -2553,20 +2572,18 @@ fn register_ipam_steps(
 mod tests {
     use super::*;
 
-    /// A newly installed version that does not accept the operator's file (a renamed key,
-    /// here) stops with exit status 12 after switching back, instead of exit status 3 with
-    /// nothing to start the previous version.
-    #[test]
-    fn a_new_version_that_refuses_the_configuration_switches_back() {
-        use crate::upgrade::{
-            layout::{CURRENT, Layout, PREVIOUS},
-            probation::{self, Attempt},
-        };
-        let data = tempfile::tempdir().expect("dir");
-        let layout = Layout::new(data.path());
-        let previous: tenko_api::dto::release::ReleaseVersion = "0.0.4".parse().expect("version");
+    use crate::upgrade::{
+        layout::{CURRENT, Layout, PREVIOUS},
+        probation::{self, Attempt},
+    };
+    use tenko_api::dto::release::ReleaseVersion;
+
+    /// This version, just installed over 0.0.4 in `data`: its first start is on probation.
+    fn just_installed(data: &std::path::Path) -> (Layout, ReleaseVersion, ReleaseVersion) {
+        let layout = Layout::new(data);
+        let previous: ReleaseVersion = "0.0.4".parse().expect("version");
         let own = crate::upgrade::running_version();
-        let binary = data.path().join("binary");
+        let binary = data.join("binary");
         std::fs::write(&binary, b"binary").expect("binary");
         for version in [&previous, &own] {
             layout.install_binary(version, &binary).expect("install");
@@ -2578,6 +2595,16 @@ mod tests {
             &Attempt::restarting(previous.clone(), own.clone(), None, 180),
         )
         .expect("record");
+        (layout, previous, own)
+    }
+
+    /// A newly installed version that does not accept the operator's file (a renamed key,
+    /// here) stops with exit status 12 after switching back, instead of exit status 3 with
+    /// nothing to start the previous version.
+    #[test]
+    fn a_new_version_that_refuses_the_configuration_switches_back() {
+        let data = tempfile::tempdir().expect("dir");
+        let (layout, previous, own) = just_installed(data.path());
         let file = data.path().join("tenko.toml");
         std::fs::write(&file, "[cluster]\nrenamed_ttl_secs = 600\n").expect("file");
         let args = ServeArgs {
@@ -2613,6 +2640,54 @@ mod tests {
         let attempt = probation::read(&layout).expect("read").expect("record");
         assert_eq!(attempt.reason.as_deref(), Some("upgrade.start_failed"));
         assert_eq!(layout.current(), Some(previous));
+    }
+
+    /// When the probation deadline passes while a start copies the store before a
+    /// migration, the watchdog switches back; the start then copies, opens and migrates
+    /// nothing, so the previous version finds the store at the format it reads.
+    #[tokio::test]
+    async fn a_start_the_watchdog_switched_back_leaves_the_store_unchanged() {
+        let data = tempfile::tempdir().expect("dir");
+        let (layout, _, own) = just_installed(data.path());
+        // A store without a format marker: the start copies it aside and migrates it.
+        let store_dir = data.path().join("store");
+        std::fs::create_dir_all(&store_dir).expect("store");
+        std::fs::write(store_dir.join("log.redb"), b"old log").expect("log");
+        let resolved = load(&ServeArgs {
+            config: None,
+            data_dir: Some(data.path().to_path_buf()),
+            roles: None,
+            stop_on_eof: false,
+        })
+        .expect("configuration");
+        resolved
+            .kek
+            .load_with(KekInit::CreateIfMissing, &resolved.kek_options)
+            .expect("key");
+        let probation::StartAction::Probation(probation) =
+            probation::on_start(data.path(), &own).expect("record")
+        else {
+            panic!("the first start is on probation");
+        };
+        // The watchdog's switch back, as its thread does when the deadline has passed.
+        assert!(probation.switch_back("upgrade.not_ready"));
+        let restart = crate::upgrade::restart::Restart::new();
+        let mut running = Running::new();
+        let started = start(&resolved, &mut running, &restart, Some(&probation)).await;
+        running.stop().await;
+        let Err(error) = started else {
+            panic!("a start after the switch back goes on");
+        };
+        assert_eq!(error.code, "upgrade.switched_back");
+        assert!(!data.path().join("upgrade-backups").exists(), "no copy");
+        assert_eq!(
+            std::fs::read(store_dir.join("log.redb")).expect("log"),
+            b"old log"
+        );
+        assert!(!store_dir.join("format").exists(), "no format marker");
+        let attempt = probation::read(&layout).expect("read").expect("record");
+        assert_eq!(attempt.reason.as_deref(), Some("upgrade.not_ready"));
+        assert!(!attempt.restore);
     }
 
     /// Every step kind the server's IPAM wiring registers is classified: a kind that

@@ -426,11 +426,18 @@ impl Probation {
         true
     }
 
-    /// Stops the clock of the deadline while the data directory is migrated: a large
-    /// migration may take longer than the deadline, and the dry run of the install job has
-    /// already shown that it passes. The service manager's own start timeout still applies.
+    /// Stops the clock of the deadline for the store step of a start: the copy of the store
+    /// before a migration, the open and the migration may take longer than the deadline, and
+    /// the dry run of the install job has already shown that the migration passes. The
+    /// service manager's own start timeout still applies.
     pub fn pause(&self) {
         self.inner.paused.store(true, Ordering::SeqCst);
+    }
+
+    /// Whether the attempt is settled: confirmed, or switched back (by the watchdog, during
+    /// a start). A start whose attempt was switched back changes the store no further.
+    pub fn settled(&self) -> bool {
+        self.inner.settled.load(Ordering::SeqCst)
     }
 
     /// Starts the clock of the deadline again after [`Probation::pause`].
