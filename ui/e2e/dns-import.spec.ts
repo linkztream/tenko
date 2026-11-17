@@ -106,7 +106,7 @@ test("imports a Windows export and makes the approved names claimable", async ({
   await expect(report.locator('[data-testid="import-claim-row"][data-key="ws02.example.test/A"]')).toHaveAttribute("data-claimant", "WS02$");
   const held = report.locator('[data-testid="import-held-row"][data-key="wpad.example.test/A"]');
   await expect(held).toHaveAttribute("data-reason", "service_name");
-  await expect(held).toContainText("wpad, isatap");
+  await expect(held).toContainText("protected name");
 
   // Nothing becomes claimable unless the person approves the listing.
   const approve = report.getByTestId("field-claim-approve");
