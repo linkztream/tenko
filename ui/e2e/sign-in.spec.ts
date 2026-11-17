@@ -122,7 +122,7 @@ test("the second step asks for the passkey first, and on an IP address for a rec
   expect((await authenticator.credentials())[0]?.signCount).toBeGreaterThan(0);
 });
 
-test("a TOTP code cannot be used twice",async ({ api, signedIn }) => {
+test("a TOTP code cannot be used twice", async ({ api, signedIn }) => {
   expect(signedIn.session.user.name).toBe(ADMIN.name);
   const { authenticator } = await api.enrollTotp();
   const first = await api.loginPassword();

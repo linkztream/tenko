@@ -43,6 +43,7 @@ export default function SignIn() {
   let userInput!: HTMLInputElement;
   let codeInput!: HTMLInputElement;
   let codeSubmit!: HTMLButtonElement;
+  let startOver!: HTMLButtonElement;
   let controller: AbortController | undefined;
   let countdown: ReturnType<typeof setInterval> | undefined;
 
@@ -56,6 +57,21 @@ export default function SignIn() {
   const usable = () => PREFERENCE.filter((m) => challenge()?.methods.includes(m) && (m !== "webauthn" || !blocker));
   /** A recovery code is all that is left: the listed passkey does not work here. */
   const recoveryOnly = () => method() === "recovery" && usable().length === 1;
+  const passkeyBlocked = () =>
+    blocker === "unsupported" ? t("auth.signin.second_passkey_unsupported") : t("auth.signin.second_passkey_address");
+  /** The step's lead; with no usable factor it says why the passkey cannot work here. */
+  const secondLead = (): string => {
+    switch (method()) {
+      case "totp":
+        return t("auth.signin.second_lead_totp");
+      case "recovery":
+        return recoveryOnly() ? t("auth.signin.second_lead_recovery_only") : t("auth.signin.second_lead_recovery");
+      case "webauthn":
+        return t("auth.signin.second_lead_passkey");
+      default:
+        return passkeyBlocked();
+    }
+  };
 
   const describe = (err: unknown): string => {
     if (err instanceof CeremonyError) return t(`auth.signin.ceremony.${err.reason}`);
@@ -143,7 +159,7 @@ export default function SignIn() {
         setMethod(first);
         setPassword("");
         setStage("second");
-        queueMicrotask(() => (first === "webauthn" ? codeSubmit : codeInput)?.focus());
+        queueMicrotask(() => (first === "webauthn" ? codeSubmit : first ? codeInput : startOver)?.focus());
       }
     } catch (err) {
       fail(err);
@@ -218,13 +234,7 @@ export default function SignIn() {
               </h1>
               <p class="lead">
                 {stage() === "second"
-                  ? method() === "totp"
-                    ? t("auth.signin.second_lead_totp")
-                    : method() === "recovery"
-                      ? recoveryOnly()
-                        ? t("auth.signin.second_lead_recovery_only")
-                        : t("auth.signin.second_lead_recovery")
-                      : t("auth.signin.second_lead_passkey")
+                  ? secondLead()
                   : stage() === "break-glass"
                     ? t("auth.signin.break_glass_lead")
                     : t("auth.signin.lead")}
@@ -337,11 +347,9 @@ export default function SignIn() {
                       />
                     </div>
                   </Show>
-                  <Show when={blocker && challenge()?.methods.includes("webauthn")}>
+                  <Show when={blocker && method() && challenge()?.methods.includes("webauthn")}>
                     <p class="help" data-testid="signin-passkey-blocked">
-                      {blocker === "unsupported"
-                        ? t("auth.signin.second_passkey_unsupported")
-                        : t("auth.signin.second_passkey_address")}
+                      {passkeyBlocked()}
                     </p>
                   </Show>
                   <Show when={recoveryOnly()}>
@@ -381,11 +389,11 @@ export default function SignIn() {
                             data-testid="signin-method"
                             data-key={m}
                             onClick={() => {
+                              if (m === "webauthn") return void passkey();
                               setMethod(m);
                               setCode("");
                               setError(null);
-                              if (m === "webauthn") void passkey();
-                              else queueMicrotask(() => codeInput?.focus());
+                              queueMicrotask(() => codeInput?.focus());
                             }}
                           >
                             {m === "totp"
@@ -397,7 +405,7 @@ export default function SignIn() {
                         </Show>
                       )}
                     </For>
-                    <button type="button" class="linkbtn" onClick={() => go("password")}>
+                    <button ref={startOver} type="button" class="linkbtn" onClick={() => go("password")}>
                       {t("auth.signin.start_over")}
                     </button>
                   </div>

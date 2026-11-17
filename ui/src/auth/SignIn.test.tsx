@@ -237,10 +237,14 @@ describe("the second step after a password", () => {
         expect(screen.getByText(/only a recovery code can finish this sign-in/)).toBeTruthy();
         expect(screen.getByText(/add an authenticator app on your account page/)).toBeTruthy();
       }
-      if (first) await waitFor(() => expect(document.activeElement).toBe(field ?? submit));
+      // Nothing usable: the lead says why, and the focus waits on "Start over".
+      if (!first) expect(container.querySelector(".lead")?.textContent).toMatch(why ?? /^$/);
+      await waitFor(() =>
+        expect(document.activeElement).toBe(first ? (field ?? submit) : screen.getByRole("button", { name: "Start over" })),
+      );
       expect(screen.queryAllByTestId("signin-method").map((b) => b.textContent)).toEqual(others);
       const note = screen.queryByTestId("signin-passkey-blocked")?.textContent ?? null;
-      if (why) expect(note).toMatch(why);
+      if (why && first) expect(note).toMatch(why);
       else expect(note).toBeNull();
       expect(await axeViolations(container)).toEqual([]);
     },
@@ -253,6 +257,25 @@ describe("the second step after a password", () => {
     fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
     await waitFor(() => expect(authState()).toBe("signed-in"));
     expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a canceled passkey, switches to the authenticator code, then to a recovery code", async () => {
+    stubPasskey("cancel");
+    show();
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
+    expect((await screen.findByRole("alert")).textContent).toContain("canceled or timed out");
+    fireEvent.click(screen.getByRole("button", { name: USE_TOTP }));
+    const totp = screen.getByLabelText(TOTP);
+    await waitFor(() => expect(document.activeElement).toBe(totp));
+    expect(totp.getAttribute("autocomplete")).toBe("one-time-code");
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: USE_RECOVERY }));
+    const recovery = screen.getByLabelText(RECOVERY);
+    await waitFor(() => expect(document.activeElement).toBe(recovery));
+    expect(recovery.getAttribute("autocomplete")).toBe("off");
+    // The passkey link starts the ceremony again from where it is.
+    expect(screen.getByRole("button", { name: "Use a passkey instead" })).toBeTruthy();
   });
 
   it("knows a passkey cannot work on an IP address", () => {
