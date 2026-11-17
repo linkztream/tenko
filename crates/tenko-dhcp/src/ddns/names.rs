@@ -15,11 +15,14 @@
 //! hyphens, 1 to 63 octets, no hyphen at either end); a name with another label is refused
 //! rather than rewritten. Names are lowercase.
 //!
-//! A name whose first label is a well-known service name (`wpad`, `isatap`:
-//! [`tenko_dns::zone::ownership::is_service_name`]) is refused, as the DNS update path
-//! refuses it to anyone not privileged.
+//! A name whose first label the zone protects (`wpad`, `isatap` and the other well-known
+//! service names, and the zone's own list: [`UpdatePolicy::protects`]) is refused, as the
+//! DNS update path refuses it to anyone not privileged.
 
-use tenko_core::{dhcp::DdnsPolicy, dns::DnsName};
+use tenko_core::{
+    dhcp::DdnsPolicy,
+    dns::{DnsName, UpdatePolicy, is_host_label},
+};
 
 /// Why a lease gets no name.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -42,21 +45,9 @@ pub enum NameRefusal {
     /// A label breaks the host-name rules.
     #[error("the name {0} is not a valid host name")]
     Invalid(String),
-    /// The name is a well-known service name that no client may claim.
-    #[error("the name {0} is a service name that no client may claim")]
+    /// The name is protected in the zone: no client may claim it.
+    #[error("the name {0} is a protected name that no client may claim")]
     Service(String),
-}
-
-/// Whether `label` keeps to the host-name rules.
-pub fn is_host_label(label: &str) -> bool {
-    let bytes = label.as_bytes();
-    !bytes.is_empty()
-        && bytes.len() <= 63
-        && bytes
-            .iter()
-            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
-        && bytes[0] != b'-'
-        && bytes[bytes.len() - 1] != b'-'
 }
 
 /// `label` under `zone`, lowercase, held to the host-name rules.
@@ -74,7 +65,7 @@ pub fn under(zone: &DnsName, label: &str) -> Result<DnsName, NameRefusal> {
 }
 
 /// The forward name of a lease: from option 81 (`fqdn`), else option 12 (`hostname`),
-/// under `zone`.
+/// under `zone`, unless the zone's update policy `update` protects it.
 ///
 /// # Errors
 ///
@@ -84,10 +75,11 @@ pub fn forward_name(
     hostname: Option<&str>,
     policy: &DdnsPolicy,
     zone: &DnsName,
+    update: &UpdatePolicy,
 ) -> Result<DnsName, NameRefusal> {
     // Every later cut of the name (here and in the planner) keeps its first label.
     let name = client_name(fqdn, hostname, policy, zone)?;
-    if tenko_dns::zone::ownership::is_service_name(&name) {
+    if update.protects(&name) {
         return Err(NameRefusal::Service(name.as_str().to_owned()));
     }
     Ok(name)
@@ -147,7 +139,16 @@ mod tests {
     }
 
     fn named(fqdn: Option<&str>, hostname: Option<&str>, policy: &DdnsPolicy) -> String {
-        match forward_name(fqdn, hostname, policy, &zone()) {
+        named_in(fqdn, hostname, policy, &UpdatePolicy::default())
+    }
+
+    fn named_in(
+        fqdn: Option<&str>,
+        hostname: Option<&str>,
+        policy: &DdnsPolicy,
+        update: &UpdatePolicy,
+    ) -> String {
+        match forward_name(fqdn, hostname, policy, &zone(), update) {
             Ok(name) => name.as_str().to_owned(),
             Err(refusal) => format!("refused: {refusal}"),
         }
@@ -228,8 +229,11 @@ mod tests {
     }
 
     #[test]
-    fn service_names_are_refused() {
+    fn protected_names_are_refused() {
         let policy = DdnsPolicy::default();
+        let refused = |name: &str| {
+            format!("refused: the name {name} is a protected name that no client may claim")
+        };
         for (fqdn, hostname, name) in [
             (Some("wpad"), None, "wpad.lan.example.test"),
             (Some("ISATAP"), None, "isatap.lan.example.test"),
@@ -249,15 +253,30 @@ mod tests {
                 "wpad.lan.example.test",
             ),
             (None, Some("IsaTap.home"), "isatap.lan.example.test"),
+            (Some("AutoDiscover"), None, "autodiscover.lan.example.test"),
         ] {
-            assert_eq!(
-                named(fqdn, hostname, &policy),
-                format!("refused: the name {name} is a service name that no client may claim")
-            );
+            assert_eq!(named(fqdn, hostname, &policy), refused(name));
         }
         assert_eq!(
             named(Some("wpad-laptop"), None, &policy),
             "wpad-laptop.lan.example.test"
+        );
+        // A label the zone protects beside the built-in ones.
+        let zone = UpdatePolicy {
+            protected_labels: vec!["proxy".to_owned()],
+            ..UpdatePolicy::default()
+        };
+        assert_eq!(
+            named(Some("Proxy"), None, &policy),
+            "proxy.lan.example.test"
+        );
+        assert_eq!(
+            named_in(Some("Proxy"), None, &policy, &zone),
+            refused("proxy.lan.example.test")
+        );
+        assert_eq!(
+            named_in(None, Some("proxy.home"), &policy, &zone),
+            refused("proxy.lan.example.test")
         );
     }
 }

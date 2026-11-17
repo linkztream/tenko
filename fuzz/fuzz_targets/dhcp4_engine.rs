@@ -27,12 +27,12 @@ use libfuzzer_sys::fuzz_target;
 use tenko_core::{
     HostId, InterfaceId, NodeId, PrefixId, RangeId, Revision, VrfId,
     dhcp::{BindingState, DdnsPolicy, LeaseEventKind, LeaseTimes, OptionValue, TrustedRelay},
-    dns::DnsName,
+    dns::{DnsName, UpdatePolicy, is_host_label},
 };
 use tenko_dhcp::{
     allocator::SingleNode,
     class::facts::Facts,
-    ddns::names::{forward_name, is_host_label},
+    ddns::names::forward_name,
     fingerprint::fingerprint_of,
     guard::{DhcpProfile, Guard},
     image::{ConfigImage, ImageBuilder, PoolImage, ReservationImage, ScopeImage},
@@ -274,8 +274,12 @@ fuzz_target!(|data: &[u8]| {
                 legacy_clients: true,
                 ..DdnsPolicy::default()
             };
-            if let Ok(name) = forward_name(fqdn.as_deref(), hostname.as_deref(), &policy, &zone) {
+            let update = UpdatePolicy::default();
+            if let Ok(name) =
+                forward_name(fqdn.as_deref(), hostname.as_deref(), &policy, &zone, &update)
+            {
                 assert!(name != zone && name.is_subdomain_of(&zone));
+                assert!(!update.protects(&name));
                 assert!(name.labels().all(is_host_label));
                 assert_eq!(name.as_str(), name.as_str().to_ascii_lowercase());
             }

@@ -36,7 +36,7 @@
 //! |---|---|---|
 //! | A locator name (every name of an `_msdcs` zone or under `_msdcs`, a first label `_ldap`, `_kerberos`, `_kpasswd`, `_gc`, `DomainDnsZones` or `ForestDnsZones`, the apex) | it is privileged | no owner is kept |
 //! | A wildcard name (`*` first) | it is privileged | no owner is kept |
-//! | A service name (a first label of [`crate::zone::ownership::SERVICE_LABELS`]: `wpad`, `isatap`) without a live owner | it is privileged; never an update signed with TSIG or unsigned (`dns.update.service_name`) | it becomes the owner |
+//! | A service name (a first label the zone protects, [`tenko_core::dns::UpdatePolicy::protects`]: `wpad`, `isatap` and the others of [`tenko_core::dns::SERVICE_LABELS`], and the zone's `protected_labels`) without a live owner | it is privileged; never an update signed with TSIG or unsigned (`dns.update.service_name`) | it becomes the owner |
 //! | Owned, the hold not passed | it is the owner (by SID when the owner has one, else by name), or privileged | the owner stays; the hold starts when the last record goes and ends when a record comes back |
 //! | Unowned with a manual, IPAM or DHCP record | it is privileged | it becomes the owner |
 //! | Unowned with a record imported from AD (origin `ad`) | it is privileged, or it claims its own host: `HOST$` claims `host.<zone>`, and a name in the address tree whose records are PTR records pointing at `host` in its realm's DNS domain or below | it becomes the owner (`claimed` for a claimant) |
@@ -139,7 +139,7 @@ struct OwnerState {
 }
 
 // WP13.4: the locator names are shared with the owner view (`zone::ownership`).
-use crate::zone::ownership::{is_locator, is_service_name, keeps_no_owner};
+use crate::zone::ownership::{is_locator, keeps_no_owner};
 
 /// Whether `identity` is `owner`: by SID when the owner has one (a ticket without a PAC,
 /// which has none, never matches it), by the principal's name otherwise.
@@ -501,15 +501,15 @@ impl Planner<'_> {
                     .collect()
             })
             .unwrap_or_default();
-        // A client finds its proxy (`wpad`) or tunnel router (`isatap`) by name alone, so a
-        // service name without a live owner goes to a privileged principal only, whatever
-        // the type: whoever created the name would own it and could add the address next.
-        // An owner keeps its name; an administrator gives one by assignment.
-        if live.is_none() && is_service_name(name) && !self.is_privileged(signer) {
+        // A client finds its proxy (`wpad`) or another service by name alone, so a protected
+        // name without a live owner goes to a privileged principal only, whatever the
+        // type: whoever created the name would own it and could add the address next. An
+        // owner keeps its name; an administrator gives one by assignment.
+        if live.is_none() && self.zone.update.protects(name) && !self.is_privileged(signer) {
             return Err(Stop::Refused(
                 codes::UPDATE_SERVICE_NAME,
                 format!(
-                    "{name} is a well-known service name without an owner; only privileged principals change it"
+                    "{name} is a protected name without an owner; only privileged principals change it"
                 ),
             ));
         }

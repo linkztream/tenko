@@ -696,7 +696,7 @@ The name of a lease, in this order:
 2. Without option 81, the host name of option 12, when `legacy_clients` is on; a host name with dots counts by its first label.
 3. Otherwise no name.
 
-Every label keeps to the host-name rules (letters, digits and hyphens, 1 to 63 octets, no hyphen at either end); a name with another label (an underscore, say) is refused rather than rewritten. A name whose first label is a well-known service name, `wpad` or `isatap` in any case (`wpad.branch.<zone>` too), is refused (`is a service name that no client may claim`), as a dynamic update refuses it to anyone not privileged ([dns.md](dns.md) section 13.11): the lease is granted without a name.
+Every label keeps to the host-name rules (letters, digits and hyphens, 1 to 63 octets, no hyphen at either end); a name with another label (an underscore, say) is refused rather than rewritten. A name whose first label the forward zone protects, in any case (`wpad.branch.<zone>` too), is refused (`is a protected name that no client may claim`), as a dynamic update refuses it to anyone not privileged: the built-in service names (`wpad`, `isatap`, `autodiscover` and the others) and the zone's `protected_labels` ([dns.md](dns.md) section 13.2). The lease is granted without a name.
 
 ### 13.3 What is written
 

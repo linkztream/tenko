@@ -136,6 +136,36 @@ fn zones_records_and_zone_files() {
     .assert_code(5)
     .assert_stderr_contains("(HTTP 412)");
     node.client(&["dns", "zone", "update", ZONE]).assert_code(2);
+    // Protected first labels: checked by the server, kept beside the rest of the policy.
+    node.client(&[
+        "dns",
+        "zone",
+        "update",
+        ZONE,
+        "--protected-labels",
+        "proxy,wpad",
+    ])
+    .assert_code(5)
+    .assert_stderr_contains("update.protected_labels: wpad is always protected");
+    node.client(&[
+        "dns",
+        "zone",
+        "update",
+        ZONE,
+        "--protected-labels",
+        "proxy, intranet",
+    ])
+    .assert_code(0);
+    let protected = node.client(&["dns", "zone", "get", ZONE, "--json"]);
+    assert_eq!(
+        protected.json()["update"]["protected_labels"],
+        serde_json::json!(["proxy", "intranet"])
+    );
+    assert_eq!(protected.json()["update"]["require_tsig"], true);
+    node.client(&["dns", "zone", "update", ZONE, "--protected-labels", ""])
+        .assert_code(0);
+    let cleared = node.client(&["dns", "zone", "get", ZONE, "--json"]);
+    assert!(cleared.json()["update"].get("protected_labels").is_none());
 
     // Records: the apex has the NS set already.
     let before = record_lines(&node.client(&["dns", "record", "list", ZONE]));

@@ -2250,6 +2250,12 @@
       <unit id="dns.update.may_replace_ipam_help">
         <segment><source>Off: an update that would change a record of the origin ipam is refused, so that IPAM stays the source of its names.</source><target>Av: en uppdatering som skulle ändra en post med ursprunget ipam nekas, så att IPAM förblir källan för sina namn.</target></segment>
       </unit>
+      <unit id="dns.update.protected_labels">
+        <segment><source>Protected names</source><target>Skyddade namn</target></segment>
+      </unit>
+      <unit id="dns.update.protected_labels_help">
+        <segment><source>Comma-separated first labels that no client gets by asking for them, beside the built-in service names (wpad, isatap, autodiscover and others), which are always protected. Only a privileged principal creates such a name by dynamic update, DHCP never writes one for a lease, and a zone file import never makes one claimable. An administrator creates one as a record and gives it an owner in the Owners tab.</source><target>Kommaseparerade första etiketter som ingen klient får genom att be om dem, utöver de inbyggda tjänstenamnen (wpad, isatap, autodiscover med flera), som alltid är skyddade. Bara en privilegierad huvudman skapar ett sådant namn med en dynamisk uppdatering, DHCP skriver aldrig ett för ett lån, och en import av en zonfil gör aldrig ett sådant namn möjligt att göra anspråk på. En administratör skapar det som en post och ger det en ägare under fliken Ägare.</target></segment>
+      </unit>
       <unit id="dns.zone.tab.dnssec">
         <segment><source>DNSSEC</source><target>DNSSEC</target></segment>
       </unit>
@@ -2766,7 +2772,7 @@
         <segment><source>The apex, a locator name (a label starting with _) or a wildcard</source><target>Zonens topp, ett lokaliseringsnamn (en etikett som börjar med _) eller ett jokertecken</target></segment>
       </unit>
       <unit id="dns.import.held.service_name">
-        <segment><source>A name clients use to find a service (wpad, isatap)</source><target>Ett namn som klienter använder för att hitta en tjänst (wpad, isatap)</target></segment>
+        <segment><source>A protected name: one clients use to find a service (wpad, autodiscover and others), or one the zone lists</source><target>Ett skyddat namn: ett som klienter använder för att hitta en tjänst (wpad, autodiscover med flera), eller ett som zonen listar</target></segment>
       </unit>
       <unit id="dns.import.held.name_server">
         <segment><source>A name server of the zone</source><target>En namnserver i zonen</target></segment>

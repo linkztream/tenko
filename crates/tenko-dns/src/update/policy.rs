@@ -292,9 +292,7 @@ mod tests {
         let zone = zone(UpdatePolicy {
             allowed: vec![lan.id, blocked.id],
             require_tsig: false,
-            may_replace_ipam: false,
-            dhcp: None,
-            kerberos: None,
+            ..UpdatePolicy::default()
         });
         let denied: IpAddr = "192.0.2.66".parse().expect("address");
         let other: IpAddr = "192.0.2.10".parse().expect("address");
@@ -338,17 +336,12 @@ mod tests {
         // `signed` names the key, `lan` holds the client's address.
         let both = zone(UpdatePolicy {
             allowed: vec![signed.id, lan.id],
-            require_tsig: true,
-            may_replace_ipam: false,
-            dhcp: None,
-            kerberos: None,
+            ..UpdatePolicy::default()
         });
         let unsigned = zone(UpdatePolicy {
             allowed: vec![lan.id],
             require_tsig: false,
-            may_replace_ipam: false,
-            dhcp: None,
-            kerberos: None,
+            ..UpdatePolicy::default()
         });
         let mut secondary = both.clone();
         secondary.kind = ZoneKind::Secondary;
@@ -453,10 +446,8 @@ mod gss_tests {
             transfer: tenko_core::dns::TransferPolicy::default(),
             update: UpdatePolicy {
                 allowed,
-                require_tsig: true,
-                may_replace_ipam: false,
-                dhcp: None,
                 kerberos,
+                ..UpdatePolicy::default()
             },
             dnssec: tenko_core::dns::DnssecPolicy::default(),
             source: None,

@@ -121,7 +121,7 @@ Windows secures a dynamic update with GSS-TSIG (RFC 3645): the client negotiates
 | The name | Who may change it |
 |---|---|
 | A locator name (every name of the `_msdcs` zone, the `_ldap`, `_kerberos`, `_kpasswd` and `_gc` names, `DomainDnsZones`, `ForestDnsZones`, the domain's apex) or a wildcard | Privileged principals only; it keeps no owner |
-| A well-known service name without an owner (`wpad`, `isatap`), which clients look up to find their web proxy settings or ISATAP router | Privileged principals only; it becomes the owner. To let another computer serve it, assign it the name in the **Owners** tab |
+| A protected name without an owner: a well-known service name (`wpad`, `isatap`, `autodiscover` and the others of [dns.md](dns.md) section 13.2), which clients look up to find their web proxy settings, ISATAP router, mail server or device registration, or a name the zone adds under Protected names | Privileged principals only; it becomes the owner. To let another computer serve it, assign it the name in the **Owners** tab |
 | A new name | Any principal of the realm; it becomes the owner (a member of DnsUpdateProxy leaves it without one) |
 | An owned name | The owner and privileged principals |
 | A name imported from the Windows export with an aging timestamp (a record a client registered) that the import approved as claimable (origin `ad`) | The computer it names, which claims it (`PC01$` claims `pc01.corp.example.test` and the PTR names that point at it), and privileged principals |

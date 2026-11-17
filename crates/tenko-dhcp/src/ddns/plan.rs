@@ -343,11 +343,12 @@ pub fn desired(
             zone.name
         )));
     }
-    let name = match names::forward_name(lease.fqdn, lease.hostname, policy, &zone.name) {
-        Ok(name) => name,
-        Err(NameRefusal::NoName) => return Err(Skip::Quiet(None)),
-        Err(refusal) => return Err(Skip::Refused(refusal.to_string())),
-    };
+    let name =
+        match names::forward_name(lease.fqdn, lease.hostname, policy, &zone.name, &zone.update) {
+            Ok(name) => name,
+            Err(NameRefusal::NoName) => return Err(Skip::Quiet(None)),
+            Err(refusal) => return Err(Skip::Refused(refusal.to_string())),
+        };
     let name = in_authority(view, zones, zone, policy, name)?;
     let reverse = if policy.reverse {
         zones
@@ -1222,6 +1223,49 @@ mod tests {
             )
             .expect("plan");
         assert!(refusal(&plan).contains("name protection"));
+    }
+
+    /// The forward zone decides what is protected: its own list beside the built-in
+    /// service names. Such a name is refused and the lease gets no name.
+    #[tokio::test]
+    async fn a_name_the_forward_zone_protects_is_refused() {
+        let lab = Lab::new().await;
+        let mut forward = lab.forward.clone();
+        forward.update.protected_labels = vec!["proxy".to_owned()];
+        let zones = Zones::from_zones(vec![forward]);
+        let view = lab.view().await;
+        let policy = DdnsPolicy {
+            enabled: true,
+            forward_zone: Some(lab.forward.id),
+            ..DdnsPolicy::default()
+        };
+        let who = client(1);
+        let wanted = |fqdn: &str| {
+            let lease = LeaseNames {
+                addr: IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 50)),
+                client: &who,
+                fqdn: Some(fqdn),
+                hostname: None,
+                fqdn_flags: None,
+                policy: &policy,
+                domain: None,
+                lease_secs: 3_600,
+            };
+            desired(view.as_ref(), &lease, &zones, DdnsProfile::HOME, false)
+                .map(|want| want.name.as_str().to_owned())
+        };
+        for (fqdn, name) in [
+            ("proxy", "proxy.lan.example.test"),
+            ("autodiscover", "autodiscover.lan.example.test"),
+        ] {
+            assert_eq!(
+                wanted(fqdn),
+                Err(Skip::Refused(format!(
+                    "the name {name} is a protected name that no client may claim"
+                )))
+            );
+        }
+        assert_eq!(wanted("laptop"), Ok("laptop.lan.example.test".to_owned()));
     }
 
     /// ADR 0020 points 3 and 6: a name that a child zone holds, or that lies below a

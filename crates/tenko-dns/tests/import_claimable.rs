@@ -23,7 +23,7 @@ use tenko_core::{
     audit::AuditRecord,
     dns::{
         DnsName, Origin, RecordData, RrSetKey, Rtype, ScopeName, SerialPolicy, SoaDefaults,
-        TextBytes, Zone, ZoneKind, tables::RRSETS,
+        TextBytes, UpdatePolicy, Zone, ZoneKind, tables::RRSETS,
     },
 };
 use tenko_dns::zone::{
@@ -66,6 +66,10 @@ fn lab() -> Lab {
 
 impl Lab {
     async fn zone(&self, apex: &str) -> Zone {
+        self.zone_with(apex, UpdatePolicy::default()).await
+    }
+
+    async fn zone_with(&self, apex: &str, update: UpdatePolicy) -> Zone {
         self.zones
             .create(
                 &cx(),
@@ -81,7 +85,7 @@ impl Lab {
                     ),
                     name_servers: vec![name(&format!("ns1.{APEX}"))],
                     transfer: tenko_core::dns::TransferPolicy::default(),
-                    update: tenko_core::dns::UpdatePolicy::default(),
+                    update,
                     dnssec: tenko_core::dns::DnssecPolicy::default(),
                     source: None,
                     description: None,
@@ -496,6 +500,65 @@ $ORIGIN 2.0.192.in-addr.arpa.
     }
     assert_eq!(listed(&preview), ["20.2.0.192.in-addr.arpa/PTR"]);
     assert_eq!(preview.claimable_names[0].claimant, "WS01$");
+}
+
+/// A protected name stays static: a built-in service name, a first label of the zone's own
+/// list, and a PTR record that points at either (by the list of the zone that holds the
+/// target). A zone without the list offers the zone's label as any other.
+#[tokio::test]
+async fn a_protected_name_stays_static() {
+    let lab = lab();
+    let protecting = UpdatePolicy {
+        protected_labels: vec!["proxy".to_owned()],
+        ..UpdatePolicy::default()
+    };
+    let zone = lab.zone_with(APEX, protecting).await;
+    let file = "$ORIGIN corp.example.test.
+proxy        [AGE:1] 600 A 192.0.2.30
+autodiscover [AGE:1] 600 A 192.0.2.31
+ws01         [AGE:1] 600 A 192.0.2.32
+";
+    let preview = lab.preview(&zone, file, ClaimRequest::default()).await;
+    let got = held(&preview);
+    for key in [
+        "proxy.corp.example.test/A",
+        "autodiscover.corp.example.test/A",
+    ] {
+        assert_eq!(
+            got.get(key),
+            Some(&HeldReason::ServiceName),
+            "{key}: {got:?}"
+        );
+    }
+    assert_eq!(listed(&preview), ["ws01.corp.example.test/A"]);
+
+    let other = lab.zone("lab.example.test").await;
+    let file = "$ORIGIN lab.example.test.
+proxy [AGE:1] 600 A 192.0.2.40
+";
+    let preview = lab.preview(&other, file, ClaimRequest::default()).await;
+    assert_eq!(listed(&preview), ["proxy.lab.example.test/A"]);
+
+    let reverse = lab.zone(REVERSE).await;
+    let file = "$ORIGIN 2.0.192.in-addr.arpa.
+30 [AGE:1] 600 PTR proxy.corp.example.test.
+31 [AGE:1] 600 PTR autodiscover.corp.example.test.
+32 [AGE:1] 600 PTR ws01.corp.example.test.
+40 [AGE:1] 600 PTR proxy.lab.example.test.
+";
+    let preview = lab.preview(&reverse, file, ClaimRequest::default()).await;
+    let got = held(&preview);
+    for key in ["30.2.0.192.in-addr.arpa/PTR", "31.2.0.192.in-addr.arpa/PTR"] {
+        assert_eq!(
+            got.get(key),
+            Some(&HeldReason::ServiceName),
+            "{key}: {got:?}"
+        );
+    }
+    assert_eq!(
+        listed(&preview),
+        ["32.2.0.192.in-addr.arpa/PTR", "40.2.0.192.in-addr.arpa/PTR"]
+    );
 }
 
 /// The operator's rule: only names under a suffix, only addresses in a prefix (for a PTR

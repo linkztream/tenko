@@ -50488,6 +50488,14 @@
             "type": "boolean",
             "description": "A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5)."
           },
+          "protected_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "First labels the zone protects beside the built-in service names (`wpad`, `isatap`,\n`autodiscover` and the others), which are always protected: no client gets such a\nname by asking for it. Lowercase host labels, each once, at most 64.",
+            "maxItems": 64
+          },
           "require_tsig": {
             "type": "boolean",
             "description": "Updates need a TSIG key (TGL-09)."

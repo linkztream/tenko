@@ -395,9 +395,7 @@ async fn warm_lab(with_dnssec: bool) -> Lab {
                 update: UpdatePolicy {
                     allowed: vec![office.id],
                     require_tsig: false,
-                    may_replace_ipam: false,
-                    dhcp: None,
-                    kerberos: None,
+                    ..UpdatePolicy::default()
                 },
                 dnssec: DnssecPolicy::default(),
                 source: None,

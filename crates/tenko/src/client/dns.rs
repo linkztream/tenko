@@ -954,6 +954,10 @@ pub struct ZoneUpdateArgs {
     /// Whether the zone is a catalog zone (RFC 9432).
     #[arg(long, value_name = "BOOL")]
     pub catalog: Option<bool>,
+    /// The first labels no client gets by asking, beside the built-in service names
+    /// (`wpad`, `autodiscover`, ...): the whole list, comma-separated; an empty text clears it.
+    #[arg(long, value_name = "LABELS")]
+    pub protected_labels: Option<String>,
 }
 
 /// Arguments of `tenko dns record list`.
@@ -1702,9 +1706,21 @@ async fn zone_update(target: &Target, args: &ZoneUpdateArgs) -> Result<Output, F
         }
         body.insert("soa".to_owned(), soa);
     }
+    if let Some(labels) = &args.protected_labels {
+        // The update policy is replaced as a whole: start from the one the zone has.
+        let mut update = zone.get("update").cloned().unwrap_or_else(|| json!({}));
+        update["protected_labels"] = json!(
+            labels
+                .split(',')
+                .map(|label| label.trim().to_ascii_lowercase())
+                .filter(|label| !label.is_empty())
+                .collect::<Vec<_>>()
+        );
+        body.insert("update".to_owned(), update);
+    }
     if body.is_empty() {
         return Err(usage(
-            "nothing to change: give --serial, --description, --catalog or an SOA option",
+            "nothing to change: give --serial, --description, --catalog, --protected-labels or an SOA option",
         ));
     }
     let answer: Value = client
@@ -2296,7 +2312,7 @@ fn render_held(report: &Value, out: &mut String) {
 fn held_reason(code: &str) -> &'static str {
     match code {
         "reserved" => "the apex, a locator, a wildcard or a name with a _ label",
-        "service_name" => "a well-known service name (wpad, isatap)",
+        "service_name" => "a protected name (a well-known service name or one the zone lists)",
         "name_server" => "a name server of the zone",
         "tenko_node" => "the host name of a Tenko node",
         "service_target" => "the target of an MX, SRV, CNAME or DNAME record",

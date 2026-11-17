@@ -205,7 +205,7 @@ describe("the names a Windows file makes claimable", () => {
     expect(within(section).getByTestId("import-held-count").dataset.count).toBe("1");
     const held = within(section).getByTestId("import-held-row");
     expect([held.dataset.key, held.dataset.reason]).toEqual(["wpad.example.test/A", "service_name"]);
-    expect(held.textContent).toContain("A name clients use to find a service (wpad, isatap)");
+    expect(held.textContent).toContain("A protected name: one clients use to find a service (wpad, autodiscover and others), or one the zone lists");
     expect(within(section).queryByTestId("import-held-more")).toBeNull();
     // The approval is off by default, and says what happens without it.
     expect(approval().checked).toBe(false);
@@ -401,7 +401,7 @@ describe("the names a Windows file makes claimable", () => {
     await setLocale("sv");
     const report = await previewWindows(WITH_WPAD);
     expect(within(report).getByTestId("import-claim-count").textContent).toBe("2 namn kan tas över av sin värd");
-    expect(within(report).getByTestId("import-held-row").textContent).toContain("Ett namn som klienter använder för att hitta en tjänst");
+    expect(within(report).getByTestId("import-held-row").textContent).toContain("Ett skyddat namn: ett som klienter använder för att hitta en tjänst");
     expect(within(report).getByTestId("import-claim").textContent).toContain("Låt datorerna som namnen tillhör ta över dessa 2 namn");
     expect(within(report).getByTestId("import-approve-help").textContent).toContain("importeras posterna som statiska");
   });

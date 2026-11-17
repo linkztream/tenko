@@ -641,11 +641,12 @@ type UpdatePolicy = NonNullable<ZonePatch["update"]>;
  * policy, so a rebuilt one would drop them.
  */
 function updatePolicyOf(policy: UpdatePolicy | null | undefined): UpdatePolicy {
-  const { allowed, require_tsig, may_replace_ipam, kerberos, ...rest } = policy ?? {};
+  const { allowed, require_tsig, may_replace_ipam, protected_labels, kerberos, ...rest } = policy ?? {};
   return {
     allowed: [...(allowed ?? [])],
     require_tsig: require_tsig ?? true,
     may_replace_ipam: may_replace_ipam ?? false,
+    protected_labels: [...(protected_labels ?? [])],
     ...rest,
     ...(kerberos ? { kerberos: kerberosOf(kerberos) } : {}),
   };
@@ -658,10 +659,15 @@ function createUpdateDraft(zone: Zone) {
   const [allowed, setAllowed] = createSignal<string[]>(policy0.allowed ?? []);
   const [requireTsig, setRequireTsig] = createSignal(policy0.require_tsig ?? true);
   const [mayReplaceIpam, setMayReplaceIpam] = createSignal(policy0.may_replace_ipam ?? false);
+  const [protectedText, setProtectedText] = createSignal((policy0.protected_labels ?? []).join(", "));
   const kerberos = createKerberosDraft(base.kerberos);
   /** The policy as the form has it now: the zone's own fields, with the edited ones replaced. */
   const current = (): UpdatePolicy => {
     const next: UpdatePolicy = { ...base, allowed: allowed(), require_tsig: requireTsig(), may_replace_ipam: mayReplaceIpam() };
+    // The server leaves an empty list out; so does the form, so that "no change" stays one.
+    const labels = splitList(protectedText()).map((label) => label.toLowerCase());
+    if (labels.length > 0) next.protected_labels = labels;
+    else delete next.protected_labels;
     if (kerberos.enabled()) next.kerberos = kerberos.value(base.kerberos);
     else if (base.kerberos) next.kerberos = null;
     return next;
@@ -678,11 +684,14 @@ function createUpdateDraft(zone: Zone) {
     setRequireTsig,
     mayReplaceIpam,
     setMayReplaceIpam,
+    protectedText,
+    setProtectedText,
     kerberos,
     fill,
     rebase: (saved: Zone) => {
       base = saved.update ?? {};
       policy0 = updatePolicyOf(base);
+      setProtectedText((policy0.protected_labels ?? []).join(", "));
     },
   };
 }
@@ -775,6 +784,19 @@ function UpdateSection(props: { draft: UpdateDraft; errors: Record<string, strin
         disabled={props.disabled}
         onChange={props.draft.setMayReplaceIpam}
       />
+      <Field id="update.protected_labels" label={t("dns.update.protected_labels")} error={props.errors["update.protected_labels"]} help={t("dns.update.protected_labels_help")}>
+        <input
+          id="dns-f-update.protected_labels"
+          class="input mono"
+          value={props.draft.protectedText()}
+          disabled={props.disabled}
+          spellcheck={false}
+          aria-invalid={props.errors["update.protected_labels"] ? "true" : undefined}
+          aria-describedby={describedBy("update.protected_labels", props.errors["update.protected_labels"], t("dns.update.protected_labels_help"))}
+          data-testid="field-update.protected_labels"
+          onInput={(e) => props.draft.setProtectedText(e.currentTarget.value)}
+        />
+      </Field>
       <KerberosSection draft={props.draft.kerberos} errors={props.errors} disabled={props.disabled} />
     </section>
   );

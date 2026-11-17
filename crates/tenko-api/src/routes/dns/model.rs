@@ -368,7 +368,8 @@ pub struct ClaimableName {
 pub enum ClaimHeldReason {
     /// The apex, a locator name, a wildcard, a name with a `_` label, or a PTR to one.
     Reserved,
-    /// A well-known service name (`wpad`, `isatap`), or a PTR to one.
+    /// A protected name (a well-known service name such as `wpad`, or one the zone lists in
+    /// `update.protected_labels`), or a PTR to one.
     ServiceName,
     /// A name server of the zone, or a PTR to one.
     NameServer,

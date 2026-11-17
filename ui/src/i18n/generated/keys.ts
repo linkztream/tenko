@@ -4099,6 +4099,8 @@ export type MessageKey =
   | "dns.update.kerberos.title"
   | "dns.update.may_replace_ipam"
   | "dns.update.may_replace_ipam_help"
+  | "dns.update.protected_labels"
+  | "dns.update.protected_labels_help"
   | "dns.update.require_tsig"
   | "dns.update.require_tsig_hardened"
   | "dns.update.require_tsig_help"
@@ -14105,6 +14107,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.update.kerberos.title",
   "dns.update.may_replace_ipam",
   "dns.update.may_replace_ipam_help",
+  "dns.update.protected_labels",
+  "dns.update.protected_labels_help",
   "dns.update.require_tsig",
   "dns.update.require_tsig_hardened",
   "dns.update.require_tsig_help",

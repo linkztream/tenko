@@ -22,6 +22,19 @@ pub const MAX_WIRE_LEN: usize = 255;
 /// The longest label (RFC 1035).
 pub const MAX_LABEL_LEN: usize = 63;
 
+/// Whether `label` keeps to the host-name rules (RFC 952 and RFC 1123): letters, digits and
+/// hyphens, 1 to 63 octets, no hyphen at either end.
+pub fn is_host_label(label: &str) -> bool {
+    let bytes = label.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= MAX_LABEL_LEN
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+        && bytes[0] != b'-'
+        && bytes[bytes.len() - 1] != b'-'
+}
+
 /// A DNS name in canonical form: lowercase ASCII labels separated by dots, without the
 /// trailing dot; the root is `.`.
 ///

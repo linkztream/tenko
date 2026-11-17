@@ -39,7 +39,7 @@ use tenko_dns::{
     wire::{self, MAX_MESSAGE_LEN},
     xfr::{Directory, TransferAudit},
     zone::{
-        NewZone, ZoneConfig, ZoneService,
+        NewZone, ZoneChange, ZoneConfig, ZoneService,
         acl::NewAcl,
         keys::NewKey,
         records::{Change, Op},
@@ -184,10 +184,8 @@ async fn lab_with(ownership: Ownership, profile: UpdateProfile) -> Lab {
                 transfer: tenko_core::dns::TransferPolicy::default(),
                 update: UpdatePolicy {
                     allowed: vec![list.id],
-                    require_tsig: true,
-                    may_replace_ipam: false,
-                    dhcp: None,
                     kerberos: Some(kerberos),
+                    ..UpdatePolicy::default()
                 },
                 dnssec: tenko_core::dns::DnssecPolicy::default(),
                 source: None,
@@ -1530,11 +1528,12 @@ async fn dns_28_e46_the_remaining_rows() {
     );
 }
 
-/// DNS-28: a well-known service name (`wpad`, `isatap` as the first label) without an owner
-/// goes to a privileged principal only, whatever the record type and whoever the lists
-/// admit (a principal by its Kerberos entry, a `DnsUpdateProxy` member, a TSIG key); a name
-/// below a service label and every other new name are unaffected. The refusal carries its
-/// own code and names the principal.
+/// DNS-28: a protected name (a well-known service name such as `wpad`, `isatap` or
+/// `autodiscover` as the first label, or a first label of the zone's own list) without an
+/// owner goes to a privileged principal only, whatever the record type and whoever the
+/// lists admit (a principal by its Kerberos entry, a `DnsUpdateProxy` member, a TSIG key);
+/// a name below a protected label and every other new name are unaffected. The refusal
+/// carries its own code and names the principal.
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one sequence over the signers")]
 async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
@@ -1577,6 +1576,22 @@ async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
         vec![sid(516)],
         "192.0.2.2",
     );
+    // The zone protects `proxy` beside the built-in names.
+    lab.zones
+        .update(
+            &cx(),
+            lab.zone.id,
+            ZoneChange {
+                update: Some(UpdatePolicy {
+                    protected_labels: vec!["proxy".to_owned()],
+                    ..lab.zone.update.clone()
+                }),
+                ..ZoneChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("protected labels");
     // A path of its own, so that its audit sink can be read: each refusal is checked by
     // the code it is audited with.
     let audit = Arc::new(Audit::default());
@@ -1599,7 +1614,13 @@ async fn dns_28_a_service_name_is_created_by_a_privileged_principal_only() {
     let service_refusal = (REFUSED, Some("dns.update.service_name".to_owned()));
     let wpad = "wpad.corp.example.test";
     let isatap = "isatap.corp.example.test";
-    for service in [wpad, isatap, "wpad.branch.corp.example.test"] {
+    for service in [
+        wpad,
+        isatap,
+        "wpad.branch.corp.example.test",
+        "autodiscover.corp.example.test",
+        "proxy.corp.example.test",
+    ] {
         for (what, key, from, msg) in [
             (
                 "A",

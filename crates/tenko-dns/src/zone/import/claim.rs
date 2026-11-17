@@ -8,10 +8,11 @@
 //! claimable only when all of this holds:
 //!
 //! 1. Nothing on the never-claimable list holds it back ([`HeldReason`]): the apex, a locator
-//!    name, a wildcard, a name with a `_` label, a well-known service name (`wpad`,
-//!    `isatap`), a name server of the zone, the target of an MX, SRV, CNAME or DNAME record
-//!    of the file, the host name of a Tenko node, a name no computer can claim (an address
-//!    name not directly below the apex, a PTR RRset outside `in-addr.arpa` and `ip6.arpa`),
+//!    name, a wildcard, a name with a `_` label, a protected name (a well-known service
+//!    name such as `wpad`, or a label of the zone's `protected_labels`), a name server of
+//!    the zone, the target of an MX, SRV, CNAME or DNAME record of the file, the host name
+//!    of a Tenko node, a name no computer can claim (an address name not directly below
+//!    the apex, a PTR RRset outside `in-addr.arpa` and `ip6.arpa`),
 //!    a name that holds other records in the file or in the store; for a PTR RRset the same
 //!    of every name it points at.
 //! 2. It matches the operator's rule ([`ClaimRule`]): only names at or below given names,
@@ -41,11 +42,11 @@ use std::{
 use aws_lc_rs::digest::{Context, SHA256, digest};
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use tenko_core::dns::{DnsName, RecordData, Rtype, ScopeName, ZoneId};
+use tenko_core::dns::{DnsName, RecordData, Rtype, ScopeName, UpdatePolicy, ZoneId};
 
 use super::super::{
     ZoneError, ZoneResult,
-    ownership::{is_reserved, is_service_name},
+    ownership::is_reserved,
     zonefile::{FileRecord, Item, Reader},
 };
 
@@ -89,7 +90,7 @@ pub enum HeldReason {
     /// The apex, a locator name, a wildcard, a name with a label that starts with `_`, or a
     /// PTR to such a name.
     Reserved,
-    /// A well-known service name (`wpad`, `isatap`), or a PTR to one.
+    /// A protected name ([`UpdatePolicy::protects`]), or a PTR to one.
     ServiceName,
     /// A name server of the zone (an NS host, the SOA MNAME, of the file or the store), or a
     /// PTR to one.
@@ -451,6 +452,8 @@ pub(super) struct Checks<'a> {
     pub hosts: HashSet<String>,
     /// The name servers the store names (the scope's apex NS hosts and SOA MNAME).
     pub store_name_servers: HashSet<DnsName>,
+    /// Every zone's apex with its update policy, for the names each protects.
+    pub zones: Vec<(DnsName, UpdatePolicy)>,
 }
 
 impl<'a> Checks<'a> {
@@ -458,6 +461,7 @@ impl<'a> Checks<'a> {
         apex: &'a DnsName,
         request: &'a ClaimRequest,
         store_name_servers: HashSet<DnsName>,
+        zones: Vec<(DnsName, UpdatePolicy)>,
     ) -> Self {
         Self {
             apex,
@@ -471,7 +475,21 @@ impl<'a> Checks<'a> {
                 .map(str::to_ascii_lowercase)
                 .collect(),
             store_name_servers,
+            zones,
         }
+    }
+
+    /// Whether `name` is protected ([`UpdatePolicy::protects`]) by the zone that holds it,
+    /// a PTR target in another zone included; the built-in names wherever it lies.
+    fn protects(&self, name: &DnsName) -> bool {
+        self.zones
+            .iter()
+            .filter(|(apex, _)| name.is_subdomain_of(apex))
+            .max_by_key(|(apex, _)| apex.label_count())
+            .map_or_else(
+                || UpdatePolicy::default().protects(name),
+                |(_, update)| update.protects(name),
+            )
     }
 
     fn is_node(&self, name: &DnsName) -> bool {
@@ -665,7 +683,7 @@ impl Found {
                     if is_reserved(&DnsName::root(), target) && !target.is_root() {
                         set.hold(HeldReason::Reserved);
                     }
-                    if is_service_name(target) {
+                    if checks.protects(target) {
                         set.hold(HeldReason::ServiceName);
                     }
                     if servers_unknown
@@ -719,7 +737,7 @@ impl Found {
         if is_reserved(checks.apex, name) {
             return Some(HeldReason::Reserved);
         }
-        if is_service_name(name) {
+        if checks.protects(name) {
             return Some(HeldReason::ServiceName);
         }
         if self.name_servers.contains(name) || checks.store_name_servers.contains(name) {

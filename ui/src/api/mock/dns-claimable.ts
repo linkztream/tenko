@@ -178,7 +178,8 @@ function heldReason(set: ClaimSet, ctx: ClaimContext, rule: ClaimRule): S["Claim
   const hosts = hostsOf(set);
   const relative = (h: string) => (h === ctx.zone ? [] : h.endsWith(`.${ctx.zone}`) ? h.slice(0, -ctx.zone.length - 1).split(".") : h.split("."));
   if (hosts.some((h) => h === ctx.zone || relative(h).some((l) => l.startsWith("_") || l === "*"))) return "reserved";
-  if (hosts.some((h) => /^(wpad|isatap)$/.test(h.split(".")[0] ?? ""))) return "service_name";
+  // The built-in protected names of the server (a zone's own list is not modeled here).
+  if (hosts.some((h) => /^(wpad|isatap|autodiscover|lyncdiscover|enterpriseregistration|enterpriseenrollment)$/.test(h.split(".")[0] ?? ""))) return "service_name";
   if (hosts.some((h) => ctx.nameServers.has(h))) return "name_server";
   if (hosts.some((h) => ctx.serviceTargets.has(h))) return "service_target";
   if (set.type === "PTR" ? new Set(hosts).size !== 1 : relative(set.name).length !== 1) return "not_a_host";

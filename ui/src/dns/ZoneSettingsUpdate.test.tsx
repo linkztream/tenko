@@ -78,6 +78,28 @@ describe("the update section of a primary zone", () => {
     expect(writes().filter((w) => w.method === "PATCH")[1]?.body).not.toHaveProperty("update");
   });
 
+  it("sends the protected names with the policy and shows the server's refusal at the field", async () => {
+    const writes = recordWrites();
+    const { form } = await settings(PRIMARY);
+    fireEvent.input(input(form, "field-update.protected_labels"), { target: { value: "Proxy, intranet" } });
+    fireEvent.click(within(form).getByTestId("form-submit"));
+    expect(await screen.findByText("Settings of example.test saved")).toBeTruthy();
+    expect(writes().filter((w) => w.method === "PATCH")[0]?.body).toMatchObject({ update: { protected_labels: ["proxy", "intranet"], require_tsig: true } });
+    server.use(
+      http.patch("/api/v1/dns/zones/:id", () =>
+        HttpResponse.json(
+          { status: 400, code: "dns.zone.invalid", title: "Invalid zone", detail: "update.protected_labels: wpad is always protected", params: { field: "update.protected_labels", reason: "wpad is always protected" } },
+          { status: 400 },
+        ),
+      ),
+    );
+    fireEvent.input(input(form, "field-update.protected_labels"), { target: { value: "proxy, wpad" } });
+    fireEvent.click(within(form).getByTestId("form-submit"));
+    const error = await within(form).findByTestId("field-error");
+    expect(error.dataset.field).toBe("update.protected_labels");
+    expect(input(form, "field-update.protected_labels").getAttribute("aria-invalid")).toBe("true");
+  });
+
   it("removes a chip and leaves the policy out when nothing changed", async () => {
     const writes = recordWrites();
     const { form } = await settings(PRIMARY);
@@ -122,7 +144,7 @@ describe("where updates do not apply", () => {
     await signInWithRoles(["viewer"]);
     const { form } = await settings(PRIMARY);
     const section = within(form).getByTestId("zone-update");
-    for (const id of ["field-update-allow-add", "field-update.require_tsig", "field-update.may_replace_ipam"]) {
+    for (const id of ["field-update-allow-add", "field-update.require_tsig", "field-update.may_replace_ipam", "field-update.protected_labels"]) {
       expect(input(section, id).disabled).toBe(true);
     }
   });

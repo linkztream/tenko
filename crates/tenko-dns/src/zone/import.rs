@@ -920,7 +920,11 @@ impl ZoneService {
         let windows = request.dialect == Dialect::Windows;
         let claim_plan = if windows && plan {
             let name_servers = name_servers(view.as_ref(), &zone, &request.scope)?;
-            let checks = claim::Checks::new(&zone.name, &request.claim, name_servers);
+            let zones = Self::zones(view.as_ref())?
+                .into_iter()
+                .map(|row| (row.zone.name, row.zone.update))
+                .collect();
+            let checks = claim::Checks::new(&zone.name, &request.claim, name_servers, zones);
             let max_generate = self.config.max_generate;
             let text = &request.text;
             let apex = &zone.name;

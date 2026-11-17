@@ -11,8 +11,8 @@ use tenko_core::{
     codec::{decode_key, encode_key, from_cbor, to_cbor},
     dns::{
         Acl, AclEntry, AclId, DnsName, KerberosUpdate, KrbAccount, NameOwner, NameOwnerKey, Origin,
-        OwnerSource, Ownership, PrincipalName, Realm, RrSet, ScopeName, Sid, UpdatePolicy,
-        WindowsUpdateMode, ZoneId, codes, identity, tables,
+        OwnerSource, Ownership, PROTECTED_LABELS_MAX, PrincipalName, Realm, RrSet, ScopeName, Sid,
+        UpdatePolicy, WindowsUpdateMode, ZoneId, codes, identity, tables,
     },
 };
 
@@ -61,6 +61,88 @@ fn an_rrset_of_0_0_11_decodes_without_a_principal_and_writes_the_same_bytes() {
     assert_eq!(from_cbor::<RrSet>(&with).expect("cbor"), signed);
     let json = serde_json::to_value(&signed).expect("json");
     assert_eq!(json["principal"], "HOST01$@CORP.EXAMPLE.TEST");
+}
+
+/// The update policy as every earlier version writes it, in CBOR: `allowed`, `require_tsig`
+/// and `may_replace_ipam`, nothing else.
+const POLICY_WITHOUT_PROTECTED_LABELS: &str =
+    "a367616c6c6f776564806c726571756972655f74736967f5706d61795f7265706c6163655f6970616df4";
+
+#[test]
+fn a_zone_protects_the_service_labels_and_its_own_list() {
+    let name = |text: &str| DnsName::new(text).expect("name");
+    let old = tenko_core::serde_util::from_hex(POLICY_WITHOUT_PROTECTED_LABELS).expect("hex");
+    let policy: UpdatePolicy = from_cbor(&old).expect("an earlier policy decodes");
+    assert_eq!(policy, UpdatePolicy::default());
+    // An empty list writes no key: the bytes stay those an earlier version reads.
+    assert_eq!(to_cbor(&policy).expect("cbor"), old);
+    for protected in [
+        "wpad.corp.example.test",
+        "ISATAP.corp.example.test",
+        "autodiscover.branch.corp.example.test",
+        "lyncdiscover.corp.example.test",
+        "enterpriseregistration.corp.example.test",
+        "enterpriseenrollment.corp.example.test",
+    ] {
+        assert!(policy.protects(&name(protected)), "{protected}");
+    }
+    for free in [
+        "proxy.corp.example.test",
+        "pc01.wpad.corp.example.test",
+        "wpad2.corp.example.test",
+    ] {
+        assert!(!policy.protects(&name(free)), "{free}");
+    }
+    let zone = UpdatePolicy {
+        protected_labels: vec!["proxy".to_owned()],
+        ..UpdatePolicy::default()
+    };
+    assert!(zone.protects(&name("Proxy.corp.example.test")));
+    assert!(
+        zone.protects(&name("wpad.corp.example.test")),
+        "the built-in names stay"
+    );
+    assert_eq!(zone.validate(), Ok(()));
+    assert_eq!(
+        from_cbor::<UpdatePolicy>(&to_cbor(&zone).expect("cbor")).expect("cbor"),
+        zone
+    );
+
+    let refused = |labels: Vec<String>| {
+        UpdatePolicy {
+            protected_labels: labels,
+            ..UpdatePolicy::default()
+        }
+        .validate()
+        .expect_err("refused")
+        .to_string()
+    };
+    for (labels, reason) in [
+        (vec!["Proxy"], "Proxy is not a lowercase host label"),
+        (vec!["_proxy"], "_proxy is not a lowercase host label"),
+        (vec!["-proxy"], "-proxy is not a lowercase host label"),
+        (
+            vec!["proxy.corp"],
+            "proxy.corp is not a lowercase host label",
+        ),
+        (vec![""], " is not a lowercase host label"),
+        (vec!["wpad"], "wpad is always protected"),
+        (vec!["proxy", "proxy"], "proxy appears twice"),
+    ] {
+        let text = refused(labels.iter().map(|label| (*label).to_owned()).collect());
+        assert!(text.starts_with("update.protected_labels: "), "{text}");
+        assert!(text.contains(reason), "{labels:?}: {text}");
+    }
+    let many = |count: usize| (0..count).map(|index| format!("name{index}")).collect();
+    assert_eq!(
+        UpdatePolicy {
+            protected_labels: many(PROTECTED_LABELS_MAX),
+            ..UpdatePolicy::default()
+        }
+        .validate(),
+        Ok(())
+    );
+    assert!(refused(many(PROTECTED_LABELS_MAX + 1)).contains("at most 64 labels"));
 }
 
 #[test]

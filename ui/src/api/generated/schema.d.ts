@@ -9787,6 +9787,12 @@ export interface components {
             kerberos?: components["schemas"]["KerberosUpdate"] | null;
             /** @description A dynamic update may replace an RRset whose origin is `ipam` (plan section 2.5). */
             may_replace_ipam?: boolean;
+            /**
+             * @description First labels the zone protects beside the built-in service names (`wpad`, `isatap`,
+             *     `autodiscover` and the others), which are always protected: no client gets such a
+             *     name by asking for it. Lowercase host labels, each once, at most 64.
+             */
+            protected_labels?: string[];
             /** @description Updates need a TSIG key (TGL-09). */
             require_tsig?: boolean;
         };

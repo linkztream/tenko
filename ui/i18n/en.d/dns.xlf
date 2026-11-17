@@ -2250,6 +2250,12 @@
       <unit id="dns.update.may_replace_ipam_help">
         <segment><source>Off: an update that would change a record of the origin ipam is refused, so that IPAM stays the source of its names.</source></segment>
       </unit>
+      <unit id="dns.update.protected_labels">
+        <segment><source>Protected names</source></segment>
+      </unit>
+      <unit id="dns.update.protected_labels_help">
+        <segment><source>Comma-separated first labels that no client gets by asking for them, beside the built-in service names (wpad, isatap, autodiscover and others), which are always protected. Only a privileged principal creates such a name by dynamic update, DHCP never writes one for a lease, and a zone file import never makes one claimable. An administrator creates one as a record and gives it an owner in the Owners tab.</source></segment>
+      </unit>
       <unit id="dns.zone.tab.dnssec">
         <segment><source>DNSSEC</source></segment>
       </unit>
@@ -2766,7 +2772,7 @@
         <segment><source>The apex, a locator name (a label starting with _) or a wildcard</source></segment>
       </unit>
       <unit id="dns.import.held.service_name">
-        <segment><source>A name clients use to find a service (wpad, isatap)</source></segment>
+        <segment><source>A protected name: one clients use to find a service (wpad, autodiscover and others), or one the zone lists</source></segment>
       </unit>
       <unit id="dns.import.held.name_server">
         <segment><source>A name server of the zone</source></segment>

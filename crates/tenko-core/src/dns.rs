@@ -47,7 +47,7 @@ pub mod recursion;
 pub mod identity;
 // WP13.0: end.
 
-pub use name::{DnsName, Rtype, ScopeName};
+pub use name::{DnsName, Rtype, ScopeName, is_host_label};
 pub use rdata::{Rdata, RecordData, SvcParam, TextBytes, split_txt};
 pub use rrset::{MAX_TTL, RrSet, RrSetKey, check_apex, check_node};
 // WP10.0: the recursive resolver's model.
@@ -173,8 +173,8 @@ pub mod codes {
     /// A dynamic update was refused (403): no or a wrong TSIG key, outside the ACL, or a
     /// prerequisite failed. Params: `zone`, `reason`.
     pub const UPDATE_REFUSED: &str = "dns.update.refused";
-    /// A dynamic update was refused because it would change a well-known service name
-    /// (`wpad`, `isatap`) that has no owner, and its signer is not privileged (403). The
+    /// A dynamic update was refused because it would change a protected name (a well-known
+    /// service name, or one the zone lists: `UpdatePolicy::protects`) that has no owner, and its signer is not privileged (403). The
     /// code of the audit record `dns.update.refuse`. Params: `zone`, `reason`.
     pub const UPDATE_SERVICE_NAME: &str = "dns.update.service_name";
     /// A zone transfer was refused (403): outside the transfer ACL or without the required
@@ -776,10 +776,83 @@ pub struct UpdatePolicy {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kerberos: Option<KerberosUpdate>,
     // WP13.0: end.
+    /// First labels the zone protects beside the built-in service names (`wpad`, `isatap`,
+    /// `autodiscover` and the others), which are always protected: no client gets such a
+    /// name by asking for it. Lowercase host labels, each once, at most 64.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(max_items = 64)]
+    pub protected_labels: Vec<String>,
 }
+
+/// The first labels of well-known service names that a client finds by name alone: web
+/// proxy auto-discovery (`wpad`) and the ISATAP router (`isatap`), which the Windows DNS
+/// Server answers for nobody by default (its global query block list), the Exchange and
+/// Skype for Business discovery names (`autodiscover`, `lyncdiscover`) and the device
+/// registration and enrollment names of Entra ID and Intune (`enterpriseregistration`,
+/// `enterpriseenrollment`). Whoever holds such a name in a domain serves that service to
+/// every client that looks for it, so no client gets one by asking: a dynamic update
+/// changes one without an owner only for a privileged principal, a zone file import never
+/// makes one claimable, and DHCP never writes one for a lease. An administrator still
+/// creates one through the API.
+pub const SERVICE_LABELS: [&str; 6] = [
+    "wpad",
+    "isatap",
+    "autodiscover",
+    "lyncdiscover",
+    "enterpriseregistration",
+    "enterpriseenrollment",
+];
+
+/// The most first labels a zone protects beside [`SERVICE_LABELS`].
+pub const PROTECTED_LABELS_MAX: usize = 64;
 
 // WP8.3: the effective DHCP switch of a zone.
 impl UpdatePolicy {
+    /// Whether the first label of `name` is protected in the zone: one of
+    /// [`SERVICE_LABELS`] or of the zone's `protected_labels`, in any case.
+    pub fn protects(&self, name: &DnsName) -> bool {
+        name.labels().next().is_some_and(|first| {
+            SERVICE_LABELS
+                .iter()
+                .copied()
+                .chain(self.protected_labels.iter().map(String::as_str))
+                .any(|known| first.eq_ignore_ascii_case(known))
+        })
+    }
+
+    /// Checks `protected_labels`: lowercase host labels, each once, none of
+    /// [`SERVICE_LABELS`], at most [`PROTECTED_LABELS_MAX`].
+    ///
+    /// # Errors
+    ///
+    /// `dns.zone.invalid` naming `update.protected_labels`.
+    pub fn validate(&self) -> Result<(), DnsError> {
+        let invalid = |reason: &str| {
+            Err(DnsError::invalid(
+                codes::ZONE_INVALID,
+                "update.protected_labels",
+                reason,
+            ))
+        };
+        if self.protected_labels.len() > PROTECTED_LABELS_MAX {
+            return invalid(&format!("at most {PROTECTED_LABELS_MAX} labels"));
+        }
+        for (index, label) in self.protected_labels.iter().enumerate() {
+            if !is_host_label(label) || label.bytes().any(|b| b.is_ascii_uppercase()) {
+                return invalid(&format!(
+                    "{label} is not a lowercase host label (letters, digits and hyphens)"
+                ));
+            }
+            if SERVICE_LABELS.contains(&label.as_str()) {
+                return invalid(&format!("{label} is always protected"));
+            }
+            if self.protected_labels[..index].contains(label) {
+                return invalid(&format!("{label} appears twice"));
+            }
+        }
+        Ok(())
+    }
+
     /// Whether Tenko DHCP may write into the zone; `profile_allows` is the profile's
     /// default (true under Home and Lab).
     pub fn dhcp_allowed(&self, profile_allows: bool) -> bool {
@@ -833,6 +906,7 @@ impl Default for UpdatePolicy {
             dhcp: None,
             // WP13.0
             kerberos: None,
+            protected_labels: Vec::new(),
         }
     }
 }
@@ -1125,7 +1199,8 @@ impl Zone {
     /// Checks a zone: the name is not a wildcard; the scopes hold `default` and no name
     /// twice; the SOA values are in bounds; a secondary, stub or forward zone names at
     /// least one server and a primary zone none; `reverse_of` only on a name under
-    /// `in-addr.arpa` or `ip6.arpa`; online signing only for a primary zone.
+    /// `in-addr.arpa` or `ip6.arpa`; online signing only for a primary zone; the update
+    /// policy's protected labels ([`UpdatePolicy::validate`]).
     ///
     /// # Errors
     ///
@@ -1152,6 +1227,7 @@ impl Zone {
             }
         }
         self.soa.validate()?;
+        self.update.validate()?;
         let servers = self
             .source
             .as_ref()

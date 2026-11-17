@@ -221,10 +221,7 @@ async fn lab_with(follow: bool, settings: UpdateSettings, profile: UpdateProfile
                 transfer: tenko_core::dns::TransferPolicy::default(),
                 update: UpdatePolicy {
                     allowed: vec![updaters.id, lan.id],
-                    require_tsig: true,
-                    may_replace_ipam: false,
-                    dhcp: None,
-                    kerberos: None,
+                    ..UpdatePolicy::default()
                 },
                 dnssec: tenko_core::dns::DnssecPolicy::default(),
                 source: None,
