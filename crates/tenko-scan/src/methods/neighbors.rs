@@ -3,8 +3,11 @@
 //!
 //! | Platform | IPv4 (`arp`) | IPv6 (`nd`) |
 //! |---|---|---|
-//! | Linux | `/proc/net/arp` | `ip -6 neigh show` |
+//! | Linux | `ip -4 neigh show` | `ip -6 neigh show` |
 //! | Windows | `Get-NetNeighbor -AddressFamily IPv4` (PowerShell) | `Get-NetNeighbor -AddressFamily IPv6` |
+//!
+//! `ip` (iproute2) asks the kernel over netlink, which the shipped systemd unit allows;
+//! `/proc/net/arp` is hidden there (`ProcSubset=pid`). Another platform runs `ip` too.
 //!
 //! Entries that are incomplete, failed or unreachable, and entries with a zero, broadcast
 //! or multicast MAC address are left out, as is everything outside the scope.
@@ -20,7 +23,7 @@ use crate::{
     method::{Availability, Found, Method, MethodKind, MethodOutput, RunContext},
     oui,
     scope::canonical,
-    sys::System,
+    sys::{CommandOutput, System},
 };
 
 /// Longest a table read may take.
@@ -48,33 +51,9 @@ fn parse_mac(text: &str) -> Option<MacAddr> {
         .filter(|mac| usable_mac(*mac))
 }
 
-/// Parses `/proc/net/arp`: a header, then `IP address  HW type  Flags  HW address  Mask
-/// Device` per line. Only complete entries (flag `0x2`) count.
-pub fn parse_proc_net_arp(text: &str) -> Vec<Neighbor> {
-    let mut out = Vec::new();
-    for line in text.lines().skip(1) {
-        let fields: Vec<&str> = line.split_whitespace().collect();
-        let [ip, _hw_type, flags, mac, ..] = fields.as_slice() else {
-            continue;
-        };
-        let complete = u32::from_str_radix(flags.trim_start_matches("0x"), 16)
-            .is_ok_and(|flags| flags & 0x2 != 0);
-        if !complete {
-            continue;
-        }
-        if let (Ok(ip), Some(mac)) = (ip.parse::<IpAddr>(), parse_mac(mac)) {
-            out.push(Neighbor {
-                ip: canonical(ip),
-                mac,
-            });
-        }
-    }
-    out
-}
-
-/// Parses the output of `ip neigh show`: `<address> dev <if> lladdr <mac> [router]
-/// <STATE>`. Entries in the states `FAILED`, `INCOMPLETE` and `NONE`, or without `lladdr`,
-/// do not count.
+/// Parses the output of `ip -4 neigh show` and `ip -6 neigh show`: `<address> dev <if>
+/// lladdr <mac> [router] <STATE>`. Entries in the states `FAILED`, `INCOMPLETE` and `NONE`,
+/// or without `lladdr`, do not count.
 pub fn parse_ip_neigh(text: &str) -> Vec<Neighbor> {
     let mut out = Vec::new();
     for line in text.lines() {
@@ -90,8 +69,11 @@ pub fn parse_ip_neigh(text: &str) -> Vec<Neighbor> {
         else {
             continue;
         };
-        let state = fields.last().copied().unwrap_or_default();
-        if matches!(state, "FAILED" | "INCOMPLETE" | "NONE") {
+        // The state is last in iproute2's text; flags such as `proto <name>` may follow it.
+        if fields
+            .iter()
+            .any(|field| matches!(*field, "FAILED" | "INCOMPLETE" | "NONE"))
+        {
             continue;
         }
         out.push(Neighbor {
@@ -191,22 +173,60 @@ pub async fn read_table(system: &dyn System, ipv6: bool) -> Result<Vec<Neighbor>
             )));
         }
         Ok(parse_get_net_neighbor_csv(&output.stdout))
-    } else if ipv6 {
-        let output = system
-            .run("ip", &["-6", "neigh", "show"], READ_TIMEOUT)
-            .await?;
-        if !output.success() {
-            return Err(ScanError::io(format!(
-                "ip -6 neigh show failed: {}",
-                output.stderr.lines().next().unwrap_or_default()
-            )));
-        }
-        Ok(parse_ip_neigh(&output.stdout))
     } else {
-        Ok(parse_proc_net_arp(
-            &system.read(Path::new("/proc/net/arp"))?,
+        let family = if ipv6 { "-6" } else { "-4" };
+        Ok(parse_ip_neigh(
+            &run_ip(system, &[family, "neigh", "show"]).await?,
         ))
     }
+}
+
+/// Where `ip` is looked for: the usual system directories, never the service's `PATH`.
+const IP_PATHS: [&str; 4] = ["/usr/sbin/ip", "/usr/bin/ip", "/sbin/ip", "/bin/ip"];
+
+/// Runs `ip` (iproute2) with fixed `args` and answers its standard output. The neighbor
+/// tables and the server's default routes are read through it.
+///
+/// # Errors
+///
+/// `scan.io` naming the cause: `ip` is not installed, cannot start, does not finish within
+/// [`READ_TIMEOUT`], or fails (its exit status and first line of standard error).
+pub async fn run_ip(system: &dyn System, args: &[&str]) -> Result<String, ScanError> {
+    let program = IP_PATHS
+        .into_iter()
+        .find(|path| system.exists(Path::new(path)))
+        .ok_or_else(|| {
+            ScanError::io(format!(
+                "the ip command is not installed (looked for {}); the package iproute2 \
+                 provides it",
+                IP_PATHS.join(", ")
+            ))
+        })?;
+    let output = system.run(program, args, READ_TIMEOUT).await?;
+    if output.success() {
+        Ok(output.stdout)
+    } else {
+        Err(ip_failed(args, &output))
+    }
+}
+
+/// The error of an `ip` that failed: the command, how it ended and the first line of
+/// standard error that says something.
+fn ip_failed(args: &[&str], output: &CommandOutput) -> ScanError {
+    let status = output.status.map_or_else(
+        || "killed by a signal".to_owned(),
+        |code| format!("exit status {code}"),
+    );
+    let message = output
+        .stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("nothing on standard error");
+    ScanError::io(format!(
+        "ip {} failed ({status}): {message}",
+        args.join(" ")
+    ))
 }
 
 /// The findings of a table: an address sighting per entry inside the scope and a vendor
@@ -288,27 +308,44 @@ impl Method for NeighborTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::sys::RecordedSystem;
 
     fn mac(text: &str) -> MacAddr {
         text.parse().expect("mac")
     }
 
-    const PROC_NET_ARP: &str = "\
-IP address       HW type     Flags       HW address            Mask     Device
-192.0.2.1        0x1         0x2         00:00:5e:00:53:01     *        eth0
-192.0.2.20       0x1         0x0         00:00:00:00:00:00     *        eth0
-192.0.2.21       0x1         0x2         00:00:5e:00:53:21     *        eth0
-192.0.2.22       0x1         0x6         00:00:5E:00:53:22     *        eth0
-198.51.100.9     0x1         0x2         ff:ff:ff:ff:ff:ff     *        eth1
-garbage line
+    fn ips(entries: &[Neighbor]) -> Vec<String> {
+        entries.iter().map(|n| n.ip.to_string()).collect()
+    }
+
+    // `ip -4 neigh show` of iproute2 6.1 (Debian 12): a failed and an incomplete entry
+    // without `lladdr` (two spaces before the state), a broadcast and a zero MAC address
+    // (`NOARP`), a flag before the state and `proto` after it; then the `-s` form of 4.18
+    // (RHEL 8) and BusyBox, with counters before the state.
+    const IP4_NEIGH: &str = "\
+192.0.2.1 dev eth0 lladdr 00:00:5e:00:53:01 REACHABLE
+192.0.2.20 dev eth0 lladdr 00:00:5e:00:53:20 STALE
+192.0.2.21 dev eth0  FAILED
+192.0.2.22 dev eth0  INCOMPLETE
+192.0.2.23 dev eth0 lladdr 00:00:5E:00:53:23 PERMANENT
+192.0.2.24 dev eth0 lladdr 00:00:5e:00:53:24 DELAY
+192.0.2.25 dev eth0 lladdr 00:00:5e:00:53:25 PROBE
+192.0.2.255 dev eth0 lladdr ff:ff:ff:ff:ff:ff NOARP
+198.51.100.9 dev eth1 lladdr 00:00:00:00:00:00 NOARP
+192.0.2.26 dev eth0 lladdr 00:00:5e:00:53:26 extern_learn STALE proto zebra
+192.0.2.27 dev eth0 lladdr 00:00:5e:00:53:27 ref 1 used 12/12/9 probes 1 REACHABLE
+192.0.2.28 dev eth0 lladdr 00:00:5e:00:53:28 used 61/121/58 probes 6 FAILED
 ";
 
-    const IP_NEIGH: &str = "\
+    // `ip -6 neigh show`: a router, a link-local router, an entry without `lladdr`, a
+    // multicast MAC address and the states of IP4_NEIGH.
+    const IP6_NEIGH: &str = "\
 2001:db8::1 dev eth0 lladdr 00:00:5e:00:53:01 router REACHABLE
 2001:db8::20 dev eth0 lladdr 00:00:5e:00:53:20 STALE
 2001:db8::21 dev eth0  FAILED
 2001:db8::22 dev eth0 lladdr 00:00:5e:00:53:22 INCOMPLETE
 fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
+fe80::5efe:c000:20a dev eth1 router STALE
 2001:db8::23 dev eth0 lladdr 33:33:00:00:00:01 PERMANENT
 ";
 
@@ -323,41 +360,31 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
 ";
 
     #[test]
-    fn proc_net_arp_keeps_complete_unicast_entries() {
-        let entries = parse_proc_net_arp(PROC_NET_ARP);
+    fn ip_neigh_keeps_usable_unicast_entries_of_both_families() {
+        let entries = parse_ip_neigh(IP4_NEIGH);
         assert_eq!(
-            entries,
+            ips(&entries),
             [
-                Neighbor {
-                    ip: "192.0.2.1".parse().expect("ip"),
-                    mac: mac("00:00:5e:00:53:01")
-                },
-                Neighbor {
-                    ip: "192.0.2.21".parse().expect("ip"),
-                    mac: mac("00:00:5e:00:53:21")
-                },
-                Neighbor {
-                    ip: "192.0.2.22".parse().expect("ip"),
-                    mac: mac("00:00:5e:00:53:22")
-                },
+                "192.0.2.1",
+                "192.0.2.20",
+                "192.0.2.23",
+                "192.0.2.24",
+                "192.0.2.25",
+                "192.0.2.26",
+                "192.0.2.27"
             ]
         );
-    }
-
-    #[test]
-    fn ip_neigh_skips_failed_incomplete_and_multicast() {
-        let ips: Vec<String> = parse_ip_neigh(IP_NEIGH)
-            .iter()
-            .map(|n| n.ip.to_string())
-            .collect();
-        assert_eq!(ips, ["2001:db8::1", "2001:db8::20", "fe80::1"]);
+        assert_eq!(entries[2].mac, mac("00:00:5e:00:53:23"));
+        assert_eq!(
+            ips(&parse_ip_neigh(IP6_NEIGH)),
+            ["2001:db8::1", "2001:db8::20", "fe80::1"]
+        );
     }
 
     #[test]
     fn get_net_neighbor_csv_is_read_by_header() {
         let entries = parse_get_net_neighbor_csv(GET_NET_NEIGHBOR);
-        let ips: Vec<String> = entries.iter().map(|n| n.ip.to_string()).collect();
-        assert_eq!(ips, ["192.0.2.1", "192.0.2.30", "fe80::1"]);
+        assert_eq!(ips(&entries), ["192.0.2.1", "192.0.2.30", "fe80::1"]);
         assert_eq!(entries[1].mac, mac("00:00:5e:00:53:30"));
         // Another column order and a localized interface column do not matter.
         let reordered = "\"State\",\"InterfaceAlias\",\"LinkLayerAddress\",\"IPAddress\"\n\
@@ -370,9 +397,9 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
 
     #[test]
     fn findings_stay_in_scope_and_name_vendors_once() {
-        let entries = parse_proc_net_arp(PROC_NET_ARP);
+        let entries = parse_ip_neigh(IP4_NEIGH);
         let found = findings(&entries, |ip| {
-            ip != "192.0.2.22".parse::<IpAddr>().expect("ip")
+            ["192.0.2.1", "192.0.2.20"].contains(&ip.to_string().as_str())
         });
         let subjects: Vec<&SightingSubject> = found.iter().map(|f| &f.subject).collect();
         assert_eq!(subjects.len(), 4, "{subjects:?}");
@@ -385,23 +412,18 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
     proptest::proptest! {
         #[test]
         fn the_parsers_never_panic(text in "(?s).{0,2048}") {
-            for entries in [
-                parse_proc_net_arp(&text),
-                parse_ip_neigh(&text),
-                parse_get_net_neighbor_csv(&text),
-            ] {
+            for entries in [parse_ip_neigh(&text), parse_get_net_neighbor_csv(&text)] {
                 let _ = findings(&entries, |_| true);
             }
         }
 
         #[test]
         fn recorded_tables_with_noise_never_panic(cut in 0usize..400, byte in 0u8..=255) {
-            for table in [PROC_NET_ARP, IP_NEIGH, GET_NET_NEIGHBOR] {
+            for table in [IP4_NEIGH, IP6_NEIGH, GET_NET_NEIGHBOR] {
                 let mut bytes = table.as_bytes().to_vec();
                 let at = cut % bytes.len();
                 bytes[at] = byte;
                 let text = String::from_utf8_lossy(&bytes[..=at]).into_owned();
-                let _ = parse_proc_net_arp(&text);
                 let _ = parse_ip_neigh(&text);
                 let _ = parse_get_net_neighbor_csv(&text);
             }
@@ -410,9 +432,10 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
 
     #[tokio::test]
     async fn the_method_reads_the_table_of_its_platform() {
-        let system = crate::sys::RecordedSystem::new()
-            .file("/proc/net/arp", PROC_NET_ARP)
-            .command("ip -6 neigh show", 0, IP_NEIGH)
+        let system = RecordedSystem::new()
+            .file("/usr/sbin/ip", "")
+            .command("/usr/sbin/ip -4 neigh show", 0, IP4_NEIGH)
+            .command("/usr/sbin/ip -6 neigh show", 0, IP6_NEIGH)
             .command(
                 "powershell.exe -NoProfile -NonInteractive -Command Get-NetNeighbor \
                  -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object \
@@ -425,6 +448,66 @@ fe80::1 dev eth0 lladdr 00:00:5e:00:53:01 router DELAY
             entries
                 .iter()
                 .any(|n| n.ip == "192.0.2.1".parse::<IpAddr>().expect("ip"))
+        );
+    }
+
+    #[tokio::test]
+    async fn ip_is_found_in_the_system_directories() {
+        let system = RecordedSystem::new().file("/bin/ip", "").command(
+            "/bin/ip -4 route show default",
+            0,
+            "default via 192.0.2.1\n",
+        );
+        let text = run_ip(&system, &["-4", "route", "show", "default"])
+            .await
+            .expect("ip");
+        assert_eq!(text, "default via 192.0.2.1\n");
+        assert_eq!(system.calls(), ["/bin/ip -4 route show default"]);
+    }
+
+    #[tokio::test]
+    async fn a_missing_or_refused_ip_names_the_cause() {
+        let missing = run_ip(&RecordedSystem::new(), &["-4", "neigh", "show"])
+            .await
+            .expect_err("no ip");
+        assert!(
+            missing
+                .to_string()
+                .starts_with("[scan.io] the ip command is not installed")
+                && missing.to_string().contains("iproute2"),
+            "{missing}"
+        );
+        let refused = RecordedSystem::new().file("/usr/sbin/ip", "").command(
+            "/usr/sbin/ip -6 neigh show",
+            1,
+            "",
+        );
+        assert_eq!(
+            run_ip(&refused, &["-6", "neigh", "show"])
+                .await
+                .expect_err("refused")
+                .to_string(),
+            "[scan.io] ip -6 neigh show failed (exit status 1): nothing on standard error"
+        );
+        let output = CommandOutput {
+            status: Some(255),
+            stdout: String::new(),
+            stderr: "\nCannot open netlink socket: Address family not supported by protocol\n"
+                .to_owned(),
+        };
+        assert_eq!(
+            ip_failed(&["-4", "neigh", "show"], &output).to_string(),
+            "[scan.io] ip -4 neigh show failed (exit status 255): Cannot open netlink socket: \
+             Address family not supported by protocol"
+        );
+        let killed = CommandOutput {
+            status: None,
+            ..CommandOutput::default()
+        };
+        assert!(
+            ip_failed(&["-4", "neigh", "show"], &killed)
+                .to_string()
+                .contains("(killed by a signal)")
         );
     }
 }

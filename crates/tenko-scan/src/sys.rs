@@ -1,5 +1,5 @@
 //! What the scanner asks of the operating system: commands (`ip`, PowerShell, `ping`) and
-//! files (`/proc/net/arp`, `/etc/resolv.conf`). Behind a trait, so tests replay recorded
+//! files (`/proc/self/status`, `/etc/resolv.conf`). Behind a trait, so tests replay recorded
 //! outputs instead of reading the tables of the machine they run on.
 
 use std::{

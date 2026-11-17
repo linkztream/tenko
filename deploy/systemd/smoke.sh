@@ -34,24 +34,29 @@
 #      of a member of tenko-cli, and the start-up step's must be one. This binary is
 #      installed under two version names, so each binary is asked `upgrade version` (the
 #      version it runs as) rather than `--version` (the version it was built as);
-#   8. installs deploy/systemd/probe.conf and runs the roles controller,probe;
-#   9. runs deploy/install.sh unattended with --roles controller,dns,dhcp,probe (the installer
+#   8. runs the scan methods arp and nd once as the account under a copy of the shipped unit
+#      (its whole sandbox, none of the drop-ins: ProcSubset=pid hides /proc/net, so they read
+#      with ip over netlink) and fails when either cannot read its table; and checks that the
+#      running server read its default route: GET /topology/root offers the gateway that
+#      `ip -4 route show default` names;
+#   9. installs deploy/systemd/probe.conf and runs the roles controller,probe;
+#  10. runs deploy/install.sh unattended with --roles controller,dns,dhcp,probe (the installer
 #      puts the probe drop-in in place, identical to deploy/systemd/probe.conf, the process
 #      has CAP_NET_RAW and the log says which method the dhcp role probes an address with),
 #      then with --roles controller (under Home every role stays prepared, so the drop-in
 #      stays, and the node runs the controller alone). A node that has started keeps
-#      its roles in the store (docs/cluster.md section 13.1), so steps 8 and 9 change the
+#      its roles in the store (docs/cluster.md section 13.1), so steps 9 and 10 change the
 #      stored set through PUT /nodes/1/roles, as an administrator does, and the node restarts
 #      itself with exit status 12 to apply it;
-#  10. records `systemd-analyze security` (in $GITHUB_STEP_SUMMARY when set) and fails when
+#  11. records `systemd-analyze security` (in $GITHUB_STEP_SUMMARY when set) and fails when
 #      the exposure is 2.5 or higher.
 # Each step prints "==> step". On failure the script prints the journal of the unit and the
 # tenko log and exits non-zero. Unless KEEP=1 is set it stops and disables the unit, removes
 # the drop-ins it added and stops the release source at the end; the data stays.
 #
 # Needs: bash, curl, openssl, python3, systemd 250 or later (systemd-creds, systemd-analyze,
-# journalctl), and what deploy/install.sh needs (ss of iproute2). It reads JSON with
-# python3, not jq.
+# journalctl), and iproute2 (ip, which the server needs, and ss for deploy/install.sh). It
+# reads JSON with python3, not jq.
 #
 # With SMOKE_LIB_ONLY=1 the file only defines its functions (for tests of the API helpers).
 #
@@ -523,7 +528,7 @@ cleanup() {
 
 check_tools() {
   local tool
-  for tool in curl openssl python3 systemctl systemd-creds systemd-analyze journalctl sha256sum runuser; do
+  for tool in curl openssl python3 ip systemctl systemd-creds systemd-analyze journalctl sha256sum runuser; do
     command -v "$tool" > /dev/null || die "$tool is needed and not installed"
   done
   [[ "$(id -u)" == 0 ]] || die "run as root (sudo bash $0 /path/to/tenko)"
@@ -763,8 +768,58 @@ step_upgrade() {
   update_once "$key_file"
 }
 
+step_readers() {
+  step "8. the neighbor tables and the default route, read with ip under the shipped unit"
+  local unit=tenko-smoke-readers config="$CONFIG_DIR/smoke-readers.toml" gateway answer
+  # The scan methods arp and nd, run once as the account by a copy of the repository's unit:
+  # its whole sandbox (ProcSubset=pid hides /proc/net, the address families, the system call
+  # filter), none of the drop-ins of this smoke, only the commands replaced.
+  printf 'data_dir = "%s"\n\n[scan]\nprefixes = ["192.0.2.0/24", "2001:db8::/64"]\n' "$DATA_DIR" > "$config"
+  chown root:tenko "$config"
+  chmod 0640 "$config"
+  install -m 0644 "$REPO_DIR/deploy/systemd/tenko.service" "/etc/systemd/system/$unit.service"
+  install -d -m 0755 "/etc/systemd/system/$unit.service.d"
+  cat > "/etc/systemd/system/$unit.service.d/run.conf" << EOF
+[Service]
+Type=oneshot
+Restart=no
+RestartForceExitStatus=
+LoadCredentialEncrypted=
+ExecStartPre=
+ExecStart=
+ExecStart=$DATA_DIR/updates/current/tenko node scan run arp --dry-run --config $config
+ExecStart=$DATA_DIR/updates/current/tenko node scan run nd --dry-run --config $config
+EOF
+  systemctl daemon-reload
+  local started=0 since
+  since="@$(date +%s)"
+  systemctl start "$unit" && started=1
+  journalctl -u "$unit" --since "$since" --no-pager -o cat |
+    grep -E '^ *(arp|nd):|^ +\[|error' | sed 's/^/    /' || true
+  rm -rf "/etc/systemd/system/$unit.service" "/etc/systemd/system/$unit.service.d" "$config"
+  systemctl daemon-reload
+  systemctl reset-failed "$unit" 2> /dev/null || true
+  ((started)) || die "a neighbor table could not be read under the shipped unit (the journal of $unit above)"
+  info "arp and nd read their tables as the account under the shipped unit"
+  # The default route, read by the running server for the root of the topology map: the
+  # candidate from the default route names the gateway root sees.
+  gateway="$(ip -4 route show default | awk '{ for (i = 1; i < NF; i++) if ($i == "via") { print $(i + 1); exit } }')"
+  [[ -n "$gateway" ]] || die "this host has no IPv4 default route to compare the server's with"
+  api_login
+  answer="$(api GET /topology/root)"
+  python3 -c '
+import json, sys
+root = json.load(sys.stdin)
+sys.exit(not any(c.get("source") == "default_route" and c.get("ip") == sys.argv[1] for c in root.get("candidates", [])))
+' "$gateway" <<< "$answer" || {
+    invocation_journal | grep 'default routes' >&2 || true
+    die "the topology root names no default route via $gateway: $answer"
+  }
+  info "the server reads its default route: the topology root offers $gateway"
+}
+
 step_probe() {
-  step "8. the probe drop-in: CAP_NET_RAW and the roles controller,probe"
+  step "9. the probe drop-in: CAP_NET_RAW and the roles controller,probe"
   local pid caps
   install -m 0644 "$REPO_DIR/deploy/systemd/probe.conf" "$DROPIN_DIR/probe.conf"
   systemctl daemon-reload
@@ -804,7 +859,7 @@ installer() {
 }
 
 step_installer() {
-  step "9. deploy/install.sh with the probe role: its drop-in, CAP_NET_RAW and the dhcp role's probe"
+  step "10. deploy/install.sh with the probe role: its drop-in, CAP_NET_RAW and the dhcp role's probe"
   local pid caps
   # The dns role on the loopback address only: systemd-resolved of a hosted runner keeps
   # 127.0.0.53:53. The dhcp role serves nothing without [dhcp] listen, but it starts and
@@ -846,7 +901,7 @@ step_installer() {
 }
 
 step_security() {
-  step "10. systemd-analyze security"
+  step "11. systemd-analyze security"
   local report="$WORK_DIR/security.txt" line score
   systemd-analyze security --no-pager "$UNIT_NAME.service" > "$report"
   cat "$report"
@@ -887,6 +942,7 @@ main() {
   step_logs
   step_stop_start
   step_upgrade
+  step_readers
   step_probe
   step_installer
   step_security

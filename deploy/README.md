@@ -123,7 +123,7 @@ sudo bash install.sh --prepare --roles controller,dns,probe    # Hardened: these
 | `--release-url <url>` | | An https directory URL with `SHA256SUMS` and the binary instead of GitHub (a mirror). Plain http is accepted only for an address of this host's loopback interface (a test server); every download restricts the protocol of the request and of every redirect to HTTPS |
 | `--kek auto\|sealed\|file` | `auto` | The key-encryption key, see below; `sealed` fails where sealing does not work |
 | `--keep-resolved-stub` | | Never turn off the stub listener of systemd-resolved; remembered in `/etc/tenko/installer.state` for later runs |
-| `--check` | | The dependency check only: the drop-ins, `CAP_NET_RAW` of the running service, the firewall ports, the resolved stub and the record of the prepared roles; changes nothing, exit 11 when something is missing |
+| `--check` | | The dependency check only: the drop-ins, `CAP_NET_RAW` of the running service, the firewall ports, the resolved stub and the record of the prepared roles; changes nothing, exit 11 when something is missing. It also warns when `ip` (the package iproute2) is missing, which the server needs to read the neighbor tables and the default routes; the installer does not install it |
 | `--prepare` | | Set up what the prepared roles miss (asked once, yes by default) and nothing else: no download, no change to `tenko.toml`; restarts the service when its unit changed. Under Hardened, `--roles` names the roles to prepare |
 | `--use-self` | no (asked in interactive mode, default no) | With the dns role, point this host's own resolver at Tenko (`127.0.0.1`) once the node listens there; `--uninstall` restores the previous resolver |
 | `--setup-token` | | Print the one-time setup token of this node and nothing else, read as the service account in a session of its own and shown only in the token's shape; exit 1 when there is none (setup is complete, or the server has not started). The way to read the token at root's prompt, see "First-run setup" below |
@@ -672,12 +672,13 @@ systemctl daemon-reload && systemctl restart tenko
 ```
 
 It adds `CAP_NET_RAW` (the only capability, ambient so the unprivileged account has it),
-and the address families `AF_NETLINK` (the `ip` command that reads the IPv6 neighbor table)
-and `AF_PACKET` (layer-2 sockets for the raw scan methods, which do not run yet). Every
+and the address family `AF_PACKET` (layer-2 sockets for the raw scan methods, which do not
+run yet); it lists `AF_NETLINK` again because it resets the base unit's list, which already
+has it for the `ip` command that reads the neighbor tables and the default routes. Every
 other hardening setting stays. The probe works without it; the capability only makes
 `tenko node scan status` report raw sockets as available (see
 [../docs/scanning.md](../docs/scanning.md), section 9). `systemd-analyze security` rates
-the unit 1.4 without the drop-in and 1.6 with it (systemd 255).
+the unit 1.6 without the drop-in and 1.7 with it (systemd 255).
 
 **The dhcp role.** UDP 67 is below 1024 and covered by the base unit's
 `CAP_NET_BIND_SERVICE`, so relay mode needs no change. Direct mode (the broadcasts of clients
@@ -693,8 +694,10 @@ and when the workflow is started by hand. It installs the binary,
 the account, a smoke configuration, the unit and the credential, starts the service,
 checks the key source and the log directory, stops and starts it, completes first-run
 setup, installs the same binary as the next version from a release source on the loopback
-interface (the service exits with status 12 and systemd starts it again), runs the probe
-drop-in, and fails if the `systemd-analyze security` score is 2.5 or higher. Run it by
+interface (the service exits with status 12 and systemd starts it again), reads the
+neighbor tables (the scan methods `arp` and `nd` as the account under a copy of the
+unit) and the default route (the root of the topology map) under the shipped unit, runs
+the probe drop-in, and fails if the `systemd-analyze security` score is 2.5 or higher. Run it by
 hand on a test VM with a debug build (only debug builds can install themselves as a newer
 version):
 
@@ -823,8 +826,10 @@ controller. In Phase 1 the probe role runs in two ways: inside the controller's 
 (`--roles probe`, enrolled; `macvlan.example.yml`). The image has no `ping` command and no
 `ip` command: ICMP echo works through an unprivileged datagram socket, which needs
 `net.ipv4.ping_group_range` to admit gid 65532 (Docker sets it in the network namespace of a
-bridge or macvlan container; with host networking the host's value applies), and the IPv6
-neighbor method of the scanner, which runs `ip`, is unavailable.
+bridge or macvlan container; with host networking the host's value applies), and the
+neighbor methods `arp` and `nd` of the scanner and the default route of the topology map,
+which run `ip`, read nothing: each run of `arp` and `nd` fails with "the ip command is not
+installed".
 
 ### Capabilities
 

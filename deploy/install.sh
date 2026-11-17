@@ -2411,7 +2411,8 @@ PrivateDevices=yes
 # Execution: every path the service can write is mounted noexec for it, so a file the
 # account writes there (the store, the logs, /tmp, the rest of the data directory) never
 # runs, even when the account was taken over. Everything else is read-only for the service
-# (ProtectSystem=strict) and stays executable: the system programs the service starts (ip and ping for the probe role, systemd-creds for the
+# (ProtectSystem=strict) and stays executable: the system programs the service starts (ip
+# for the neighbor tables and the routes, ping for the probe role, systemd-creds for the
 # KEK providers that seal, the interpreter of an installed plugin). The writable paths are
 # the state and log directories and the private /tmp and /var/tmp; /dev/shm, /run and
 # /proc are noexec already. Two directories of the state directory stay executable:
@@ -2453,13 +2454,23 @@ LimitCORE=0
 
 # Network
 # TCP and UDP listeners (AF_INET, AF_INET6: the API, the dns role, the dhcp role in relay
-# mode, the forwarder's upstream queries) and the sd_notify socket (AF_UNIX).
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# mode, the forwarder's upstream queries), the sd_notify socket (AF_UNIX), and netlink
+# (AF_NETLINK), through which `ip` reads the neighbor tables for the scanner and the default
+# routes for the topology, since ProcSubset=pid hides /proc/net. Over netlink the service
+# can list interfaces, addresses, routes, neighbors and the sockets of its network namespace,
+# and change none of them: that needs CAP_NET_ADMIN, which the service does not hold.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 
 # System calls
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 SystemCallFilter=~@privileged @resources
+# Back from @privileged: capset(2), with which `ip` (iproute2 built with libcap) lowers its
+# own capabilities at start; refused, it exits with status 1 and prints nothing. capset can
+# only lower or rearrange capabilities within the permitted set, and with NoNewPrivileges=yes
+# and a bounding set of the one capability CAP_NET_BIND_SERVICE (Identity, above) it grants
+# nothing.
+SystemCallFilter=capset
 # A call outside the filter fails with EPERM instead of killing the service.
 SystemCallErrorNumber=EPERM
 
@@ -2479,7 +2490,7 @@ LimitNOFILE=65536
 # [dhcp] listen with mode = "relay") it binds UDP 67 and needs nothing but the
 # CAP_NET_BIND_SERVICE above. Direct mode (the node hears the broadcasts of clients on its
 # link) binds the interface with SO_BINDTODEVICE and answers a client without an address
-# through an AF_PACKET socket, which needs CAP_NET_RAW, AF_PACKET and AF_NETLINK:
+# through an AF_PACKET socket, which needs CAP_NET_RAW and AF_PACKET:
 # deploy/systemd/dhcp-direct.conf is the drop-in for that. Install it as
 # /etc/systemd/system/tenko.service.d/dhcp-direct.conf; see its header.
 
@@ -2880,6 +2891,12 @@ deps_check() {
   if [[ -n "$wanted" ]] && ((ACTIVE)) && ! grep -q '^fix_dropin' < <(printf '%s\n' "${TODO_FIX[@]}") &&
     service_lacks_net_raw; then
     todo probe "a restart of the running service, which lacks CAP_NET_RAW (it started before its drop-in)" fix_restart
+  fi
+  # Where the server looks for it (never on PATH).
+  if [[ -x /usr/sbin/ip || -x /usr/bin/ip || -x /sbin/ip || -x /bin/ip ]]; then
+    DEP_OK+=("ip (iproute2), with which the server reads the neighbor tables and the default routes")
+  else
+    DEP_NOTES+=("ip is missing: install the package iproute2, or the scan methods arp and nd fail and the topology has no default route")
   fi
   if [[ "$FIREWALL" == none ]]; then
     DEP_OK+=("no host firewall is active (firewalld, ufw); the network's firewall must let in $(wanted_ports | paste -sd, - | sed 's/,/, /g')")

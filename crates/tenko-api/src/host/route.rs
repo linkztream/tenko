@@ -4,12 +4,13 @@
 //!
 //! | Platform | IPv4 | IPv6 |
 //! |---|---|---|
-//! | Linux | `/proc/net/route` (world-readable) | `/proc/net/ipv6_route` (world-readable) |
+//! | Linux | `ip -4 route show default` (netlink, which the shipped unit allows; `/proc/net` is hidden there) | `ip -6 route show default` |
 //! | Windows | `Get-NetRoute -DestinationPrefix 0.0.0.0/0` (PowerShell, readable by every account) | `Get-NetRoute -DestinationPrefix ::/0` |
 //! | other | nothing: the controller's gateway alone names the root | |
 //!
 //! The answer is ordered by preference: IPv4 before IPv6, the lowest metric first, and
-//! kept for [`ROUTE_TTL`]. A table that cannot be read answers nothing, never an error.
+//! kept for [`ROUTE_TTL`]. A table that cannot be read answers nothing, never an error; on
+//! Linux the log says why.
 
 use std::{
     future::Future,
@@ -59,14 +60,20 @@ impl DefaultRoute for OsDefaultRoute {
 
 #[cfg(target_os = "linux")]
 async fn read() -> Vec<IpAddr> {
-    let v4 = tokio::fs::read_to_string("/proc/net/route")
-        .await
-        .unwrap_or_default();
-    let v6 = tokio::fs::read_to_string("/proc/net/ipv6_route")
-        .await
-        .unwrap_or_default();
-    let mut hops = parse_proc_route(&v4);
-    hops.extend(parse_proc_ipv6_route(&v6));
+    // A warning once per process: a host without iproute2 (the container image) would
+    // repeat it at every read.
+    static WARNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let mut hops = Vec::new();
+    for family in ["-4", "-6"] {
+        let args = [family, "route", "show", "default"];
+        match tenko_scan::methods::neighbors::run_ip(&tenko_scan::sys::HostSystem, &args).await {
+            Ok(text) => hops.extend(parse_ip_route(&text)),
+            Err(error) if WARNED.swap(true, std::sync::atomic::Ordering::Relaxed) => {
+                tracing::debug!(%error, "the default routes cannot be read");
+            }
+            Err(error) => tracing::warn!(%error, "the default routes cannot be read"),
+        }
+    }
     hops
 }
 
@@ -100,81 +107,48 @@ async fn read() -> Vec<IpAddr> {
     Vec::new()
 }
 
-/// `RTF_UP | RTF_GATEWAY` of the route flags.
+/// The next hops of `ip -4 route show default` or `ip -6 route show default`, the lowest
+/// metric first: a route per line (`default [nhid <n>] via <hop> dev <if> ... [metric <n>]`,
+/// no metric is 0) with the hops of a multipath route on the indented lines after it
+/// (`nexthop via [inet6] <hop> dev <if> weight <n>`). A route without `via` is on-link and
+/// names no hop; another route type (`unreachable default`, ...) and a `dead` hop do not
+/// count.
 #[cfg(any(target_os = "linux", test))]
-const UP_GATEWAY: u32 = 0x0003;
-
-/// The gateways of the IPv4 default routes in `/proc/net/route`, the lowest metric first:
-/// a header, then `Iface Destination Gateway Flags RefCnt Use Metric Mask ...` with the
-/// addresses as hexadecimal numbers in host byte order (little-endian on every platform
-/// Tenko ships for).
-#[cfg(any(target_os = "linux", test))]
-pub fn parse_proc_route(text: &str) -> Vec<IpAddr> {
-    let mut hops: Vec<(u32, std::net::Ipv4Addr)> = text
-        .lines()
-        .skip(1)
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            let (destination, gateway, flags, metric, mask) = (
-                fields.get(1)?,
-                fields.get(2)?,
-                fields.get(3)?,
-                fields.get(6)?,
-                fields.get(7)?,
-            );
-            let flags = u32::from_str_radix(flags, 16).ok()?;
-            if *destination != "00000000" || *mask != "00000000" || flags & UP_GATEWAY != UP_GATEWAY
-            {
-                return None;
-            }
-            let gateway = u32::from_str_radix(gateway, 16).ok()?;
-            if gateway == 0 {
-                return None;
-            }
-            Some((
-                metric.parse().ok()?,
-                std::net::Ipv4Addr::from(gateway.to_le_bytes()),
-            ))
-        })
-        .collect();
+pub fn parse_ip_route(text: &str) -> Vec<IpAddr> {
+    let mut hops: Vec<(u32, IpAddr)> = Vec::new();
+    let mut route: Option<u32> = None;
+    for line in text.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        let after = |name: &str| {
+            let at = fields.iter().position(|field| *field == name)?;
+            fields.get(at + 1).copied()
+        };
+        if !line.starts_with(char::is_whitespace) {
+            route = (fields.first() == Some(&"default")).then(|| {
+                after("metric")
+                    .and_then(|metric| metric.parse().ok())
+                    .unwrap_or(0)
+            });
+        }
+        let Some(metric) = route else { continue };
+        if fields.contains(&"dead") {
+            continue;
+        }
+        let mut via = fields.iter().skip_while(|field| **field != "via").skip(1);
+        let hop = via
+            .next()
+            .filter(|field| !matches!(**field, "inet" | "inet6"))
+            .or_else(|| via.next())
+            .and_then(|field| field.parse::<IpAddr>().ok());
+        if let Some(hop) = hop.filter(|hop| !hop.is_unspecified()) {
+            hops.push((metric, hop));
+        }
+    }
     hops.sort();
-    hops.dedup_by_key(|(_, ip)| *ip);
-    hops.into_iter().map(|(_, ip)| IpAddr::V4(ip)).collect()
-}
-
-/// The next hops of the IPv6 default routes in `/proc/net/ipv6_route`, the lowest metric
-/// first: `dest dest_len src src_len next_hop metric refcnt use flags iface`, the addresses
-/// as 32 hexadecimal digits.
-#[cfg(any(target_os = "linux", test))]
-pub fn parse_proc_ipv6_route(text: &str) -> Vec<IpAddr> {
-    let mut hops: Vec<(u32, std::net::Ipv6Addr)> = text
-        .lines()
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            let (destination, length, next_hop, metric, flags) = (
-                fields.first()?,
-                fields.get(1)?,
-                fields.get(4)?,
-                fields.get(5)?,
-                fields.get(8)?,
-            );
-            let flags = u32::from_str_radix(flags, 16).ok()?;
-            if destination.chars().any(|c| c != '0')
-                || *length != "00"
-                || flags & UP_GATEWAY != UP_GATEWAY
-            {
-                return None;
-            }
-            let hop = std::net::Ipv6Addr::from(u128::from_str_radix(next_hop, 16).ok()?);
-            if hop.is_unspecified() {
-                return None;
-            }
-            Some((u32::from_str_radix(metric, 16).ok()?, hop))
-        })
-        .collect();
-    hops.sort();
-    hops.dedup_by_key(|(_, ip)| *ip);
-    hops.into_iter().map(|(_, ip)| IpAddr::V6(ip)).collect()
+    let mut seen = std::collections::BTreeSet::new();
+    hops.into_iter()
+        .filter_map(|(_, hop)| seen.insert(hop).then_some(hop))
+        .collect()
 }
 
 /// The addresses of `Get-NetRoute ... | ForEach-Object NextHop`, one per line, IPv4 first;
@@ -199,39 +173,55 @@ pub fn parse_next_hops(text: &str) -> Vec<IpAddr> {
 mod tests {
     use super::*;
 
+    fn ips(text: &[&str]) -> Vec<IpAddr> {
+        text.iter().map(|ip| ip.parse().expect("ip")).collect()
+    }
+
     #[test]
     fn the_ipv4_default_routes_come_by_metric() {
-        let table = "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n\
-            eth0\t00000000\t010200C0\t0003\t0\t0\t100\t00000000\t0\t0\t0\n\
-            eth0\t000200C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\t0\t0\t0\n\
-            wlan0\t00000000\t016433C6\t0003\t0\t0\t50\t00000000\t0\t0\t0\n\
-            down0\t00000000\t017100CB\t0002\t0\t0\t1\t00000000\t0\t0\t0\n";
+        // `ip -4 route show default` of iproute2 6.1: DHCP routes, an on-link route, a route
+        // through a next-hop object, and a multipath route with a dead hop.
+        let table = "\
+default via 192.0.2.1 dev eth0 proto dhcp src 192.0.2.10 metric 100 \n\
+default via 198.51.100.1 dev wlan0 proto dhcp src 198.51.100.20 metric 600 \n\
+default dev wg0 scope link \n\
+default nhid 12 via 203.0.113.1 dev eth2 metric 50 \n\
+default proto static metric 20 \n\
+\tnexthop via 192.0.2.254 dev eth0 weight 1 \n\
+\tnexthop via 198.51.100.254 dev wlan0 weight 1 dead linkdown \n\
+default via 192.0.2.1 dev eth1 \n";
         assert_eq!(
-            parse_proc_route(table),
-            [
-                IpAddr::from([198, 51, 100, 1]),
-                IpAddr::from([192, 0, 2, 1])
-            ]
+            parse_ip_route(table),
+            ips(&["192.0.2.1", "192.0.2.254", "203.0.113.1", "198.51.100.1"])
         );
-        assert!(parse_proc_route("").is_empty(), "an empty table");
+        // A route of an older iproute2 without a metric, and one through an IPv6 next hop.
+        assert_eq!(
+            parse_ip_route(
+                "default via 192.0.2.1 dev eth0 \ndefault via inet6 fe80::1 dev eth1 metric 5\n"
+            ),
+            ips(&["192.0.2.1", "fe80::1"])
+        );
+        assert!(parse_ip_route("").is_empty(), "no default route");
         assert!(
-            parse_proc_route("header\nbroken line\n").is_empty(),
-            "a broken line"
+            parse_ip_route("default via\nbroken line\n\tnexthop via 192.0.2.9\n").is_empty(),
+            "broken lines"
         );
     }
 
     #[test]
     fn the_ipv6_default_routes_come_by_metric() {
+        // `ip -6 route show default`: a router advertisement, a static route, an unreachable
+        // default route, and the multipath form of iproute2 4.x and later.
         let table = "\
-            00000000000000000000000000000000 00 00000000000000000000000000000000 00 20010db8000000000000000000000001 00000400 00000001 00000000 00000003     eth0\n\
-            20010db8000000000000000000000000 40 00000000000000000000000000000000 00 00000000000000000000000000000000 00000100 00000001 00000000 00000001     eth0\n\
-            00000000000000000000000000000000 00 00000000000000000000000000000000 00 fe800000000000000000000000000001 00000064 00000001 00000000 00000003     eth0\n";
+default via fe80::1 dev eth0 proto ra metric 1024 expires 1797sec hoplimit 64 pref medium\n\
+default via 2001:db8::1 dev eth0 proto static metric 100 pref medium\n\
+unreachable default dev lo proto kernel metric 4294967295 error -101 pref medium\n\
+default proto ra metric 2048 expires 1795sec pref medium\n\
+\tnexthop via fe80::2 dev eth1 weight 1 \n\
+\tnexthop via fe80::3 dev eth1 weight 1 \n";
         assert_eq!(
-            parse_proc_ipv6_route(table),
-            [
-                "fe80::1".parse::<IpAddr>().expect("ip"),
-                "2001:db8::1".parse::<IpAddr>().expect("ip")
-            ]
+            parse_ip_route(table),
+            ips(&["2001:db8::1", "fe80::1", "fe80::2", "fe80::3"])
         );
     }
 

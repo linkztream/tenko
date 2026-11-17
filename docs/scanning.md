@@ -66,8 +66,8 @@ tenko node scan run arp --dry-run --data-dir /var/lib/tenko
 
 | Method | What it does | What it needs | Active probing (TGL-18) | Held by blackout windows | Default interval | Reports |
 |---|---|---|---|---|---|---|
-| `arp` | Reads the IPv4 neighbor table of the probe host | Unprivileged. Linux: `/proc/net/arp`. Windows: PowerShell `Get-NetNeighbor` | No | No | 5 minutes | `address` with MAC address, `vendor` |
-| `nd` | Reads the IPv6 neighbor table of the probe host | Unprivileged. Linux: the `ip` command. Windows: PowerShell `Get-NetNeighbor` | No | No | 5 minutes | `address` with MAC address, `vendor` |
+| `arp` | Reads the IPv4 neighbor table of the probe host | Unprivileged. Linux: the `ip` command (package iproute2). Windows: PowerShell `Get-NetNeighbor` | No | No | 5 minutes | `address` with MAC address, `vendor` |
+| `nd` | Reads the IPv6 neighbor table of the probe host | Unprivileged. Linux: the `ip` command (package iproute2). Windows: PowerShell `Get-NetNeighbor` | No | No | 5 minutes | `address` with MAC address, `vendor` |
 | `icmp` | Sends one ICMP echo request to every address of the sweep | Unprivileged. Linux: ICMP datagram sockets when `net.ipv4.ping_group_range` admits the group of the process, else the `ping` command. Windows: `ping.exe` | Yes | Yes | 30 minutes | `address` (no MAC address) |
 | `tcp_connect` | Tries a TCP connection to a list of ports, with a TLS hint per open port | Unprivileged; outbound TCP | Yes | Yes | 6 hours | `services` |
 | `reverse_dns` | Looks up the PTR name of every known address | Unprivileged; UDP to the DNS servers | No | Yes | 1 hour | `name` |
@@ -90,10 +90,12 @@ Both methods read a table that the operating system keeps and send nothing (SCAN
 
 | Platform | `arp` (IPv4) | `nd` (IPv6) |
 |---|---|---|
-| Linux | `/proc/net/arp` | `ip -6 neigh show` |
+| Linux | `ip -4 neigh show` | `ip -6 neigh show` |
 | Windows | `Get-NetNeighbor -AddressFamily IPv4` through `powershell.exe` | `Get-NetNeighbor -AddressFamily IPv6` through `powershell.exe` |
 
-Entries that are incomplete, failed or unreachable are left out: in `/proc/net/arp` an entry counts only with the flag `0x2`, in `ip neigh` the states `FAILED`, `INCOMPLETE` and `NONE` and entries without `lladdr` do not count, and in `Get-NetNeighbor` the states `Incomplete` and `Unreachable` do not count. Entries whose MAC address is all zero, the broadcast address or another group address are left out too, and so is everything outside the scope. Each remaining entry is an `address` sighting with its MAC address, and each distinct MAC address that the OUI table knows adds a `vendor` sighting (section 11). A run reads the whole table, so it always covers everything and its batch is complete: an address that left the table expires at the controller. A read that fails or takes longer than 30 seconds fails the run with `scan.io`; the deadline of the method is 60 seconds.
+On Linux the server needs `ip` of the package iproute2 (`deploy/install.sh` checks for it). It is looked for in `/usr/sbin`, `/usr/bin`, `/sbin` and `/bin`, never through the service's `PATH`, and asks the kernel over netlink, which the shipped systemd unit allows (`/proc/net` is hidden from the service there). When it is missing, or the sandbox refuses it, the run fails with `scan.io` and the cause (`the ip command is not installed ...`, or the command, its exit status and its message), shown with the other scan errors in `tenko node scan status` and the scan's run; the other methods go on.
+
+Entries that are incomplete, failed or unreachable are left out: in `ip neigh` the states `FAILED`, `INCOMPLETE` and `NONE` and entries without `lladdr` do not count, and in `Get-NetNeighbor` the states `Incomplete` and `Unreachable` do not count. Entries whose MAC address is all zero, the broadcast address or another group address are left out too, and so is everything outside the scope. Each remaining entry is an `address` sighting with its MAC address, and each distinct MAC address that the OUI table knows adds a `vendor` sighting (section 11). A run reads the whole table, so it always covers everything and its batch is complete: an address that left the table expires at the controller. A read that fails or takes longer than 30 seconds fails the run with `scan.io`; the deadline of the method is 60 seconds.
 
 ### 2.2 `icmp`
 
@@ -587,7 +589,7 @@ Scanning looks like an attack to the products that watch for attacks, and Tenko 
 | Reverse DNS (`reverse_dns`) | One PTR query per known address to a DNS server, in a short burst | Bulk reverse lookups are a known reconnaissance technique, and identity-protection products watch DNS servers for it. The DNS server's query log grows by one line per address |
 | SNMP (`snmp`) | An SNMPv3 discovery request without a user, then authenticated GetBulk walks. A wrong user or password makes the device count failed authentications, and most devices log them | Switches log authentication failures, and SNMP requests to a device that does not expect them are often alerted on |
 | mDNS and LLMNR | A multicast browse query to 224.0.0.251, and unicast reverse queries to port 5353 and 5355 of known hosts | Some products watch LLMNR and mDNS, because poisoning tools abuse them. The probe only asks; it never answers a query or announces a name |
-| `arp`, `nd` and the resolver list | Nothing on the network. On Windows the process `powershell.exe -NoProfile -NonInteractive -Command` with `Get-NetNeighbor` or `Get-DnsClientServerAddress`; on Linux `ip -6 neigh show` | EDR products log PowerShell command lines and may flag a service account that runs them |
+| `arp`, `nd` and the resolver list | Nothing on the network. On Windows the process `powershell.exe -NoProfile -NonInteractive -Command` with `Get-NetNeighbor` or `Get-DnsClientServerAddress`; on Linux `ip -4 neigh show` and `ip -6 neigh show` | EDR products log PowerShell command lines and may flag a service account that runs them |
 
 The list holds in both directions. An IPS that drops the traffic does not only alert: the probe then sees unanswered lookups and missing sightings, which show up as `partial` runs and missing facts.
 

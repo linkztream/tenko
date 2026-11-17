@@ -31,7 +31,7 @@
 #
 # The gates: each combination's score as measured plus 0.1, so that losing any setting
 # worth 0.1 or more fails the check; the unit's gate also stays below 2.5, the ceiling of
-# deploy/systemd/smoke.sh step 10. Measured on 2026-11-01 with systemd 255
+# deploy/systemd/smoke.sh step 11. Measured on 2026-11-17 with systemd 255
 # (255.4-1ubuntu8.18, Ubuntu 24.04, the systemd of ubuntu-latest). When a deliberate change
 # of the unit or a drop-in moves a score, measure again and change the gate in the same
 # commit, with the reason in the commit message. A newer systemd may score the same unit
@@ -61,13 +61,13 @@ set -euo pipefail
 
 # combination -> the gate (the score must be below it)
 declare -A GATE=(
-  [unit]=1.5
-  [probe.conf]=1.7
-  [dhcp-direct.conf]=1.7
-  [data-dir.conf]=1.5
-  [kek-file.conf]=1.5
-  [memory.conf]=1.5
-  [all]=1.7
+  [unit]=1.7
+  [probe.conf]=1.8
+  [dhcp-direct.conf]=1.8
+  [data-dir.conf]=1.7
+  [kek-file.conf]=1.7
+  [memory.conf]=1.7
+  [all]=1.8
 )
 # What the service may not and may execute (tenko.service, "Execution"), and the data
 # directory of the example data-dir.conf.
