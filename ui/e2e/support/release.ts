@@ -49,11 +49,14 @@ export function currentPlatform(): string {
   return `${os}-${arch}`;
 }
 
-/** The next patch version of a SemVer version without pre-release: `0.0.1` → `0.0.2`. */
+/**
+ * The next version a node is offered: the next patch (`0.0.1` → `0.0.2`), or the release of a
+ * pre-release (`0.0.2-rc.1` → `0.0.2`), since a later pre-release is offered only on request.
+ */
 export function nextPatch(version: string): string {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
-  if (!match) throw new Error(`not a plain SemVer version: ${version}`);
-  return `${match[1]}.${match[2]}.${Number(match[3]) + 1}`;
+  const match = /^(\d+)\.(\d+)\.(\d+)(-.+)?$/.exec(version);
+  if (!match) throw new Error(`not a SemVer version: ${version}`);
+  return `${match[1]}.${match[2]}.${match[4] ? match[3] : Number(match[3]) + 1}`;
 }
 
 /** The SHA-256 (lowercase hexadecimal) and the size of a file. */
