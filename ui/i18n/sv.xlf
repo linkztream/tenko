@@ -3947,9 +3947,6 @@
       <unit id="ipam.address.claimed">
         <segment><source>Claimed {ip}</source><target>Tog {ip}</target></segment>
       </unit>
-      <unit id="ipam.address.claim_failed">
-        <segment><source>Could not claim {ip}</source><target>Kunde inte ta {ip}</target></segment>
-      </unit>
       <unit id="ipam.move.dragging">
         <segment><source>Moving {count, plural, one {# object} other {# objects}}</source><target>Flyttar {count, plural, one {# objekt} other {# objekt}}</target></segment>
       </unit>

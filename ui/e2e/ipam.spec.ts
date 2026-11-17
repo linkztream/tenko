@@ -602,7 +602,7 @@ test("a column layout set in one browser comes back in another after sign-in, an
   }
 });
 
-test("the networks view keeps the tree short, draws a network's address map and lists a supernet's networks", async ({ page, api, signedIn }) => {
+test("the networks view keeps the tree short, draws a network's address map, claims a chosen address and lists a supernet's networks", async ({ page, api, signedIn }) => {
   expect(signedIn.session.user.name).toBe("admin");
   await api.post("/prefixes", { cidr: "198.51.100.0/24", role: "supernet", description: "Documentation supernet" });
   for (const [cidr, description] of [
@@ -634,6 +634,33 @@ test("the networks view keeps the tree short, draws a network's address map and 
   await cells.nth(10).focus();
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/ipam\/addresses\/198\.51\.100\.10/);
+
+  // A free cell opens the claim dialog with its address; the server refuses a taken address under
+  // the field, then claims the chosen one, and the cell has the focus again, now in use.
+  await page.goto("/ipam/prefixes/198.51.100.0/26");
+  await expect(cells).toHaveCount(64);
+  await cells.nth(12).click();
+  const claim = page.getByTestId("dialog-next-free-address");
+  await expect(claim.getByTestId("field-ip")).toHaveValue("198.51.100.12");
+  await claim.getByTestId("field-ip").fill("198.51.100.11");
+  await claim.getByTestId("form-submit").click();
+  await expect(claim.getByText("198.51.100.11 already exists in this VRF.")).toBeVisible();
+  await claim.getByTestId("field-ip").fill("198.51.100.12");
+  await claim.getByTestId("field-dns_name").fill("map-03.example.com");
+  await claim.getByTestId("form-submit").click();
+  await confirmPlan(page);
+  await expect(cells.nth(12)).toHaveAttribute("data-state", "used");
+  await expect(cells.nth(12)).toBeFocused();
+  const claimed = await api.get<Schemas["Page_AddressRow"]>("/addresses", { q: "198.51.100.12" });
+  expect(claimed.items.map((a) => [a.ip, a.dns_name])).toEqual([["198.51.100.12", "map-03.example.com"]]);
+
+  // The page of an address nobody has offers the same claim.
+  await page.goto("/ipam/addresses/198.51.100.13");
+  await page.getByTestId("address-claim").click();
+  await expect(claim.getByTestId("field-ip")).toHaveValue("198.51.100.13");
+  await claim.getByTestId("form-submit").click();
+  await confirmPlan(page);
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("198.51.100.13");
 
   // A supernet: its networks in one table, the chips filter them.
   await page.goto("/ipam/prefixes/198.51.100.0/24");

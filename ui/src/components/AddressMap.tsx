@@ -7,9 +7,11 @@
 //
 // Keyboard: the map is one tab stop (a WAI-ARIA grid with a roving tab index); the arrows move,
 // Home and End go to the start and end of the row, Ctrl+Home and Ctrl+End to the first and last
-// cell, Enter opens the address (or the block's addresses). Hover and focus say the address and
-// its state in the readout under the map. No chart library; the route loads it as its own chunk.
-import { createMemo, createSignal, For, Show } from "solid-js";
+// cell, Enter opens the address (or the block's addresses), or claims a free one when the page
+// offers that. Hover and focus say the address and its state in the readout under the map. The
+// cells are kept by position, so a reload of the addresses keeps the focused cell. No chart
+// library; the route loads it as its own chunk.
+import { createMemo, createSignal, For, Index, Show } from "solid-js";
 import { t } from "../i18n";
 import {
   addressCells,
@@ -33,6 +35,8 @@ export interface AddressMapProps {
   ranges: readonly MapRange[];
   findings: readonly MapFinding[];
   onOpen?: (ip: string) => void;
+  /** Claims a free address; without it a free address opens like any other. */
+  onClaim?: ((ip: string) => void) | undefined;
   onOpenBlock?: (cidr: string) => void;
 }
 
@@ -82,8 +86,9 @@ export default function AddressMap(props: AddressMapProps) {
     grid.querySelector<HTMLElement>(`#${cellId(next)}`)?.focus();
   };
   const open = (cell: Cell) => {
-    if (cell.kind === "address") props.onOpen?.(cell.ip);
-    else props.onOpenBlock?.(cell.cidr);
+    if (cell.kind === "block") props.onOpenBlock?.(cell.cidr);
+    else if (cell.state === "free" && props.onClaim) props.onClaim(cell.ip);
+    else props.onOpen?.(cell.ip);
   };
   const onKeyDown = (e: KeyboardEvent) => {
     const i = active();
@@ -120,6 +125,8 @@ export default function AddressMap(props: AddressMapProps) {
     e.preventDefault();
   };
 
+  const stateOf = (cell: Cell) => (cell.kind === "address" ? cell.state : cell.inUse > 0 ? "used" : "free");
+  const digitsOf = (cell: Cell) => (cell.kind === "address" ? cell.digits : cell.inUse);
   const classOf = (cell: Cell) => {
     if (cell.kind === "block") return { block: true, used: cell.inUse > 0, [`sev-${cell.severity}`]: !!cell.severity };
     return { [cell.state]: true, [`sev-${cell.severity}`]: !!cell.severity };
@@ -182,41 +189,45 @@ export default function AddressMap(props: AddressMapProps) {
           onKeyDown={onKeyDown}
           onMouseLeave={() => setShown(null)}
         >
-          <For each={rows()}>
+          <Index each={rows()}>
             {(row) => (
               <div role="row" class="amap-row">
-                <For each={row.cells}>
-                  {({ cell, index }) => (
-                    <span
-                      role="gridcell"
-                      id={cellId(index)}
-                      class="amap-cell"
-                      classList={classOf(cell)}
-                      tabIndex={index === active() ? 0 : -1}
-                      aria-label={cellLabel(cell)}
-                      data-testid="amap-cell"
-                      data-state={cell.kind === "address" ? cell.state : cell.inUse > 0 ? "used" : "free"}
-                      data-severity={cell.severity}
-                      onMouseEnter={() => setShown(index)}
-                      onFocus={() => {
-                        setActive(index);
-                        setShown(index);
-                      }}
-                      onClick={() => {
-                        setActive(index);
-                        open(cell);
-                      }}
-                    >
-                      {cell.kind === "address" ? cell.digits : cell.inUse}
-                    </span>
-                  )}
-                </For>
+                <Index each={row().cells}>
+                  {(item) => {
+                    const cell = () => item().cell;
+                    const index = () => item().index;
+                    return (
+                      <span
+                        role="gridcell"
+                        id={cellId(index())}
+                        class="amap-cell"
+                        classList={classOf(cell())}
+                        tabIndex={index() === active() ? 0 : -1}
+                        aria-label={cellLabel(cell())}
+                        data-testid="amap-cell"
+                        data-state={stateOf(cell())}
+                        data-severity={cell().severity}
+                        onMouseEnter={() => setShown(index())}
+                        onFocus={() => {
+                          setActive(index());
+                          setShown(index());
+                        }}
+                        onClick={() => {
+                          setActive(index());
+                          open(cell());
+                        }}
+                      >
+                        {digitsOf(cell())}
+                      </span>
+                    );
+                  }}
+                </Index>
               </div>
             )}
-          </For>
+          </Index>
         </div>
         <p class="amap-readout" aria-live="polite" data-testid="address-map-readout">
-          <Show when={readout()} keyed fallback={<span class="muted">{t("ipam.map.hint")}</span>}>
+          <Show when={readout()} keyed fallback={<span class="muted">{props.onClaim && layout().mode === "addresses" ? t("ipam.map.hint_claim") : t("ipam.map.hint")}</span>}>
             {(c) => {
               return c.kind === "address" ? (
                 <>

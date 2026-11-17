@@ -318,7 +318,6 @@
     {"rule":"read-guard","file":"ui/src/connectors/ConnectorDetail.tsx","scope":"","text":".error ? undefined : live.value.latest"},
     {"rule":"list-type","file":"ui/src/connectors/ConnectorsView.tsx","scope":"createListSource","text":"createListSource<"},
     {"rule":"list-type","file":"ui/src/connectors/api.ts","scope":"fetchAll","text":"fetchAll<"},
-    {"rule":"list-type","file":"ui/src/dashboard/Dashboard.tsx","scope":"fetchAll","text":"fetchAll<"},
     {"rule":"list-type","file":"ui/src/dashboard/utilization.ts","scope":"fetchAll","text":"fetchAll<","count":2},
     {"rule":"read-guard","file":"ui/src/dhcp/EffectiveOptions.tsx","scope":"","text":".error ? undefined : classes.latest"},
     {"rule":"read-guard","file":"ui/src/dhcp/EffectiveOptions.tsx","scope":"","text":".error ? undefined : policies.latest"},

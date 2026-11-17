@@ -5192,7 +5192,6 @@ export type MessageKey =
   | "ipam.action.restore"
   | "ipam.action.unlock"
   | "ipam.action.update"
-  | "ipam.address.claim_failed"
   | "ipam.address.claimed"
   | "ipam.address.dormant"
   | "ipam.address.facts"
@@ -5278,6 +5277,9 @@ export type MessageKey =
   | "ipam.children.filter_placeholder"
   | "ipam.children.no_description"
   | "ipam.children.no_vlan"
+  | "ipam.claim.outside"
+  | "ipam.claim.submit"
+  | "ipam.claim.title"
   | "ipam.col.address"
   | "ipam.col.allocated"
   | "ipam.col.created"
@@ -5412,6 +5414,7 @@ export type MessageKey =
   | "ipam.map.cell"
   | "ipam.map.cell_finding"
   | "ipam.map.hint"
+  | "ipam.map.hint_claim"
   | "ipam.map.label"
   | "ipam.map.label_blocks"
   | "ipam.map.legend"
@@ -5481,6 +5484,7 @@ export type MessageKey =
   | "ipam.nav.vlans"
   | "ipam.next_free.address"
   | "ipam.next_free.address_title"
+  | "ipam.next_free.alloc_address"
   | "ipam.next_free.create"
   | "ipam.next_free.find_address"
   | "ipam.next_free.find_prefix"
@@ -9315,7 +9319,6 @@ export interface MessageArgs {
   "ipam.action.restore": { count: number };
   "ipam.action.unlock": { count: number };
   "ipam.action.update": { count: number };
-  "ipam.address.claim_failed": { ip: string | number };
   "ipam.address.claimed": { ip: string | number };
   "ipam.address.dormant": { name: string | number };
   "ipam.address.in_several": { ip: string | number };
@@ -9337,6 +9340,8 @@ export interface MessageArgs {
   "ipam.cfdef.deleted": { key: string | number };
   "ipam.cfdef.edit_title": { key: string | number };
   "ipam.children.count": { count: number };
+  "ipam.claim.outside": { cidr: string | number; ip: string | number };
+  "ipam.claim.title": { cidr: string | number };
   "ipam.delete.done": { kind: string | number; label: string | number };
   "ipam.delete.title": { kind: string | number; label: string | number };
   "ipam.delete.undo_failed": { kind: string | number; label: string | number };
@@ -15205,7 +15210,6 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.action.restore",
   "ipam.action.unlock",
   "ipam.action.update",
-  "ipam.address.claim_failed",
   "ipam.address.claimed",
   "ipam.address.dormant",
   "ipam.address.facts",
@@ -15291,6 +15295,9 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.children.filter_placeholder",
   "ipam.children.no_description",
   "ipam.children.no_vlan",
+  "ipam.claim.outside",
+  "ipam.claim.submit",
+  "ipam.claim.title",
   "ipam.col.address",
   "ipam.col.allocated",
   "ipam.col.created",
@@ -15425,6 +15432,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.map.cell",
   "ipam.map.cell_finding",
   "ipam.map.hint",
+  "ipam.map.hint_claim",
   "ipam.map.label",
   "ipam.map.label_blocks",
   "ipam.map.legend",
@@ -15494,6 +15502,7 @@ export const messageKeys: readonly MessageKey[] = [
   "ipam.nav.vlans",
   "ipam.next_free.address",
   "ipam.next_free.address_title",
+  "ipam.next_free.alloc_address",
   "ipam.next_free.create",
   "ipam.next_free.find_address",
   "ipam.next_free.find_prefix",

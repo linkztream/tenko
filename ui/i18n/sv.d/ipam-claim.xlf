@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="ipam-claim">
+      <unit id="ipam.next_free.alloc_address">
+        <notes><note category="description">Third choice of the allocation in the next free address dialog, beside "From the lowest address" and "From the highest address": the operator types the address to claim.</note></notes>
+        <segment><source>A chosen address</source><target>En vald adress</target></segment>
+      </unit>
+      <unit id="ipam.claim.title">
+        <notes><note category="description">Heading of the address dialog when it claims a chosen address; {cidr} is the network.</note></notes>
+        <segment><source>Claim an address in {cidr}</source><target>Ta en adress i {cidr}</target></segment>
+      </unit>
+      <unit id="ipam.claim.submit">
+        <notes><note category="description">Button of the address dialog that checks a chosen address with the server before the plan is shown.</note></notes>
+        <segment><source>Check the address</source><target>Kontrollera adressen</target></segment>
+      </unit>
+      <unit id="ipam.claim.outside">
+        <notes><note category="description">Error under the address field when the typed address is not inside the network; {ip} is the text typed, {cidr} the network.</note></notes>
+        <segment><source>{ip} is not in {cidr}.</source><target>{ip} ligger inte i {cidr}.</target></segment>
+      </unit>
+      <unit id="ipam.map.hint_claim">
+        <notes><note category="description">Hint under the address map for a person who may claim addresses in the network.</note></notes>
+        <segment><source>Hover or focus a cell for its address; Enter opens it, or claims it when it is free.</source><target>Hovra över eller fokusera en ruta för att se adressen; Enter öppnar den, eller tar den om den är ledig.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

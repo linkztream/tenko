@@ -6,7 +6,7 @@ import type { Address, Prefix, Range } from "../../api/types";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
-import { applied, choose, noteOf, recordWrites, submitForm, typeInto } from "../testkit";
+import { applied, choose, confirmPlan, noteOf, recordWrites, submitForm, typeInto } from "../testkit";
 import { NextFreeAddressDialog, NextFreePrefixDialog, nibbleLengths } from "./NextFreeDialogs";
 
 const prefix = (id: string) => ipamState().data.prefix.get(id) as Prefix;
@@ -100,6 +100,112 @@ describe("next free address", () => {
     const plan = await screen.findByTestId("dialog-plan");
     await within(plan).findByTestId("next-free-result");
     expect(await axeViolations(plan.closest("[role='dialog']") as HTMLElement)).toEqual([]);
+  });
+});
+
+describe("a chosen address", () => {
+  it("claims the address it opens with, asking what the next free address asks", async () => {
+    const writes = recordWrites();
+    const done = vi.fn();
+    const lan = prefix(IPAM_IDS.prefix.lan);
+    renderRoute(() => <NextFreeAddressDialog prefix={lan} ranges={rangesOf(lan.id)} ip="192.0.2.77" onDone={done} onClose={() => {}} />);
+    const form = await screen.findByTestId("dialog-next-free-address");
+    expect(within(form).getByRole("heading", { name: "Claim an address in 192.0.2.0/24" })).toBeTruthy();
+    expect((screen.getByTestId("field-policy") as HTMLSelectElement).value).toBe("address");
+    expect((screen.getByTestId("field-ip") as HTMLInputElement).value).toBe("192.0.2.77");
+    // The address takes the place of the range to allocate from.
+    expect(screen.queryByTestId("field-range")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId("field-dns_name")));
+    typeInto("field-dns_name", "Printer-3.example.test.");
+    typeInto("field-description", "Third printer");
+    expect(screen.getByTestId("form-submit").textContent).toBe("Check the address");
+    submitForm();
+
+    const plan = await screen.findByTestId("dialog-plan");
+    expect(within(plan).queryByTestId("next-free-result")).toBeNull();
+    await waitFor(() => expect(within(plan).getByTestId("plan-confirm").textContent).toBe("Claim 192.0.2.77"));
+    expect(addressNamed("192.0.2.77")).toBeUndefined();
+    await confirmPlan();
+    await waitFor(() => expect(done).toHaveBeenCalledTimes(1));
+    expect((done.mock.calls[0]?.[0] as Address).ip).toBe("192.0.2.77");
+    expect(addressNamed("192.0.2.77")?.dns_name).toBe("printer-3.example.test");
+    const sent = applied(writes());
+    expect(sent.map((s) => s.url)).toEqual(["/api/v1/addresses"]);
+    expect(sent[0]?.body).toEqual({
+      ip: "192.0.2.77",
+      vrf: IPAM_IDS.vrf.default,
+      status: "active",
+      dns_name: "printer-3.example.test",
+      description: "Third printer",
+    });
+    expect(await screen.findByText("Claimed 192.0.2.77")).toBeTruthy();
+  });
+
+  it("switches from the lowest address to a chosen one in the same dialog and checks it before it goes anywhere", async () => {
+    const writes = recordWrites();
+    const lan = prefix(IPAM_IDS.prefix.lan);
+    renderRoute(() => <NextFreeAddressDialog prefix={lan} ranges={rangesOf(lan.id)} onDone={() => {}} onClose={() => {}} />);
+    const form = await screen.findByTestId("dialog-next-free-address");
+    expect(screen.queryByTestId("field-ip")).toBeNull();
+    choose("field-policy", "address");
+    expect(within(form).getByRole("heading", { name: "Claim an address in 192.0.2.0/24" })).toBeTruthy();
+    expect(screen.queryByTestId("field-range")).toBeNull();
+    submitForm();
+    expect(noteOf("field-ip")).toBe("Enter an address.");
+    typeInto("field-ip", "192.0.2.300");
+    expect(noteOf("field-ip")).toBe("This is not a valid IP address.");
+    typeInto("field-ip", "198.51.100.5");
+    expect(noteOf("field-ip")).toBe("198.51.100.5 is not in 192.0.2.0/24.");
+    typeInto("field-ip", "2001:db8::5");
+    expect(noteOf("field-ip")).toBe("2001:db8::5 is not in 192.0.2.0/24.");
+    submitForm();
+    expect(screen.queryByTestId("dialog-plan")).toBeNull();
+    expect(writes()).toEqual([]);
+    // Back to the lowest address: the ranges return and the address is not asked for.
+    choose("field-policy", "lowest");
+    expect(within(form).getByRole("heading", { name: "Next free address in 192.0.2.0/24" })).toBeTruthy();
+    expect(screen.getByTestId("field-range")).toBeTruthy();
+    expect(screen.queryByTestId("field-ip")).toBeNull();
+  });
+
+  it.each([
+    ["taken", "192.0.2.41", "192.0.2.41 already exists in this VRF."],
+    ["the network address", "192.0.2.0", "192.0.2.0 is the network or broadcast address of 192.0.2.0/24."],
+    ["the broadcast address", "192.0.2.255", "192.0.2.255 is the network or broadcast address of 192.0.2.0/24."],
+  ])("shows the server's refusal of an address that is %s under the address", async (_case, ip, message) => {
+    const writes = recordWrites();
+    const lan = prefix(IPAM_IDS.prefix.lan);
+    renderRoute(() => <NextFreeAddressDialog prefix={lan} ranges={[]} ip={ip} onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-next-free-address");
+    expect(noteOf("field-ip")).toBeUndefined();
+    submitForm();
+    await waitFor(() => expect(noteOf("field-ip")).toBe(message));
+    expect(screen.queryByTestId("dialog-plan")).toBeNull();
+    expect(screen.getByTestId("field-ip").getAttribute("aria-invalid")).toBe("true");
+    expect(applied(writes())).toEqual([]);
+  });
+
+  it("names the reserved range the address lies in before it is claimed", async () => {
+    const lan = prefix(IPAM_IDS.prefix.lan);
+    await api.post("/api/v1/prefixes/{id}/ranges", { path: { id: lan.id }, body: { first: "192.0.2.230", last: "192.0.2.239", role: "reserved" } });
+    renderRoute(() => <NextFreeAddressDialog prefix={lan} ranges={rangesOf(lan.id)} ip="192.0.2.233" onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-next-free-address");
+    submitForm();
+    const plan = await screen.findByTestId("dialog-plan");
+    expect(await within(plan).findByText("The address lies in a reserved or infrastructure range.")).toBeTruthy();
+    await confirmPlan({ acknowledge: true });
+    await waitFor(() => expect(addressNamed("192.0.2.233")).toBeDefined());
+  });
+
+  it("has no accessibility violations with a refused address", async () => {
+    const lan = prefix(IPAM_IDS.prefix.lan);
+    renderRoute(() => <NextFreeAddressDialog prefix={lan} ranges={rangesOf(lan.id)} ip="192.0.2.41" onDone={() => {}} onClose={() => {}} />);
+    await screen.findByTestId("dialog-next-free-address");
+    submitForm();
+    await waitFor(() => expect(noteOf("field-ip")).toBe("192.0.2.41 already exists in this VRF."));
+    // The form is drawn anew when the plan hands the refusal back.
+    const form = screen.getByTestId("dialog-next-free-address");
+    expect(await axeViolations(form.closest("[role='dialog']") as HTMLElement)).toEqual([]);
   });
 });
 

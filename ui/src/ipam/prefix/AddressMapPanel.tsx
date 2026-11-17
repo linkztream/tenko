@@ -1,7 +1,8 @@
 // The address map of a network above its address grid (UI-Q3): reads the network's address
 // objects, takes its ranges and the findings inside it from the pane, and draws the map in its
-// own chunk so the first page load does not grow. Enter on a cell opens the address; on a block
-// cell (a network larger than /22) it lists the block's addresses.
+// own chunk so the first page load does not grow. Enter on a cell opens the address, or claims a
+// free one through `onClaim` when the pane passes it; on a block cell (a network larger than /22)
+// it lists the block's addresses.
 //
 // The chunk and the addresses load into plain signals rather than through Suspense or a
 // resource: the map is secondary to the grid and must never hold a navigation's transition.
@@ -31,6 +32,8 @@ export function AddressMapPanel(props: {
   network: boolean;
   ranges: readonly Range[];
   findings: readonly MapFinding[];
+  /** Claims a free address; absent for a principal who may not. */
+  onClaim?: ((ip: string) => void) | undefined;
 }) {
   const navigate = useNavigate();
   const drawn = () => mapLayout(props.cidr).mode !== "none";
@@ -88,6 +91,7 @@ export function AddressMapPanel(props: {
             ranges={ranges()}
             findings={props.findings}
             onOpen={(ip: string) => navigate(paths.address(ip))}
+            onClaim={props.onClaim}
             onOpenBlock={(cidr: string) => navigate(paths.addresses({ q: `within:${cidr}` }))}
           />
           <Show when={addresses()!.truncated}>

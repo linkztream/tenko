@@ -162,6 +162,21 @@ describe("gating of the prefix tree and the prefix pane", () => {
     expect(editsInline("203.0.113.193")).toBe(true);
   });
 
+  it("opens the page of a free address clicked in the map for a principal who may not claim it", async () => {
+    await signInWithRoles(["viewer"]);
+    const pane = await openPane(LAN);
+    const panel = within(pane).getByTestId("address-map-panel");
+    await waitFor(() => expect(within(panel).queryAllByTestId("amap-cell").length).toBe(256));
+    expect(within(panel).getByTestId("address-map-readout").textContent).toBe("Hover or focus a cell for its address; Enter opens it.");
+    const free = within(panel)
+      .getAllByTestId("amap-cell")
+      .find((c) => c.getAttribute("aria-label")?.startsWith("192.0.2.77,")) as HTMLElement;
+    expect(free.dataset.state).toBe("free");
+    fireEvent.click(free);
+    expect(await screen.findByTestId("address-route")).toBeTruthy();
+    expect(screen.queryByTestId("dialog-next-free-address")).toBeNull();
+  });
+
   it("hides every action from a viewer", async () => {
     await signInWithRoles(["viewer"]);
     const pane = await openPane(LAN);

@@ -11,7 +11,7 @@ import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import IpamView from "./IpamView";
 import { chooseVrf } from "./scope";
-import { recordWrites } from "./testkit";
+import { confirmPlan, recordWrites, submitForm } from "./testkit";
 import { resetTreeStateForTest } from "./tree/PrefixTree";
 
 // ---------------------------------------------------------------------------------
@@ -528,12 +528,19 @@ describe("the prefix pane", () => {
     expect(perHost).toEqual([]);
   });
 
-  it("claims a free gap with its button", async () => {
+  it("claims the first address of a free gap through the claim dialog", async () => {
     await openNetwork("192.0.2.0/24");
     expect(
       [...ipamState().data.address.values()].some((a) => a.ip === "192.0.2.6" && a.vrf === IPAM_IDS.vrf.default),
     ).toBe(false);
     fireEvent.click(within(rowOf("192.0.2.6")).getByTestId("claim-gap"));
+    // The same questions as every other way to claim, with the gap's first address filled in.
+    const dialog = await screen.findByTestId("dialog-next-free-address");
+    expect((within(dialog).getByTestId("field-ip") as HTMLInputElement).value).toBe("192.0.2.6");
+    expect([...ipamState().data.address.values()].some((a) => a.ip === "192.0.2.6")).toBe(false);
+    fireEvent.input(within(dialog).getByTestId("field-dns_name"), { target: { value: "gap.example.test" } });
+    submitForm();
+    await confirmPlan();
     expect(await screen.findByText("Claimed 192.0.2.6")).toBeTruthy();
     expect(
       [...ipamState().data.address.values()].some((a) => a.ip === "192.0.2.6" && a.vrf === IPAM_IDS.vrf.default),
@@ -877,6 +884,56 @@ describe("the address map of a network", () => {
     expect(cells.filter((c) => !c.dataset.severity)).toHaveLength(256 - colored.size);
     expect(cells.find((c) => ipOf(c) === "192.0.2.49")?.dataset.state).toBe("free");
     expect(new Set(cells.map((c) => c.dataset.state))).toEqual(new Set(["edge", "used", "held", "free"]));
+  });
+
+  /** The map cell of an address, once the map is drawn. */
+  async function mapCell(ip: string): Promise<HTMLElement> {
+    const panel = await screen.findByTestId("address-map-panel");
+    await waitFor(() => expect(within(panel).queryAllByTestId("amap-cell").length).toBeGreaterThan(0));
+    const cell = within(panel)
+      .getAllByTestId("amap-cell")
+      .find((c) => c.getAttribute("aria-label")?.startsWith(`${ip},`));
+    if (!cell) throw new Error(`no map cell ${ip}`);
+    return cell;
+  }
+
+  it("claims a free address clicked in the map, and the cell has the focus again with its new state", async () => {
+    await openNetwork("192.0.2.0/24");
+    expect(screen.getByTestId("address-map-readout").textContent).toBe(
+      "Hover or focus a cell for its address; Enter opens it, or claims it when it is free.",
+    );
+    const cell = await mapCell("192.0.2.77");
+    expect(cell.dataset.state).toBe("free");
+    cell.focus();
+    fireEvent.click(cell);
+    const dialog = await screen.findByTestId("dialog-next-free-address");
+    expect(within(dialog).getByRole("heading", { name: "Claim an address in 192.0.2.0/24" })).toBeTruthy();
+    expect((within(dialog).getByTestId("field-ip") as HTMLInputElement).value).toBe("192.0.2.77");
+    expect(screen.queryByTestId("address-route")).toBeNull();
+    submitForm();
+    await confirmPlan();
+    expect(await screen.findByText("Claimed 192.0.2.77")).toBeTruthy();
+    await waitFor(() => expect(cell.dataset.state).toBe("used"));
+    expect(document.activeElement).toBe(cell);
+  });
+
+  it("opens the claim dialog with Enter on a free cell and gives the focus back to it on cancel", async () => {
+    await openNetwork("192.0.2.0/24");
+    const cell = await mapCell("192.0.2.78");
+    cell.focus();
+    fireEvent.keyDown(cell, { key: "Enter" });
+    const dialog = await screen.findByTestId("dialog-next-free-address");
+    expect((within(dialog).getByTestId("field-ip") as HTMLInputElement).value).toBe("192.0.2.78");
+    fireEvent.click(within(dialog).getByTestId("form-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-next-free-address")).toBeNull());
+    expect(document.activeElement).toBe(cell);
+  });
+
+  it("opens the page of an address in use", async () => {
+    await openNetwork("192.0.2.0/24");
+    fireEvent.click(await mapCell("192.0.2.41"));
+    expect(await screen.findByTestId("address-route")).toBeTruthy();
+    expect(screen.queryByTestId("dialog-next-free-address")).toBeNull();
   });
 
   it("draws the 16 cells of a /28 uncolored when no finding sits on an address, above the address grid", async () => {

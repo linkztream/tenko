@@ -19,10 +19,7 @@
 // for the session. The profile chooses the set (ui-plan section 6, model.ts).
 import { A, useNavigate } from "@solidjs/router";
 import { createMemo, createSignal, lazy, onCleanup, onMount, Show } from "solid-js";
-import { api } from "../api/client";
-import { createLiveQuery } from "../api/live";
-import { fetchAll } from "../api/paginate";
-import type { Range, TreeNode, TreeResponse } from "../api/types";
+import type { TreeNode, TreeResponse } from "../api/types";
 import { paths } from "../app/paths";
 import { isAdmin, session } from "../auth/session";
 import { HiddenLine, type HiddenItem } from "../components/HiddenLine";
@@ -31,7 +28,7 @@ import { Kbd } from "../components/Kbd";
 import { PageHeader } from "../components/PageHeader";
 import { formatNumber, t, withPacks } from "../i18n";
 import { MoveDialog } from "../ipam/move/MoveDialog";
-import { NextFreeAddressDialog } from "../ipam/prefix/NextFreeDialogs";
+import { ClaimIn } from "../ipam/prefix/NextFreeDialogs";
 import { PrefixForm } from "../ipam/prefix/PrefixForm";
 import { useScope } from "../ipam/scope";
 import { formatBytes } from "../nodes/format";
@@ -265,7 +262,7 @@ export default function Dashboard() {
         />
       </Show>
       <Show when={action() === "claim_in" && claimIn()}>
-        {(n) => <ClaimIn node={n()} onClose={() => setAction(null)} onDone={(ip) => navigate(paths.address(ip))} />}
+        {(n) => <ClaimIn prefix={n().id} onClose={() => setAction(null)} onDone={(a) => navigate(paths.address(a.ip))} />}
       </Show>
       <Show when={action() === "prefix" && scope.vrf()}>
         <PrefixForm
@@ -284,23 +281,4 @@ export default function Dashboard() {
 /** Picks the network to claim in: the network list of the move dialog, reused. */
 function MoveDialogPicker(props: { tree: TreeResponse | undefined; onPick: (n: TreeNode) => void; onClose: () => void }) {
   return <MoveDialog tree={props.tree} items={[]} onClose={props.onClose} onPick={props.onPick} title={t("dashboard.action.claim_where")} />;
-}
-
-/** The next free address dialog for a network of the tree (it needs the prefix and its ranges). */
-function ClaimIn(props: { node: TreeNode; onClose: () => void; onDone: (ip: string) => void }) {
-  const live = createLiveQuery({
-    topics: [],
-    fetch: async (signal) => {
-      const [prefix, ranges] = await Promise.all([
-        api.get("/api/v1/prefixes/{id}", { path: { id: props.node.id }, signal }),
-        fetchAll<Range>("/api/v1/prefixes/{id}/ranges", { path: { id: props.node.id }, signal }),
-      ]);
-      return { value: { prefix, ranges: ranges.items } };
-    },
-  });
-  return (
-    <Show when={live.value.latest}>
-      {(d) => <NextFreeAddressDialog prefix={d().prefix} ranges={d().ranges} onClose={props.onClose} onDone={(a) => props.onDone(a.ip)} />}
-    </Show>
-  );
 }

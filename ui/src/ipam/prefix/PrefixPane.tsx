@@ -20,7 +20,6 @@ import { may } from "../../auth/gate";
 import { Addr } from "../../components/Addr";
 import { Icon } from "../../components/Icon";
 import { Kbd } from "../../components/Kbd";
-import { toast } from "../../components/toast";
 import { ActionBar, ActionButton } from "../../grid/ActionBar";
 import { Count, DeletedTag, StatusBadge, Tags } from "../../grid/cells";
 import { createGridSelection, DataGrid } from "../../grid/DataGrid";
@@ -98,7 +97,7 @@ export function PrefixPane(props: PrefixPaneProps) {
   const [dialog, setDialog] = createSignal<
     | { kind: "edit" }
     | { kind: "delete" }
-    | { kind: "claim" }
+    | { kind: "claim"; ip?: string }
     | { kind: "next_prefix" }
     | { kind: "range"; range?: Range }
     | { kind: "delete_range"; range: Range }
@@ -183,16 +182,6 @@ export function PrefixPane(props: PrefixPaneProps) {
     });
     writeToast(t("ipam.address.renamed", { ip: address.ip, name: value || "–" }), result);
     source.reload();
-  };
-
-  const claimGap = async (first: string) => {
-    try {
-      const result = await api.post("/api/v1/addresses", { body: { ip: first, vrf: props.prefix.vrf } });
-      writeToast(t("ipam.address.claimed", { ip: first }), result);
-      source.reload();
-    } catch (err) {
-      toast({ kind: "bad", title: t("ipam.address.claim_failed", { ip: first }), body: (await import("../../api/problem")).errorMessage(err) });
-    }
   };
 
   const scopes = createScopeIndex();
@@ -463,6 +452,7 @@ export function PrefixPane(props: PrefixPaneProps) {
                 network
                 ranges={ranges()}
                 findings={mapFindings()}
+                onClaim={!deleted() && mayClaim() ? (ip) => setDialog({ kind: "claim", ip }) : undefined}
               />
             </Show>
             <FilterBar
@@ -512,7 +502,7 @@ export function PrefixPane(props: PrefixPaneProps) {
                         class="btn sm ghost"
                         tabIndex={-1}
                         data-testid="claim-gap"
-                        onClick={() => void claimGap(r.data.first)}
+                        onClick={() => setDialog({ kind: "claim", ip: r.data.first })}
                       >
                         {t("ipam.addresses.claim", { ip: r.data.first })}
                       </button>
@@ -675,6 +665,7 @@ export function PrefixPane(props: PrefixPaneProps) {
           <NextFreeAddressDialog
             prefix={props.prefix}
             ranges={ranges()}
+            ip={(dialog() as { ip?: string }).ip}
             onClose={() => setDialog(null)}
             onDone={() => {
               setDialog(null);

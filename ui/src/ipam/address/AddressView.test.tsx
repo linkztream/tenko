@@ -8,7 +8,8 @@ import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
 import { signInAlex } from "../../auth/account/testkit";
 import { chooseVrf } from "../scope";
-import { confirmPlan } from "../testkit";
+import { signInWithRoles } from "../../auth/scope-testkit";
+import { choose, confirmPlan, submitForm } from "../testkit";
 import AddressView from "./AddressView";
 
 // ---------------------------------------------------------------------------------
@@ -41,6 +42,14 @@ async function shown(ip: string) {
   const page = await screen.findByTestId("page-ipam-address");
   await waitFor(() => expect(within(page).getByRole("heading", { level: 1 }).textContent).toContain(ip));
   return page;
+}
+
+/** Waits for the not-found state of `ip` with the address read and the tree loaded (the page no longer busy). */
+async function settledOn(page: HTMLElement, ip: string) {
+  await waitFor(() => {
+    expect(within(page).getByText(`No address ${ip} here.`)).toBeTruthy();
+    expect(page.getAttribute("aria-busy")).toBeNull();
+  });
 }
 
 /** The text of the value that follows a label of the facts list. */
@@ -209,7 +218,47 @@ describe("an address that is not there", () => {
     renderAddress("192.0.2.99");
     const page = await screen.findByTestId("page-ipam-address");
     await within(page).findByText("No address 192.0.2.99 here.");
+    await within(page).findByTestId("address-claim");
     expect(await axeViolations(page)).toEqual([]);
+  });
+
+  it("offers to claim an address of a network and shows it once claimed", async () => {
+    renderAddress("192.0.2.99");
+    const page = await screen.findByTestId("page-ipam-address");
+    const claim = await within(page).findByTestId("address-claim");
+    expect(claim.textContent).toBe("Claim 192.0.2.99");
+    fireEvent.click(claim);
+    const dialog = await screen.findByTestId("dialog-next-free-address");
+    expect(within(dialog).getByRole("heading", { name: "Claim an address in 192.0.2.0/24" })).toBeTruthy();
+    expect((within(dialog).getByTestId("field-ip") as HTMLInputElement).value).toBe("192.0.2.99");
+    // The network's ranges are there for a switch to the next free address.
+    choose("field-policy", "lowest");
+    await waitFor(() => expect((within(dialog).getByTestId("field-range") as HTMLSelectElement).options).toHaveLength(3));
+    choose("field-policy", "address");
+    submitForm();
+    await confirmPlan();
+    await shown("192.0.2.99");
+    expect(screen.queryByTestId("address-claim")).toBeNull();
+  });
+
+  it("offers nothing to claim outside the networks, even after a page that did", async () => {
+    const { history } = renderAddress("192.0.2.99");
+    const page = await screen.findByTestId("page-ipam-address");
+    await within(page).findByTestId("address-claim");
+    // Directly in the supernet 203.0.113.0/24, in none of its networks; then in no prefix at all.
+    for (const ip of ["203.0.113.210", "10.9.9.9"]) {
+      history.set({ value: paths.address(ip) });
+      await settledOn(page, ip);
+      expect(within(page).queryByTestId("address-claim")).toBeNull();
+    }
+  });
+
+  it("offers no claim to a principal who may not create addresses", async () => {
+    await signInWithRoles(["viewer"]);
+    renderAddress("192.0.2.99");
+    const page = await screen.findByTestId("page-ipam-address");
+    await settledOn(page, "192.0.2.99");
+    expect(within(page).queryByTestId("address-claim")).toBeNull();
   });
 });
 

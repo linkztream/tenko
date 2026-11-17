@@ -1,9 +1,13 @@
-// Claiming the next free address of a network and carving the next free prefix out of a
-// supernet (IPAM-07). A small form says what to create and from where, then the plan dialog
-// shows what the server found (the address or network it would take) before anything is written.
+// Claiming the next free address of a network, or an address the operator chose, and carving the
+// next free prefix out of a supernet (IPAM-07). A small form says what to create and from where,
+// then the plan dialog shows what the server found (the address or network it would take) before
+// anything is written.
 import { createMemo, createSignal, For, Show, untrack } from "solid-js";
 import { api } from "../../api/client";
-import type { Address, AllocPolicy, NextFreeAddress, NextFreePrefix, Prefix, PrefixRole, Range, Status, WriteResponse } from "../../api/types";
+import type { components } from "../../api/generated/schema";
+import { createLiveQuery } from "../../api/live";
+import { fetchAll } from "../../api/paginate";
+import type { Address, AddressInput, AllocPolicy, NextFreeAddress, NextFreePrefix, Prefix, PrefixRole, Range, Status, WriteResponse } from "../../api/types";
 import { t, tx } from "../../i18n";
 import { normalizeDnsName } from "../address/AddressForm";
 import {
@@ -18,7 +22,7 @@ import {
   WriteForm,
   type Option,
 } from "../formKit";
-import { bitsOf, parseCidr } from "../ip";
+import { bitsOf, containsIp, parseCidr, parseIp } from "../ip";
 import { writeQuery } from "../plan/describe";
 import { kindWord, prefixRoleWord, rangeRoleWord } from "../words";
 
@@ -29,60 +33,86 @@ function policyOptions(): Option<AllocPolicy>[] {
 }
 
 // ---------------------------------------------------------------------------------
-// The next free address
+// The next free address, or a chosen one
 
 export function NextFreeAddressDialog(props: {
   prefix: Prefix;
   ranges: Range[];
+  /** The address to claim: the dialog opens on "a chosen address" with it filled in. */
+  ip?: string | undefined;
   onDone: (address: Address) => void;
   onClose: () => void;
 }) {
   const prefix = untrack(() => props.prefix);
+  const net = parseCidr(prefix.cidr);
+  const chosen = untrack(() => props.ip);
   const [dns, setDns] = createSignal("");
   const [dnsTouched, setDnsTouched] = createSignal(false);
   const [status, setStatus] = createSignal<Status>("active");
   const [description, setDescription] = createSignal("");
   const [range, setRange] = createSignal("");
-  const [policy, setPolicy] = createSignal<AllocPolicy>(prefix.alloc ?? "lowest");
+  const [policy, setPolicy] = createSignal<AllocPolicy | "address">(chosen !== undefined ? "address" : (prefix.alloc ?? "lowest"));
+  const [ip, setIp] = createSignal(chosen ?? "");
+  const [ipTouched, setIpTouched] = createSignal(false);
+  const byAddress = () => policy() === "address";
 
   const dnsName = createMemo(() => (dns().trim() === "" ? undefined : normalizeDnsName(dns())));
+  // Only what the dialog knows by itself; the server says whether the address is free and usable.
+  const ipMessage = createMemo((): string | undefined => {
+    const text = ip().trim();
+    if (text === "") return t("ipam.field.ip_required");
+    const parsed = parseIp(text);
+    if (!parsed) return t("ipam.field.ip_invalid");
+    return net && containsIp(net, parsed) ? undefined : t("ipam.claim.outside", { ip: text, cidr: prefix.cidr });
+  });
+  const allocOptions = (): Option<AllocPolicy | "address">[] => [
+    ...policyOptions(),
+    { value: "address", label: t("ipam.next_free.alloc_address") },
+  ];
   const rangeOptions = (): Option[] => [
     { value: "", label: t("ipam.next_free.whole_network", { cidr: prefix.cidr }) },
     ...props.ranges.map((r) => ({ value: r.id, label: `${r.first} - ${r.last} (${rangeRoleWord(r.role)})` })),
   ];
 
-  const body = (): NextFreeAddress =>
-    ({
-      policy: policy(),
-      status: status(),
-      ...(dnsName() ? { dns_name: dnsName() } : {}),
-      ...(description().trim() !== "" ? { description: description().trim() } : {}),
-      ...(range() !== "" ? { range: range() } : {}),
-    }) as NextFreeAddress;
+  const fields = () => ({
+    status: status(),
+    ...(dnsName() ? { dns_name: dnsName() } : {}),
+    ...(description().trim() !== "" ? { description: description().trim() } : {}),
+  });
+  const title = () =>
+    byAddress() ? t("ipam.claim.title", { cidr: prefix.cidr }) : t("ipam.next_free.address_title", { cidr: prefix.cidr });
 
   return (
     <WriteForm<Address>
       name="next-free-address"
-      title={t("ipam.next_free.address_title", { cidr: prefix.cidr })}
-      submitLabel={t("ipam.next_free.find_address")}
-      placed={["dns_name", "status", "description", "range", "policy"]}
+      title={title()}
+      submitLabel={byAddress() ? t("ipam.claim.submit") : t("ipam.next_free.find_address")}
+      placed={["dns_name", "status", "description", "range", "policy", "ip"]}
       validate={() => {
         setDnsTouched(true);
-        return dnsName() !== null;
+        setIpTouched(true);
+        return dnsName() !== null && (!byAddress() || ipMessage() === undefined);
       }}
-      planTitle={() => t("ipam.next_free.address_title", { cidr: prefix.cidr })}
-      planConfirm={t("ipam.do.next_free_address")}
+      planTitle={title}
+      planConfirm={byAddress() ? t("ipam.addresses.claim", { ip: ip().trim() }) : t("ipam.do.next_free_address")}
       send={(o) =>
-        api.post("/api/v1/prefixes/{id}/next-free-address", {
-          path: { id: prefix.id },
-          query: writeQuery(o.dryRun, o.acknowledge),
-          body: body(),
-        }) as Promise<WriteResponse<Address>>
+        (byAddress()
+          ? api.post("/api/v1/addresses", {
+              query: writeQuery(o.dryRun, o.acknowledge),
+              body: { ip: ip().trim(), vrf: prefix.vrf, ...fields() } as AddressInput,
+            })
+          : api.post("/api/v1/prefixes/{id}/next-free-address", {
+              path: { id: prefix.id },
+              query: writeQuery(o.dryRun, o.acknowledge),
+              body: { policy: policy(), ...fields(), ...(range() !== "" ? { range: range() } : {}) } as NextFreeAddress,
+            })) as Promise<WriteResponse<Address>>
       }
       describe={(preview) => (
-        <p class="next-free-result" data-testid="next-free-result">
-          {tx("ipam.next_free.address", { ip: <span class="mono">{preview.item?.ip ?? ""}</span> })}
-        </p>
+        <Show when={!byAddress()}>
+          <p class="next-free-result" data-testid="next-free-result">
+            {tx("ipam.next_free.address", { ip: <span class="mono">{preview.item?.ip ?? ""}</span> })}
+          </p>
+        </Show>
       )}
       confirmFor={(preview) => t("ipam.addresses.claim", { ip: preview.item?.ip ?? "" })}
       doneTitle={(item) => t("ipam.address.claimed", { ip: item.ip })}
@@ -128,17 +158,62 @@ export function NextFreeAddressDialog(props: {
               {(c) => <SelectInput {...c} value={status()} options={statusOptions()} onChange={tracked(setStatus, flow)} />}
             </Field>
             <Field name="policy" label={t("ipam.prefix.alloc")} error={serverFieldMessage(flow.error(), "policy")}>
-              {(c) => <SelectInput {...c} value={policy()} options={policyOptions()} onChange={tracked(setPolicy, flow)} />}
+              {(c) => <SelectInput {...c} value={policy()} options={allocOptions()} onChange={tracked(setPolicy, flow)} />}
             </Field>
           </FieldRow>
-          <Show when={props.ranges.length > 0}>
-            <Field name="range" label={t("ipam.next_free.from")} error={serverFieldMessage(flow.error(), "range")}>
-              {(c) => <SelectInput {...c} value={range()} options={rangeOptions()} onChange={tracked(setRange, flow)} />}
+          <Show
+            when={byAddress()}
+            fallback={
+              <Show when={props.ranges.length > 0}>
+                <Field name="range" label={t("ipam.next_free.from")} error={serverFieldMessage(flow.error(), "range")}>
+                  {(c) => <SelectInput {...c} value={range()} options={rangeOptions()} onChange={tracked(setRange, flow)} />}
+                </Field>
+              </Show>
+            }
+          >
+            <Field
+              name="ip"
+              label={t("ipam.col.address")}
+              required
+              error={serverFieldMessage(flow.error(), "ip") ?? (ipTouched() ? ipMessage() : undefined)}
+            >
+              {(c) => (
+                <input
+                  class="input mono"
+                  type="text"
+                  autocomplete="off"
+                  autocapitalize="off"
+                  spellcheck={false}
+                  {...c}
+                  value={ip()}
+                  onInput={(e) => tracked(setIp, flow)(e.currentTarget.value)}
+                  onBlur={() => setIpTouched(true)}
+                />
+              )}
             </Field>
           </Show>
         </>
       )}
     </WriteForm>
+  );
+}
+
+/** The address dialog for a network known by its identifier: it reads the prefix and its ranges first. */
+export function ClaimIn(props: { prefix: string; ip?: string; onClose: () => void; onDone: (address: Address) => void }) {
+  const live = createLiveQuery({
+    topics: [],
+    fetch: async (signal) => {
+      const [prefix, ranges] = await Promise.all([
+        api.get("/api/v1/prefixes/{id}", { path: { id: props.prefix }, signal }),
+        fetchAll<components["schemas"]["Range"]>("/api/v1/prefixes/{id}/ranges", { path: { id: props.prefix }, signal }),
+      ]);
+      return { value: { prefix, ranges: ranges.items } };
+    },
+  });
+  return (
+    <Show when={live.value.latest}>
+      {(d) => <NextFreeAddressDialog prefix={d().prefix} ranges={d().ranges} ip={props.ip} onClose={props.onClose} onDone={props.onDone} />}
+    </Show>
   );
 }
 

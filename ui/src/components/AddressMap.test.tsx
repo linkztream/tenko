@@ -2,6 +2,7 @@
 // 1,024, a /23 512, a /16 256 block cells, an IPv6 /120 256), the states and the digits of the
 // cells, color only where a finding sits, and hover, focus, the arrows and Enter.
 import { fireEvent, render, screen, within } from "@solidjs/testing-library";
+import { createSignal } from "solid-js";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { axeViolations } from "../app/testing/axe";
 import { loadPacks, setLocale } from "../i18n";
@@ -140,9 +141,45 @@ describe("the component", () => {
     expect(document.activeElement).toBe(cells[255]);
   });
 
+  it("claims a free address by click and Enter when it may, opens the others, and keeps the focused cell when the addresses change", () => {
+    const onOpen = vi.fn();
+    const onClaim = vi.fn();
+    const [addresses, setAddresses] = createSignal<{ ip: string }[]>(props.addresses);
+    render(() => <AddressMap {...props} addresses={addresses()} onOpen={onOpen} onClaim={onClaim} />);
+    const cells = screen.getAllByRole("gridcell");
+    expect(screen.getByTestId("address-map-readout").textContent).toBe(
+      "Hover or focus a cell for its address; Enter opens it, or claims it when it is free.",
+    );
+    fireEvent.click(cells[30]!);
+    expect(onClaim).toHaveBeenLastCalledWith("192.0.2.30");
+    cells[31]!.focus();
+    fireEvent.keyDown(cells[31]!, { key: "Enter" });
+    expect(onClaim).toHaveBeenLastCalledWith("192.0.2.31");
+    // In use and never usable: the address page, as without the claim.
+    fireEvent.click(cells[10]!);
+    cells[0]!.focus();
+    fireEvent.keyDown(cells[0]!, { key: "Enter" });
+    expect(onOpen.mock.calls).toEqual([["192.0.2.10"], ["192.0.2.0"]]);
+    expect(onClaim).toHaveBeenCalledTimes(2);
+    cells[31]!.focus();
+    setAddresses([...props.addresses, { ip: "192.0.2.31" }]);
+    expect(screen.getAllByRole("gridcell")[31]).toBe(cells[31]);
+    expect(cells[31]!.dataset.state).toBe("used");
+    expect(document.activeElement).toBe(cells[31]);
+  });
+
+  it("opens a free address like any other without a claim", () => {
+    const onOpen = vi.fn();
+    render(() => <AddressMap {...props} onOpen={onOpen} />);
+    fireEvent.click(screen.getAllByRole("gridcell")[30]!);
+    expect(onOpen).toHaveBeenCalledWith("192.0.2.30");
+  });
+
   it("draws block cells with their in-use count and opens a block's addresses", () => {
     const onOpenBlock = vi.fn();
-    render(() => <AddressMap cidr="198.18.0.0/16" addresses={[{ ip: "198.18.5.1" }, { ip: "198.18.5.2" }]} ranges={[]} findings={[]} onOpenBlock={onOpenBlock} />);
+    render(() => <AddressMap cidr="198.18.0.0/16" addresses={[{ ip: "198.18.5.1" }, { ip: "198.18.5.2" }]} ranges={[]} findings={[]} onOpenBlock={onOpenBlock} onClaim={vi.fn()} />);
+    // Blocks never claim, so the hint does not offer it.
+    expect(screen.getByTestId("address-map-readout").textContent).toBe("Hover or focus a cell for its address; Enter opens it.");
     const cells = screen.getAllByRole("gridcell");
     expect(cells).toHaveLength(256);
     expect(cells[5]?.textContent).toBe("2");
