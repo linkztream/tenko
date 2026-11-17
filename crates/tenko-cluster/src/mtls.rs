@@ -8,7 +8,10 @@
 //! - **Controller (server).** [`server_config`] requires a client certificate that chains
 //!   to the CA root, has client authentication in its extended key usage, names a node,
 //!   and whose serial is not in the [`RevocationSet`]. A revoked certificate fails the
-//!   handshake with the alert `certificate_revoked`.
+//!   handshake with the alert `certificate_revoked`, except a controller's: it passes,
+//!   and its connection is marked ([`PeerInfo::revoked`]) and gets nothing but the exchange
+//!   of generation records, so that two histories always learn of each other whatever
+//!   either side revoked.
 //! - **Node (client).** [`client_config`] presents the node certificate and accepts a
 //!   server certificate only when it chains to the CA root the node received at enrollment
 //!   (a controller of another installation is refused) and carries the role `controller`.
@@ -193,7 +196,10 @@ impl ClientCertVerifier for NodeClientVerifier {
         let peer = PeerIdentity::from_der(end_entity).map_err(|_| {
             TlsErr::InvalidCertificate(CertificateError::ApplicationVerificationFailure)
         })?;
-        if self.revoked.is_revoked(&peer.serial) {
+        // A revoked controller passes, marked, to the exchange of generation records only.
+        if self.revoked.is_revoked(&peer.serial)
+            && !peer.roles.contains(tenko_core::Role::Controller)
+        {
             tracing::warn!(node = %peer.node, serial = %peer.serial, "refused a revoked node certificate");
             return Err(TlsErr::InvalidCertificate(CertificateError::Revoked));
         }
@@ -323,7 +329,8 @@ fn config_error(error: &impl fmt::Display) -> ClusterError {
 
 /// The TLS configuration of the controller's cluster port: TLS 1.3, ALPN `h2`, the
 /// controller certificate from `resolver`, and mandatory node certificates of the CA
-/// `ca_root` that are not in `revoked`.
+/// `ca_root` that are not in `revoked` (a controller's revoked certificate passes, marked:
+/// [`PeerInfo::revoked`]).
 ///
 /// # Errors
 ///
@@ -447,6 +454,9 @@ pub struct PeerInfo {
     pub local: Option<SocketAddr>,
     /// The connection's kill switch.
     pub kill: Arc<KillSwitch>,
+    /// The certificate is revoked (a controller's, which the handshake lets through): the
+    /// connection gets nothing but the exchange of generation records.
+    pub revoked: bool,
 }
 
 /// A TLS connection of a node on the cluster port that a revocation can close.

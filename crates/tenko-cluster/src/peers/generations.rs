@@ -3,27 +3,30 @@
 //!
 //! - **Every `Raft` and `Cluster` call and answer** carries this controller's claim
 //!   ([`GENERATION_METADATA`]); a call without one claims generation 0, which is what a
-//!   binary without generations sends. [`Peers::admit`] runs before a call reaches openraft
-//!   or the service: a lineage the caller offers is checked first ([`Peers::offer`]), then a
-//!   caller marked superseded in this store is refused whatever it claims (the store
-//!   decides, not the message), then a claim that differs from this history's is refused
-//!   with `cluster.superseded` and this history's lineage ([`RECORD_METADATA`]), so the
-//!   caller learns why and can pass the proof on. A store that holds nothing yet (a learner
-//!   that is joining) accepts any claim: it has no history to protect, and its snapshot
-//!   brings the generation. A `Join` from a controller of an older claim is let through: a
-//!   joining controller starts empty.
+//!   binary without generations sends.
+//! - **The exchange of records comes first** ([`Peers::exchange`]): a lineage a caller
+//!   offers is decided before anything about the caller is looked up, for any caller with a
+//!   controller's certificate of the installation's CA, revoked or not (the TLS check lets a
+//!   revoked controller through, marked, for this exchange only). Every refusal that
+//!   follows (a revoked certificate, one the caller's node record does not hold, a caller
+//!   this store marks superseded, a claim that differs) carries this controller's own
+//!   lineage ([`RECORD_METADATA`]), and a caller that learns from it that the callee is
+//!   older or competing offers its own lineage back at once (`Peers::observe`), so one
+//!   meeting is enough for two histories to learn of each other.
+//!   A store that holds nothing yet (a learner that is joining) accepts any claim, and a
+//!   `Join` from a controller of an older claim is let through: a joining controller starts
+//!   empty.
 //! - **A lineage offered by any path** is decided by [`Lineage::admit`] against this
-//!   controller's own lineage and the standing its store gives the signers
-//!   ([`Standing::read`]): a descendant fences this controller ([`FenceReason::Superseded`]);
-//!   a sibling, or a newer history it cannot place, stops its writes until an operator
-//!   chooses ([`FenceReason::Conflict`]): neither history may move the other alone; a refused
-//!   offer changes nothing.
+//!   controller's own lineage alone: a descendant fences this controller
+//!   ([`FenceReason::Superseded`]); a sibling, or a newer history it cannot place, stops its
+//!   writes until an operator chooses ([`FenceReason::Conflict`]); a refused offer changes
+//!   nothing. A record does nothing but stop writes.
 //! - **The fence** is written to `<data_dir>/node/` first, then the store stops
 //!   ([`tenko_store::raft::RaftStore::fence`]), so a crash between the two leaves the fence
 //!   to the next start ([`Peers::load_generation`]).
 //! - **The authority pushes its lineage** to every controller its store marks superseded
-//!   and has not revoked, every [`PUSH_INTERVAL`], from its leader; the status names the
-//!   ones not reached yet (`cluster.recover.superseded_unreached`).
+//!   that is not a member again, revoked or not, every [`PUSH_INTERVAL`], from its leader;
+//!   the status names the ones not reached yet (`cluster.recover.superseded_unreached`).
 
 use std::{
     collections::{BTreeSet, HashSet},
@@ -49,8 +52,8 @@ use crate::{
     error::ClusterError,
     generation::{
         Claim, FenceFile, GENERATION_METADATA, GenerationRecord, Lineage, MAX_LINEAGE,
-        RECORD_METADATA, Relation, SUPERSEDED, Signed, Standing, codes, decode_lineage,
-        encode_lineage, next_fence, suggested_winner,
+        MAX_LINEAGE_BYTES, RECORD_METADATA, Relation, SUPERSEDED, Signed, codes, decode_lineage,
+        encode_lineage, next_fence,
     },
     mtls::PeerInfo,
     proto::v1,
@@ -96,9 +99,6 @@ pub struct RefusedRecords {
     pub count: u64,
     /// The last refusal.
     pub last: Option<Refusal>,
-    /// The last refusal of a record signed by a certificate this store does not hold for a
-    /// controller it knows: a renewal it never saw, or a forgery; an operator looks.
-    pub unverified: Option<Refusal>,
     /// The newest history older than this one that met it: it stops when it meets this
     /// one's records.
     pub older: Option<Refusal>,
@@ -315,8 +315,16 @@ impl Peers {
                 .records()
                 .iter()
                 .any(|own| Some(own.hash()) == newest);
-        if theirs.is_some_and(|theirs| theirs <= state.lineage.number()) {
-            lock(&self.generations().behind).insert(from);
+        if theirs.is_some_and(|theirs| theirs <= state.lineage.number())
+            && lock(&self.generations().behind).insert(from)
+            && !self.holding()
+        {
+            // Offered back at once, not with the next call: the meeting decides now. Once
+            // per peer until it answers this history, so two refusals never loop.
+            let (peers, offer) = (self.clone(), offerable(&state));
+            tokio::spawn(async move {
+                peers.push_one(from, &offer).await;
+            });
         }
         if known {
             return;
@@ -332,6 +340,35 @@ impl Peers {
     // -----------------------------------------------------------------------------------
     // The calls this controller answers.
 
+    /// The exchange of generation records, before anything about the caller is looked up:
+    /// a lineage the caller offers is decided ([`Peers::offer`]).
+    ///
+    /// # Errors
+    ///
+    /// The refusal of a lineage entry that does not decode.
+    pub(crate) async fn exchange(
+        &self,
+        peer: &PeerInfo,
+        metadata: &MetadataMap,
+    ) -> Result<(), Status> {
+        if let Some(offered) = offered_lineage(metadata) {
+            let records = offered.map_err(|error| status_of(&error))?;
+            if let Err(error) = self.offer(&records, Some(peer.identity.node)).await {
+                log_offer_error(&error, Some(peer.identity.node));
+            }
+        }
+        Ok(())
+    }
+
+    /// `status` with this controller's lineage attached (and the records that superseded
+    /// it), unless the first start after a forced step still holds it back.
+    pub(crate) fn with_records(&self, mut status: Status) -> Status {
+        if !self.holding() {
+            attach(status.metadata_mut(), &offerable(&self.generation()));
+        }
+        status
+    }
+
     /// The generation check of a `Raft` or `Cluster` call, before the service runs.
     ///
     /// # Errors
@@ -343,13 +380,7 @@ impl Peers {
         join: bool,
         metadata: &MetadataMap,
     ) -> Result<(), Status> {
-        let claim = claim_of(metadata)?;
-        if let Some(offered) = offered_lineage(metadata) {
-            let records = offered.map_err(|error| status_of(&error))?;
-            if let Err(error) = self.offer(&records, Some(peer.identity.node)).await {
-                log_offer_error(&error, Some(peer.identity.node));
-            }
-        }
+        let claim = claim_of(metadata).map_err(|status| self.with_records(status))?;
         let mut state = self.generation();
         let held = self.holding();
         let own = |state: &GenerationState| {
@@ -419,8 +450,8 @@ impl Peers {
             .map_or(true, |mark| mark.is_some())
     }
 
-    /// A lineage offered by any path: admitted against this controller's own and the
-    /// standing its store gives the signers, then acted on (section 3.6).
+    /// A lineage offered by any path: admitted against this controller's own under the CA
+    /// root, then acted on (section 3.6).
     ///
     /// # Errors
     ///
@@ -447,8 +478,7 @@ impl Peers {
         if !records.is_empty() && records.iter().all(|record| held.contains(&record.hash())) {
             return Ok(Relation::Known);
         }
-        let standing = self.standing().await?;
-        let admission = match state.lineage.admit(records, &root, &standing) {
+        let admission = match state.lineage.admit(records, &root) {
             Ok(admission) => admission,
             Err(error) => {
                 self.count_refused(&error, from);
@@ -469,36 +499,19 @@ impl Peers {
         ) else {
             return Ok(admission.relation);
         };
-        // A controller this history superseded can sign any number: never suggest it.
-        let suggested = if standing.is_superseded(newest.forced()) {
-            None
-        } else {
-            Some(state.lineage.tip().map_or(newest.forced(), |own| {
-                if suggested_winner(own, newest).is_lt() {
-                    own.forced()
-                } else {
-                    newest.forced()
-                }
-            }))
-        };
         tracing::error!(
             relation = ?admission.relation,
             generation = newest.number(),
             forced = %newest.forced(),
             from = ?from,
-            suggested = ?suggested,
-            "generation {} of the cluster, forced on controller {}, {}; this controller stops \
-             writing",
+            "a record claims generation {} of the cluster, forced on controller {}, and {}; \
+             this controller stops writing until an operator chooses",
             newest.number(),
             newest.forced(),
             match admission.relation {
-                Relation::Descendant => "supersedes this controller's history",
-                Relation::Sibling => {
-                    "competes with this controller's history; an operator chooses, and the \
-                     suggested winner is the history forced on the controller named as \
-                     suggested"
-                }
-                _ => "cannot be placed beside this controller's history; an operator decides",
+                Relation::Descendant => "that it supersedes this controller's history",
+                Relation::Sibling => "to compete with this controller's history",
+                _ => "a history this controller cannot place beside its own",
             }
         );
         self.apply_fence(reason, Lineage::kept(&kept)?, true).await;
@@ -514,7 +527,7 @@ impl Peers {
     ///
     /// When this controller cannot check records (no CA root, a store error): the probe
     /// reads the answer as undecided, never as an answer without a majority.
-    pub async fn competing(&self, status: &Status) -> Result<Option<String>, ClusterError> {
+    pub fn competing(&self, status: &Status) -> Result<Option<String>, ClusterError> {
         let Some(records) = offered_lineage(status.metadata()) else {
             return Ok(None);
         };
@@ -522,8 +535,7 @@ impl Peers {
             return Ok(None);
         };
         let root = self.ca_root().ok_or_else(no_root)?;
-        let standing = self.standing().await?;
-        let Ok(admission) = self.generation().lineage.admit(&records, &root, &standing) else {
+        let Ok(admission) = self.generation().lineage.admit(&records, &root) else {
             return Ok(None);
         };
         Ok(admission
@@ -539,16 +551,6 @@ impl Peers {
             }))
     }
 
-    /// The standing this controller's store gives the signers of offered records.
-    async fn standing(&self) -> Result<Standing, ClusterError> {
-        let view = self.store().read(ReadConsistency::Local).await?;
-        Standing::read(
-            view.as_ref(),
-            self.store().membership().voters,
-            Timestamp::now(),
-        )
-    }
-
     /// Notes an older history that met this one.
     fn note_other(&self, newest: &Signed, from: Option<NodeId>) {
         let mut seen = lock(&self.generations().refused);
@@ -561,9 +563,9 @@ impl Peers {
                 generation = newest.number(),
                 forced = %newest.forced(),
                 from = ?from,
-                "an older history of the cluster (generation {}, forced on controller {}) met \
-                 this one; it stops writing when it receives this one's record and can check its \
-                 signer",
+                "a record of an older history of the cluster (it claims generation {}, forced \
+                 on controller {}) met this one; that history stops writing when it receives \
+                 this one's record",
                 newest.number(),
                 newest.forced()
             );
@@ -597,11 +599,6 @@ impl Peers {
                 from,
                 at: Timestamp::now(),
             };
-            if error.code() == codes::RECORD_UNHELD
-                && error.as_coded().params.get("known").map(String::as_str) == Some("true")
-            {
-                refused.unverified = Some(refusal.clone());
-            }
             refused.last = Some(refusal);
             refused.count
         };
@@ -695,29 +692,21 @@ impl Peers {
     }
 
     /// The generation part of the cluster view; `None` at generation 0 without a fence.
-    /// A competing history signed by a controller this history superseded is never the
-    /// suggested one: such a controller can sign any number.
-    pub(super) async fn generation_view(&self) -> Option<Box<GenerationView>> {
+    pub(super) fn generation_view(&self) -> Option<Box<GenerationView>> {
         let state = self.generation();
         let own = state.lineage.tip();
         if own.is_none() && state.fence.is_none() {
             return None;
         }
-        let stopped_by = match state
+        let stopped_by = state
             .fence
             .as_ref()
-            .and_then(|(reason, other)| other.tip().map(|other| (reason, other)))
-        {
-            Some((reason, other)) => Some(OtherHistory {
+            .and_then(|(_, other)| other.tip())
+            .map(|other| OtherHistory {
                 number: other.number(),
                 record: other.hash().to_string(),
                 forced: other.forced(),
-                suggested: *reason == FenceReason::Conflict
-                    && own.is_some_and(|own| suggested_winner(other, own).is_lt())
-                    && !self.superseded_here(other.forced()).await,
-            }),
-            None => None,
-        };
+            });
         Some(Box::new(GenerationView {
             number: state.lineage.number(),
             record: own.map(|own| own.hash().to_string()),
@@ -730,8 +719,9 @@ impl Peers {
     // -----------------------------------------------------------------------------------
     // The authority's push.
 
-    /// Offers this history's record to every controller the store marks superseded and
-    /// has not revoked, once every [`PUSH_INTERVAL`] on the leader, until `stop` turns true.
+    /// Offers this history's record to every controller the store marks superseded and that
+    /// is not a member again, revoked or not, once every [`PUSH_INTERVAL`] on the leader,
+    /// until `stop` turns true.
     pub(super) async fn push_loop(self, mut stop: watch::Receiver<bool>) {
         let mut tick = tokio::time::interval(PUSH_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -774,15 +764,26 @@ impl Peers {
     }
 
     async fn push_targets(&self) -> Result<Vec<NodeId>, ClusterError> {
+        // A revoked controller too: revoking a side must never keep it from learning of
+        // this history.
         let informed = lock(&self.generations().informed).clone();
-        let mut pending = self.pending_superseded().await?;
-        pending.retain(|node| !informed.contains(node));
-        Ok(pending)
+        let membership = self.store().membership();
+        let view = self.store().read(ReadConsistency::Local).await?;
+        Ok(view
+            .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .map(|(node, _, _)| NodeId(node))
+            .filter(|node| {
+                !informed.contains(node)
+                    && !membership.voters.contains(node)
+                    && !membership.learners.contains(node)
+            })
+            .collect())
     }
 
     /// The controllers this history superseded that are neither members again nor removed
-    /// (revoked): the ones the push offers the record to, the cluster view shows as
-    /// superseded and the status warns about.
+    /// (revoked): the ones the cluster view shows as superseded and the status warns about.
+    /// The push offers the record to these and to the revoked ones alike.
     ///
     /// # Errors
     ///
@@ -838,7 +839,7 @@ fn no_root() -> ClusterError {
 /// Logs an offer that failed for a reason other than its records' refusal, which the offer
 /// counts and logs itself.
 fn log_offer_error(error: &ClusterError, from: Option<NodeId>) {
-    if ![codes::RECORD_INVALID, codes::RECORD_UNHELD].contains(&error.code()) {
+    if error.code() != codes::RECORD_INVALID {
         tracing::warn!(peer = ?from, code = %error.code(), "an offered generation record could not be checked: {}", error.detail());
     }
 }
@@ -859,8 +860,15 @@ fn offerable(state: &GenerationState) -> Vec<GenerationRecord> {
     if let Some((FenceReason::Superseded | FenceReason::Unknown, fence)) = &state.fence {
         records.extend(records_of(fence));
     }
+    // The newest records within the count and the bytes an offer may hold.
     let skip = records.len().saturating_sub(MAX_LINEAGE);
-    records.split_off(skip)
+    let mut records = records.split_off(skip);
+    while records.len() > 1
+        && encode_lineage(&records).map_or(true, |bytes| bytes.len() > MAX_LINEAGE_BYTES)
+    {
+        records.remove(0);
+    }
+    records
 }
 
 fn attach(metadata: &mut MetadataMap, records: &[GenerationRecord]) {

@@ -228,11 +228,15 @@ struct Inner {
     /// The generation of this controller's history and its fence.
     generations: generations::Generations,
     /// While this controller is being seeded (a joining learner with an empty store): the
-    /// voters it takes its first copy from, with the serials their records hold (`None`:
-    /// any certificate of that node id, from a leader of an earlier version), as the join
-    /// answer named them.
-    seeds: Mutex<Option<BTreeMap<NodeId, Option<BTreeSet<String>>>>>,
+    /// voters it takes its first copy from, with the serials and SHA-256 of the certificates
+    /// their records hold, as the join answer named them. A leader of an earlier version
+    /// names no SHA-256 (the serial alone then decides) or no certificate at all (`None`:
+    /// any certificate of that node id).
+    seeds: Mutex<Option<Seeds>>,
 }
+
+/// The certificates (serial, SHA-256) of each voter a joining learner takes its copy from.
+type Seeds = BTreeMap<NodeId, Option<BTreeSet<(String, String)>>>;
 
 impl std::fmt::Debug for Peers {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -419,13 +423,13 @@ impl Peers {
     /// The voters a joining learner takes its first copy from: those its join answer names,
     /// each with the serials its record holds. Without them an empty store takes no copy.
     pub fn seed_from(&self, answer: &v1::JoinResponse) {
-        let mut seeds: BTreeMap<NodeId, Option<BTreeSet<String>>> = BTreeMap::new();
+        let mut seeds = Seeds::new();
         for voter in &answer.voter_serials {
             seeds
                 .entry(NodeId(voter.node_id))
                 .or_insert_with(|| Some(BTreeSet::new()))
                 .get_or_insert_with(BTreeSet::new)
-                .insert(voter.serial.clone());
+                .insert((voter.serial.clone(), voter.sha256.to_ascii_lowercase()));
         }
         if seeds.is_empty() && answer.leader_id != 0 {
             tracing::warn!(
@@ -442,8 +446,9 @@ impl Peers {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(seeds);
     }
 
-    /// Whether the pinned voters include `node` with `serial`; `None` without a pin.
-    fn seeds_from(&self, node: NodeId, serial: &str) -> Option<bool> {
+    /// Whether the pinned voters include `node` with the certificate `serial` and `sha256`;
+    /// `None` without a pin.
+    fn seeds_from(&self, node: NodeId, serial: &str, sha256: &str) -> Option<bool> {
         self.inner
             .seeds
             .lock()
@@ -451,7 +456,12 @@ impl Peers {
             .as_ref()
             .map(|seeds| {
                 seeds.get(&node).is_some_and(|serials| {
-                    serials.as_ref().is_none_or(|held| held.contains(serial))
+                    serials.as_ref().is_none_or(|held| {
+                        held.iter().any(|(held_serial, digest)| {
+                            held_serial == serial
+                                && (digest.is_empty() || digest.eq_ignore_ascii_case(sha256))
+                        })
+                    })
                 })
             })
     }
@@ -516,13 +526,6 @@ impl Peers {
         access: Access,
     ) -> Result<Option<NodeRecord>, Status> {
         let node = peer.identity.node;
-        if !peer.identity.roles.contains(Role::Controller) {
-            return Err(status_of(&ClusterError::new(
-                "cluster.peer.not_controller",
-                403,
-                format!("node {node} is not a controller; the controller services refuse it"),
-            )));
-        }
         let mut record = self
             .node_record(node, ReadConsistency::Local)
             .await
@@ -576,7 +579,9 @@ impl Peers {
                 // whole copy: from an empty store and while it catches up from the log.
                 // Otherwise a member of this controller's own Raft membership whose record
                 // a later entry brings; an empty store takes nobody.
-                let accepted = if let Some(pinned) = self.seeds_from(node, &peer.identity.serial) {
+                let accepted = if let Some(pinned) =
+                    self.seeds_from(node, &peer.identity.serial, &peer.identity.sha256)
+                {
                     pinned
                 } else {
                     let membership = self.store().membership();
@@ -713,6 +718,7 @@ impl Peers {
                 voter_serials.extend(record.serials.into_iter().map(|cert| v1::VoterSerial {
                     node_id: voter.0,
                     serial: cert.serial,
+                    sha256: cert.sha256,
                 }));
             }
         }
@@ -1109,7 +1115,7 @@ impl Peers {
             changing: membership.changing,
             members,
             job_id: None,
-            generation: self.generation_view().await,
+            generation: self.generation_view(),
         })
     }
 
@@ -1153,14 +1159,27 @@ impl Peers {
     ///
     /// The member did not answer.
     pub async fn applied_by(&self, node: NodeId) -> Result<Option<u64>, ClusterError> {
-        let mut client = self.network().cluster_client(node).await?;
-        let mut request = tonic::Request::new(v1::MembersRequest {});
-        self.network().stamp(&mut request, node);
-        let answer = client
-            .members(request)
+        // A member that accepts the connection and never answers must not hold a renewal.
+        let call = async {
+            let mut client = self.network().cluster_client(node).await?;
+            let mut request = tonic::Request::new(v1::MembersRequest {});
+            request.set_timeout(APPLIED_CALL);
+            self.network().stamp(&mut request, node);
+            let answer = client
+                .members(request)
+                .await
+                .map_err(|status| error_of_status(&status))?;
+            Ok(answer.into_inner().applied)
+        };
+        tokio::time::timeout(APPLIED_CALL, call)
             .await
-            .map_err(|status| error_of_status(&status))?;
-        Ok(answer.into_inner().applied)
+            .map_err(|_| {
+                ClusterError::new(
+                    "cluster.peer.timeout",
+                    504,
+                    format!("controller {node} did not answer in time"),
+                )
+            })?
     }
 
     // -----------------------------------------------------------------------------------
@@ -1959,10 +1978,9 @@ fn presenting(
     retired: Option<&str>,
     replace: bool,
 ) -> Option<NodeRecord> {
-    let holds = record
-        .serials
-        .iter()
-        .any(|held| held.serial == certificate.serial);
+    let holds = record.serials.iter().any(|held| {
+        held.serial == certificate.serial && held.sha256.eq_ignore_ascii_case(&certificate.sha256)
+    });
     if holds && retired.is_none() {
         return None;
     }
@@ -1994,6 +2012,9 @@ fn registry_name(view: &dyn ReadView, own: &str, me: NodeId) -> Result<String, C
     }
     Ok(name)
 }
+
+/// How long one question to a member about what it applied may take.
+const APPLIED_CALL: Duration = Duration::from_secs(3);
 
 /// The number of learners to promote so that the voters stay odd: as many as possible.
 fn odd_promotions(voters: usize, eligible: usize) -> usize {

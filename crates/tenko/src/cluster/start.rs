@@ -521,7 +521,7 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
                     // A refusal that carries another forced history is evidence of it: this
                     // controller does not take office beside it (`--undo` lets it meet that
                     // history as a plain member). Its records are read, never acted on here.
-                    let rival = peers.competing(&status).await;
+                    let rival = peers.competing(&status);
                     if let Some(code) = tenko_cluster::server::code_of(&status) {
                         let answer = match rival {
                             Ok(Some(rival)) => Answer::Alive(format!("another history: {rival}")),

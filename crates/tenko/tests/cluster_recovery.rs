@@ -196,12 +196,6 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     write(&lab, others[0], 4).expect(201);
     let first = wait_fenced(&lab, stale, "conflict");
     assert_eq!(first["generation"]["stopped_by"]["number"], 2, "{first}");
-    // Its signer is a controller the first history superseded, which can sign any
-    // number: no side is suggested.
-    assert_eq!(
-        first["generation"]["stopped_by"]["suggested"], false,
-        "{first}"
-    );
     let second = lab.members(others[0]).expect("the members view");
     assert_eq!(second["generation"]["number"], 2, "{second}");
     assert_eq!(second["quorum"]["state"], "single", "{second}");
@@ -263,8 +257,7 @@ fn a_live_majority_keeps_the_forced_controller_out_of_office() {
 
 /// Two controllers forced at once on the two sides of a partition both take office;
 /// after the heal each meets the other's record as a sibling, both stop writing, and each
-/// names the other's record; as each side's step superseded the other's controller, neither
-/// side is suggested.
+/// names the other's record.
 #[test]
 #[ignore = "slow lab scenario; runner: ci.yml#cluster-lab"]
 fn two_controllers_forced_at_once_both_stop_and_name_each_other() {
@@ -288,11 +281,8 @@ fn two_controllers_forced_at_once_both_stop_and_name_each_other() {
     lab.heal();
     let seen_a = wait_fenced(&lab, a, "conflict");
     let seen_b = wait_fenced(&lab, b, "conflict");
-    // Each side's forced step superseded the other's controller, which can sign any
-    // number: neither side is suggested, and both name the other's record.
     for (seen, other) in [(&seen_a, &seen_b), (&seen_b, &seen_a)] {
         let stopped = &seen["generation"]["stopped_by"];
-        assert_eq!(stopped["suggested"], false, "{seen}");
         assert_eq!(
             stopped["record"], other["generation"]["record"],
             "{seen}

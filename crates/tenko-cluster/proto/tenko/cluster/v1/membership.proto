@@ -96,6 +96,9 @@ message JoinResponse {
 message VoterSerial {
   uint64 node_id = 1;
   string serial = 2;
+  // The SHA-256 of the certificate, lower-case hex: a certificate minted with the CA's key
+  // can copy a serial, not this.
+  string sha256 = 3;
 }
 
 message ProposeRequest {

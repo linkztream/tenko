@@ -66738,10 +66738,6 @@
           "record": {
             "type": "string",
             "description": "The SHA-256 of its record, hexadecimal."
-          },
-          "suggested": {
-            "type": "boolean",
-            "description": "For a competing history: whether it, not this controller's, is the one the order of\nthe recovery suggests keeping (the same answer on every member)."
           }
         }
       },

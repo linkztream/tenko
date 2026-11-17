@@ -1027,7 +1027,7 @@ async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certi
     let due = days_before(node_record(&registry, node).await.certificate.not_after, 10);
     store.arm(1);
     let renewed = registry
-        .renew(node, &serial, &csr, due, None)
+        .renew(node, &serial, &csr, due)
         .await
         .expect("renew");
     assert_eq!(store.raced.load(Ordering::SeqCst), 1);
@@ -1435,7 +1435,7 @@ async fn a_renewal_before_the_window_is_refused() {
     let (_, registry, node, serial, csr) = racing_registry().await;
     let record = node_record(&registry, node).await;
     let error = registry
-        .renew(node, &serial, &csr, Timestamp::now(), None)
+        .renew(node, &serial, &csr, Timestamp::now())
         .await
         .expect_err("not due yet");
     assert_eq!(error.code(), "cluster.node.renew_not_due");
@@ -1444,17 +1444,14 @@ async fn a_renewal_before_the_window_is_refused() {
     let early = days_before(record.certificate.not_after, 125);
     assert_eq!(
         registry
-            .renew(node, &serial, &csr, early, None)
+            .renew(node, &serial, &csr, early)
             .await
             .expect_err("still early")
             .code(),
         "cluster.node.renew_not_due"
     );
     let due = days_before(record.certificate.not_after, 121);
-    registry
-        .renew(node, &serial, &csr, due, None)
-        .await
-        .expect("due");
+    registry.renew(node, &serial, &csr, due).await.expect("due");
     assert_eq!(node_record(&registry, node).await.serials.len(), 2);
 }
 
@@ -1466,7 +1463,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
     let enrolled = node_record(&registry, node).await;
     let mut now = days_before(enrolled.certificate.not_after, 10);
     let first = registry
-        .renew(node, &serial, &csr, now, None)
+        .renew(node, &serial, &csr, now)
         .await
         .expect("first renewal");
     let error = registry
@@ -1475,7 +1472,6 @@ async fn renewals_are_paced_and_keep_two_certificates() {
             &serial,
             &csr,
             now.checked_add(Duration::from_secs(60)).expect("time"),
-            None,
         )
         .await
         .expect_err("a minute later");
@@ -1489,7 +1485,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
             .checked_add(registry::RENEW_INTERVAL + Duration::from_secs(1))
             .expect("time");
         let issued = registry
-            .renew(node, &serial, &csr, now, None)
+            .renew(node, &serial, &csr, now)
             .await
             .expect("an hour later");
         let record = node_record(&registry, node).await;
@@ -1524,7 +1520,7 @@ async fn the_replaced_certificate_retires_once_the_node_holds_the_new_one() {
     let enrolled = node_record(&registry, node).await;
     let now = days_before(enrolled.certificate.not_after, 10);
     let issued = registry
-        .renew(node, &serial, &csr, now, None)
+        .renew(node, &serial, &csr, now)
         .await
         .expect("renewal");
     // A report of another certificate changes nothing.

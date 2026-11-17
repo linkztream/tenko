@@ -7,8 +7,10 @@
 //! packages edit disjoint files: the node services for [`ClusterService`], the controller
 //! services `Raft` and `Cluster` for [`PeerService`](crate::peers::PeerService).
 //!
-//! Every call is checked twice: the TLS verifier refused certificates of another CA and
-//! revoked serials during the handshake; each service then requires that the certificate's
+//! Every call is checked twice: the TLS verifier refuses certificates of another CA and
+//! revoked serials during the handshake, except a controller's revoked certificate, which
+//! passes marked and reaches nothing but the exchange of generation records; each service
+//! then requires that the certificate's
 //! node is enrolled and still holds that certificate ([`NodeRegistry::authenticate`], or
 //! the peer check of the controller services). Errors carry the metadata entry
 //! `tenko-error-code`.
@@ -193,6 +195,13 @@ where
     }
 
     fn call(&mut self, request: http::Request<Body>) -> Self::Future {
+        if request
+            .extensions()
+            .get::<PeerInfo>()
+            .is_some_and(|peer| peer.revoked)
+        {
+            return Box::pin(async { Ok(revoked_status().into_http()) });
+        }
         match self.slot.get() {
             Some(service) => {
                 let service = service.clone();
@@ -263,10 +272,31 @@ where
                 ))
                 .into_http());
             };
-            // The role first (another caller is refused before any table is read or any
-            // signature verified), then a certificate the caller's node record holds, on
-            // every call of both services; the services read the outcome and cannot skip
-            // it.
+            // The role first: another caller is refused before any record is read or any
+            // table touched.
+            if !peer.identity.roles.contains(tenko_core::Role::Controller) {
+                return Ok(status_of(&ClusterError::new(
+                    "cluster.peer.not_controller",
+                    403,
+                    format!(
+                        "node {} is not a controller; the controller services refuse it",
+                        peer.identity.node
+                    ),
+                ))
+                .into_http());
+            }
+            // Then the exchange of generation records, before anything about the caller is
+            // looked up: two histories learn of each other whatever either revoked or
+            // superseded. Every refusal below carries this controller's own records.
+            let metadata = tonic::metadata::MetadataMap::from_headers(request.headers().clone());
+            if let Err(status) = peers.exchange(&peer, &metadata).await {
+                return Ok(peers.with_records(status).into_http());
+            }
+            if peer.revoked {
+                return Ok(peers.with_records(revoked_status()).into_http());
+            }
+            // Then a certificate the caller's node record holds, on every call of both
+            // services; the services read the outcome and cannot skip it.
             let access = if request.uri().path().starts_with("/tenko.cluster.v1.Raft/") {
                 Access::Raft
             } else {
@@ -274,9 +304,8 @@ where
             };
             let record = match peers.authenticate(&peer, access).await {
                 Ok(record) => record,
-                Err(status) => return Ok(status.into_http()),
+                Err(status) => return Ok(peers.with_records(status).into_http()),
             };
-            let metadata = tonic::metadata::MetadataMap::from_headers(request.headers().clone());
             let joining = joins(request.uri().path());
             if let Err(status) = peers.admit(&peer, joining, &metadata).await {
                 return Ok(status.into_http());
@@ -297,6 +326,17 @@ where
             Ok(response)
         })
     }
+}
+
+/// The refusal of every call on a connection whose certificate is revoked (a controller's,
+/// let through for the exchange of generation records only).
+fn revoked_status() -> Status {
+    status_of(&ClusterError::new(
+        "cluster.peer.revoked",
+        403,
+        "this certificate is revoked: the cluster port takes nothing from it but the \
+         exchange of generation records",
+    ))
 }
 
 /// The outcome of [`Peers::authenticate`] for a call of the controller services: the
@@ -573,7 +613,15 @@ impl ClusterListener {
         let peers = port.peers.as_ref().map(Peers::service);
         let router = router(&port.nodes, peers.as_ref());
         Ok(tokio::spawn(async move {
-            run(self.listeners, config, router, port.sessions, stop).await;
+            run(
+                self.listeners,
+                config,
+                router,
+                port.sessions,
+                port.revocations,
+                stop,
+            )
+            .await;
             stopped();
         }))
     }
@@ -586,6 +634,7 @@ async fn run(
     config: Arc<ServerConfig>,
     router: tonic::transport::server::Router,
     sessions: Arc<Sessions>,
+    revocations: Arc<RevocationSet>,
     stop: watch::Receiver<bool>,
 ) {
     let (tx, mut rx) = mpsc::channel::<Incoming>(64);
@@ -596,6 +645,7 @@ async fn run(
             Arc::clone(&config),
             tx.clone(),
             Arc::clone(&sessions),
+            Arc::clone(&revocations),
             stop.clone(),
         )));
     }
@@ -633,6 +683,7 @@ async fn accept_loop(
     config: Arc<ServerConfig>,
     tx: mpsc::Sender<Incoming>,
     sessions: Arc<Sessions>,
+    revocations: Arc<RevocationSet>,
     mut stop: watch::Receiver<bool>,
 ) {
     let handshakes = Arc::new(Semaphore::new(MAX_HANDSHAKES));
@@ -656,6 +707,7 @@ async fn accept_loop(
         let acceptor = TlsAcceptor::from(Arc::clone(&config));
         let tx = tx.clone();
         let sessions = Arc::clone(&sessions);
+        let revocations = Arc::clone(&revocations);
         let local = tcp.local_addr().ok();
         tokio::spawn(async move {
             let _ = tcp.set_nodelay(true);
@@ -685,6 +737,7 @@ async fn accept_loop(
             let kill = KillSwitch::new();
             sessions.track(identity.node, &kill);
             let peer = PeerInfo {
+                revoked: revocations.is_revoked(&identity.serial),
                 identity,
                 remote: Some(remote),
                 local,
@@ -774,9 +827,7 @@ pub fn fuzz_request(data: &[u8]) {
 /// an offered lineage admitted against the first record's own certificate as the root, the
 /// claim and a fence file.
 fn fuzz_generation(input: &[u8]) {
-    use crate::generation::{
-        Claim, FenceFile, GenerationRecord, Lineage, Standing, decode_lineage,
-    };
+    use crate::generation::{Claim, FenceFile, GenerationRecord, Lineage, decode_lineage};
 
     if let Ok(record) = GenerationRecord::decode(input) {
         drop(record.header());
@@ -786,7 +837,7 @@ fn fuzz_generation(input: &[u8]) {
         && let Some(first) = records.first().and_then(|record| record.chain.first())
     {
         let root = rustls::pki_types::CertificateDer::from(first.0.as_slice());
-        drop(Lineage::default().admit(&records, &root, &Standing::default()));
+        drop(Lineage::default().admit(&records, &root));
     }
     let _ = Claim::parse(&String::from_utf8_lossy(input));
     drop(tenko_core::codec::from_cbor::<FenceFile>(input));
@@ -946,7 +997,6 @@ mod tests {
             body: HexBytes(body.canonical().expect("body")),
             signature: HexBytes(Vec::new()),
             chain: Vec::new(),
-            continuity: Vec::new(),
         }
         .encode()
         .expect("record")

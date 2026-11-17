@@ -45,12 +45,10 @@ fn ca() -> Ca {
     }
 }
 
-/// A certificate of `node` with `role`, its key, and its serial.
+/// A certificate of `node` with `role`, and its key.
 struct Leaf {
     chain: Vec<CertificateDer<'static>>,
     key: SecretBytes,
-    serial: String,
-    sha256: String,
 }
 
 fn leaf(ca: &Ca, node: u64, role: &str) -> Leaf {
@@ -63,12 +61,9 @@ fn leaf(ca: &Ca, node: u64, role: &str) -> Leaf {
     params.not_before = rcgen::date_time_ymd(2020, 1, 1);
     params.not_after = rcgen::date_time_ymd(2099, 1, 1);
     let cert = params.signed_by(&key, &ca.issuer).expect("leaf");
-    let identity = PeerIdentity::from_der(cert.der()).expect("identity");
     Leaf {
         chain: vec![cert.der().clone()],
         key: SecretBytes::from_slice(&key.serialize_der()),
-        serial: identity.serial,
-        sha256: identity.sha256,
     }
 }
 
@@ -101,7 +96,6 @@ fn the_body_layout_is_pinned_and_reads_back() {
         body: HexBytes(tenko_core::serde_util::from_hex(pinned).expect("hex")),
         signature: HexBytes(Vec::new()),
         chain: Vec::new(),
-        continuity: Vec::new(),
     };
     assert_eq!(record.body().expect("body"), Some(body(1, None, 2)));
     let header = record.header().expect("header");
@@ -277,14 +271,12 @@ fn a_record_of_a_later_layout_is_placed_by_its_header() {
             .iter()
             .map(|cert| HexBytes(cert.to_vec()))
             .collect(),
-        continuity: Vec::new(),
     };
     let checked = record.verify(&ca.root).expect("a later layout verifies");
     assert_eq!(checked.body(), None);
     assert_eq!(checked.number(), 1);
-    let standing = standing(&[(2, &signer)]);
     let admission = Lineage::default()
-        .admit(&[record], &ca.root, &standing)
+        .admit(&[record], &ca.root)
         .expect("admit");
     assert_eq!(admission.relation, Relation::Descendant);
 }
@@ -316,40 +308,18 @@ fn the_kept_signed_record_still_verifies() {
     assert_eq!(record.encode().expect("cbor"), bytes);
 }
 
-/// A standing in which `holds` are the controllers (node, certificate) the store knows;
-/// every node in it is a voter.
-fn standing(holds: &[(u64, &Leaf)]) -> Standing {
-    let mut standing = Standing {
-        now: Timestamp::from_unix_nanos(AT).expect("time"),
-        ..Standing::default()
-    };
-    for (node, leaf) in holds {
-        standing.voters.insert(NodeId(*node));
-        standing
-            .serials
-            .entry(NodeId(*node))
-            .or_default()
-            .insert(leaf.serial.clone(), leaf.sha256.clone());
-    }
-    standing
-}
-
 #[test]
 fn relations_follow_the_lineage() {
     let ca = ca();
-    let one = leaf(&ca, 1, "controller");
     let two = leaf(&ca, 2, "controller");
     let three = leaf(&ca, 3, "controller");
-    let standing = standing(&[(1, &one), (2, &two), (3, &three)]);
     let r1 = sign(&two, &body(1, None, 2));
     let mut b2 = body(2, Some(r1.hash()), 2);
     b2.at = Timestamp::from_unix_nanos(AT + 1).expect("time");
     let r2 = sign(&two, &b2);
     let zero = Lineage::default();
     let admit = |lineage: &Lineage, offer: &[GenerationRecord]| {
-        lineage
-            .admit(offer, &ca.root, &standing)
-            .map(|a| a.relation)
+        lineage.admit(offer, &ca.root).map(|a| a.relation)
     };
 
     assert_eq!(
@@ -410,288 +380,83 @@ fn s_unlinked(signer: &Leaf) -> GenerationRecord {
     sign(signer, &body(3, Some(Digest([4; 32])), 3))
 }
 
+/// The rule: a record counts when a controller's certificate of the installation's CA
+/// signed it, whatever the receiver knows of that certificate. One minted for a node id the
+/// receiver never saw stops it like any other (the owner accepts that whoever holds the CA's
+/// key can stop the cluster); one of another role, or of another CA, never verifies.
 #[test]
-fn a_signer_without_standing_fences_nothing() {
+fn a_controller_certificate_of_the_ca_is_all_a_record_needs() {
     let ca = ca();
-    let two = leaf(&ca, 2, "controller");
-    let r1 = sign(&two, &body(1, None, 2));
+    let minted = leaf(&ca, 99, "controller");
     let zero = Lineage::default();
-    let admit = |standing: &Standing| zero.admit(std::slice::from_ref(&r1), &ca.root, standing);
-
-    let mut not_voter = standing(&[(2, &two)]);
-    not_voter.voters.clear();
-    refused(admit(&not_voter), "not a voter");
-    let mut superseded = standing(&[(2, &two)]);
-    superseded.superseded.insert(NodeId(2));
-    refused(admit(&superseded), "superseded");
-    let mut revoked = standing(&[(2, &two)]);
-    revoked.revoked_serials.insert(two.serial.clone());
-    refused(admit(&revoked), "revoked");
-    let mut revoked_node = standing(&[(2, &two)]);
-    revoked_node.revoked_nodes.insert(NodeId(2));
-    refused(admit(&revoked_node), "revoked");
-    // A voter whose certificate the store does not know: refused, never acted on.
-    let unknown = standing(&[(2, &leaf(&ca, 2, "controller"))]);
-    unheld(admit(&unknown));
-    // From the future.
-    let mut early = standing(&[(2, &two)]);
-    early.now = Timestamp::from_unix_nanos(AT - 3_600_000_000_000).expect("time");
-    refused(admit(&early), "in the future");
-    // A sibling signed by a node that was not a voter of the parent history.
-    let nine = leaf(&ca, 9, "controller");
-    let at_one = Lineage::kept(std::slice::from_ref(&r1)).expect("lineage");
+    let record = sign(&minted, &body(1, None, 99));
+    assert_eq!(
+        zero.admit(std::slice::from_ref(&record), &ca.root)
+            .expect("counts")
+            .relation,
+        Relation::Descendant
+    );
+    let at_one =
+        Lineage::kept(&[sign(&leaf(&ca, 1, "controller"), &body(1, None, 1))]).expect("lineage");
+    assert_eq!(
+        at_one
+            .admit(&[sign(&minted, &body(1, None, 99))], &ca.root)
+            .expect("counts")
+            .relation,
+        Relation::Sibling
+    );
+    let probe = leaf(&ca, 7, "probe");
+    refused(zero.admit(&[sign(&probe, &body(1, None, 7))], &ca.root), "");
+    let foreign = leaf(&self::ca(), 2, "controller");
     refused(
-        at_one.admit(
-            &[sign(&nine, &body(1, None, 9))],
-            &ca.root,
-            &standing(&[(9, &nine)]),
-        ),
-        "not a voter of the parent history",
+        zero.admit(&[sign(&foreign, &body(1, None, 2))], &ca.root),
+        "",
     );
 }
 
-/// A certificate minted with the CA's key that copies the serial of a certificate the
-/// receiver holds is not that certificate: the serial and the SHA-256 both decide.
+/// No difference of clocks makes a receiver ignore a record: a record dated far ahead of
+/// the receiver counts, and a lineage whose later record carries the earlier date (two hosts
+/// whose clocks disagree) is still one lineage.
 #[test]
-fn a_minted_certificate_with_a_held_serial_is_not_held() {
+fn the_time_a_record_claims_never_refuses_it() {
     let ca = ca();
-    let two = leaf(&ca, 2, "controller");
-    let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
-    let mut params = CertificateParams::new(Vec::new()).expect("params");
-    params.subject_alt_names = vec![
-        rcgen::SanType::URI("urn:tenko:node:2".try_into().expect("uri")),
-        rcgen::SanType::URI("urn:tenko:role:controller".try_into().expect("uri")),
-    ];
-    params.serial_number = Some(rcgen::SerialNumber::from_slice(
-        &tenko_core::serde_util::from_hex(&two.serial).expect("hex"),
-    ));
-    let cert = params.signed_by(&key, &ca.issuer).expect("minted");
-    let copy = Leaf {
-        chain: vec![cert.der().clone()],
-        key: SecretBytes::from_slice(&key.serialize_der()),
-        serial: PeerIdentity::from_der(cert.der()).expect("identity").serial,
-        sha256: PeerIdentity::from_der(cert.der()).expect("identity").sha256,
+    let one = leaf(&ca, 1, "controller");
+    let ahead = GenerationBody {
+        at: Timestamp::from_unix_nanos(AT + 10 * 365 * 86_400 * 1_000_000_000).expect("time"),
+        ..body(1, None, 1)
     };
-    assert_eq!(copy.serial, two.serial, "the same serial");
-    assert_ne!(copy.sha256, two.sha256);
-    unheld(Lineage::default().admit(
-        &[sign(&copy, &body(1, None, 2))],
-        &ca.root,
-        &standing(&[(2, &two)]),
-    ));
-}
-
-/// A signer reached only by a chain longer than the bound is refused at admission and shown
-/// as unverified (a controller the receiver knows); the receiver never acts on it.
-#[test]
-fn a_chain_past_its_bound_is_refused_at_admission() {
-    let ca = ca();
-    let leaves: Vec<Leaf> = (0..=crate::continuity::MAX_STEPS + 1)
-        .map(|_| leaf(&ca, 2, "controller"))
-        .collect();
-    let steps: Vec<crate::continuity::Step> = leaves
-        .windows(2)
-        .map(|pair| {
-            crate::continuity::Step::new(
-                NodeId(2),
-                &pair[0].chain[0],
-                &pair[1].chain[0],
-                crate::continuity::attest(NodeId(2), &pair[0].key, &pair[1].key).expect("attest"),
-            )
-            .expect("a step")
-        })
-        .collect();
-    let mut record = sign(leaves.last().expect("newest"), &body(1, None, 2));
-    record.continuity = steps;
-    let error = Lineage::default()
-        .admit(&[record.clone()], &ca.root, &standing(&[(2, &leaves[0])]))
-        .expect_err("past the bound");
-    assert_eq!(error.code(), codes::RECORD_UNHELD);
-    assert_eq!(
-        error.as_coded().params.get("known").map(String::as_str),
-        Some("true")
-    );
-    // Within the bound the same signer is held.
-    record.continuity.remove(0);
-    Lineage::default()
-        .admit(&[record], &ca.root, &standing(&[(2, &leaves[1])]))
-        .expect("within the bound");
-}
-
-/// A record that carries a chain keeps these bytes on the wire, in the store and in the
-/// fence file, and reads back exactly.
-#[test]
-fn a_record_with_a_chain_keeps_its_bytes() {
-    let record = GenerationRecord {
-        body: HexBytes(vec![1]),
-        signature: HexBytes(vec![2]),
-        chain: vec![HexBytes(vec![3])],
-        continuity: vec![crate::continuity::Step {
-            previous: HexBytes(vec![4]),
-            next: HexBytes(vec![5]),
-            signature: HexBytes(vec![6]),
-        }],
+    let first = sign(&one, &ahead);
+    let behind = GenerationBody {
+        at: Timestamp::from_unix_nanos(AT - 86_400 * 1_000_000_000).expect("time"),
+        ..body(2, Some(first.hash()), 1)
     };
-    let bytes = record.encode().expect("cbor");
-    assert_eq!(
-        tenko_core::serde_util::to_hex(&bytes),
-        concat!(
-            "a464626f6479410169",
-            "7369676e6174757265410265636861696e8141036a636f6e74696e7569747981a368",
-            "70726576696f75734104646e6578744105697369676e61747572654106"
-        )
-    );
-    assert_eq!(GenerationRecord::decode(&bytes).expect("exact"), record);
+    let admission = Lineage::default()
+        .admit(&[first, sign(&one, &behind)], &ca.root)
+        .expect("counts");
+    assert_eq!(admission.relation, Relation::Descendant);
+    assert_eq!(admission.new.len(), 2);
 }
 
-#[track_caller]
-fn unheld<T: std::fmt::Debug>(result: Result<T, ClusterError>) {
-    let error = result.expect_err("an unheld signer");
-    assert_eq!(error.code(), codes::RECORD_UNHELD, "{}", error.detail());
-}
-
-/// A certificate minted with the CA's key, which every controller and every copy of a data
-/// directory or backup holds, signs records that place nothing: for an unused node id, for a
-/// voter of the receiver's history, and for a voter of its parent history; as a descendant,
-/// as a sibling and as a record the receiver cannot place.
+/// The envelope of a record is frozen (its bytes are pinned in
+/// `the_record_lineage_and_fence_layouts_are_pinned`): one with a field a later version
+/// might add is refused, so a later version puts what it needs into a new body layout.
 #[test]
-fn a_record_signed_with_a_minted_certificate_places_nothing() {
-    let ca = ca();
-    let (one, two, three) = (
-        leaf(&ca, 1, "controller"),
-        leaf(&ca, 2, "controller"),
-        leaf(&ca, 3, "controller"),
-    );
-    let standing = standing(&[(1, &one), (2, &two), (3, &three)]);
-    let own = sign(&one, &body(1, None, 1));
-    let at_one = Lineage::kept(std::slice::from_ref(&own)).expect("lineage");
-    for node in [99, 1, 2, 3] {
-        // The same node id, another certificate: the store's record does not hold it.
-        let minted = leaf(&ca, node, "controller");
-        let records = [
-            // A descendant of the receiver's own history.
-            sign(&minted, &body(2, Some(own.hash()), node)),
-            // A sibling from the receiver's parent (another nonce: the receiver's own body
-            // would be its own record, already known).
-            sign(
-                &minted,
-                &GenerationBody {
-                    nonce: HexBytes(vec![9; 16]),
-                    ..body(1, None, node)
-                },
-            ),
-            // A newer history the receiver cannot place.
-            sign(&minted, &body(7, Some(Digest([7; 32])), node)),
-        ];
-        for record in records {
-            unheld(at_one.admit(std::slice::from_ref(&record), &ca.root, &standing));
-        }
-        // A minted record never rides on a valid one: the offer ends before it.
-        let valid = sign(&two, &body(2, Some(own.hash()), 2));
-        let mut tail = body(u64::MAX, Some(valid.hash()), node);
-        tail.at = Timestamp::from_unix_nanos(AT + 1).expect("time");
-        let admission = at_one
-            .admit(&[valid.clone(), sign(&minted, &tail)], &ca.root, &standing)
-            .expect("the valid record");
-        assert_eq!(admission.relation, Relation::Descendant);
-        assert_eq!(
-            admission.new.iter().map(Signed::number).collect::<Vec<_>>(),
-            vec![2]
-        );
-        // At generation 0 a minted descendant is refused too.
-        unheld(Lineage::default().admit(
-            &[sign(&minted, &body(1, None, node))],
-            &ca.root,
-            &standing,
-        ));
+fn an_envelope_with_a_later_field_is_refused() {
+    #[derive(Serialize)]
+    struct Later {
+        body: HexBytes,
+        signature: HexBytes,
+        chain: Vec<HexBytes>,
+        extra: HexBytes,
     }
-}
-
-/// A record that `kept` reads without a signature, for the order's property test.
-fn unsigned(leaf: &Leaf, body: &GenerationBody) -> Signed {
-    Signed::kept(&GenerationRecord {
-        body: HexBytes(body.canonical().expect("cbor")),
-        signature: HexBytes(Vec::new()),
-        chain: leaf
-            .chain
-            .iter()
-            .map(|cert| HexBytes(cert.to_vec()))
-            .collect(),
-        continuity: Vec::new(),
+    let later = to_cbor(&Later {
+        body: HexBytes(vec![0xa0]),
+        signature: HexBytes(vec![9; 4]),
+        chain: vec![HexBytes(vec![1, 2])],
+        extra: HexBytes(vec![4]),
     })
-    .expect("kept")
-}
-
-#[test]
-fn the_suggested_winner_is_a_total_transitive_order() {
-    let ca = ca();
-    let signer = leaf(&ca, 1, "controller");
-    // A small generator: every combination of number, parent, fork, forced node and nonce
-    // that the order can tell apart, so that cycles between mixed parents show.
-    let parents = [None, Some(Digest([1; 32])), Some(Digest([2; 32]))];
-    let mut records = Vec::new();
-    let mut seed: u64 = 0x5eed;
-    for number in 1..=2 {
-        for parent in parents {
-            for index in [5, 10] {
-                for forced in [1, 2, 3] {
-                    seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                    let mut body = body(number, parent, forced);
-                    body.superseded.retain(|node| node.0 != forced);
-                    body.fork.index = index;
-                    body.nonce = HexBytes(seed.to_be_bytes().repeat(2));
-                    records.push(unsigned(&signer, &body));
-                }
-            }
-        }
-    }
-    // The review's cycle: a beats b on the fork, b beats c and c beats a on the node id.
-    let a = records
-        .iter()
-        .find(|r| {
-            r.number() == 2
-                && r.parent() == parents[1]
-                && r.body().is_some_and(|b| b.fork.index == 10)
-                && r.forced() == NodeId(3)
-        })
-        .expect("a");
-    let b = records
-        .iter()
-        .find(|r| {
-            r.number() == 2
-                && r.parent() == parents[1]
-                && r.body().is_some_and(|b| b.fork.index == 5)
-                && r.forced() == NodeId(1)
-        })
-        .expect("b");
-    let c = records
-        .iter()
-        .find(|r| r.number() == 2 && r.parent() == parents[2] && r.forced() == NodeId(2))
-        .expect("c");
-    let ab = suggested_winner(a, b);
-    let bc = suggested_winner(b, c);
-    let ac = suggested_winner(a, c);
-    assert!(!(ab.is_lt() && bc.is_lt() && ac.is_gt()), "a cycle");
-    for x in &records {
-        assert_eq!(suggested_winner(x, x), Ordering::Equal);
-        for y in &records {
-            assert_eq!(suggested_winner(x, y), suggested_winner(y, x).reverse());
-            if x.hash() != y.hash() {
-                assert_ne!(suggested_winner(x, y), Ordering::Equal);
-            }
-            for z in &records {
-                if suggested_winner(x, y).is_le() && suggested_winner(y, z).is_le() {
-                    assert!(suggested_winner(x, z).is_le(), "not transitive");
-                }
-            }
-        }
-    }
-    // Every member sorts any subset the same way.
-    let mut forward = records.clone();
-    forward.sort_by(suggested_winner);
-    let mut backward: Vec<Signed> = records.iter().rev().cloned().collect();
-    backward.sort_by(suggested_winner);
-    assert_eq!(forward, backward);
+    .expect("cbor");
+    refused(GenerationRecord::decode(&later), "exact encoding");
 }
 
 #[test]
@@ -739,7 +504,6 @@ fn the_record_lineage_and_fence_layouts_are_pinned() {
         body: HexBytes(vec![0xa0]),
         signature: HexBytes(vec![9; 4]),
         chain: vec![HexBytes(vec![1, 2])],
-        continuity: Vec::new(),
     };
     let encoded = "a364626f647941a0697369676e6174757265440909090965636861696e81420102";
     assert_eq!(to_hex(&record.encode().expect("cbor")), encoded);
@@ -762,34 +526,22 @@ fn the_record_lineage_and_fence_layouts_are_pinned() {
     );
 }
 
-/// One controller of a cluster in the model of forced steps, renewals and meetings: its
-/// history, its fence, the controllers its steps superseded, its voters, the certificates
-/// and renewal steps its store holds, and whether it saw an older history.
+/// One controller of a cluster in the model of forced steps and meetings: its history, its
+/// fence, its voters, whether it saw an older history, and what the rule must not depend on:
+/// its current certificate (renewed at will) and the controllers it revoked or marked
+/// superseded.
 struct Side {
     node: u64,
     leaf: Leaf,
     lineage: Lineage,
     fence: Option<(FenceReason, Lineage)>,
-    marks: BTreeSet<NodeId>,
     voters: BTreeSet<NodeId>,
     saw_older: bool,
-    /// The certificates its store's node records hold, with their SHA-256.
-    view: BTreeMap<NodeId, crate::continuity::Held>,
-    /// The renewal steps its store holds, by the new serial.
-    steps: BTreeMap<String, crate::continuity::Step>,
+    revoked: BTreeSet<NodeId>,
+    marks: BTreeSet<NodeId>,
 }
 
 impl Side {
-    fn standing(&self) -> Standing {
-        Standing {
-            voters: self.voters.clone(),
-            superseded: self.marks.clone(),
-            serials: self.view.clone(),
-            now: Timestamp::from_unix_nanos(AT + 1_000_000_000_000_000).expect("time"),
-            ..Standing::default()
-        }
-    }
-
     /// What it offers on a call: its history, and the records that superseded it.
     fn offer(&self) -> Vec<GenerationRecord> {
         let mut records = self.lineage.offer();
@@ -822,19 +574,12 @@ impl Rng {
     }
 }
 
-/// The serial and SHA-256 of a leaf.
-fn held_of(leaf: &Leaf) -> (String, String) {
-    let identity = PeerIdentity::from_der(&leaf.chain[0]).expect("identity");
-    (identity.serial, identity.sha256)
-}
-
 /// A forced step on `side`, as `tenko cluster recover --force` makes it: allowed on a copy
 /// with other voters, or on one another history stopped; the new generation is above every
-/// one it has seen; its other voters are superseded and marked; the record carries the
-/// chain of its renewals from its store.
-fn force(side: &mut Side, clock: &mut i128) -> bool {
+/// one it has seen; its other voters are superseded and marked.
+fn force(side: &mut Side, clock: &mut i128) {
     if side.voters.len() == 1 && side.fence.is_none() {
-        return false;
+        return;
     }
     let seen = side
         .lineage
@@ -848,61 +593,23 @@ fn force(side: &mut Side, clock: &mut i128) -> bool {
         .filter(|voter| voter.0 != side.node)
         .collect();
     let body = GenerationBody {
-        number: seen + 1,
         parent: side.lineage.tip().map(Signed::hash),
-        forced: NodeId(side.node),
         superseded: others.iter().copied().collect(),
         at: Timestamp::from_unix_nanos(AT + *clock).expect("time"),
         nonce: HexBytes([side.node.to_be_bytes(), (seen + 1).to_be_bytes()].concat()),
         ..body(seen + 1, None, side.node)
     };
-    let mut record = sign(&side.leaf, &body);
-    record.continuity = crate::continuity::chain(&side.leaf.serial, |serial| {
-        Ok(side.steps.get(serial).cloned())
-    })
-    .expect("chain");
-    let mut records: Vec<GenerationRecord> = side
-        .lineage
-        .records()
-        .iter()
-        .map(|signed| signed.record().clone())
-        .collect();
-    records.push(record);
+    let mut records = side.lineage.offer();
+    records.push(sign(&side.leaf, &body));
     side.lineage = Lineage::kept(&records).expect("lineage");
     side.marks.extend(others);
     side.voters = [NodeId(side.node)].into_iter().collect();
     side.fence = None;
-    true
 }
 
-/// `who` renews its certificate: the old key signs the new one; its own store holds the new
-/// certificate and the step, and so does every side in `seen_by` (a history it still
-/// shared with them).
-fn renew(sides: &mut [Side], who: usize, seen_by: &[usize], ca: &Ca) {
-    let node = sides[who].node;
-    let next = leaf(ca, node, "controller");
-    let step = crate::continuity::Step::new(
-        NodeId(node),
-        &sides[who].leaf.chain[0],
-        &next.chain[0],
-        crate::continuity::attest(NodeId(node), &sides[who].leaf.key, &next.key).expect("attest"),
-    )
-    .expect("a step");
-    let (serial, sha256) = held_of(&next);
-    for &side in std::iter::once(&who).chain(seen_by) {
-        sides[side]
-            .view
-            .entry(NodeId(node))
-            .or_default()
-            .insert(serial.clone(), sha256.clone());
-        sides[side].steps.insert(serial.clone(), step.clone());
-    }
-    sides[who].leaf = next;
-}
-
-/// `to` receives what `from` offers, as `Peers::offer` acts on it.
+/// `to` receives what another side offers, as `Peers::offer` acts on it.
 fn receive(to: &mut Side, offer: &[GenerationRecord], root: &CertificateDer<'_>) {
-    let Ok(admission) = to.lineage.admit(offer, root, &to.standing()) else {
+    let Ok(admission) = to.lineage.admit(offer, root) else {
         return;
     };
     if admission.relation == Relation::Known && !admission.new.is_empty() {
@@ -918,15 +625,20 @@ fn receive(to: &mut Side, offer: &[GenerationRecord], root: &CertificateDer<'_>)
 enum Act {
     /// A forced step on a side.
     Force(usize),
-    /// A renewal of a side, seen by every other side or by none.
-    Renew(usize, bool),
-    /// Two sides exchange their records.
+    /// A side renews its certificate: a new key and serial that no other side knows.
+    Renew(usize),
+    /// A side revokes another's certificates.
+    Revoke(usize, usize),
+    /// A side marks another superseded.
+    Mark(usize, usize),
+    /// Two sides exchange their records: the cluster port grants that exchange to every
+    /// controller certificate of the CA, revoked or not.
     Meet(usize, usize),
 }
 
 /// Runs `acts` on `sides` and checks after each meeting: when two controllers that both
 /// write, of different histories, exchange their records, at least one stops writing, and
-/// each shows the other's history (its fence, or the older history it saw).
+/// each forced one shows the other's history (its fence, or the older history it saw).
 fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
     let mut clock = 0;
     for (index, act) in acts.iter().enumerate() {
@@ -935,25 +647,29 @@ fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
                 force(&mut sides[a], &mut clock);
                 continue;
             }
-            Act::Renew(who, seen) => {
-                let others: Vec<usize> = if seen {
-                    (0..sides.len()).filter(|side| *side != who).collect()
-                } else {
-                    Vec::new()
-                };
-                renew(sides, who, &others, ca);
+            Act::Renew(who) => {
+                sides[who].leaf = leaf(ca, sides[who].node, "controller");
+                continue;
+            }
+            Act::Revoke(by, whom) => {
+                let node = NodeId(sides[whom].node);
+                sides[by].revoked.insert(node);
+                continue;
+            }
+            Act::Mark(by, whom) => {
+                let node = NodeId(sides[whom].node);
+                sides[by].marks.insert(node);
                 continue;
             }
             Act::Meet(a, b) => (a, b),
         };
-        let apart = sides[a]
-            .lineage
-            .tip()
-            .is_some_and(|tip| !sides[b].holds(tip.hash()))
-            && sides[b]
-                .lineage
-                .tip()
-                .is_some_and(|tip| !sides[a].holds(tip.hash()));
+        // Different histories: neither holds the other's newest record (a side at
+        // generation 0, the old majority, has none and is apart from every forced side).
+        let tip = |side: &Side| side.lineage.tip().map(Signed::hash);
+        let (tip_a, tip_b) = (tip(&sides[a]), tip(&sides[b]));
+        let apart = tip_a != tip_b
+            && tip_a.is_none_or(|hash| !sides[b].holds(hash))
+            && tip_b.is_none_or(|hash| !sides[a].holds(hash));
         let both_wrote = sides[a].writes() && sides[b].writes();
         let (offer_a, offer_b) = (sides[a].offer(), sides[b].offer());
         receive(&mut sides[b], &offer_a, &ca.root);
@@ -964,7 +680,12 @@ fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
                 "two authorities met and both still write after {:?}",
                 &acts[..=index]
             );
-            for side in [a, b] {
+            // A side at generation 0 offers no record, so only two forced sides show
+            // each other.
+            for side in [a, b]
+                .into_iter()
+                .filter(|_| tip_a.is_some() && tip_b.is_some())
+            {
                 assert!(
                     !sides[side].writes() || sides[side].saw_older,
                     "side {side} does not show the other history after {:?}",
@@ -978,38 +699,26 @@ fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
 /// The cluster's promise after any sequence of forced steps by any number of operators:
 /// two controllers that both believe they are the authority stop at least one of them when
 /// they exchange one call, and both show the other's history. Generated sequences of forced
-/// steps, renewals (on any side, seen by the others or not) and meetings among two and three
-/// controllers of one cluster, plus two written ones: two operators who each chose their own
-/// side after a conflict, and a side that renewed where the other could not see it before
-/// its forced step. Renewals stay within a chain's bound (`continuity::MAX_STEPS`); past it a
-/// receiver refuses and shows the record (`continuity::tests`).
+/// steps, renewals, revocations, superseded marks and meetings among two and three
+/// controllers of one cluster, plus written ones: two operators who each chose their own
+/// side after a conflict, and two forced sides that both renewed after the fork, one of them
+/// revoked by the other.
 #[test]
 fn two_authorities_that_meet_never_both_go_on_writing() {
-    use Act::{Force, Meet, Renew};
+    use Act::{Force, Mark, Meet, Renew, Revoke};
     let ca = ca();
     let sides = |count: u64| -> Vec<Side> {
         let voters: BTreeSet<NodeId> = (1..=count).map(NodeId).collect();
-        let leaves: Vec<Leaf> = (1..=count)
-            .map(|node| leaf(&ca, node, "controller"))
-            .collect();
-        let view: BTreeMap<NodeId, crate::continuity::Held> = leaves
-            .iter()
-            .zip(1..=count)
-            .map(|(leaf, node)| (NodeId(node), [held_of(leaf)].into_iter().collect()))
-            .collect();
-        leaves
-            .into_iter()
-            .zip(1..=count)
-            .map(|(leaf, node)| Side {
+        (1..=count)
+            .map(|node| Side {
                 node,
-                leaf,
+                leaf: leaf(&ca, node, "controller"),
                 lineage: Lineage::default(),
                 fence: None,
-                marks: BTreeSet::new(),
                 voters: voters.clone(),
                 saw_older: false,
-                view: view.clone(),
-                steps: BTreeMap::new(),
+                revoked: BTreeSet::new(),
+                marks: BTreeSet::new(),
             })
             .collect()
     };
@@ -1031,25 +740,16 @@ fn two_authorities_that_meet_never_both_go_on_writing() {
         &mut sides(2),
         &[
             Force(0),
-            Renew(1, false),
-            Meet(0, 1),
-            Renew(0, false),
             Force(1),
-            Meet(0, 1),
-        ],
-        &ca,
-    );
-    run(
-        &mut sides(3),
-        &[
-            Force(0),
-            Force(1),
-            Renew(0, false),
-            Renew(1, false),
+            Renew(0),
+            Renew(1),
+            Revoke(0, 1),
+            Mark(1, 0),
             Meet(0, 1),
             Force(0),
             Force(1),
-            Meet(0, 1),
+            Renew(1),
+            Meet(1, 0),
         ],
         &ca,
     );
@@ -1058,19 +758,12 @@ fn two_authorities_that_meet_never_both_go_on_writing() {
         let n = usize::try_from(count).expect("small");
         for _ in 0..300 {
             let mut sides = sides(count);
-            let mut renewals = vec![0; n];
-            let acts: Vec<Act> = (0..=rng.next(14))
-                .map(|_| match rng.next(5) {
-                    0 => {
-                        let who = rng.next(n);
-                        if renewals[who] < crate::continuity::MAX_STEPS {
-                            renewals[who] += 1;
-                            Renew(who, rng.next(2) == 0)
-                        } else {
-                            Force(who)
-                        }
-                    }
-                    1 => Force(rng.next(n)),
+            let acts: Vec<Act> = (0..=rng.next(16))
+                .map(|_| match rng.next(7) {
+                    0 => Renew(rng.next(n)),
+                    1 => Revoke(rng.next(n), rng.next(n)),
+                    2 => Mark(rng.next(n), rng.next(n)),
+                    3 => Force(rng.next(n)),
                     _ => Meet(rng.next(n), rng.next(n)),
                 })
                 .filter(|act| !matches!(act, Meet(a, b) if a == b))

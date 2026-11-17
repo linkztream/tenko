@@ -88,10 +88,6 @@ pub struct OtherHistory {
     /// The controller forced to start it.
     #[schema(value_type = u64)]
     pub forced: NodeId,
-    /// For a competing history: whether it, not this controller's, is the one the order of
-    /// the recovery suggests keeping (the same answer on every member).
-    #[serde(default)]
-    pub suggested: bool,
 }
 
 /// The kind of quorum state (the API's schema is `tenko_api::dto::system::QuorumKind`).

@@ -1019,16 +1019,7 @@ async fn renew_once(
     }
     let (key, csr) = generate_csr()?;
     let issued = registry
-        .renew(
-            current.identity.node,
-            &current.info.serial,
-            &csr,
-            now,
-            Some((
-                &current.chain[0],
-                tenko_cluster::continuity::attest(current.identity.node, &current.key, &key)?,
-            )),
-        )
+        .renew(current.identity.node, &current.info.serial, &csr, now)
         .await?;
     // On disk first: a stop while it waits keeps the new key, and the next start presents
     // it.
@@ -1077,15 +1068,9 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                     .map(tenko_cluster::generation::Signed::forced)
                     .into_iter()
                     .collect();
-                let superseded = match forced.first() {
-                    Some(node) if reason == FenceReason::Conflict => {
-                        layer.superseded_here(*node).await
-                    }
-                    _ => false,
-                };
                 state.set_notice(notice(
                     reason.code(),
-                    fence_detail(reason, forced.first().copied(), superseded),
+                    fence_detail(reason, other.tip(), generation.lineage.tip()),
                     &forced,
                 ));
             }
@@ -1111,9 +1096,10 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
         ));
         state.set_notice(notice(
             codes::SUPERSEDED_PENDING,
-            "controllers a forced step superseded are neither rejoined nor removed: until each \
-             is revoked or removed it can still stop this cluster's writes with its own \
-             certificate (`tenko cluster remove <id>`, or a forced step with --revoke <id>)"
+            "controllers a forced step superseded are neither rejoined nor removed; any holder of \
+             the installation's CA key, these included, can stop this cluster's writes with a \
+             record of its own (a forced step on the side the operators choose lifts each stop, \
+             and a new CA ends it)"
                 .to_owned(),
             &pending,
         ));
@@ -1133,29 +1119,44 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
     offer_notices(layer, state);
 }
 
-/// The detail of the status warning of a fence. A competing record signed by a controller
-/// this history superseded suggests no side: such a controller can sign any number.
+/// The detail of the status warning of a fence: what the record that stopped this controller
+/// claims, as its signer chose it, beside what this controller holds. No side is
+/// recommended.
 fn fence_detail(
     reason: tenko_store::FenceReason,
-    forced: Option<NodeId>,
-    superseded: bool,
+    other: Option<&tenko_cluster::generation::Signed>,
+    own: Option<&tenko_cluster::generation::Signed>,
 ) -> String {
-    let mut detail = format!(
+    let claim = match (reason, other) {
+        (tenko_store::FenceReason::MajorityAlive, _) | (_, None) => String::new(),
+        (reason, Some(other)) => format!(
+            ". A record claims generation {}, forced on controller {}, dated {}, and that it {} \
+             this controller's history, which holds {}; a forced step on the side the operators \
+             choose lifts the stop",
+            other.number(),
+            other.forced(),
+            other.at().to_rfc3339(),
+            if reason == tenko_store::FenceReason::Conflict {
+                "competes with"
+            } else {
+                "supersedes"
+            },
+            own.map_or_else(
+                || "generation 0".to_owned(),
+                |own| format!(
+                    "generation {}, forced on controller {}, dated {}",
+                    own.number(),
+                    own.forced(),
+                    own.at().to_rfc3339()
+                )
+            ),
+        ),
+    };
+    format!(
         "this controller stopped writing ({}): reads serve its copy until an operator acts on \
-         its host (docs/cluster.md section 12.11)",
+         its host (docs/cluster.md section 12.11){claim}",
         reason.code()
-    );
-    if let (true, Some(node)) = (superseded, forced) {
-        use std::fmt::Write as _;
-        let _ = write!(
-            detail,
-            ". The competing record was signed by controller {node}, which this history \
-             superseded: no side is suggested. It can stop this cluster until it is revoked or \
-             removed; if it is not trusted, revoke it (`tenko cluster recover --force \
-             --revoke {node}` on this controller, or `tenko cluster remove {node}`)"
-        );
-    }
-    detail
+    )
 }
 
 /// The notices of generation records this controller refused or did not act on.
@@ -1205,26 +1206,12 @@ fn offer_notices(layer: &Peers, state: &AppState) {
             }),
         ),
         (
-            codes::UNVERIFIED_HISTORY,
-            refused.unverified.as_ref(),
-            refused.unverified.as_ref().map(|last| {
-                format!(
-                    "a generation record signed with a certificate this controller's records do \
-                     not hold for a controller they know was refused: a renewal this copy never \
-                     saw, or a forgery; if that controller may be the authority of another \
-                     history, look at its host ({})",
-                    last.detail
-                )
-            }),
-        ),
-        (
             codes::OLDER_HISTORY,
             refused.older.as_ref(),
             refused.older.as_ref().map(|older| {
                 format!(
                     "an older history of the cluster met this one ({}); it stops writing when it \
-                     receives this one's record and can check its signer, else it shows this one as \
-                     unverified",
+                     receives this one's record",
                     older.code
                 )
             }),
@@ -1414,38 +1401,31 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![now.clone()]
         );
-        // The rotation is a renewal like any other: the vault key signed the new key, and
-        // the step is stored, so a history that still holds the vault certificate follows.
-        let view = store
-            .read(tenko_store::ReadConsistency::Local)
-            .await
-            .expect("view");
-        let chain = tenko_cluster::continuity::chain_of(view.as_ref(), &now).expect("chain");
-        assert_eq!(chain.len(), 1);
-        assert_eq!(chain[0].previous.0, moved.chain[0].to_vec());
-        let held: tenko_cluster::continuity::Held = [(old.clone(), moved.info.sha256.clone())]
-            .into_iter()
-            .collect();
-        assert!(tenko_cluster::continuity::Chain(&chain).reaches(
-            NodeId(1),
-            &held,
-            &|_| false,
-            &Credentials::load(&paths).expect("identity").chain[0]
-        ));
-        drop(view);
         let _ = store.shutdown().await;
     }
 
-    /// The status warning of a conflict whose competing record a superseded controller
-    /// signed suggests no side and says how to revoke it; another conflict does not.
+    /// The status warning of a fence shows what the other record claims and recommends no
+    /// side; a live majority has no record to show.
     #[test]
-    fn a_conflict_signed_by_a_superseded_controller_names_no_side() {
+    fn a_fence_warning_shows_the_claims_and_recommends_no_side() {
         use tenko_store::FenceReason;
-        let detail = fence_detail(FenceReason::Conflict, Some(NodeId(2)), true);
-        assert!(detail.contains("no side is suggested"), "{detail}");
-        assert!(detail.contains("--revoke 2"), "{detail}");
-        let detail = fence_detail(FenceReason::Conflict, Some(NodeId(2)), false);
-        assert!(!detail.contains("no side is suggested"), "{detail}");
+        let other = crate::cluster::recover::tests::competing(2, 1);
+        let own = crate::cluster::recover::tests::competing(1, 1);
+        let detail = fence_detail(FenceReason::Conflict, Some(&other), Some(&own));
+        assert!(
+            detail.contains("A record claims generation 1, forced on controller 2"),
+            "{detail}"
+        );
+        assert!(
+            detail.contains("which holds generation 1, forced on controller 1"),
+            "{detail}"
+        );
+        assert!(detail.contains("competes with"), "{detail}");
+        for advice in ["suggest", "recommend", "--revoke", "winner"] {
+            assert!(!detail.contains(advice), "{advice} in {detail}");
+        }
+        let detail = fence_detail(FenceReason::MajorityAlive, Some(&other), None);
+        assert!(!detail.contains("claims"), "{detail}");
     }
 
     fn at(text: &str) -> Timestamp {

@@ -157,13 +157,14 @@ impl v1::node_server::Node for ClusterService {
     ) -> Result<Response<v1::RenewResponse>, Status> {
         let peer = peer_of(&request)?;
         let record = self.authenticate(&peer).await?;
-        // A controller renews its cluster certificate itself, the key it renews signing
-        // the new one (`crate::continuity`): a renewal here would break that chain.
+        // A controller renews its cluster certificate itself and presents the new one once
+        // every member applied the renewal: a renewal here would skip that wait.
         if record.roles.contains(&Role::Controller) {
             return Err(status_of(&crate::error::ClusterError::new(
                 "cluster.node.controller_renewal",
                 409,
-                "a controller renews its own cluster certificate; this service renews the                  certificates of other nodes",
+                "a controller renews its own cluster certificate; this service renews the \
+                 certificates of other nodes",
             )));
         }
         let csr = request.into_inner().csr;
@@ -174,7 +175,6 @@ impl v1::node_server::Node for ClusterService {
                 &peer.identity.serial,
                 &csr,
                 Timestamp::now(),
-                None,
             )
             .await
             .map_err(|error| status_of(&error))?;

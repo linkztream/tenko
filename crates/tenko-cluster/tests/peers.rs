@@ -619,6 +619,7 @@ impl Lab {
             voter_serials: vec![v1::VoterSerial {
                 node_id: 1,
                 serial: records[0].1.serial.clone(),
+                sha256: records[0].1.sha256.clone(),
             }],
         };
         for member in &members[1..] {
@@ -920,9 +921,15 @@ async fn raft_vote_refusal(
 
 /// A controller removed from the cluster is refused with every certificate it was issued,
 /// on every member that stays: the one it runs with and one a renewal issued before the
-/// removal are on the revocation list and fail the handshake; a certificate of it that its
-/// record never held passes the handshake and is refused before Raft sees the call.
+/// removal are on the revocation list and pass the handshake marked, so that every method
+/// of every service on the port refuses them, one by one, and only the generation records
+/// a call carries are taken; a certificate of it that its record never held is refused
+/// before Raft sees the call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "every certificate of one removed controller, on every member, in order"
+)]
 async fn a_removed_controller_is_refused_with_every_certificate() {
     // Twenty-day certificates are due for renewal at once.
     let lab = Lab::three_with(
@@ -953,13 +960,7 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
     let renewed = lab
         .first
         .registry
-        .renew(
-            node,
-            &running.serial,
-            &csr,
-            tenko_core::Timestamp::now(),
-            None,
-        )
+        .renew(node, &running.serial, &csr, tenko_core::Timestamp::now())
         .await
         .expect("a renewal before the removal");
     // A certificate of the controller that its record never held.
@@ -1000,15 +1001,20 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
             .is_revoked(&stray.info.serial)
     );
 
-    // Each certificate with the refusal it gets: `None` for the handshake.
+    // Each certificate with the refusal it gets.
     let cases = [
         (
             "the certificate it runs with",
             running_chain,
             running_key,
-            None,
+            Some("cluster.peer.revoked"),
         ),
-        ("the renewed certificate", renewed.chain, renewed_key, None),
+        (
+            "the renewed certificate",
+            renewed.chain,
+            renewed_key,
+            Some("cluster.peer.revoked"),
+        ),
         (
             "the certificate outside the record",
             stray.chain,
@@ -1027,6 +1033,230 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
                 member.node()
             );
         }
+        for path in EVERY_METHOD {
+            let refused = call_path(&lab, &target.identity, member, path, &|_| {}).await;
+            assert_eq!(
+                code_of(&refused),
+                Some("cluster.peer.revoked"),
+                "{path} on member {}",
+                member.node()
+            );
+        }
+    }
+    // The exchange: a record the revoked certificate signed stops a member's writes.
+    let forged = record(1, None, node, &[], &target.identity);
+    let refused = call_path(
+        &lab,
+        &target.identity,
+        &staying[0],
+        "/tenko.cluster.v1.Cluster/Members",
+        &offering(std::slice::from_ref(&forged)),
+    )
+    .await;
+    assert_eq!(
+        code_of(&refused),
+        Some("cluster.peer.revoked"),
+        "{refused:?}"
+    );
+    assert!(!still_writes(&staying[0]).await, "the record was taken");
+    lab.stop().await;
+}
+
+/// Every method the cluster port serves, by its gRPC path.
+const EVERY_METHOD: [&str; 23] = [
+    "/tenko.cluster.v1.Handshake/Hello",
+    "/tenko.cluster.v1.Node/Heartbeat",
+    "/tenko.cluster.v1.Node/Renew",
+    "/tenko.cluster.v1.Observations/Ingest",
+    "/tenko.cluster.v1.Config/Watch",
+    "/tenko.cluster.v1.Config/Secrets",
+    "/tenko.cluster.v1.Config/Offer",
+    "/tenko.cluster.v1.Config/Report",
+    "/tenko.cluster.v1.Commands/Subscribe",
+    "/tenko.cluster.v1.Commands/Report",
+    "/tenko.cluster.v1.Metrics/Snapshot",
+    "/tenko.cluster.v1.Metrics/History",
+    "/tenko.cluster.v1.Raft/AppendEntries",
+    "/tenko.cluster.v1.Raft/Vote",
+    "/tenko.cluster.v1.Raft/InstallSnapshot",
+    "/tenko.cluster.v1.Cluster/Join",
+    "/tenko.cluster.v1.Cluster/Propose",
+    "/tenko.cluster.v1.Cluster/ReadIndex",
+    "/tenko.cluster.v1.Cluster/Members",
+    "/tenko.cluster.v1.Cluster/Digest",
+    "/tenko.cluster.v1.Cluster/TransferKek",
+    "/tenko.cluster.v1.Cluster/Campaign",
+    "/tenko.cluster.v1.Cluster/Change",
+];
+
+/// Calls `path` on `member` as `identity` with an empty message: the refusal.
+async fn call_path(
+    lab: &Lab,
+    identity: &Identity,
+    member: &Member,
+    path: &'static str,
+    stamp: &(dyn Fn(&mut tonic::metadata::MetadataMap) + Sync),
+) -> tonic::Status {
+    let network = PeerNetwork::new(NodeId(0), PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
+            .expect("config"),
+    );
+    let channel = network
+        .channel(&member.addr.to_string())
+        .await
+        .expect("the handshake passes");
+    let mut grpc = tonic::client::Grpc::new(channel);
+    grpc.ready().await.expect("ready");
+    let mut request = tonic::Request::new(());
+    stamp(request.metadata_mut());
+    grpc.unary::<(), (), _>(
+        request,
+        tonic::codegen::http::uri::PathAndQuery::from_static(path),
+        tonic_prost::ProstCodec::default(),
+    )
+    .await
+    .expect_err(path)
+}
+
+/// Two controllers forced on the two sides of a split, each of its own store and one CA,
+/// both renewed after the fork (neither knows the other's certificate), and one revoked by
+/// the other's forced step, meet over real ports: the revoked side's call, with its old
+/// certificate (on the revocation list) or its renewed one (unknown), carries its record to
+/// the other, whose refusal carries that side's record back. Both stop writing. A side that
+/// has no CA root yet keeps writing until it has one: the record reaches it again with the
+/// next call (the push repeats every ten seconds).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(
+    clippy::too_many_lines,
+    reason = "two forked sides, their renewals and their meeting, in order"
+)]
+async fn two_forced_sides_that_renewed_and_revoked_both_stop_when_they_meet() {
+    let ca_store = Arc::new(tenko_store::mem::MemStore::default());
+    let ca_vault = tenko_vault::MemVault::with_store(Arc::clone(&ca_store));
+    let ca = Arc::new(
+        InternalCa::load_or_init(ca_store.as_ref(), &ca_vault, &system(), CaPolicy::default())
+            .await
+            .expect("CA"),
+    );
+    let roles: tenko_core::RoleSet = [Role::Controller].into_iter().collect();
+    let issue = |node: u64| -> Identity {
+        let issued = ca
+            .issue_node_cert_with_key_for(NodeId(node), roles, tenko_core::Timestamp::now())
+            .expect("certificate");
+        (issued.chain, issued.key)
+    };
+    let mut sides = Vec::new();
+    for node in [1001_u64, 1002] {
+        let store = RaftStore::open_temp(store_config(node, &|config| config.bootstrap = true))
+            .await
+            .expect("store");
+        let (chain, key) = issue(node);
+        let reference =
+            certificate_ref(&tenko_cluster::ca::CertInfo::from_der(&chain[0]).expect("info"));
+        sides.push(Arc::new(
+            start_member(
+                store,
+                &ca,
+                chain,
+                &key,
+                Arc::new(FixedIdentity(reference)),
+                false,
+            )
+            .await,
+        ));
+    }
+    let lab = Lab {
+        members: Mutex::new(sides.clone()),
+        ca: Arc::clone(&ca),
+        first: Arc::clone(&sides[0]),
+    };
+    let (a, b) = (&sides[0], &sides[1]);
+    a.peers.attach_ca_root(ca.root_der().clone());
+    // Each side's forced step: generation 1 forced on itself, the other superseded.
+    let mut forced = Vec::new();
+    for (side, other) in [(a, b), (b, a)] {
+        let own = record(1, None, side.node(), &[other.node()], &side.identity);
+        wait_until_async("the side's own record written", async || {
+            let mut batch = WriteBatch::for_request(&system());
+            batch
+                .put_typed(&tenko_cluster::generation::GENERATION, &1_u64, &own)
+                .expect("record");
+            side.store.propose(batch).await.is_ok()
+        })
+        .await;
+        side.peers.load_generation().await.expect("generation");
+        assert!(still_writes(side).await);
+        forced.push(own);
+    }
+    // After the fork: both renew, and the first side's step revoked the second's old one.
+    let (renewed_a, renewed_b) = (issue(a.node().0), issue(b.node().0));
+    let old_b = tenko_cluster::ca::CertInfo::from_der(&b.identity.0[0]).expect("info");
+    a.registry.revocations().insert([old_b.serial]);
+    // The first side's renewed certificate reaches the second, which cannot check the record
+    // before it has the CA root, and checks it at the next call once it does.
+    for root in [false, true] {
+        if root {
+            b.peers.attach_ca_root(lab.ca.root_der().clone());
+        }
+        let refused = call_path(
+            &lab,
+            &renewed_a,
+            b,
+            "/tenko.cluster.v1.Cluster/Members",
+            &offering(std::slice::from_ref(&forced[0])),
+        )
+        .await;
+        assert_eq!(
+            code_of(&refused),
+            Some("cluster.node.unknown"),
+            "{refused:?}"
+        );
+        assert_eq!(still_writes(b).await, !root, "with the CA root: {root}");
+    }
+    // The second side calls the first with each of its certificates; each call carries its
+    // record, and each refusal the first side's.
+    for (what, identity, code) in [
+        ("old", &b.identity, "cluster.peer.revoked"),
+        ("renewed", &renewed_b, "cluster.node.unknown"),
+    ] {
+        let refused = call_path(
+            &lab,
+            identity,
+            a,
+            "/tenko.cluster.v1.Raft/Vote",
+            &offering(std::slice::from_ref(&forced[1])),
+        )
+        .await;
+        assert_eq!(code_of(&refused), Some(code), "{what}: {refused:?}");
+        let back = tenko_cluster::generation::decode_lineage(
+            &refused
+                .metadata()
+                .get_bin(tenko_cluster::generation::RECORD_METADATA)
+                .expect("the first side's records")
+                .to_bytes()
+                .expect("bytes"),
+        )
+        .expect("a lineage");
+        assert_eq!(
+            back.last()
+                .map(tenko_cluster::generation::GenerationRecord::hash),
+            Some(forced[0].hash()),
+            "{what}"
+        );
+    }
+    for side in [a, b] {
+        assert_eq!(
+            side.peers
+                .generation()
+                .fence
+                .as_ref()
+                .map(|(reason, _)| *reason),
+            Some(tenko_store::FenceReason::Conflict),
+            "side {}",
+            side.node()
+        );
+        assert!(!still_writes(side).await, "side {}", side.node());
     }
     lab.stop().await;
 }
@@ -1709,13 +1939,14 @@ async fn calls_refused(
     [vote, append, snapshot, join]
 }
 
-/// What a removed controller gets from a member: nothing with the certificate it ran with
-/// (the handshake fails), and the refusal of the services with a certificate its record
-/// never held, which passes the handshake and so shows that the member is reachable.
+/// What a removed controller gets from a member: the revocation with the certificate it ran
+/// with (its handshake passes marked, for the exchange of generation records only), and the
+/// refusal of the services with a certificate its record never held.
 async fn assert_cut_off(lab: &Lab, node: NodeId, running: &Identity, member: &Member) {
+    let revoked = Some("cluster.peer.revoked".to_owned());
     assert_eq!(
         calls_refused(lab, node, running, member).await,
-        [None, None, None, None],
+        [revoked.clone(), revoked.clone(), revoked.clone(), revoked],
         "the certificate it ran with, on member {}",
         member.node()
     );
@@ -2314,7 +2545,6 @@ async fn a_certificate_its_record_does_not_hold_is_refused_on_every_call() {
             &running.serial,
             &csr,
             tenko_core::Timestamp::now(),
-            None,
         )
         .await
         .expect("a renewal");
@@ -2578,84 +2808,48 @@ async fn still_writes(member: &Member) -> bool {
     }
 }
 
-/// A record signed with a certificate minted from the CA's key places nothing and fences
-/// nothing, whether it comes as an offer (the push's answer takes this path) or on a call
-/// of a member with its own valid certificate: for an unused node id, for the leader (a
-/// voter of the receiver's history) and for a superseded controller. Each is counted and
-/// shown, and every member keeps writing.
+/// A record signed with a certificate minted from the CA's key, for a node id no member
+/// knows, counts like any other: the receiver stops writing and does nothing else. Its store,
+/// its Raft membership and its leader stay as they were, and it follows no one; the stop
+/// shows the record's claims. (A forced step on the chosen side lifts it:
+/// `tenko cluster recover`, in the cluster lab.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_record_with_a_minted_signer_fences_nothing_by_either_path() {
+async fn a_minted_record_stops_writes_and_does_nothing_else() {
     let lab = Lab::three(&no_change).await;
     let leader = lab.leader().await;
-    let members = lab.members();
-    let followers: Vec<_> = members
-        .iter()
-        .filter(|member| member.node() != leader.node())
-        .cloned()
-        .collect();
-    let (superseded, receiver) = (&followers[0], &followers[1]);
-    let mut batch = WriteBatch::for_request(&system());
-    batch
-        .put_typed(
-            &tenko_cluster::generation::SUPERSEDED,
-            &superseded.node().0,
-            &tenko_cluster::generation::SupersededMark {
-                generation: 1,
-                record: tenko_core::audit::Digest([1; 32]),
-                rejoin: false,
-            },
-        )
-        .expect("mark");
-    leader.store.propose(batch).await.expect("write");
-    let mut offers = 0;
-    for signer in [NodeId(4242), leader.node(), superseded.node()] {
-        let minted = stray_certificate(&lab, signer);
-        let forged = record(1, None, signer, &[], &minted);
-        // The offer (what a push answer or a caller's metadata leads to).
-        let refused = receiver
-            .peers
-            .offer(std::slice::from_ref(&forged), Some(signer))
-            .await
-            .expect_err("a minted signer is refused");
-        assert_eq!(
-            refused.code(),
-            tenko_cluster::generation::codes::RECORD_UNHELD,
-            "{}",
-            refused.detail()
-        );
-        // On a call of a member with its own certificate.
-        let calls = every_call(
-            &lab,
-            leader.node(),
-            &leader.identity,
-            receiver,
-            &offering(std::slice::from_ref(&forged)),
-        )
-        .await;
-        assert!(
-            calls
-                .iter()
-                .all(|(_, code)| code.as_deref() == Some("cluster.superseded")),
-            "a claim of another generation is refused on every call: {calls:?}"
-        );
-        offers += 1 + calls.len();
-        for member in &members {
-            assert!(
-                still_writes(member).await,
-                "member {} after a record minted for {signer}",
-                member.node()
-            );
-        }
-    }
-    let refused = receiver.peers.refused_records();
-    assert_eq!(refused.count, u64::try_from(offers).expect("count"));
+    let receiver = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    let membership = receiver.store.membership();
+    let applied = receiver.store.applied_index().expect("applied");
+    let minted = stray_certificate(&lab, NodeId(4242));
+    let forged = record(1, None, NodeId(4242), &[], &minted);
     assert_eq!(
-        refused.last.map(|last| last.code).as_deref(),
-        Some(tenko_cluster::generation::codes::RECORD_UNHELD)
+        receiver
+            .peers
+            .offer(std::slice::from_ref(&forged), None)
+            .await
+            .expect("a record of the CA counts"),
+        tenko_cluster::generation::Relation::Descendant
     );
-    // The last signer is a controller this store knows: shown apart, as it could be a
-    // renewal this copy never saw.
-    assert!(refused.unverified.is_some());
+    let state = receiver.peers.generation();
+    let (reason, records) = state.fence.as_ref().expect("fenced");
+    assert_eq!(*reason, tenko_store::FenceReason::Superseded);
+    assert_eq!(
+        records.tip().map(tenko_cluster::generation::Signed::hash),
+        Some(forged.hash())
+    );
+    assert!(!still_writes(&receiver).await);
+    // Nothing taken, nothing followed: the receiver's copy and its group are its own.
+    assert_eq!(receiver.store.membership(), membership);
+    assert!(receiver.store.applied_index().expect("applied") >= applied);
+    assert_eq!(receiver.peers.generation().lineage.number(), 0);
+    assert!(
+        !receiver.store.membership().voters.contains(&NodeId(4242)),
+        "the forced controller of the record joined nothing"
+    );
     lab.stop().await;
 }
 
@@ -2823,16 +3017,15 @@ async fn a_joining_learner_is_seeded_only_by_a_voter_its_answer_names() {
     };
     let unknown = Some("cluster.node.unknown".to_owned());
     assert_eq!(vote(&leader.identity).await, unknown, "before the answer");
-    let serial = tenko_cluster::ca::CertInfo::from_der(&leader.identity.0[0])
-        .expect("info")
-        .serial;
+    let info = tenko_cluster::ca::CertInfo::from_der(&leader.identity.0[0]).expect("info");
     joiner.peers.seed_from(&v1::JoinResponse {
         leader_id: leader.node().0,
         term: 1,
         members: Vec::new(),
         voter_serials: vec![v1::VoterSerial {
             node_id: leader.node().0,
-            serial,
+            serial: info.serial,
+            sha256: info.sha256,
         }],
     });
     assert_ne!(
@@ -3140,7 +3333,7 @@ async fn a_vault_key_still_in_use_is_rotated_at_once() {
     drop(key);
     let renewed = single
         .registry
-        .renew(NodeId(1), &serial, &csr, tenko_core::Timestamp::now(), None)
+        .renew(NodeId(1), &serial, &csr, tenko_core::Timestamp::now())
         .await
         .expect("a rotation is never early");
     let renewed = tenko_cluster::ca::CertInfo::from_der(&renewed.chain[0])
@@ -3159,13 +3352,7 @@ async fn a_vault_key_still_in_use_is_rotated_at_once() {
     let (_, csr) = generate_csr().expect("csr");
     let early = single
         .registry
-        .renew(
-            NodeId(1),
-            &held[0],
-            &csr,
-            tenko_core::Timestamp::now(),
-            None,
-        )
+        .renew(NodeId(1), &held[0], &csr, tenko_core::Timestamp::now())
         .await
         .expect_err("not due");
     assert!(
@@ -3176,8 +3363,8 @@ async fn a_vault_key_still_in_use_is_rotated_at_once() {
 }
 
 /// The first start's probe reads a refusal that carries another forced history as a live
-/// cluster: a sibling signed by a controller this history holds is competing; this
-/// history's own records, and a sibling signed with a minted certificate, are not.
+/// cluster: a sibling is competing whatever certificate of the CA signed it, this history's
+/// own records are not.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_refusal_with_a_competing_history_is_read_as_one() {
     let lab = Lab::three(&no_change).await;
@@ -3210,7 +3397,6 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
         leader
             .peers
             .competing(&refusal(std::slice::from_ref(&sibling)))
-            .await
             .expect("checked")
             .is_some_and(|rival| rival.contains(&other.node().to_string())),
         "a sibling of a controller this history holds"
@@ -3219,7 +3405,6 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
         leader
             .peers
             .competing(&refusal(std::slice::from_ref(&own)))
-            .await
             .expect("checked"),
         None,
         "this history's own record"
@@ -3231,13 +3416,12 @@ async fn a_refusal_with_a_competing_history_is_read_as_one() {
         &[],
         &stray_certificate(&lab, other.node()),
     );
-    assert_eq!(
+    assert!(
         leader
             .peers
             .competing(&refusal(std::slice::from_ref(&minted)))
-            .await
-            .expect("checked"),
-        None,
+            .expect("checked")
+            .is_some(),
         "a minted signer"
     );
     lab.stop().await;
@@ -3271,7 +3455,6 @@ async fn a_member_names_the_identity_a_renewal_put_under_node() {
             &started.info.serial,
             &csr,
             tenko_core::Timestamp::now(),
-            None,
         )
         .await
         .expect("a renewal");
@@ -3367,15 +3550,14 @@ async fn an_offer_of_the_largest_lineage_passes_the_transport() {
         parent = Some(next.hash());
         records.push(next);
     }
-    // Fill the budget with chain bytes (the service checks them only when it acts).
-    let mut pad = (MAX_LINEAGE_BYTES - encode_lineage(&records).expect("cbor").len()) / 4;
+    // Fill the budget with certificate bytes (the service checks them only when it acts).
+    let mut pad = (MAX_LINEAGE_BYTES - encode_lineage(&records).expect("cbor").len()) / 2;
     let size = loop {
         for padded in records.iter_mut().skip(1) {
-            padded.continuity = vec![tenko_cluster::continuity::Step {
-                previous: tenko_core::serde_util::HexBytes(vec![1; pad]),
-                next: tenko_core::serde_util::HexBytes(vec![2; pad]),
-                signature: tenko_core::serde_util::HexBytes(vec![3; 8]),
-            }];
+            padded.chain.truncate(1);
+            padded
+                .chain
+                .push(tenko_core::serde_util::HexBytes(vec![1; pad]));
         }
         let size = encode_lineage(&records).expect("cbor").len();
         if size <= MAX_LINEAGE_BYTES {
@@ -3402,8 +3584,66 @@ async fn an_offer_of_the_largest_lineage_passes_the_transport() {
     lab.stop().await;
 }
 
-/// A controller renews its cluster certificate itself, the renewed key signing the new one;
-/// the node service that renews other nodes' certificates refuses it.
+/// A lineage larger than an offer may hold is offered from its newest record back, within
+/// the byte bound: a caller always receives the newest record.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_offer_keeps_the_newest_records_within_its_byte_bound() {
+    use tenko_cluster::generation::{
+        GENERATION, GenerationRecord, MAX_LINEAGE_BYTES, RECORD_METADATA, decode_lineage,
+        encode_lineage,
+    };
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let caller = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    let mut records = Vec::new();
+    let mut parent = None;
+    let mut batch = WriteBatch::for_request(&system());
+    for number in 1..=3_u64 {
+        let mut next = record(number, parent, leader.node(), &[], &leader.identity);
+        next.chain.push(tenko_core::serde_util::HexBytes(vec![
+            1;
+            MAX_LINEAGE_BYTES / 3
+        ]));
+        parent = Some(next.hash());
+        batch
+            .put_typed(&GENERATION, &number, &next)
+            .expect("record");
+        records.push(next);
+    }
+    assert!(encode_lineage(&records).expect("cbor").len() > MAX_LINEAGE_BYTES);
+    leader.store.propose(batch).await.expect("write");
+    leader.peers.load_generation().await.expect("generation");
+    let refused = call_path(
+        &lab,
+        &caller.identity,
+        &leader,
+        "/tenko.cluster.v1.Cluster/Members",
+        &|_| {},
+    )
+    .await;
+    let offered = decode_lineage(
+        &refused
+            .metadata()
+            .get_bin(RECORD_METADATA)
+            .expect("the leader's records")
+            .to_bytes()
+            .expect("bytes"),
+    )
+    .expect("within the bound");
+    assert_eq!(
+        offered.last().map(GenerationRecord::hash),
+        Some(records[2].hash())
+    );
+    assert!(offered.len() < records.len(), "{}", offered.len());
+    lab.stop().await;
+}
+
+/// A controller renews its cluster certificate itself; the node service that renews other
+/// nodes' certificates refuses it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_controller_cannot_renew_through_the_node_service() {
     let lab = Lab::three(&no_change).await;

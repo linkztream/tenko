@@ -15,42 +15,36 @@
 //! way from offered bytes to a [`Relation`], and [`Signed`] has no public constructor for a
 //! record that came from outside. The offer is a lineage, the records of the sender's
 //! history from older to newer (at most [`MAX_LINEAGE`]), so a controller several
-//! generations behind can link the newest record to its own. Every record must verify
-//! (chain to the CA at the record's time, a controller's certificate naming the forced
-//! node, the signature over [`SIGNING_CONTEXT`] and the body), carry a time not after the
-//! receiver's clock plus [`MAX_CLOCK_SKEW`], and be signed by a certificate the receiver's
-//! store does not revoke. The first new record must also be signed by a certificate that
-//! the receiver's node record of its signer holds, and the offer ends before any later
-//! record whose signer's certificate it does not hold: a certificate minted with the CA's key
-//! (which every controller, every copy of a data directory and every backup holds) places
-//! nothing and fences nothing. Then:
+//! generations behind can link the newest record to its own.
+//!
+//! The rule: a record counts when it verifies under the installation's CA as signed by a
+//! controller's certificate naming the forced node (the chain at the record's own time, the
+//! signature over [`SIGNING_CONTEXT`] and the body) and is not older than the receiver's
+//! history. Nothing about the signer is looked up in the receiver's store: not the
+//! certificates its node record holds, not a revocation, not a superseded mark. A receiver
+//! needs nothing from the other side but the CA, so two forced histories that meet always
+//! stop each other, whatever either side renewed, revoked or superseded. The time a record
+//! carries is shown and never refused: no difference of clocks can make a receiver ignore a
+//! record. The cost, accepted by the owner: whoever holds the CA's key (anyone who once held
+//! a controller's secrets) can stop the cluster's writes with a record of their own, again
+//! and again; an operator lifts each stop with a forced step on the side they choose, and
+//! the cure is a new CA. A record does nothing but stop writes: it never makes a receiver
+//! follow, join, take a store or change its data.
 //!
 //! - **Known** ([`Relation::Known`]): every record is in the receiver's own lineage, or the
 //!   newest one is older than the receiver's own. Nothing to do; the other side learns of
 //!   this history from the receiver.
 //! - **Descendant**: the offer links to the receiver's own record (the first new record's
-//!   parent is it) with a higher number, signed by a voter of the receiver's history that
-//!   is neither superseded nor revoked there and holds the certificate that signed. The
-//!   receiver's history was superseded: it fences itself.
-//! - **Sibling**: the first new record shares the receiver's parent, is not older, and is
-//!   signed by a voter of that parent history: a competing forced history. Both stop
-//!   writing; an operator chooses, and [`suggested_winner`] names the same one everywhere.
+//!   parent is it) with a higher number: it claims that the receiver's history was
+//!   superseded, and the receiver fences itself.
+//! - **Sibling**: the first new record shares the receiver's parent and is not older: a
+//!   competing forced history. Both stop writing; an operator chooses.
 //! - **Unplaced**: anything else that is not older than the receiver's own: a parent the
 //!   receiver does not know, or a lineage longer than an offer carries. The receiver stops
-//!   writing too and shows the records to an operator, never ignores them: a history it
-//!   cannot place may be one that superseded it.
+//!   writing too and shows the records.
 //!
-//! A record signed by a revoked certificate, by a certificate the receiver's record of its
-//! signer does not hold, by a controller superseded in the receiver's store as a
-//! descendant, or by a node that was not a voter, is refused and fences nothing; the
-//! receiver counts and reports it. A controller superseded here can still sign a sibling or
-//! a newer history that stops this one (two forced histories always stop each other) until
-//! it is revoked or removed. An offer whose verified part is older than the receiver's
-//! history but goes on with an unverified record that is not is refused too, never taken
-//! for an older history: the receiver shows it as unverified. A receiver further behind than an offer carries
-//! ([`MAX_LINEAGE`], [`MAX_LINEAGE_BYTES`]) may hold no certificate of the first record's
-//! signer and refuses it: that takes more forced steps than an offer carries while the old
-//! history lives.
+//! Every figure a record shows (its number, forced controller, time, fork point, and
+//! whether it claims to supersede or to compete) is its signer's claim.
 //!
 //! # Byte layouts
 //!
@@ -64,7 +58,10 @@
 //!   and `at` with their meaning ([`Header`]): a receiver of an older version can then place
 //!   a record of a newer layout and stop writing, although it cannot read the rest.
 //! - The record is CBOR of [`GenerationRecord`]: the body bytes, the signature and the
-//!   signer's certificate chain (DER, leaf first), read exactly as well. The store row
+//!   signer's certificate chain (DER, leaf first), read exactly as well. This envelope is
+//!   frozen, its bytes pinned by `the_record_lineage_and_fence_layouts_are_pinned`: it never
+//!   gains a field, as an older reader would refuse such a record and so never stop for it;
+//!   whatever a later version needs goes into a new body layout. The store row
 //!   [`GENERATION`] holds every record of the store's history by number; the metadata entry
 //!   [`RECORD_METADATA`] carries a lineage (a CBOR array of records, oldest first).
 //! - The wire claim ([`Claim`], metadata entry [`GENERATION_METADATA`]) is
@@ -75,13 +72,7 @@
 //!
 //! The golden tests below pin every layout and one signed record byte for byte.
 
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, BTreeSet},
-    fs, io,
-    path::Path,
-    time::Duration,
-};
+use std::{collections::BTreeSet, fs, io, path::Path, time::Duration};
 
 use aws_lc_rs::{
     rand::SystemRandom,
@@ -92,7 +83,7 @@ use aws_lc_rs::{
 use rustls::pki_types::{CertificateDer, UnixTime};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
-    NodeId, Revision, Role, Timestamp,
+    NodeId, Revision, Timestamp,
     audit::{ChainHead, Digest},
     codec::{from_cbor, to_canonical_cbor, to_cbor},
     serde_util::{HexBytes, to_hex},
@@ -104,7 +95,6 @@ use tenko_vault::SecretBytes;
 use crate::{
     error::ClusterError,
     identity::{NODE_DIR, files_error, write_private},
-    model::tables,
     mtls::PeerIdentity,
 };
 
@@ -120,17 +110,13 @@ pub const SIGNING_CONTEXT: &[u8] = b"tenko generation record v1\0";
 pub const MAX_RECORD_BYTES: usize = 8 * 1024;
 
 /// The most records an offered lineage carries; a receiver further behind cannot link the
-/// newest: it stops writing ([`Relation::Unplaced`]) when it holds the first record's
-/// signer, and refuses the offer otherwise.
+/// newest and stops writing all the same ([`Relation::Unplaced`]).
 pub const MAX_LINEAGE: usize = 8;
 
 /// The largest encoded lineage: a binary metadata entry of about 12 KiB in base64, within
 /// the 16 KiB of headers HTTP/2 takes by default at both ends of a call, with room for the
 /// others. A record alone ([`MAX_RECORD_BYTES`]) always fits.
 pub const MAX_LINEAGE_BYTES: usize = 9 * 1024;
-
-/// How far a record's time may be ahead of the receiver's clock.
-pub const MAX_CLOCK_SKEW: Duration = Duration::from_secs(300);
 
 /// Bytes of the hash a [`Claim`] carries: enough to tell two signed records apart.
 pub const CLAIM_HASH_BYTES: usize = 16;
@@ -173,6 +159,9 @@ pub mod codes {
     pub const MIXED: &str = "cluster.recover.mixed";
     /// `--force` on a copy that is already the only voter.
     pub const NOT_NEEDED: &str = "cluster.recover.not_needed";
+    /// `--force` on a copy whose own generation is the largest number already: no step can
+    /// go above it (a record minted with the CA's key took the numbers; a new CA ends that).
+    pub const NO_GENERATION_LEFT: &str = "cluster.recover.no_generation_left";
     /// `--revoke` names a node that is not another controller with a record.
     pub const UNKNOWN_NODE: &str = "cluster.recover.unknown_node";
     /// A fingerprint given with `--compare` does not read.
@@ -188,19 +177,11 @@ pub mod codes {
     pub const IN_USE: &str = "cluster.recover.in_use";
     /// A generation record that does not verify, or that this receiver may not act on.
     pub const RECORD_INVALID: &str = "cluster.recover.record_invalid";
-    /// A generation record signed by a certificate that the receiver's node record of its
-    /// signer does not hold (one minted with the CA's key): it places and fences nothing.
-    pub const RECORD_UNHELD: &str = "cluster.recover.record_unheld";
     /// Warning: generation records were refused since this controller started; the last
     /// one is named.
     pub const RECORDS_REFUSED: &str = "cluster.recover.records_refused";
-    /// Warning: a record was refused whose signer is a controller this store knows, by a
-    /// certificate it does not hold (a renewal it never saw, or a forgery).
-    pub const UNVERIFIED_HISTORY: &str = "cluster.recover.unverified_history";
     /// Warning: an older history of the cluster met this one.
     pub const OLDER_HISTORY: &str = "cluster.recover.older_history";
-    /// The forced step would sign with a certificate this copy's record does not hold.
-    pub const SIGNER_UNHELD: &str = "cluster.recover.signer_unheld";
     /// Warning: a superseded controller has not received the record yet.
     pub const SUPERSEDED_UNREACHED: &str = "cluster.recover.superseded_unreached";
     /// Warning: a superseded controller is neither rejoined nor removed.
@@ -229,13 +210,6 @@ pub struct ForkPoint {
     pub revision: Revision,
     /// The head of the audit chain after the whole log.
     pub audit: ChainHead,
-}
-
-impl ForkPoint {
-    /// Raft's order of log ids: term first, then index. Only meaningful inside one history.
-    pub fn log_order(&self, other: &Self) -> Ordering {
-        (self.term, self.index).cmp(&(other.term, other.index))
-    }
 }
 
 /// What a generation record says (layout 1). Its canonical CBOR is what is hashed and,
@@ -299,12 +273,6 @@ pub struct GenerationRecord {
     pub signature: HexBytes,
     /// The forced controller's certificate chain, DER, leaf first.
     pub chain: Vec<HexBytes>,
-    /// The renewals that lead from an older certificate of the forced controller to the
-    /// leaf, oldest first ([`crate::continuity`]): a store of a history that forked before a
-    /// renewal holds the older certificate only. Not signed by the record: each step is
-    /// signed by the key it renews. Empty (and absent from the bytes) without a renewal.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub continuity: Vec<crate::continuity::Step>,
 }
 
 impl std::fmt::Debug for GenerationRecord {
@@ -372,7 +340,6 @@ impl GenerationRecord {
             body: HexBytes(bytes),
             signature: HexBytes(signature.as_ref().to_vec()),
             chain: chain.iter().map(|cert| HexBytes(cert.to_vec())).collect(),
-            continuity: Vec::new(),
         })
     }
 
@@ -440,9 +407,8 @@ impl GenerationRecord {
     }
 
     /// Checks the chain against `ca_root` at the record's own time (a returning controller
-    /// may meet a record whose signer renewed its certificate since; how far that time may
-    /// lie is bounded by [`Lineage::admit`]), the leaf as the forced controller's, and the
-    /// signature.
+    /// may meet a record whose signer renewed its certificate since), the leaf as the forced
+    /// controller's, and the signature.
     fn verify(&self, ca_root: &CertificateDer<'_>) -> Result<Signed, ClusterError> {
         let header = self.header()?;
         if header.number == 0 {
@@ -643,7 +609,7 @@ pub struct Admission {
 /// The fence a controller raises for an admitted offer, given the fence it holds already:
 /// `None` when nothing changes. A fence never weakens; the same newest record again
 /// changes nothing; a competing record newer than the one a conflict holds replaces it, so
-/// the stopped side always shows the other side's latest history and its suggested winner.
+/// the stopped side always shows the other side's latest history.
 pub fn next_fence(
     current: Option<&(FenceReason, Lineage)>,
     admission: &Admission,
@@ -667,153 +633,6 @@ pub fn next_fence(
             .map(|signed| signed.record().clone())
             .collect(),
     ))
-}
-
-/// What the receiver's store says about the signers: the voters of its history, the
-/// controllers it marks superseded, the revoked certificates and nodes, and the
-/// certificates each node record holds.
-#[derive(Debug, Clone)]
-pub struct Standing {
-    voters: BTreeSet<NodeId>,
-    superseded: BTreeSet<NodeId>,
-    revoked_serials: BTreeSet<String>,
-    revoked_nodes: BTreeSet<NodeId>,
-    serials: BTreeMap<NodeId, crate::continuity::Held>,
-    now: Timestamp,
-}
-
-impl Default for Standing {
-    /// A store that knows no controller, at the current time: every signer lacks standing.
-    fn default() -> Self {
-        Self {
-            voters: BTreeSet::new(),
-            superseded: BTreeSet::new(),
-            revoked_serials: BTreeSet::new(),
-            revoked_nodes: BTreeSet::new(),
-            serials: BTreeMap::new(),
-            now: Timestamp::now(),
-        }
-    }
-}
-
-impl Standing {
-    /// The standing in `view`, with `voters` the voters of the receiver's membership and
-    /// `now` its clock.
-    ///
-    /// # Errors
-    ///
-    /// A store error.
-    pub fn read(
-        view: &dyn ReadView,
-        voters: BTreeSet<NodeId>,
-        now: Timestamp,
-    ) -> Result<Self, ClusterError> {
-        let mut standing = Self {
-            voters,
-            now,
-            ..Self::default()
-        };
-        for (node, _, _) in view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)? {
-            standing.superseded.insert(NodeId(node));
-        }
-        for (serial, _, _) in
-            view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
-        {
-            standing.revoked_serials.insert(serial);
-        }
-        standing.revoked_nodes = crate::registry::revoked_nodes(view)?.into_iter().collect();
-        for (node, record, _) in
-            view.scan_typed(&tables::NODES, KeyRange::all(), usize::MAX, false)?
-        {
-            if record.roles.contains(&Role::Controller) {
-                standing.serials.insert(
-                    NodeId(node),
-                    record
-                        .serials
-                        .into_iter()
-                        .map(|cert| (cert.serial, cert.sha256))
-                        .collect(),
-                );
-            }
-        }
-        Ok(standing)
-    }
-
-    fn revoked(&self, signer: &PeerIdentity) -> bool {
-        self.revoked_serials.contains(&signer.serial) || self.revoked_nodes.contains(&signer.node)
-    }
-
-    /// Whether this store marks `node` superseded.
-    pub fn is_superseded(&self, node: NodeId) -> bool {
-        self.superseded.contains(&node)
-    }
-
-    /// Cuts `new` before its first record after the first whose signer this store does
-    /// not hold: a record signed with a minted certificate never rides on a valid one into
-    /// the fence, its number or its suggested winner. The first record is checked by
-    /// [`Lineage::admit`] itself.
-    /// Returns the newest record cut off, if any.
-    fn held_prefix(&self, new: &mut Vec<Signed>) -> Option<Signed> {
-        let cut = new.iter().skip(1).position(|signed| !self.holds(signed))?;
-        let dropped = new.last().cloned();
-        new.truncate(cut + 1);
-        dropped
-    }
-
-    /// Whether this store holds the certificate that signed `record`: its node record of the
-    /// signer holds the serial, or the record's chain of renewals leads to it from a
-    /// certificate that record holds.
-    fn holds(&self, record: &Signed) -> bool {
-        let signer = &record.signer;
-        let Some(certificates) = self.serials.get(&signer.node) else {
-            return false;
-        };
-        // The serial and the SHA-256 both: anyone holding the CA's key can mint a
-        // certificate with a serial the record holds.
-        certificates
-            .get(&signer.serial)
-            .is_some_and(|sha256| sha256.eq_ignore_ascii_case(&signer.sha256))
-            || record.record.chain.first().is_some_and(|leaf| {
-                crate::continuity::Chain(&record.record.continuity).reaches(
-                    signer.node,
-                    certificates,
-                    &|serial| self.revoked_serials.contains(serial),
-                    &leaf.0,
-                )
-            })
-    }
-}
-
-/// The refusal of `record`, whose signer's certificate the receiver's record of it does not
-/// hold; `known` says whether the receiver knows that controller at all.
-fn unheld(record: &Signed, standing: &Standing) -> ClusterError {
-    let signer = record.signer();
-    ClusterError::new(
-        codes::RECORD_UNHELD,
-        403,
-        format!(
-            "generation {} signed by controller {} was refused: its certificate (serial {}) is \
-             not one this history's record of that controller holds",
-            record.number(),
-            signer.node,
-            signer.serial
-        ),
-    )
-    .with_param("node", signer.node.to_string())
-    .with_param("generation", record.number().to_string())
-    // A controller this store knows: a renewal of its certificate that this copy never saw
-    // looks the same as a forgery, so an operator is told apart.
-    .with_param(
-        "known",
-        standing.serials.contains_key(&signer.node).to_string(),
-    )
-}
-
-fn refused(signer: NodeId, why: &str) -> ClusterError {
-    invalid(format!(
-        "a generation record signed by controller {signer} was refused: {why}"
-    ))
-    .with_param("node", signer.to_string())
 }
 
 /// The records of the history a store holds, oldest first; empty at generation 0.
@@ -875,71 +694,55 @@ impl Lineage {
     /// oldest first.
     pub fn offer(&self) -> Vec<GenerationRecord> {
         let mut offer = Vec::new();
-        let mut bytes = 16;
+        let mut bytes: usize = 16;
         for signed in self.records.iter().rev().take(MAX_LINEAGE) {
             let size = signed
                 .record
                 .encode()
                 .map_or(usize::MAX, |encoded| encoded.len());
-            if bytes + size > MAX_LINEAGE_BYTES {
+            // The newest record always goes: a receiver refuses one past the bound itself.
+            if !offer.is_empty() && bytes.saturating_add(size) > MAX_LINEAGE_BYTES {
                 break;
             }
-            bytes += size;
+            bytes = bytes.saturating_add(size);
             offer.push(signed.record.clone());
         }
         offer.reverse();
         offer
     }
 
-    /// Checks an offered lineage against this one and the receiver's `standing` (see the
-    /// module documentation for the rules).
+    /// Checks an offered lineage against this one (see the module documentation for the
+    /// rule).
     ///
     /// # Errors
     ///
-    /// `cluster.recover.record_invalid` for an offer that does not verify, is not one
-    /// lineage, lies in the future, or is signed by a controller this receiver may not take
-    /// a record from; the offer then changes nothing.
+    /// `cluster.recover.record_invalid` for an offer that does not verify or is not one
+    /// lineage; the offer then changes nothing.
     pub fn admit(
         &self,
         offered: &[GenerationRecord],
         ca_root: &CertificateDer<'_>,
-        standing: &Standing,
     ) -> Result<Admission, ClusterError> {
         if offered.is_empty() || offered.len() > MAX_LINEAGE {
             return Err(invalid(format!(
                 "an offered lineage holds 1 to {MAX_LINEAGE} records"
             )));
         }
-        let latest = standing
-            .now
-            .checked_add(MAX_CLOCK_SKEW)
-            .unwrap_or(standing.now);
-        let mut checked = Vec::with_capacity(offered.len());
-        for record in offered {
-            let signed = record.verify(ca_root)?;
-            if signed.at() > latest {
-                return Err(invalid("a generation record carries a time in the future"));
-            }
-            if standing.revoked(&signed.signer) {
-                return Err(refused(signed.forced(), "its certificate is revoked"));
-            }
-            checked.push(signed);
-        }
+        let mut checked = offered
+            .iter()
+            .map(|record| record.verify(ca_root))
+            .collect::<Result<Vec<_>, _>>()?;
         checked.sort_by_key(Signed::number);
         for pair in checked.windows(2) {
-            if pair[1].parent() != Some(pair[0].hash)
-                || pair[1].number() <= pair[0].number()
-                || pair[1].at() < pair[0].at()
-            {
+            if pair[1].parent() != Some(pair[0].hash) || pair[1].number() <= pair[0].number() {
                 return Err(invalid("the offered records are not one lineage"));
             }
         }
         let known: BTreeSet<Digest> = self.records.iter().map(|own| own.hash).collect();
-        let mut new: Vec<Signed> = checked
+        let new: Vec<Signed> = checked
             .into_iter()
             .filter(|signed| !known.contains(&signed.hash))
             .collect();
-        let cut = standing.held_prefix(&mut new);
         let (Some(first), Some(newest)) = (new.first(), new.last()) else {
             return Ok(Admission {
                 relation: Relation::Known,
@@ -947,83 +750,17 @@ impl Lineage {
             });
         };
         let own = self.tip();
-        let own_hash = own.map(|own| own.hash);
-        let own_number = self.number();
-        if newest.number() < own_number {
-            // What it can verify is older than this history, but the offer goes on with a
-            // record that is not, by a certificate this store does not hold: a renewal it
-            // never saw, or a forgery. It fences nothing; it is not an older history either,
-            // and an operator is shown it.
-            if let Some(cut) = cut.filter(|cut| cut.number() >= own_number) {
-                return Err(unheld(&cut, standing));
-            }
-            return Ok(Admission {
-                relation: Relation::Known,
-                new,
-            });
-        }
-        let signer = first.signer();
-        // Every relation that acts needs the signer's certificate held by its node record
-        // here: one minted with the CA's key, which every controller and every copy of a
-        // data directory or backup holds, must never stop a history.
-        if !standing.holds(first) {
-            return Err(unheld(first, standing));
-        }
-        let relation = if first.parent() == own_hash && first.number() > own_number {
-            if !standing.voters.contains(&signer.node) {
-                return Err(refused(signer.node, "it is not a voter of this history"));
-            }
-            if standing.superseded.contains(&signer.node) {
-                return Err(refused(signer.node, "it is superseded in this history"));
-            }
-            if own.is_some_and(|own| first.at() < own.at()) {
-                return Err(refused(signer.node, "its record is older than its parent"));
-            }
+        let relation = if newest.number() < self.number() {
+            Relation::Known
+        } else if first.parent() == own.map(|own| own.hash) && first.number() > self.number() {
             Relation::Descendant
-        } else if let Some(own) = own.filter(|own| first.parent() == own.parent()) {
-            let parent_voters = own.body().map(|body| {
-                body.superseded
-                    .iter()
-                    .copied()
-                    .chain([own.forced()])
-                    .collect::<BTreeSet<_>>()
-            });
-            if parent_voters.is_some_and(|voters| !voters.contains(&signer.node)) {
-                return Err(refused(
-                    signer.node,
-                    "it was not a voter of the parent history",
-                ));
-            }
+        } else if own.is_some_and(|own| first.parent() == own.parent()) {
             Relation::Sibling
         } else {
-            // Another forced history that is not older than this one, at any depth. Its
-            // signer may be one that this history's own forced step superseded (each side of
-            // two forced histories marks the other's controllers so): that must not make this
-            // side deaf to the other, or two authorities that met would both go on writing. A
-            // superseded signer never supersedes (no descendant above); it only stops both.
             Relation::Unplaced
         };
         Ok(Admission { relation, new })
     }
-}
-
-/// The order of competing histories, the same on every member and transitive: the higher
-/// number; then the parent (none first, then the lower hash); then, within one parent, the
-/// fresher fork point; then the lower node id of the forced controller; then the lower hash.
-/// `Ordering::Less` when `a` is the suggested winner. A record of a later layout has no
-/// readable fork point and ranks as the oldest one at its place.
-pub fn suggested_winner(a: &Signed, b: &Signed) -> Ordering {
-    let fork = |signed: &Signed| {
-        signed
-            .body()
-            .map_or((0, 0), |body| (body.fork.term, body.fork.index))
-    };
-    b.number()
-        .cmp(&a.number())
-        .then_with(|| a.parent().cmp(&b.parent()))
-        .then_with(|| fork(b).cmp(&fork(a)))
-        .then_with(|| a.forced().0.cmp(&b.forced().0))
-        .then_with(|| a.hash.cmp(&b.hash))
 }
 
 /// A history as a call names it: its number and the first [`CLAIM_HASH_BYTES`] of its

@@ -16200,11 +16200,6 @@ export interface components {
             number: number;
             /** @description The SHA-256 of its record, hexadecimal. */
             record: string;
-            /**
-             * @description For a competing history: whether it, not this controller's, is the one the order of
-             *     the recovery suggests keeping (the same answer on every member).
-             */
-            suggested?: boolean;
         };
         /**
          * @description How a name got its owner.
