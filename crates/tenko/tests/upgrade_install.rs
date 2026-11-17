@@ -35,8 +35,13 @@ use tenko_core::testing::wait_until;
 /// The version of this build, which the node runs before the install.
 const OLD: &str = env!("CARGO_PKG_VERSION");
 
-/// The version the test installs: this build's version with the patch number raised by one.
+/// The version the test installs: the release of this build's pre-release, or this build's
+/// version with the patch number raised by one. A later pre-release would not do: a node
+/// is offered none unless `updates.prereleases` is on.
 static NEW: LazyLock<String> = LazyLock::new(|| {
+    if let Some((release, _)) = OLD.split_once('-') {
+        return release.to_owned();
+    }
     let (rest, patch) = OLD.rsplit_once('.').expect("a SemVer version");
     let patch: u64 = patch.parse().expect("a numeric patch version");
     format!("{rest}.{}", patch + 1)
