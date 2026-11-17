@@ -122,7 +122,8 @@ test("adds an operator trust anchor, shows its state, refreshes and removes it",
   await expect(key.getByTestId("dns-anchor-state")).not.toHaveText("");
 
   await anchor.getByTestId("dns-anchor-refresh").click();
-  await expect(page.getByTestId("toast").filter({ hasText: "corp.example.test" })).toBeVisible();
+  // By its own words: the toast of the save above names the zone too and may still be shown.
+  await expect(page.getByTestId("toast").filter({ hasText: "The trust anchor of corp.example.test is refreshed now" })).toBeVisible();
 
   await anchor.getByTestId("dns-anchor-remove").click();
   const confirm = page.getByTestId("dialog-anchor-remove");
