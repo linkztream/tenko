@@ -899,10 +899,11 @@ describe("the address map of a network", () => {
 
   it("claims a free address clicked in the map, and the cell has the focus again with its new state", async () => {
     await openNetwork("192.0.2.0/24");
+    // The map is drawn after the address grid: wait for its cells before reading its hint.
+    const cell = await mapCell("192.0.2.77");
     expect(screen.getByTestId("address-map-readout").textContent).toBe(
       "Hover or focus a cell for its address; Enter opens it, or claims it when it is free.",
     );
-    const cell = await mapCell("192.0.2.77");
     expect(cell.dataset.state).toBe("free");
     cell.focus();
     fireEvent.click(cell);
