@@ -484,6 +484,27 @@ fn answer_of(response: &tenko_cluster::proto::v1::MembersResponse) -> Answer {
     }
 }
 
+/// When this controller's own cluster certificate has expired: every handshake then fails,
+/// so silence cannot be told from a live majority, and the probe asks nobody (undecided).
+fn own_expiry(resolved: &Resolved) -> Option<tenko_core::Timestamp> {
+    Credentials::load(&NodePaths::new(&resolved.data_dir))
+        .ok()
+        .map(|own| own.info.not_after)
+        .filter(|end| *end <= tenko_core::Timestamp::now())
+}
+
+/// Logs why a controller whose certificate expired at `end` does not take office.
+fn log_expired(end: tenko_core::Timestamp) {
+    tracing::error!(
+        code = tenko_cluster::generation::codes::MAJORITY_ALIVE,
+        "this controller's cluster certificate expired at {end}, so none of the old voters \
+         could be asked at this first start after a forced step; it does not take office and \
+         refuses writes; check this host's clock first, and if it is right make sure the old \
+         voters are stopped, then confirm with `tenko cluster recover --despite-majority` \
+         (`--undo` would leave this controller unable to renew its certificate)"
+    );
+}
+
 /// The first start after a forced step (section 3.5): asks every old voter for its quorum
 /// state, speaking for the parent history, for `[cluster] recover_probe_secs`. Takes office
 /// (ends the notice) when nobody answers or every answer is without a majority; otherwise
@@ -493,12 +514,7 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
     let deadline = Instant::now() + Duration::from_secs(resolved.config.cluster.recover_probe_secs);
     let claim = recover::parent_claim(notice).render();
     let mut answers: BTreeMap<NodeId, Answer> = BTreeMap::new();
-    // With an expired certificate every handshake fails, so silence cannot be told from a
-    // live majority: undecided, without asking.
-    let expired = Credentials::load(&NodePaths::new(&resolved.data_dir))
-        .ok()
-        .map(|own| own.info.not_after)
-        .filter(|end| *end <= tenko_core::Timestamp::now());
+    let expired = own_expiry(resolved);
     let mut tick = tokio::time::interval(Duration::from_secs(1));
     while expired.is_none() {
         tick.tick().await;
@@ -553,19 +569,18 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
             break;
         }
     }
-    let live: Vec<String> = expired
-        .map(|end| {
-            format!(
-                "none asked: this controller's cluster certificate expired at {end}, so every \
-                 handshake fails and silence cannot be told from a live majority (undecided)"
-            )
-        })
-        .into_iter()
-        .chain(answers.iter().filter_map(|(node, answer)| match answer {
+    if let Some(end) = expired.filter(|_| !notice.despite_majority) {
+        log_expired(end);
+        peers.refuse_office().await;
+        return;
+    }
+    let live: Vec<String> = answers
+        .iter()
+        .filter_map(|(node, answer)| match answer {
             Answer::Alive(state) => Some(format!("{node} ({state})")),
             Answer::Unreadable(state) => Some(format!("{node} ({state}, undecided)")),
             Answer::Alone(_) => None,
-        }))
+        })
         .collect();
     if !live.is_empty() && !notice.despite_majority {
         tracing::error!(

@@ -828,7 +828,11 @@ fn force_checks(
             codes::NO_GENERATION_LEFT,
             exit::USAGE,
             "this copy's generation is the largest number already, so no forced step can go \
-             above it; only a new CA for the installation ends records that claim it",
+             above it: a record at that number, which only a holder of the CA's key can make, \
+             stops this cluster until the CA is replaced; until then restore a backup from \
+             before it into empty data directories on every controller, or delete \
+             <data_dir>/node/generation-fence on every stopped controller (docs/cluster.md \
+             section 12.11); either lasts only until the key's holder sends the record again",
         ));
     }
     if !fresher.is_empty() && !args.accept_older {
@@ -2046,6 +2050,102 @@ pub(crate) mod tests {
                 .get_typed(&GENERATION, &8_u64)
                 .expect("read")
                 .is_some()
+        );
+    }
+
+    /// One record at the largest generation number, which only a holder of the CA's key can
+    /// make, stops the cluster until a new CA: the members keep it against the authority's
+    /// record of the same number, the authority meets it as a sibling and stops, and no
+    /// further forced step is left.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_record_at_the_largest_number_stops_the_cluster_for_good() {
+        use tenko_store::FenceReason;
+        let root = TempDir::new("recover-largest");
+        let resolved = three_voter_copy(root.path()).await;
+        let own = Credentials::load(&NodePaths::new(&resolved.data_dir)).expect("identity");
+        let lineage = |copy: &OfflineCopy| Lineage::read(copy.view().as_ref()).expect("lineage");
+        let copy = inspect(&resolved.layout().store()).await.expect("copy");
+        // The members' copy: the cluster as it was before the step.
+        let members = lineage(&copy);
+        drop(copy);
+        let minted = GenerationRecord::sign(
+            &GenerationBody {
+                layout: LAYOUT,
+                number: u64::MAX,
+                parent: members.tip().map(generation::Signed::hash),
+                forced: NodeId(1),
+                fork: ForkPoint {
+                    term: 1,
+                    leader: 1,
+                    index: 1,
+                    revision: Revision(1),
+                    audit: ChainHead::default(),
+                },
+                superseded: vec![NodeId(2), NodeId(3)],
+                at: Timestamp::now(),
+                nonce: HexBytes(vec![9; 16]),
+            },
+            &own.chain,
+            &own.key,
+        )
+        .expect("minted");
+        let fence = |held: Option<&(FenceReason, Lineage)>, of: &Lineage, offered: &[_]| {
+            generation::next_fence(held, &of.admit(offered, &own.ca_root).expect("admit"))
+        };
+        let (reason, records) =
+            fence(None, &members, std::slice::from_ref(&minted)).expect("the members stop");
+        let held = (reason, Lineage::kept(&records).expect("kept"));
+        // The operator forces controller 1, stopped by the same record.
+        FenceFile {
+            kind: reason,
+            records,
+            at: Timestamp::now(),
+        }
+        .save(&resolved.data_dir)
+        .expect("the stop");
+        let copy = inspect(&resolved.layout().store()).await.expect("copy");
+        let facts = Facts::read(&resolved, &copy).expect("facts");
+        drop(copy);
+        assert_eq!(facts.next(), u64::MAX);
+        let step = RecoverArgs {
+            confirm: Some(format!("1:{}", u64::MAX)),
+            ..args()
+        };
+        let forced = force_with(&resolved, &step, &facts, Vec::new(), String::new(), &|_| {
+            None
+        });
+        assert!(forced.await.is_ok(), "a step above the record");
+        let copy = inspect(&resolved.layout().store())
+            .await
+            .expect("the new store");
+        let authority = lineage(&copy);
+        drop(copy);
+        assert_eq!(authority.number(), u64::MAX);
+        // The members keep the minted record against the authority's of the same number,
+        // and their refusals carry it back.
+        let pushed: Vec<_> = authority
+            .records()
+            .iter()
+            .map(|r| r.record().clone())
+            .collect();
+        assert_eq!(fence(Some(&held), &members, &pushed), None, "kept");
+        let (kind, records) =
+            fence(None, &authority, std::slice::from_ref(&minted)).expect("the authority stops");
+        assert_eq!(kind, FenceReason::Conflict);
+        FenceFile {
+            kind,
+            records,
+            at: Timestamp::now(),
+        }
+        .save(&resolved.data_dir)
+        .expect("the authority's stop");
+        let copy = inspect(&resolved.layout().store()).await.expect("copy");
+        let facts = Facts::read(&resolved, &copy).expect("facts");
+        drop(copy);
+        let refused = force_checks(&step, &facts, &[]).expect_err("no number left");
+        assert!(
+            format!("{refused:?}").contains(codes::NO_GENERATION_LEFT),
+            "{refused:?}"
         );
     }
 

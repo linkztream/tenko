@@ -2447,8 +2447,9 @@ mod tests {
     }
 
     /// A member of the store's Raft membership without a node record takes Raft by its node
-    /// id alone, until a join pin decides: the empty pin a joining controller sets before
-    /// its port opens (a rerun on a copy that stopped half way) takes Raft from nobody.
+    /// id alone, until a join pin decides: an empty pin takes Raft from nobody. This pins the
+    /// rule of `Peers`; that `tenko cluster join` sets the empty pin before its port opens
+    /// is not tested here.
     #[tokio::test]
     async fn an_empty_join_pin_takes_raft_from_nobody() {
         let mut config = tenko_store::raft::RaftStoreConfig::new(std::env::temp_dir());

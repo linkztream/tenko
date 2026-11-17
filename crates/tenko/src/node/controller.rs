@@ -883,8 +883,8 @@ async fn renew_identity(
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
             () = tokio::time::sleep(wait) => {}
         }
-        // Soon again while the certificate has expired (a forced controller waiting to
-        // take office): it reaches nobody until it is renewed.
+        // Soon again while the certificate has expired and may be renewed (a forced
+        // controller waiting for its write): it reaches nobody until it is renewed.
         wait = match Credentials::load(&paths) {
             Ok(current) if current.info.not_after <= Timestamp::now() => EXPIRED_RETRY,
             _ => IDENTITY_INTERVAL,
@@ -899,6 +899,10 @@ async fn renew_identity(
             tracing::warn!(code = %error.code(), "the key this controller had in the vault could not be retired yet: {}", error.detail());
         }
         if let Err(error) = renew_once(&registry, &peers, &resolver, &paths, false).await {
+            // An expired certificate this controller may not renew stays so: no faster retry.
+            if error.code() == "cluster.node.certificate_unknown" {
+                wait = IDENTITY_INTERVAL;
+            }
             tracing::warn!(code = %error.code(), "the cluster certificate of this controller could not be renewed: {}", error.detail());
         }
     }
@@ -1028,13 +1032,9 @@ async fn renew_once(
     let (key, csr) = generate_csr()?;
     // An expired certificate is renewed only by the controller a forced step left as the
     // only voter: it can present nothing else to the controllers it superseded.
-    let membership = peers.store().membership();
-    let issued = if current.info.not_after <= now
-        && membership.learners.is_empty()
-        && membership.voters.iter().eq([&current.identity.node])
-    {
+    let issued = if current.info.not_after <= now {
         registry
-            .renew_own_expired(&current.info.serial, &csr, now)
+            .renew_own_expired(&peers.store().membership(), &current.info.serial, &csr, now)
             .await?
     } else {
         registry

@@ -2003,22 +2003,29 @@ impl NodeRegistry {
 
     /// Renews this controller's own certificate after it expired, which [`Self::renew`]
     /// refuses so that an old certificate cannot renew itself: only the local node's
-    /// record, and only while the store's newest generation record was forced on it. The
-    /// caller, the controller's own renewal in its process (no service reaches this), checks
-    /// that it is the only voter. Without it a controller forced after more time off than
-    /// its certificate lasted could present nothing, and its record would reach nobody.
+    /// record, only while `membership` (the Raft group as this node knows it) has it as the
+    /// only voter, and only while the store's newest generation record names it as forced.
+    /// That record stays the newest until another forced step, however long ago it was
+    /// written. Only the controller's own renewal in its process calls this; no service
+    /// reaches it. Without it a controller forced after more time off than its certificate
+    /// lasted could present nothing, and its record would reach nobody.
     ///
     /// # Errors
     ///
-    /// `cluster.node.certificate_unknown` (403) when the last forced step was not this
-    /// controller's or `serial` is not its record's, else as [`Self::renew`].
+    /// `cluster.node.certificate_unknown` (403) when this controller is not the only voter,
+    /// the newest forced step was not made on it, or `serial` is not an expired certificate
+    /// of its record, else as [`Self::renew`].
     pub async fn renew_own_expired(
         &self,
+        membership: &tenko_store::raft::Membership,
         serial: &str,
         csr_der: &[u8],
         now: Timestamp,
     ) -> Result<NodeCert, ClusterError> {
         let node = self.config.local_node;
+        if !membership.learners.is_empty() || !membership.voters.iter().eq([&node]) {
+            return Err(unknown_certificate());
+        }
         let view = self.store.read(ReadConsistency::Local).await?;
         let lineage = crate::generation::Lineage::read(view.as_ref())?;
         drop(view);
@@ -2103,7 +2110,7 @@ impl NodeRegistry {
         Ok(issued)
     }
 
-    /// Whether `serial` of `record` may be renewed at `now`; `expired` also takes one that
+    /// Whether `serial` of `record` may be renewed at `now`; with `expired`, only one that
     /// ended ([`Self::renew_own_expired`]).
     fn check_renewal(
         &self,
@@ -2116,7 +2123,7 @@ impl NodeRegistry {
         let Some(cert) = record
             .serials
             .iter()
-            .find(|cert| cert.serial == serial && (expired || cert.not_after > now))
+            .find(|cert| cert.serial == serial && (cert.not_after > now) != expired)
         else {
             return Err(unknown_certificate());
         };
@@ -3110,8 +3117,9 @@ mod tests {
     }
 
     /// An expired certificate renews only as the local controller's own, through
-    /// `renew_own_expired`, and only once the newest generation record was forced on it:
-    /// `renew`, which the node service runs, refuses it whatever the store holds.
+    /// `renew_own_expired`, and only once the newest generation record was forced on it and
+    /// it is the only voter: `renew`, which the node service runs, refuses it whatever the
+    /// store holds, and `renew_own_expired` refuses a certificate that has not expired.
     #[tokio::test]
     async fn only_a_forced_controller_renews_its_own_expired_certificate() {
         use crate::generation::{ForkPoint, GENERATION, GenerationBody, GenerationRecord, LAYOUT};
@@ -3128,12 +3136,24 @@ mod tests {
         let refused =
             |result: Result<NodeCert, ClusterError>| result.expect_err("refused").code().to_owned();
         let unknown = "cluster.node.certificate_unknown";
+        let alone = tenko_store::raft::Membership {
+            voters: [NodeId(1)].into(),
+            ..Default::default()
+        };
+        let two = tenko_store::raft::Membership {
+            voters: [NodeId(1), NodeId(2)].into(),
+            ..Default::default()
+        };
         assert_eq!(
             refused(registry.renew(NodeId(1), &info.serial, &csr, later).await),
             unknown
         );
         assert_eq!(
-            refused(registry.renew_own_expired(&info.serial, &csr, later).await),
+            refused(
+                registry
+                    .renew_own_expired(&alone, &info.serial, &csr, later)
+                    .await
+            ),
             unknown
         );
         let body = GenerationBody {
@@ -3165,8 +3185,25 @@ mod tests {
             refused(registry.renew(NodeId(1), &info.serial, &csr, later).await),
             unknown
         );
+        assert_eq!(
+            refused(
+                registry
+                    .renew_own_expired(&two, &info.serial, &csr, later)
+                    .await
+            ),
+            unknown
+        );
+        let valid = Timestamp(info.not_after.0 - time::Duration::days(1));
+        assert_eq!(
+            refused(
+                registry
+                    .renew_own_expired(&alone, &info.serial, &csr, valid)
+                    .await
+            ),
+            unknown
+        );
         let renewed = registry
-            .renew_own_expired(&info.serial, &csr, later)
+            .renew_own_expired(&alone, &info.serial, &csr, later)
             .await
             .expect("the forced controller's own");
         assert!(renewed.info.not_after > later);

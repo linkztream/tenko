@@ -25,7 +25,8 @@
 //!   ([`tenko_store::raft::RaftStore::fence`]), so a crash between the two leaves the fence
 //!   to the next start ([`Peers::load_generation`]).
 //! - **The authority pushes its lineage** to every controller its store marks superseded
-//!   that is not a member again, revoked or not, every [`PUSH_INTERVAL`], from its leader;
+//!   that is neither a member again nor removed (a revoked one that keeps its member record
+//!   is still called), every [`PUSH_INTERVAL`], from its leader;
 //!   the status names the ones not reached yet (`cluster.recover.superseded_unreached`).
 
 use std::{
@@ -720,8 +721,8 @@ impl Peers {
     // The authority's push.
 
     /// Offers this history's record to every controller the store marks superseded and that
-    /// is neither a member again nor removed, revoked or not (`push_targets_in`), once every
-    /// [`PUSH_INTERVAL`] on the leader, until `stop` turns true.
+    /// is neither a member again nor removed (`push_targets_in`), once every [`PUSH_INTERVAL`]
+    /// on the leader, until `stop` turns true.
     pub(super) async fn push_loop(self, mut stop: watch::Receiver<bool>) {
         let mut tick = tokio::time::interval(PUSH_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
