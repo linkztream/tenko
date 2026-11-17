@@ -2061,7 +2061,22 @@ async fn a_removal_that_would_stop_the_writes_needs_force() {
         })
         .await;
     }
-    write_commits(&*lab.leader().await, 1).await;
+    // The removed voter may have won an election before the absent voter applied the
+    // revocation: cut off since, it still leads its old configuration and commits nothing.
+    let current = wait_until_async("a remaining member to take office", async || {
+        [&leader, absent]
+            .into_iter()
+            .find(|member| {
+                member
+                    .store
+                    .leadership()
+                    .borrow()
+                    .is_some_and(|seen| seen.is_self)
+            })
+            .cloned()
+    })
+    .await;
+    write_commits(&current, 1).await;
     lab.stop().await;
 }
 
