@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.12-rc.1] - 2026-11-17
+
 ### Added
 
 - Protected names per zone (DNS-28; `docs/dns.md` section 13.2): a zone's update policy takes `protected_labels`, more first labels that no client gets by asking for them, honored like the built-in service names by dynamic updates, the Windows zone file import and Tenko DHCP. Up to 64 lowercase host labels, each once; a built-in label is refused as redundant (`dns.zone.invalid`, field `update.protected_labels`). Set it in the zone's settings (Dynamic updates, Protected names), with `tenko dns zone update <zone> --protected-labels a,b` (an empty list clears it) or in `PATCH /api/v1/dns/zones/{id}`. A zone stored before reads with an empty list.
