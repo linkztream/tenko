@@ -48,6 +48,7 @@ use reqwest::header::CONTENT_TYPE;
 use serde_json::{Map, Value, json};
 use tenko_api::{client::Client, dto::Page, problem::ProblemDetails};
 use tenko_core::Revision;
+use tenko_dns::zone::import::HeldReason;
 use uuid::Uuid;
 
 use super::{ClientOpts, Failure, Output, Target, table};
@@ -2308,21 +2309,11 @@ fn render_held(report: &Value, out: &mut String) {
     }
 }
 
-/// The reason a candidate stays static, in words.
+/// The reason a candidate stays static, in the server's words; a code this client does not
+/// know (a newer server) is shown as held back.
 fn held_reason(code: &str) -> &'static str {
-    match code {
-        "reserved" => "the apex, a locator, a wildcard or a name with a _ label",
-        "service_name" => "a protected name (a well-known service name or one the zone lists)",
-        "name_server" => "a name server of the zone",
-        "tenko_node" => "the host name of a Tenko node",
-        "service_target" => "the target of an MX, SRV, CNAME or DNAME record",
-        "not_a_host" => "no computer can claim it",
-        "other_data" => "the name holds other records",
-        "rule" => "outside the --claimable-* options",
-        "too_many" => "too many records with an aging mark",
-        "not_approved" => "not approved",
-        _ => "held back",
-    }
+    serde_json::from_value::<HeldReason>(Value::from(code))
+        .map_or("held back", HeldReason::describe)
 }
 
 fn render_report(report: &Value) -> String {
@@ -4014,7 +4005,10 @@ mod tests {
         assert!(text.contains("  ws01.corp.example.test A by WS01$: 192.0.2.21 (line 2)"));
         assert!(text.contains(&format!("--approve-claimable {}", "ab".repeat(32))));
         assert!(text.contains("kept static (records with an aging mark that stay manual): 2"));
-        assert!(text.contains("  wpad.corp.example.test A: a well-known service name"));
+        assert!(text.contains(
+            "  wpad.corp.example.test A: a protected name: one clients use to find a service"
+        ));
+        assert!(text.contains("  ws02.corp.example.test A: not approved (line 4)"));
         assert!(text.contains("deletes the records and they register anew"));
     }
 

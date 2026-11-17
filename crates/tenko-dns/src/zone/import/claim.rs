@@ -129,6 +129,25 @@ impl HeldReason {
             HeldReason::NotApproved => "not_approved",
         }
     }
+
+    /// The reason in words, as the command-line client shows it; the web UI shows its own
+    /// translation of [`HeldReason::as_str`].
+    pub const fn describe(self) -> &'static str {
+        match self {
+            HeldReason::Reserved => "the apex, a locator, a wildcard or a name with a _ label",
+            HeldReason::ServiceName => {
+                "a protected name: one clients use to find a service (wpad, autodiscover and others), or one the zone lists"
+            }
+            HeldReason::NameServer => "a name server of the zone",
+            HeldReason::TenkoNode => "the host name of a Tenko node",
+            HeldReason::ServiceTarget => "the target of an MX, SRV, CNAME or DNAME record",
+            HeldReason::NotAHost => "no computer can claim it",
+            HeldReason::OtherData => "the name holds other records",
+            HeldReason::Rule => "outside the --claimable-* options",
+            HeldReason::TooMany => "too many records with an aging mark",
+            HeldReason::NotApproved => "not approved",
+        }
+    }
 }
 
 /// The operator's rule over the candidates: each part that is not empty must hold.
