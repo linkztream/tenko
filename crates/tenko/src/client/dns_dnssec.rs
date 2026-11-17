@@ -17,7 +17,7 @@ use std::fmt::Write as _;
 use clap::{Args, Subcommand, ValueEnum};
 use serde_json::{Map, Value, json};
 
-use super::{ZoneRefArgs, key, resolve_zone, revision, text, usage, zone_path};
+use super::{ZoneRefArgs, key, resolve_zone, revision, text, zone_path};
 use crate::client::{ClientOpts, Failure, Output, Target, table};
 
 /// Subcommands of `tenko dns dnssec`.
@@ -287,13 +287,7 @@ async fn patch_policy(
 }
 
 async fn enable(target: &Target, args: &EnableArgs) -> Result<Output, Failure> {
-    if args
-        .resign_days
-        .zip(args.validity_days)
-        .is_some_and(|(resign, validity)| resign >= validity)
-    {
-        return Err(usage("--resign-days must be less than --validity-days"));
-    }
+    // The server checks the validity and the re-sign time together with the stored policy.
     patch_policy(target, &args.zone, |policy| {
         let mode = if args.imported { "imported" } else { "online" };
         policy.insert("mode".to_owned(), json!(mode));

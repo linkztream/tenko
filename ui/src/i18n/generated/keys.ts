@@ -3180,6 +3180,7 @@ export type MessageKey =
   | "dns.dnssec.finding.expired"
   | "dns.dnssec.finding.expiring"
   | "dns.dnssec.finding.other"
+  | "dns.dnssec.finding.policy_clamped"
   | "dns.dnssec.finding.resign_overdue"
   | "dns.dnssec.key.activated"
   | "dns.dnssec.key.published"
@@ -13185,6 +13186,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.dnssec.finding.expired",
   "dns.dnssec.finding.expiring",
   "dns.dnssec.finding.other",
+  "dns.dnssec.finding.policy_clamped",
   "dns.dnssec.finding.resign_overdue",
   "dns.dnssec.key.activated",
   "dns.dnssec.key.published",

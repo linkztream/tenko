@@ -50679,7 +50679,7 @@
             "items": {
               "$ref": "#/components/schemas/DnssecFinding"
             },
-            "description": "The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,\n`dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`."
+            "description": "The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,\n`dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`,\n`dns.dnssec.policy_clamped`."
           },
           "keys": {
             "type": "array",

@@ -45,6 +45,8 @@ function findingTitle(code: string): string {
       return t("dns.dnssec.finding.resign_overdue");
     case "dns.dnssec.expired":
       return t("dns.dnssec.finding.expired");
+    case "dns.dnssec.policy_clamped":
+      return t("dns.dnssec.finding.policy_clamped");
     default:
       return t("dns.dnssec.finding.other");
   }

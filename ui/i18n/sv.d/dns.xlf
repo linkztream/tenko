@@ -2446,6 +2446,9 @@
       <unit id="dns.dnssec.finding.expired">
         <segment><source>A signature has expired</source><target>En signatur har gått ut</target></segment>
       </unit>
+      <unit id="dns.dnssec.finding.policy_clamped">
+        <segment><source>The signing policy is outside its bounds</source><target>Signeringspolicyn ligger utanför sina gränser</target></segment>
+      </unit>
       <unit id="dns.dnssec.finding.other">
         <segment><source>DNSSEC warning</source><target>DNSSEC-varning</target></segment>
       </unit>

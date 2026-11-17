@@ -9861,7 +9861,8 @@ export interface components {
             expires?: components["schemas"]["Timestamp"] | null;
             /**
              * @description The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,
-             *     `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`.
+             *     `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`,
+             *     `dns.dnssec.policy_clamped`.
              */
             findings: components["schemas"]["DnssecFinding"][];
             /** @description The keys. */

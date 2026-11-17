@@ -7,6 +7,7 @@
 //! | `dns.dnssec.expiring` | An imported zone's earliest signature expires within 7 days (nothing re-signs it) |
 //! | `dns.dnssec.resign_overdue` | A zone signed online has a signature with less than half of `resign_before_days` left: the signer does not keep up |
 //! | `dns.dnssec.expired` | A signature of the zone has expired: validators answer SERVFAIL for it |
+//! | `dns.dnssec.policy_clamped` | A zone signed online has a policy stored outside the bounds that are checked today; the signer uses the bounded values ([`tenko_core::dns::DnssecPolicy::bounded`]) |
 //!
 //! One node cannot see its own clock run ahead; the cluster's skew warning
 //! (`cluster.clock_skew`) compares the controllers' clocks with each other.
@@ -32,6 +33,9 @@ pub const RESIGN_OVERDUE: &str = "dns.dnssec.resign_overdue";
 
 /// A signature has expired.
 pub const EXPIRED: &str = "dns.dnssec.expired";
+
+/// A stored policy is outside the bounds and is signed with the bounded values.
+pub const POLICY_CLAMPED: &str = "dns.dnssec.policy_clamped";
 
 /// The clock skew tolerated (OPS-09: Kerberos tolerates 5 minutes).
 pub const SKEW_TOLERANCE: Duration = Duration::from_secs(300);
@@ -67,6 +71,35 @@ pub fn findings(zone: &Zone, state: &SignState, now: Timestamp) -> Vec<Finding> 
     let mut out = Vec::new();
     if zone.dnssec.mode == DnssecMode::Off {
         return out;
+    }
+    let (validity, resign) = zone.dnssec.bounded();
+    if zone.dnssec.mode == DnssecMode::Online
+        && (validity, resign)
+            != (
+                zone.dnssec.signature_validity_days,
+                zone.dnssec.resign_before_days,
+            )
+    {
+        out.push(finding(
+            POLICY_CLAMPED,
+            zone,
+            format!(
+                "the DNSSEC policy of zone {} has a signature validity of {} days and a \
+                 re-sign time of {} days, outside the allowed bounds; it is signed with \
+                 {validity} and {resign} days until the policy is saved within them",
+                zone.name, zone.dnssec.signature_validity_days, zone.dnssec.resign_before_days
+            ),
+            &[
+                (
+                    "signature_validity_days",
+                    zone.dnssec.signature_validity_days.to_string(),
+                ),
+                (
+                    "resign_before_days",
+                    zone.dnssec.resign_before_days.to_string(),
+                ),
+            ],
+        ));
     }
     if zone.dnssec.mode == DnssecMode::Online
         && let Some(signed) = state.last_signed
@@ -114,7 +147,7 @@ pub fn findings(zone: &Zone, state: &SignState, now: Timestamp) -> Vec<Finding> 
             &[("expires", expires.to_string())],
         )),
         DnssecMode::Online => {
-            let half = Duration::from_secs(u64::from(zone.dnssec.resign_before_days) * 43_200);
+            let half = Duration::from_secs(u64::from(resign) * 43_200);
             if left < half {
                 out.push(finding(
                     RESIGN_OVERDUE,

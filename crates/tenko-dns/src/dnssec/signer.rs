@@ -738,9 +738,8 @@ impl Signer {
             if let Some(expires) = expires {
                 let at = sign::time_of(expires, stamp.at);
                 state.expires = Some(at);
-                let resign = Duration::from_secs(
-                    u64::from(zone.dnssec.resign_before_days) * u64::from(DAY_SECS),
-                );
+                let resign =
+                    Duration::from_secs(u64::from(zone.dnssec.bounded().1) * u64::from(DAY_SECS));
                 state.next_resign = Some(
                     Timestamp::from_unix_nanos(
                         at.unix_nanos() - i128::try_from(resign.as_nanos()).unwrap_or(0),

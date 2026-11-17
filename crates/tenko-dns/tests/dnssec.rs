@@ -1376,28 +1376,57 @@ async fn a_csk_zone_signs_everything_with_one_key() {
     assert_eq!(&dnskey.rdata[0].as_bytes()[..2], &257u16.to_be_bytes());
 }
 
+/// A signing state of `zone` signed at `signed` whose earliest signature expires in 10 days.
+fn signed_state(zone: &Zone, signed: Timestamp, now: Timestamp) -> SignState {
+    SignState {
+        zone: zone.id,
+        keys: Vec::new(),
+        signed_serial: Some(1),
+        last_signed: Some(signed),
+        next_resign: None,
+        signed_revision: None,
+        expires: now.checked_add(Duration::from_secs(10 * 86_400)),
+        rollover_job: None,
+    }
+}
+
 #[test]
 fn health_warns_when_the_clock_went_back() {
     let mut zone = support::zone(APEX);
     zone.dnssec.mode = DnssecMode::Online;
-    let now = tenko_core::Timestamp::now();
-    let later = now
-        .checked_add(std::time::Duration::from_secs(600))
-        .expect("later");
-    let state = tenko_core::dns::SignState {
-        zone: zone.id,
-        keys: Vec::new(),
-        signed_serial: Some(1),
-        last_signed: Some(later),
-        next_resign: None,
-        signed_revision: None,
-        expires: now.checked_add(std::time::Duration::from_secs(10 * 86_400)),
-        rollover_job: None,
-    };
+    let now = Timestamp::now();
+    let later = now.checked_add(Duration::from_secs(600)).expect("later");
+    let state = signed_state(&zone, later, now);
     let findings = health::findings(&zone, &state, now);
     assert_eq!(findings.len(), 1, "{findings:?}");
     assert_eq!(findings[0].code, health::CLOCK_SKEW);
     let fine = health::findings(&zone, &state, later);
+    assert!(fine.is_empty(), "{fine:?}");
+}
+
+#[test]
+fn health_warns_of_a_policy_stored_outside_its_bounds() {
+    let mut zone = support::zone(APEX);
+    zone.dnssec = DnssecPolicy {
+        signature_validity_days: 10,
+        resign_before_days: 7,
+        ..online(DnssecAlgorithm::EcdsaP256Sha256, Denial::Nsec)
+    };
+    let now = Timestamp::now();
+    let state = signed_state(&zone, now, now);
+    let findings = health::findings(&zone, &state, now);
+    assert_eq!(findings.len(), 1, "{findings:?}");
+    assert_eq!(findings[0].code, health::POLICY_CLAMPED);
+    assert_eq!(findings[0].params["zone"], APEX);
+    assert_eq!(findings[0].params["signature_validity_days"], "10");
+    assert_eq!(findings[0].params["resign_before_days"], "7");
+    assert_eq!(
+        findings[0].detail,
+        "the DNSSEC policy of zone example.test has a signature validity of 10 days and a \
+         re-sign time of 7 days, outside the allowed bounds; it is signed with 10 and 6 days until the policy is saved within them"
+    );
+    zone.dnssec.resign_before_days = 6;
+    let fine = health::findings(&zone, &state, now);
     assert!(fine.is_empty(), "{fine:?}");
 }
 

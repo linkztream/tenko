@@ -66,11 +66,13 @@ pub struct Times {
 }
 
 impl Times {
-    /// The times of a pass at `now` under `policy`; `ahead` renews up to
+    /// The times of a pass at `now` under `policy` within its bounds
+    /// ([`DnssecPolicy::bounded`]), so no expiration wraps past `now`; `ahead` renews up to
     /// [`RENEW_SLACK_SECS`] before the due time (the passes of the timer).
     pub fn new(now: Timestamp, policy: &DnssecPolicy, ahead: bool) -> Self {
-        let validity = u32::from(policy.signature_validity_days).saturating_mul(DAY_SECS);
-        let resign = u32::from(policy.resign_before_days).saturating_mul(DAY_SECS);
+        let (validity, resign) = policy.bounded();
+        let validity = u32::from(validity).saturating_mul(DAY_SECS);
+        let resign = u32::from(resign).saturating_mul(DAY_SECS);
         Self {
             now: unix32(now),
             validity,
@@ -254,6 +256,35 @@ mod tests {
             let left = seconds_until(expiration, plain.now);
             assert!(left <= i64::from(14 * DAY_SECS));
             assert!(left > i64::from(14 * DAY_SECS - plain.spread));
+        }
+    }
+
+    #[test]
+    fn a_policy_out_of_bounds_signs_ahead_and_not_due_at_once() {
+        let now = Timestamp::from_unix_nanos(1_792_238_400 * 1_000_000_000).expect("now");
+        for (validity, resign) in [
+            (u16::MAX, 7),
+            (24_856, 7),
+            (11, 7),
+            (14, 9),
+            (14, 14),
+            (0, 0),
+        ] {
+            let policy = DnssecPolicy {
+                signature_validity_days: validity,
+                resign_before_days: resign,
+                ..DnssecPolicy::default()
+            };
+            let times = Times::new(now, &policy, false);
+            let ahead = Times::new(now, &policy, true);
+            for _ in 0..100 {
+                let left = seconds_until(times.expiration(), times.now);
+                assert!(left > i64::from(times.renew), "{validity}/{resign}: {left}");
+                assert!(
+                    left >= i64::from(ahead.renew),
+                    "{validity}/{resign}: {left}"
+                );
+            }
         }
     }
 }

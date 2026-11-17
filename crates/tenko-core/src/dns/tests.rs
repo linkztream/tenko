@@ -173,6 +173,38 @@ fn zone_rules_hold() {
 }
 
 #[test]
+fn a_dnssec_policy_is_refused_outside_its_bounds() {
+    let refused = |validity: u16, resign: u16| {
+        let mut zone = zone();
+        zone.dnssec.signature_validity_days = validity;
+        zone.dnssec.resign_before_days = resign;
+        zone.validate()
+            .err()
+            .map(|error| error.field_errors()[0].field.clone())
+    };
+    let validity = Some("dnssec.signature_validity_days".to_owned());
+    let resign = Some("dnssec.resign_before_days".to_owned());
+    assert_eq!(refused(SIGNATURE_VALIDITY_DAYS_MAX, 7), None);
+    assert_eq!(refused(SIGNATURE_VALIDITY_DAYS_MAX + 1, 7), validity);
+    assert_eq!(refused(u16::MAX, 7), validity);
+    assert_eq!(refused(1, 0), None);
+    assert_eq!(refused(0, 0), validity);
+    assert_eq!(refused(12, 7), None);
+    assert_eq!(refused(11, 7), resign);
+    assert_eq!(refused(14, 8), None);
+    assert_eq!(refused(14, 9), resign);
+    assert_eq!(refused(14, 14), resign);
+    let mut zone = zone();
+    zone.dnssec.signature_validity_days = 11;
+    let error = zone.validate().expect_err("refused");
+    assert_eq!(
+        error.as_coded_error().params["reason"],
+        "at most 6 days for a signature validity of 11 days: the validity is at least one \
+         and a half times the re-sign time and a day"
+    );
+}
+
+#[test]
 fn rrset_rules_hold() {
     let zone = zone();
     let apex = &zone.name;

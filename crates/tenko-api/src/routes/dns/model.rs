@@ -545,7 +545,8 @@ pub struct DnssecStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rollover_job: Option<JobId>,
     /// The health findings of the zone (OPS-09): `dns.dnssec.clock_skew`,
-    /// `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`.
+    /// `dns.dnssec.expiring`, `dns.dnssec.resign_overdue`, `dns.dnssec.expired`,
+    /// `dns.dnssec.policy_clamped`.
     pub findings: Vec<DnssecFinding>,
 }
 

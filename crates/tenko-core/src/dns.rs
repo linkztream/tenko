@@ -966,6 +966,10 @@ pub fn parse_transfer_site(entries: &[String]) -> Result<Vec<IpNet>, String> {
 /// insecure (RFC 9276 section 3.2), which recommends 0.
 pub const NSEC3_ITERATIONS_MAX: u16 = 150;
 
+/// The longest signature validity in days: the times of an RRSIG are 32-bit serial numbers
+/// (RFC 4034, section 3.1.5), so an expiration lies less than 2^31 seconds ahead.
+pub const SIGNATURE_VALIDITY_DAYS_MAX: u16 = 24_855;
+
 /// The signing settings of a zone.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub struct DnssecPolicy {
@@ -998,6 +1002,25 @@ const fn default_validity() -> u16 {
 }
 const fn default_resign() -> u16 {
     7
+}
+
+impl DnssecPolicy {
+    /// The validity and the re-sign time in days that signing uses: the validity from 1 to
+    /// [`SIGNATURE_VALIDITY_DAYS_MAX`], the re-sign time at most what leaves the validity at
+    /// least one and a half times it and a day (up to half of the re-sign time comes off a
+    /// new signature's expiration at random, and a new signature must not be due at once).
+    /// [`Zone::validate`] refuses a policy this changes; one stored before is clamped here.
+    pub fn bounded(&self) -> (u16, u16) {
+        let validity = self
+            .signature_validity_days
+            .clamp(1, SIGNATURE_VALIDITY_DAYS_MAX);
+        // The largest r with 1.5 r + 1 <= validity: a fresh signature has more than
+        // validity - r / 2 left, and the timer renews what has less than r and a day left.
+        (
+            validity,
+            self.resign_before_days.min(2 * (validity - 1) / 3),
+        )
+    }
 }
 
 impl Default for DnssecPolicy {
@@ -1174,10 +1197,20 @@ impl Zone {
                 return invalid("dnssec.denial.salt", "an NSEC3 salt has at most 255 octets");
             }
         }
-        if self.dnssec.resign_before_days >= self.dnssec.signature_validity_days {
+        let (validity, resign) = self.dnssec.bounded();
+        if validity != self.dnssec.signature_validity_days {
+            return invalid(
+                "dnssec.signature_validity_days",
+                &format!("a signature is valid for 1 to {SIGNATURE_VALIDITY_DAYS_MAX} days"),
+            );
+        }
+        if resign != self.dnssec.resign_before_days {
             return invalid(
                 "dnssec.resign_before_days",
-                "signatures are renewed before they expire",
+                &format!(
+                    "at most {resign} days for a signature validity of {validity} days: the \
+                     validity is at least one and a half times the re-sign time and a day"
+                ),
             );
         }
         // WP13.0: the Kerberos settings of a primary zone.
