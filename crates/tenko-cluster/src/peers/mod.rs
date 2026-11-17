@@ -537,7 +537,11 @@ impl Peers {
         match record {
             Some(record) => {
                 if !record.roles.contains(&Role::Controller)
-                    || !record.holds(&peer.identity.serial, Timestamp::now())
+                    || !record.holds(
+                        &peer.identity.serial,
+                        &peer.identity.sha256,
+                        Timestamp::now(),
+                    )
                 {
                     return Err(status_of(&ClusterError::new(
                         "cluster.node.certificate_unknown",
@@ -1105,7 +1109,7 @@ impl Peers {
             changing: membership.changing,
             members,
             job_id: None,
-            generation: self.generation_view(),
+            generation: self.generation_view().await,
         })
     }
 
@@ -1138,7 +1142,25 @@ impl Peers {
             quorum: status.quorum.name().to_owned(),
             in_contact: u32::try_from(in_contact).unwrap_or(u32::MAX),
             voters: u32::try_from(voters.len()).unwrap_or(u32::MAX),
+            applied: self.store().applied_index(),
         })
+    }
+
+    /// The log index `node`'s store applied, as its `Cluster.Members` answer reports it:
+    /// `Ok(None)` from a member of an earlier version, which does not report it.
+    ///
+    /// # Errors
+    ///
+    /// The member did not answer.
+    pub async fn applied_by(&self, node: NodeId) -> Result<Option<u64>, ClusterError> {
+        let mut client = self.network().cluster_client(node).await?;
+        let mut request = tonic::Request::new(v1::MembersRequest {});
+        self.network().stamp(&mut request, node);
+        let answer = client
+            .members(request)
+            .await
+            .map_err(|status| error_of_status(&status))?;
+        Ok(answer.into_inner().applied)
     }
 
     // -----------------------------------------------------------------------------------
@@ -2366,6 +2388,16 @@ mod tests {
 
     fn serials(record: Option<NodeRecord>) -> Option<Vec<String>> {
         record.map(|record| record.serials.into_iter().map(|cert| cert.serial).collect())
+    }
+
+    /// A caller's certificate is the record's only with the record's serial and SHA-256:
+    /// one minted with the CA's key can copy the serial, not the digest.
+    #[test]
+    fn a_record_holds_a_certificate_by_serial_and_digest() {
+        let now = Timestamp::now();
+        assert!(holding(&["a"]).holds("a", "", now));
+        assert!(!holding(&["a"]).holds("a", "ff", now));
+        assert!(!holding(&["a"]).holds("b", "", now));
     }
 
     /// A join only adds the certificate a controller presents to its record, so a leader

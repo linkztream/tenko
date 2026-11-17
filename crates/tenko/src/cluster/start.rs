@@ -663,6 +663,7 @@ mod tests {
             quorum: quorum.to_owned(),
             in_contact,
             voters,
+            applied: None,
         })
     }
 

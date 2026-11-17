@@ -1027,7 +1027,7 @@ async fn a_renewal_that_races_the_heartbeat_is_planned_again_with_the_same_certi
     let due = days_before(node_record(&registry, node).await.certificate.not_after, 10);
     store.arm(1);
     let renewed = registry
-        .renew(node, &serial, &csr, due)
+        .renew(node, &serial, &csr, due, None)
         .await
         .expect("renew");
     assert_eq!(store.raced.load(Ordering::SeqCst), 1);
@@ -1435,7 +1435,7 @@ async fn a_renewal_before_the_window_is_refused() {
     let (_, registry, node, serial, csr) = racing_registry().await;
     let record = node_record(&registry, node).await;
     let error = registry
-        .renew(node, &serial, &csr, Timestamp::now())
+        .renew(node, &serial, &csr, Timestamp::now(), None)
         .await
         .expect_err("not due yet");
     assert_eq!(error.code(), "cluster.node.renew_not_due");
@@ -1444,14 +1444,17 @@ async fn a_renewal_before_the_window_is_refused() {
     let early = days_before(record.certificate.not_after, 125);
     assert_eq!(
         registry
-            .renew(node, &serial, &csr, early)
+            .renew(node, &serial, &csr, early, None)
             .await
             .expect_err("still early")
             .code(),
         "cluster.node.renew_not_due"
     );
     let due = days_before(record.certificate.not_after, 121);
-    registry.renew(node, &serial, &csr, due).await.expect("due");
+    registry
+        .renew(node, &serial, &csr, due, None)
+        .await
+        .expect("due");
     assert_eq!(node_record(&registry, node).await.serials.len(), 2);
 }
 
@@ -1463,7 +1466,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
     let enrolled = node_record(&registry, node).await;
     let mut now = days_before(enrolled.certificate.not_after, 10);
     let first = registry
-        .renew(node, &serial, &csr, now)
+        .renew(node, &serial, &csr, now, None)
         .await
         .expect("first renewal");
     let error = registry
@@ -1472,6 +1475,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
             &serial,
             &csr,
             now.checked_add(Duration::from_secs(60)).expect("time"),
+            None,
         )
         .await
         .expect_err("a minute later");
@@ -1485,7 +1489,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
             .checked_add(registry::RENEW_INTERVAL + Duration::from_secs(1))
             .expect("time");
         let issued = registry
-            .renew(node, &serial, &csr, now)
+            .renew(node, &serial, &csr, now, None)
             .await
             .expect("an hour later");
         let record = node_record(&registry, node).await;
@@ -1501,7 +1505,7 @@ async fn renewals_are_paced_and_keep_two_certificates() {
     // The certificate of a renewal that never reached the node no longer works.
     assert_eq!(
         registry
-            .authenticate(node, &first.info.serial, now)
+            .authenticate(node, &first.info.serial, &first.info.sha256, now)
             .await
             .expect_err("dropped")
             .code(),
@@ -1520,7 +1524,7 @@ async fn the_replaced_certificate_retires_once_the_node_holds_the_new_one() {
     let enrolled = node_record(&registry, node).await;
     let now = days_before(enrolled.certificate.not_after, 10);
     let issued = registry
-        .renew(node, &serial, &csr, now)
+        .renew(node, &serial, &csr, now, None)
         .await
         .expect("renewal");
     // A report of another certificate changes nothing.
@@ -1534,7 +1538,7 @@ async fn the_replaced_certificate_retires_once_the_node_holds_the_new_one() {
         .checked_add(registry::RETIRE_GRACE + Duration::from_secs(1))
         .expect("time");
     registry
-        .authenticate(node, &serial, later)
+        .authenticate(node, &serial, &enrolled.certificate.sha256, later)
         .await
         .expect("no proof yet: the old certificate keeps working");
 
@@ -1545,17 +1549,17 @@ async fn the_replaced_certificate_retires_once_the_node_holds_the_new_one() {
             .expect("retire")
     );
     registry
-        .authenticate(node, &serial, now)
+        .authenticate(node, &serial, &enrolled.certificate.sha256, now)
         .await
         .expect("inside the grace");
     let error = registry
-        .authenticate(node, &serial, later)
+        .authenticate(node, &serial, &enrolled.certificate.sha256, later)
         .await
         .expect_err("retired");
     assert_eq!(error.code(), "cluster.node.certificate_replaced");
     assert_eq!(error.status(), 503);
     registry
-        .authenticate(node, &issued.info.serial, later)
+        .authenticate(node, &issued.info.serial, &issued.info.sha256, later)
         .await
         .expect("the new certificate");
     // Retiring again finds nothing left to retire.
@@ -1620,7 +1624,12 @@ async fn a_node_renews_and_moves_to_its_new_certificate() {
             });
         let retired = controller
             .registry
-            .authenticate(node, &credentials.info.serial, Timestamp::now())
+            .authenticate(
+                node,
+                &credentials.info.serial,
+                &credentials.info.sha256,
+                Timestamp::now(),
+            )
             .await
             .is_err();
         if moved && retired && status.state == AgentState::Connected {

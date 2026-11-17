@@ -148,7 +148,12 @@ impl ClusterService {
         peer: &PeerInfo,
     ) -> Result<crate::model::NodeRecord, Status> {
         self.registry
-            .authenticate(peer.identity.node, &peer.identity.serial, Timestamp::now())
+            .authenticate(
+                peer.identity.node,
+                &peer.identity.serial,
+                &peer.identity.sha256,
+                Timestamp::now(),
+            )
             .await
             .map_err(|error| status_of(&error))
     }
@@ -941,6 +946,7 @@ mod tests {
             body: HexBytes(body.canonical().expect("body")),
             signature: HexBytes(Vec::new()),
             chain: Vec::new(),
+            continuity: Vec::new(),
         }
         .encode()
         .expect("record")

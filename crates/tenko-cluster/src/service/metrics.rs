@@ -44,7 +44,11 @@ impl ClusterService {
             .await
             .map_err(|error| status_of(&error))?
             && (!record.roles.contains(&Role::Controller)
-                || !record.holds(&peer.identity.serial, Timestamp::now()))
+                || !record.holds(
+                    &peer.identity.serial,
+                    &peer.identity.sha256,
+                    Timestamp::now(),
+                ))
         {
             return Err(status_of(&ClusterError::new(
                 "cluster.node.certificate_unknown",

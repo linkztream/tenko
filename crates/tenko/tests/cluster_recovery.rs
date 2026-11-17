@@ -196,8 +196,10 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     write(&lab, others[0], 4).expect(201);
     let first = wait_fenced(&lab, stale, "conflict");
     assert_eq!(first["generation"]["stopped_by"]["number"], 2, "{first}");
+    // Its signer is a controller the first history superseded, which can sign any
+    // number: no side is suggested.
     assert_eq!(
-        first["generation"]["stopped_by"]["suggested"], true,
+        first["generation"]["stopped_by"]["suggested"], false,
         "{first}"
     );
     let second = lab.members(others[0]).expect("the members view");
@@ -260,11 +262,12 @@ fn a_live_majority_keeps_the_forced_controller_out_of_office() {
 }
 
 /// Two controllers forced at once on the two sides of a partition both take office;
-/// after the heal each meets the other's record as a sibling, both stop writing, and both
-/// name the same suggested winner.
+/// after the heal each meets the other's record as a sibling, both stop writing, and each
+/// names the other's record; as each side's step superseded the other's controller, neither
+/// side is suggested.
 #[test]
 #[ignore = "slow lab scenario; runner: ci.yml#cluster-lab"]
-fn two_controllers_forced_at_once_both_stop_and_agree_on_the_winner() {
+fn two_controllers_forced_at_once_both_stop_and_name_each_other() {
     let mut lab = lab(3);
     let ids = lab.ids();
     let (gone, a, b) = (ids[0], ids[1], ids[2]);
@@ -285,20 +288,17 @@ fn two_controllers_forced_at_once_both_stop_and_agree_on_the_winner() {
     lab.heal();
     let seen_a = wait_fenced(&lab, a, "conflict");
     let seen_b = wait_fenced(&lab, b, "conflict");
-    let winner = |view: &Value| {
-        let stopped = &view["generation"]["stopped_by"];
-        if stopped["suggested"] == true {
-            stopped["forced"].clone()
-        } else {
-            view["generation"]["forced"].clone()
-        }
-    };
-    assert_eq!(winner(&seen_a), winner(&seen_b), "{seen_a}\n{seen_b}");
-    assert_ne!(
-        seen_a["generation"]["stopped_by"]["suggested"],
-        seen_b["generation"]["stopped_by"]["suggested"],
-        "exactly one side is the suggested winner"
-    );
+    // Each side's forced step superseded the other's controller, which can sign any
+    // number: neither side is suggested, and both name the other's record.
+    for (seen, other) in [(&seen_a, &seen_b), (&seen_b, &seen_a)] {
+        let stopped = &seen["generation"]["stopped_by"];
+        assert_eq!(stopped["suggested"], false, "{seen}");
+        assert_eq!(
+            stopped["record"], other["generation"]["record"],
+            "{seen}
+{other}"
+        );
+    }
     for id in [a, b] {
         let problem = write(&lab, id, 9).expect(503);
         assert_eq!(problem["code"], "cluster.recover.conflict", "{problem}");

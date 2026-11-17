@@ -3,7 +3,7 @@
 use std::{pin::Pin, sync::Arc};
 
 use futures::Stream;
-use tenko_core::{NodeId, Timestamp};
+use tenko_core::{NodeId, Role, Timestamp};
 use tokio::sync::mpsc;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -28,6 +28,7 @@ pub(super) fn rechecked<T: Send + 'static>(
     registry: Arc<NodeRegistry>,
     node: NodeId,
     serial: String,
+    sha256: String,
     mut inner: mpsc::Receiver<Result<T, Status>>,
 ) -> Pin<Box<dyn Stream<Item = Result<T, Status>> + Send>> {
     let (tx, mut rx) = mpsc::channel(1);
@@ -38,7 +39,10 @@ pub(super) fn rechecked<T: Send + 'static>(
         // The check runs while the task waits for an item and while it waits for room to
         // hand one on, so a client that stops reading does not hold it off.
         let check = async |tx: &mpsc::Sender<Result<T, Status>>| -> bool {
-            match registry.authenticate(node, &serial, Timestamp::now()).await {
+            match registry
+                .authenticate(node, &serial, &sha256, Timestamp::now())
+                .await
+            {
                 Ok(_) => true,
                 Err(error) => {
                     tracing::info!(node = %node, code = %error.code(), "ended a stream of a node that no longer holds its certificate");
@@ -152,7 +156,16 @@ impl v1::node_server::Node for ClusterService {
         request: Request<v1::RenewRequest>,
     ) -> Result<Response<v1::RenewResponse>, Status> {
         let peer = peer_of(&request)?;
-        self.authenticate(&peer).await?;
+        let record = self.authenticate(&peer).await?;
+        // A controller renews its cluster certificate itself, the key it renews signing
+        // the new one (`crate::continuity`): a renewal here would break that chain.
+        if record.roles.contains(&Role::Controller) {
+            return Err(status_of(&crate::error::ClusterError::new(
+                "cluster.node.controller_renewal",
+                409,
+                "a controller renews its own cluster certificate; this service renews the                  certificates of other nodes",
+            )));
+        }
         let csr = request.into_inner().csr;
         let issued = self
             .registry
@@ -161,6 +174,7 @@ impl v1::node_server::Node for ClusterService {
                 &peer.identity.serial,
                 &csr,
                 Timestamp::now(),
+                None,
             )
             .await
             .map_err(|error| status_of(&error))?;
@@ -206,7 +220,7 @@ async fn follow_beats(
         if checked.elapsed() >= recheck {
             checked = std::time::Instant::now();
             if let Err(error) = registry
-                .authenticate(node, &peer.identity.serial, now)
+                .authenticate(node, &peer.identity.serial, &peer.identity.sha256, now)
                 .await
             {
                 tracing::info!(node = %node, code = %error.code(), "ended the heartbeat stream of a node that no longer holds its certificate");
@@ -308,7 +322,13 @@ mod tests {
             producer.send(Ok(n)).await.expect("item");
         }
         // No node 4242 is enrolled; the stream is never read.
-        let _unread = rechecked(registry, NodeId(4242), "00".to_owned(), inner);
+        let _unread = rechecked(
+            registry,
+            NodeId(4242),
+            "00".to_owned(),
+            "00".to_owned(),
+            inner,
+        );
         tokio::time::timeout(Duration::from_secs(5), producer.closed())
             .await
             .expect("the stream ended although nobody read it");

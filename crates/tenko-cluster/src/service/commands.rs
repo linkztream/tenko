@@ -54,6 +54,7 @@ impl v1::commands_server::Commands for ClusterService {
             Arc::clone(&self.registry),
             record.id,
             peer.identity.serial.clone(),
+            peer.identity.sha256.clone(),
             rx,
         );
         Ok(Response::new(stream))

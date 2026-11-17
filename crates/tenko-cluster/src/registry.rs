@@ -1989,14 +1989,20 @@ impl NodeRegistry {
     ///
     /// `cluster.node.not_found` (404), `cluster.node.certificate_unknown` (403),
     /// `cluster.node.renew_not_due`, `cluster.node.renew_too_soon` (409),
-    /// `cluster.ca.invalid_csr` (422), or a store or job error (the store's conflict when
-    /// every attempt lost the race).
+    /// `cluster.ca.invalid_csr` (422), `cluster.continuity.invalid` (403) for a `continued`
+    /// that is not the renewed certificate or whose signature does not verify, or a store or
+    /// job error (the store's conflict when every attempt lost the race).
+    ///
+    /// A controller passes `continued`: the certificate it renews and that key's signature
+    /// over the new key ([`crate::continuity::attest`]); the step is stored with the
+    /// renewal, in its batch, so a history that forks later can follow the renewal.
     pub async fn renew(
         &self,
         node: NodeId,
         serial: &str,
         csr_der: &[u8],
         now: Timestamp,
+        continued: Option<(&CertificateDer<'_>, Vec<u8>)>,
     ) -> Result<NodeCert, ClusterError> {
         let (mut record, mut revision) = self
             .record_for_edit(node, 1)
@@ -2010,6 +2016,28 @@ impl NodeRegistry {
         let issued = self
             .ca
             .issue_node_cert_for(node, record.role_set(), csr_der, now)?;
+        let step = continued
+            .map(|(previous, signature)| {
+                let renewed = crate::mtls::PeerIdentity::from_der(previous).ok();
+                let held = record.serials.iter().find(|cert| cert.serial == serial);
+                if renewed.is_none_or(|renewed| {
+                    renewed.node != node
+                        || renewed.serial != serial
+                        || held.is_none_or(|held| held.sha256 != renewed.sha256)
+                }) {
+                    return Err(ClusterError::new(
+                        "cluster.continuity.invalid",
+                        403,
+                        "the certificate a renewal names as renewed is not the one presented",
+                    ));
+                }
+                let next = issued
+                    .chain
+                    .first()
+                    .ok_or_else(|| ClusterError::internal("an issued chain without a leaf"))?;
+                crate::continuity::Step::new(node, previous, next, signature)
+            })
+            .transpose()?;
         let certificate = CertificateRef {
             serial: issued.info.serial.clone(),
             sha256: issued.info.sha256.clone(),
@@ -2029,6 +2057,9 @@ impl NodeRegistry {
             let mut batch = WriteBatch::for_request(&cx);
             batch.expect_typed(&tables::NODES, &node.0, Some(revision));
             batch.put_typed(&tables::NODES, &node.0, &record)?;
+            if let Some(step) = &step {
+                batch.put_typed(&crate::continuity::CONTINUITY, &issued.info.serial, step)?;
+            }
             batch.audit(
                 AuditDraft::success(actions::NODE_RENEW, vec![ObjectRef::node(node)])
                     .with_context("serial", issued.info.serial.clone())
@@ -2187,6 +2218,7 @@ impl NodeRegistry {
         &self,
         node: NodeId,
         serial: &str,
+        sha256: &str,
         now: Timestamp,
     ) -> Result<NodeRecord, ClusterError> {
         let local = self.record(node).await?;
@@ -2206,7 +2238,7 @@ impl NodeRegistry {
                 format!("node {node} is not enrolled in this installation"),
             )
         })?;
-        if !record.holds(serial, now) {
+        if !record.holds(serial, sha256, now) {
             // A certificate a renewal replaced: the node holds a newer one and connects
             // again with it (503 tells it to; 403 would hold it back as refused).
             if record.certificate.serial != serial

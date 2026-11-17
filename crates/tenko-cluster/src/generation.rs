@@ -124,8 +124,10 @@ pub const MAX_RECORD_BYTES: usize = 8 * 1024;
 /// signer, and refuses the offer otherwise.
 pub const MAX_LINEAGE: usize = 8;
 
-/// The largest encoded lineage (a binary metadata entry of about 22 KiB in base64).
-pub const MAX_LINEAGE_BYTES: usize = 16 * 1024;
+/// The largest encoded lineage: a binary metadata entry of about 12 KiB in base64, within
+/// the 16 KiB of headers HTTP/2 takes by default at both ends of a call, with room for the
+/// others. A record alone ([`MAX_RECORD_BYTES`]) always fits.
+pub const MAX_LINEAGE_BYTES: usize = 9 * 1024;
 
 /// How far a record's time may be ahead of the receiver's clock.
 pub const MAX_CLOCK_SKEW: Duration = Duration::from_secs(300);
@@ -297,6 +299,12 @@ pub struct GenerationRecord {
     pub signature: HexBytes,
     /// The forced controller's certificate chain, DER, leaf first.
     pub chain: Vec<HexBytes>,
+    /// The renewals that lead from an older certificate of the forced controller to the
+    /// leaf, oldest first ([`crate::continuity`]): a store of a history that forked before a
+    /// renewal holds the older certificate only. Not signed by the record: each step is
+    /// signed by the key it renews. Empty (and absent from the bytes) without a renewal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub continuity: Vec<crate::continuity::Step>,
 }
 
 impl std::fmt::Debug for GenerationRecord {
@@ -364,6 +372,7 @@ impl GenerationRecord {
             body: HexBytes(bytes),
             signature: HexBytes(signature.as_ref().to_vec()),
             chain: chain.iter().map(|cert| HexBytes(cert.to_vec())).collect(),
+            continuity: Vec::new(),
         })
     }
 
@@ -669,7 +678,7 @@ pub struct Standing {
     superseded: BTreeSet<NodeId>,
     revoked_serials: BTreeSet<String>,
     revoked_nodes: BTreeSet<NodeId>,
-    serials: BTreeMap<NodeId, BTreeSet<String>>,
+    serials: BTreeMap<NodeId, crate::continuity::Held>,
     now: Timestamp,
 }
 
@@ -719,7 +728,11 @@ impl Standing {
             if record.roles.contains(&Role::Controller) {
                 standing.serials.insert(
                     NodeId(node),
-                    record.serials.into_iter().map(|cert| cert.serial).collect(),
+                    record
+                        .serials
+                        .into_iter()
+                        .map(|cert| (cert.serial, cert.sha256))
+                        .collect(),
                 );
             }
         }
@@ -730,25 +743,44 @@ impl Standing {
         self.revoked_serials.contains(&signer.serial) || self.revoked_nodes.contains(&signer.node)
     }
 
+    /// Whether this store marks `node` superseded.
+    pub fn is_superseded(&self, node: NodeId) -> bool {
+        self.superseded.contains(&node)
+    }
+
     /// Cuts `new` before its first record after the first whose signer this store does
     /// not hold: a record signed with a minted certificate never rides on a valid one into
     /// the fence, its number or its suggested winner. The first record is checked by
     /// [`Lineage::admit`] itself.
     /// Returns the newest record cut off, if any.
     fn held_prefix(&self, new: &mut Vec<Signed>) -> Option<Signed> {
-        let cut = new
-            .iter()
-            .skip(1)
-            .position(|signed| !self.holds(&signed.signer))?;
+        let cut = new.iter().skip(1).position(|signed| !self.holds(signed))?;
         let dropped = new.last().cloned();
         new.truncate(cut + 1);
         dropped
     }
 
-    fn holds(&self, signer: &PeerIdentity) -> bool {
-        self.serials
-            .get(&signer.node)
-            .is_some_and(|serials| serials.contains(&signer.serial))
+    /// Whether this store holds the certificate that signed `record`: its node record of the
+    /// signer holds the serial, or the record's chain of renewals leads to it from a
+    /// certificate that record holds.
+    fn holds(&self, record: &Signed) -> bool {
+        let signer = &record.signer;
+        let Some(certificates) = self.serials.get(&signer.node) else {
+            return false;
+        };
+        // The serial and the SHA-256 both: anyone holding the CA's key can mint a
+        // certificate with a serial the record holds.
+        certificates
+            .get(&signer.serial)
+            .is_some_and(|sha256| sha256.eq_ignore_ascii_case(&signer.sha256))
+            || record.record.chain.first().is_some_and(|leaf| {
+                crate::continuity::Chain(&record.record.continuity).reaches(
+                    signer.node,
+                    certificates,
+                    &|serial| self.revoked_serials.contains(serial),
+                    &leaf.0,
+                )
+            })
     }
 }
 
@@ -934,7 +966,7 @@ impl Lineage {
         // Every relation that acts needs the signer's certificate held by its node record
         // here: one minted with the CA's key, which every controller and every copy of a
         // data directory or backup holds, must never stop a history.
-        if !standing.holds(signer) {
+        if !standing.holds(first) {
             return Err(unheld(first, standing));
         }
         let relation = if first.parent() == own_hash && first.number() > own_number {

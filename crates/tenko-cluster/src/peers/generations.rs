@@ -411,7 +411,7 @@ impl Peers {
 
     /// Whether this history superseded `node`; a store that cannot be read counts as yes,
     /// so a superseded caller never passes on an error.
-    async fn superseded_here(&self, node: NodeId) -> bool {
+    pub async fn superseded_here(&self, node: NodeId) -> bool {
         let Ok(view) = self.store().read(ReadConsistency::Local).await else {
             return true;
         };
@@ -435,6 +435,18 @@ impl Peers {
         let _one_at_a_time = self.generations().offering.lock().await;
         self.refresh_lineage().await;
         let state = self.generation();
+        // Records this controller holds were checked when it took them in: an offer of only
+        // those (every push of the current history) costs no scan and no signature.
+        let held: HashSet<_> = state
+            .lineage
+            .records()
+            .iter()
+            .chain(state.fence.iter().flat_map(|(_, fence)| fence.records()))
+            .map(Signed::hash)
+            .collect();
+        if !records.is_empty() && records.iter().all(|record| held.contains(&record.hash())) {
+            return Ok(Relation::Known);
+        }
         let standing = self.standing().await?;
         let admission = match state.lineage.admit(records, &root, &standing) {
             Ok(admission) => admission,
@@ -457,19 +469,24 @@ impl Peers {
         ) else {
             return Ok(admission.relation);
         };
-        let suggested = state.lineage.tip().map_or(newest.forced(), |own| {
-            if suggested_winner(own, newest).is_lt() {
-                own.forced()
-            } else {
-                newest.forced()
-            }
-        });
+        // A controller this history superseded can sign any number: never suggest it.
+        let suggested = if standing.is_superseded(newest.forced()) {
+            None
+        } else {
+            Some(state.lineage.tip().map_or(newest.forced(), |own| {
+                if suggested_winner(own, newest).is_lt() {
+                    own.forced()
+                } else {
+                    newest.forced()
+                }
+            }))
+        };
         tracing::error!(
             relation = ?admission.relation,
             generation = newest.number(),
             forced = %newest.forced(),
             from = ?from,
-            suggested = %suggested,
+            suggested = ?suggested,
             "generation {} of the cluster, forced on controller {}, {}; this controller stops \
              writing",
             newest.number(),
@@ -678,22 +695,29 @@ impl Peers {
     }
 
     /// The generation part of the cluster view; `None` at generation 0 without a fence.
-    pub(super) fn generation_view(&self) -> Option<Box<GenerationView>> {
+    /// A competing history signed by a controller this history superseded is never the
+    /// suggested one: such a controller can sign any number.
+    pub(super) async fn generation_view(&self) -> Option<Box<GenerationView>> {
         let state = self.generation();
         let own = state.lineage.tip();
         if own.is_none() && state.fence.is_none() {
             return None;
         }
-        let stopped_by = state.fence.as_ref().and_then(|(reason, other)| {
-            let other = other.tip()?;
-            Some(OtherHistory {
+        let stopped_by = match state
+            .fence
+            .as_ref()
+            .and_then(|(reason, other)| other.tip().map(|other| (reason, other)))
+        {
+            Some((reason, other)) => Some(OtherHistory {
                 number: other.number(),
                 record: other.hash().to_string(),
                 forced: other.forced(),
                 suggested: *reason == FenceReason::Conflict
-                    && own.is_some_and(|own| suggested_winner(other, own).is_lt()),
-            })
-        });
+                    && own.is_some_and(|own| suggested_winner(other, own).is_lt())
+                    && !self.superseded_here(other.forced()).await,
+            }),
+            None => None,
+        };
         Some(Box::new(GenerationView {
             number: state.lineage.number(),
             record: own.map(|own| own.hash().to_string()),

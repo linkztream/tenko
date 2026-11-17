@@ -953,7 +953,13 @@ async fn a_removed_controller_is_refused_with_every_certificate() {
     let renewed = lab
         .first
         .registry
-        .renew(node, &running.serial, &csr, tenko_core::Timestamp::now())
+        .renew(
+            node,
+            &running.serial,
+            &csr,
+            tenko_core::Timestamp::now(),
+            None,
+        )
         .await
         .expect("a renewal before the removal");
     // A certificate of the controller that its record never held.
@@ -2308,6 +2314,7 @@ async fn a_certificate_its_record_does_not_hold_is_refused_on_every_call() {
             &running.serial,
             &csr,
             tenko_core::Timestamp::now(),
+            None,
         )
         .await
         .expect("a renewal");
@@ -3133,7 +3140,7 @@ async fn a_vault_key_still_in_use_is_rotated_at_once() {
     drop(key);
     let renewed = single
         .registry
-        .renew(NodeId(1), &serial, &csr, tenko_core::Timestamp::now())
+        .renew(NodeId(1), &serial, &csr, tenko_core::Timestamp::now(), None)
         .await
         .expect("a rotation is never early");
     let renewed = tenko_cluster::ca::CertInfo::from_der(&renewed.chain[0])
@@ -3152,7 +3159,13 @@ async fn a_vault_key_still_in_use_is_rotated_at_once() {
     let (_, csr) = generate_csr().expect("csr");
     let early = single
         .registry
-        .renew(NodeId(1), &held[0], &csr, tenko_core::Timestamp::now())
+        .renew(
+            NodeId(1),
+            &held[0],
+            &csr,
+            tenko_core::Timestamp::now(),
+            None,
+        )
         .await
         .expect_err("not due");
     assert!(
@@ -3258,6 +3271,7 @@ async fn a_member_names_the_identity_a_renewal_put_under_node() {
             &started.info.serial,
             &csr,
             tenko_core::Timestamp::now(),
+            None,
         )
         .await
         .expect("a renewal");
@@ -3322,4 +3336,101 @@ async fn a_foreign_identity_left_under_node_is_not_reused() {
     let used = single.node_local_serial();
     assert_ne!(used, foreign.info.serial);
     assert_eq!(single.state().await.0, vec![used]);
+}
+
+/// The largest lineage an offer may carry passes the HTTP/2 transport of a real call (whose
+/// headers both ends take up to 16 KiB by default), so a controller always hears it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_offer_of_the_largest_lineage_passes_the_transport() {
+    use tenko_cluster::generation::{MAX_LINEAGE_BYTES, encode_lineage};
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let follower = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    // A member reports the log index its store applied.
+    let applied = follower.store.applied_index().expect("applied");
+    assert!(
+        leader
+            .peers
+            .applied_by(follower.node())
+            .await
+            .expect("an answer")
+            .is_some_and(|reported| reported >= applied)
+    );
+    let mut records = Vec::new();
+    let mut parent = None;
+    for number in 1..=3 {
+        let next = record(number, parent, leader.node(), &[], &leader.identity);
+        parent = Some(next.hash());
+        records.push(next);
+    }
+    // Fill the budget with chain bytes (the service checks them only when it acts).
+    let mut pad = (MAX_LINEAGE_BYTES - encode_lineage(&records).expect("cbor").len()) / 4;
+    let size = loop {
+        for padded in records.iter_mut().skip(1) {
+            padded.continuity = vec![tenko_cluster::continuity::Step {
+                previous: tenko_core::serde_util::HexBytes(vec![1; pad]),
+                next: tenko_core::serde_util::HexBytes(vec![2; pad]),
+                signature: tenko_core::serde_util::HexBytes(vec![3; 8]),
+            }];
+        }
+        let size = encode_lineage(&records).expect("cbor").len();
+        if size <= MAX_LINEAGE_BYTES {
+            break size;
+        }
+        pad -= 8;
+    };
+    assert!(
+        size <= MAX_LINEAGE_BYTES && size + 512 > MAX_LINEAGE_BYTES,
+        "{size}"
+    );
+    assert!(
+        members_with(
+            &lab,
+            &leader.identity,
+            leader.node(),
+            &follower,
+            &offering(&records)
+        )
+        .await
+        .is_some(),
+        "the service answered the call (a refusal with its code), not the transport"
+    );
+    lab.stop().await;
+}
+
+/// A controller renews its cluster certificate itself, the renewed key signing the new one;
+/// the node service that renews other nodes' certificates refuses it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_controller_cannot_renew_through_the_node_service() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let member = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    let network = PeerNetwork::new(member.node(), PeerTimings::default());
+    network.set_tls(
+        tenko_cluster::mtls::client_config(
+            lab.ca.root_der(),
+            member.identity.0.clone(),
+            &member.identity.1,
+        )
+        .expect("config"),
+    );
+    let channel = network
+        .channel(&leader.addr.to_string())
+        .await
+        .expect("the handshake passes");
+    let (_, csr) = generate_csr().expect("csr");
+    let refused = v1::node_client::NodeClient::new(channel)
+        .renew(v1::RenewRequest { csr })
+        .await
+        .expect_err("a controller");
+    assert_eq!(code_of(&refused), Some("cluster.node.controller_renewal"));
+    lab.stop().await;
 }

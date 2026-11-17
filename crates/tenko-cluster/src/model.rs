@@ -150,11 +150,15 @@ impl NodeRecord {
         self.roles.iter().copied().collect()
     }
 
-    /// Whether a certificate serial belongs to the node and has not expired at `now`.
-    pub fn holds(&self, serial: &str, now: Timestamp) -> bool {
-        self.serials
-            .iter()
-            .any(|cert| cert.serial == serial && cert.not_after > now)
+    /// Whether a certificate belongs to the node and has not expired at `now`: its serial
+    /// and its SHA-256 both, as anyone holding the CA's key could mint a certificate with a
+    /// serial the record holds.
+    pub fn holds(&self, serial: &str, sha256: &str, now: Timestamp) -> bool {
+        self.serials.iter().any(|cert| {
+            cert.serial == serial
+                && cert.sha256.eq_ignore_ascii_case(sha256)
+                && cert.not_after > now
+        })
     }
 }
 

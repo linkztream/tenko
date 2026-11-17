@@ -33,6 +33,7 @@ pub mod admin;
 pub mod buffer;
 pub mod ca;
 pub mod client;
+pub mod continuity;
 pub mod error;
 pub mod generation;
 pub mod identity;

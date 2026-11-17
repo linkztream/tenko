@@ -947,40 +947,61 @@ fn switch_to(resolver: &TlsResolver, peers: &Peers, credentials: &Credentials) {
     }
 }
 
-/// How long a renewing leader waits for its members to replicate the renewal.
-const REPLICATION_WAIT: Duration = Duration::from_secs(10);
+/// How often a renewing controller asks its members whether they applied the renewal.
+const APPLIED_POLL: Duration = Duration::from_millis(500);
 
-/// Waits until every other member replicated what this leader applied (the renewal just
-/// committed), for at most [`REPLICATION_WAIT`]: the members check a leader's certificate
-/// against their copy of its record, and one that has not applied the new serial would
-/// refuse the appends that bring it. A follower does not wait.
-async fn replicated(store: &tenko_store::raft::RaftStore) {
+/// How many polls a member may answer without having applied the renewal before it is
+/// left out with a warning (ten minutes): one that never applies it holds no renewal back.
+const LAGGING_POLLS: u32 = 1200;
+
+/// How many polls in a row a member may fail to answer before it is left out: it gets
+/// nothing from this controller either way, and takes the renewal from the log when it
+/// returns (refusing this controller until then, which an election ends).
+const UNANSWERED_POLLS: u32 = 20;
+
+/// Waits until every other member of the cluster applied what this controller applied (the
+/// renewal just committed), by what each member reports (`Cluster.Members`): a member checks
+/// a controller's certificate against its own copy of the controller's record, and one that
+/// has not applied the new serial would refuse the new certificate. A member of an earlier
+/// version, which does not report it, is not waited for; one that stops answering is left
+/// out after [`UNANSWERED_POLLS`].
+async fn applied_everywhere(peers: &Peers) {
+    let store = peers.store();
     let Some(target) = store.applied_index() else {
         return;
     };
-    let started = tokio::time::Instant::now();
-    loop {
-        let status = store.status();
-        let caught_up = status.role != tenko_store::StoreRole::Leader
-            || status
-                .members
-                .iter()
-                .filter(|member| Some(member.node) != status.node)
-                .all(|member| member.matched.is_some_and(|matched| matched >= target));
-        if caught_up {
-            // A follower learns that the renewal committed from the next message of this
-            // leader: give it two heartbeats before the certificate changes.
-            tokio::time::sleep(Duration::from_millis(store.config().timings.heartbeat_ms) * 2)
-                .await;
-            return;
+    let membership = store.membership();
+    let me = store.node_id();
+    let mut pending: std::collections::BTreeMap<NodeId, (u32, u32)> = membership
+        .voters
+        .iter()
+        .chain(&membership.learners)
+        .filter(|node| **node != me)
+        .map(|node| (*node, (0, 0)))
+        .collect();
+    while !pending.is_empty() {
+        let mut still = std::collections::BTreeMap::new();
+        for (node, (unanswered, lagging)) in pending {
+            match peers.applied_by(node).await {
+                Ok(Some(applied)) if applied < target && lagging + 1 < LAGGING_POLLS => {
+                    still.insert(node, (0, lagging + 1));
+                }
+                Ok(Some(applied)) if applied < target => {
+                    tracing::warn!(node = %node, applied, target, "a member did not apply this controller's renewed certificate in time; it refuses the new certificate until it does");
+                }
+                Ok(_) => {}
+                Err(_) if unanswered + 1 < UNANSWERED_POLLS => {
+                    still.insert(node, (unanswered + 1, lagging));
+                }
+                Err(_) => {
+                    tracing::warn!(node = %node, "a member did not answer while this controller waited for it to apply its renewed certificate; it refuses the new certificate until it applies it");
+                }
+            }
         }
-        if started.elapsed() >= REPLICATION_WAIT {
-            tracing::warn!(
-                "not every member replicated the renewed certificate in time; it is presented anyway, and a member that lags refuses this leader until an election"
-            );
-            return;
+        pending = still;
+        if !pending.is_empty() {
+            tokio::time::sleep(APPLIED_POLL).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -998,10 +1019,21 @@ async fn renew_once(
     }
     let (key, csr) = generate_csr()?;
     let issued = registry
-        .renew(current.identity.node, &current.info.serial, &csr, now)
+        .renew(
+            current.identity.node,
+            &current.info.serial,
+            &csr,
+            now,
+            Some((
+                &current.chain[0],
+                tenko_cluster::continuity::attest(current.identity.node, &current.key, &key)?,
+            )),
+        )
         .await?;
-    replicated(peers.store()).await;
+    // On disk first: a stop while it waits keeps the new key, and the next start presents
+    // it.
     let renewed = current.renewed(paths, issued.chain, key)?;
+    applied_everywhere(peers).await;
     switch_to(resolver, peers, &renewed);
     tracing::info!(not_after = %renewed.info.not_after, "renewed the cluster certificate of this controller");
     Ok(())
@@ -1045,12 +1077,15 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                     .map(tenko_cluster::generation::Signed::forced)
                     .into_iter()
                     .collect();
+                let superseded = match forced.first() {
+                    Some(node) if reason == FenceReason::Conflict => {
+                        layer.superseded_here(*node).await
+                    }
+                    _ => false,
+                };
                 state.set_notice(notice(
                     reason.code(),
-                    format!(
-                        "this controller stopped writing ({}): reads serve its copy until an operator acts on its host (docs/cluster.md section 12.11)",
-                        reason.code()
-                    ),
+                    fence_detail(reason, forced.first().copied(), superseded),
                     &forced,
                 ));
             }
@@ -1076,7 +1111,10 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
         ));
         state.set_notice(notice(
             codes::SUPERSEDED_PENDING,
-            "controllers a forced step superseded are neither rejoined nor removed".to_owned(),
+            "controllers a forced step superseded are neither rejoined nor removed: until each \
+             is revoked or removed it can still stop this cluster's writes with its own \
+             certificate (`tenko cluster remove <id>`, or a forced step with --revoke <id>)"
+                .to_owned(),
             &pending,
         ));
     }
@@ -1093,6 +1131,31 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
     // Records that changed nothing here (a forged signer, a revoked or superseded one):
     // an operator sees that someone offers them, and from where.
     offer_notices(layer, state);
+}
+
+/// The detail of the status warning of a fence. A competing record signed by a controller
+/// this history superseded suggests no side: such a controller can sign any number.
+fn fence_detail(
+    reason: tenko_store::FenceReason,
+    forced: Option<NodeId>,
+    superseded: bool,
+) -> String {
+    let mut detail = format!(
+        "this controller stopped writing ({}): reads serve its copy until an operator acts on \
+         its host (docs/cluster.md section 12.11)",
+        reason.code()
+    );
+    if let (true, Some(node)) = (superseded, forced) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            detail,
+            ". The competing record was signed by controller {node}, which this history \
+             superseded: no side is suggested. It can stop this cluster until it is revoked or \
+             removed; if it is not trusted, revoke it (`tenko cluster recover --force \
+             --revoke {node}` on this controller, or `tenko cluster remove {node}`)"
+        );
+    }
+    detail
 }
 
 /// The notices of generation records this controller refused or did not act on.
@@ -1250,6 +1313,10 @@ mod tests {
     /// before the renewal window, presents the new certificate, and takes the vault key
     /// out; the record holds only the new certificate.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[allow(
+        clippy::too_many_lines,
+        reason = "the installation, the rotation and what it leaves, in order"
+    )]
     async fn a_first_controller_still_on_its_vault_key_rotates_at_the_first_run() {
         use tenko_cluster::{
             ca::{CaPolicy, InternalCa},
@@ -1345,9 +1412,40 @@ mod tests {
                 .iter()
                 .map(|cert| cert.serial.clone())
                 .collect::<Vec<_>>(),
-            vec![now]
+            vec![now.clone()]
         );
+        // The rotation is a renewal like any other: the vault key signed the new key, and
+        // the step is stored, so a history that still holds the vault certificate follows.
+        let view = store
+            .read(tenko_store::ReadConsistency::Local)
+            .await
+            .expect("view");
+        let chain = tenko_cluster::continuity::chain_of(view.as_ref(), &now).expect("chain");
+        assert_eq!(chain.len(), 1);
+        assert_eq!(chain[0].previous.0, moved.chain[0].to_vec());
+        let held: tenko_cluster::continuity::Held = [(old.clone(), moved.info.sha256.clone())]
+            .into_iter()
+            .collect();
+        assert!(tenko_cluster::continuity::Chain(&chain).reaches(
+            NodeId(1),
+            &held,
+            &|_| false,
+            &Credentials::load(&paths).expect("identity").chain[0]
+        ));
+        drop(view);
         let _ = store.shutdown().await;
+    }
+
+    /// The status warning of a conflict whose competing record a superseded controller
+    /// signed suggests no side and says how to revoke it; another conflict does not.
+    #[test]
+    fn a_conflict_signed_by_a_superseded_controller_names_no_side() {
+        use tenko_store::FenceReason;
+        let detail = fence_detail(FenceReason::Conflict, Some(NodeId(2)), true);
+        assert!(detail.contains("no side is suggested"), "{detail}");
+        assert!(detail.contains("--revoke 2"), "{detail}");
+        let detail = fence_detail(FenceReason::Conflict, Some(NodeId(2)), false);
+        assert!(!detail.contains("no side is suggested"), "{detail}");
     }
 
     fn at(text: &str) -> Timestamp {

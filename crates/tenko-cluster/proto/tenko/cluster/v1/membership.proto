@@ -142,6 +142,9 @@ message MembersResponse {
   uint32 in_contact = 5;
   // The voters of the callee's membership.
   uint32 voters = 6;
+  // The log index the callee's store applied; absent while it applied nothing, and from a
+  // callee of an earlier version.
+  optional uint64 applied = 7;
 }
 
 message DigestRequest {
