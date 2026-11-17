@@ -1114,8 +1114,8 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
             &unreached,
         ));
     }
-    // Records that changed nothing here (a forged signer, a revoked or superseded one):
-    // an operator sees that someone offers them, and from where.
+    // Records that changed nothing here (ones that do not verify, an older history): an
+    // operator sees that someone offers them, and from where.
     offer_notices(layer, state);
 }
 

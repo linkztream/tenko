@@ -2496,7 +2496,6 @@ async fn a_certificate_its_record_does_not_hold_is_refused_on_every_call() {
             &tenko_cluster::generation::SupersededMark {
                 generation: 1,
                 record: tenko_core::audit::Digest([1; 32]),
-                rejoin: false,
             },
         )
         .expect("mark");
@@ -2931,7 +2930,6 @@ async fn every_call_is_refused_across_generations_and_by_a_fenced_member() {
             &tenko_cluster::generation::SupersededMark {
                 generation: 1,
                 record: first.hash(),
-                rejoin: false,
             },
         )
         .expect("mark");

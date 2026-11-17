@@ -406,9 +406,10 @@ impl GenerationRecord {
         exact(bytes, false, "generation record")
     }
 
-    /// Checks the chain against `ca_root` at the record's own time (a returning controller
-    /// may meet a record whose signer renewed its certificate since), the leaf as the forced
-    /// controller's, and the signature.
+    /// Checks the chain against `ca_root` at the start of the leaf's own validity, the leaf
+    /// as the forced controller's, and the signature. No time counts: neither the date the
+    /// record claims nor the receiver's clock, so a forced step signed with a certificate
+    /// that expired meanwhile (a controller long off) still stops the other side.
     fn verify(&self, ca_root: &CertificateDer<'_>) -> Result<Signed, ClusterError> {
         let header = self.header()?;
         if header.number == 0 {
@@ -428,13 +429,12 @@ impl GenerationRecord {
         roots
             .add(ca_root.clone().into_owned())
             .map_err(|error| invalid(format!("the CA root is unusable: {error}")))?;
-        let seconds = u64::try_from(header.at.0.unix_timestamp())
-            .map_err(|_| invalid("the generation record's time is before 1970"))?;
+        let (point, valid_from) = leaf_facts(&leaf)?;
         let signer = crate::mtls::verify_controller(
             &roots,
             &leaf,
             &intermediates,
-            UnixTime::since_unix_epoch(Duration::from_secs(seconds)),
+            UnixTime::since_unix_epoch(Duration::from_secs(valid_from)),
             &crate::mtls::provider().signature_verification_algorithms,
         )
         .map_err(|error| invalid(format!("the signer's certificate does not verify: {error}")))?;
@@ -443,7 +443,6 @@ impl GenerationRecord {
                 "the generation record is not signed by the forced controller's certificate",
             ));
         }
-        let point = public_key(&leaf)?;
         UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, point)
             .verify(&signed_message(&self.body.0), &self.signature.0)
             .map_err(|_| invalid("the generation record's signature does not verify"))?;
@@ -457,11 +456,17 @@ impl GenerationRecord {
     }
 }
 
-fn public_key(leaf: &[u8]) -> Result<Vec<u8>, ClusterError> {
+/// The leaf's public key and the start of its validity, in seconds since 1970.
+fn leaf_facts(leaf: &[u8]) -> Result<(Vec<u8>, u64), ClusterError> {
     use x509_parser::prelude::FromDer as _;
     let (_, cert) = x509_parser::certificate::X509Certificate::from_der(leaf)
         .map_err(|error| invalid(format!("the signer's certificate: {error}")))?;
-    Ok(cert.public_key().subject_public_key.data.to_vec())
+    let valid_from = u64::try_from(cert.validity().not_before.timestamp())
+        .map_err(|_| invalid("the signer's certificate starts before 1970"))?;
+    Ok((
+        cert.public_key().subject_public_key.data.to_vec(),
+        valid_from,
+    ))
 }
 
 /// Encodes a lineage for [`RECORD_METADATA`]: the records, oldest first.
@@ -870,10 +875,6 @@ pub struct SupersededMark {
     pub generation: u64,
     /// That generation's record hash.
     pub record: Digest,
-    /// Whether it may rejoin by itself when it holds nothing of its own after the fork
-    /// (`--rejoin`, not offered until the rejoin is built).
-    #[serde(default)]
-    pub rejoin: bool,
 }
 
 #[cfg(test)]

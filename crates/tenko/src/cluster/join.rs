@@ -441,6 +441,9 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
         )
         .map_err(|error| Failure::other(error.to_string()))?,
     ));
+    // The pin lives in memory only: a rerun on a copy that stopped half way takes Raft from
+    // nobody until the answer names the voters again, not from any certificate of their ids.
+    peers.seed_from(&v1::JoinResponse::default());
     let (stop, stopped) = watch::channel(false);
     let port = listener
         .serve_port(

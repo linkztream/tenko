@@ -764,21 +764,16 @@ impl Peers {
     }
 
     async fn push_targets(&self) -> Result<Vec<NodeId>, ClusterError> {
-        // A revoked controller too: revoking a side must never keep it from learning of
-        // this history.
         let informed = lock(&self.generations().informed).clone();
         let membership = self.store().membership();
+        let current: BTreeSet<NodeId> = membership
+            .voters
+            .iter()
+            .chain(&membership.learners)
+            .copied()
+            .collect();
         let view = self.store().read(ReadConsistency::Local).await?;
-        Ok(view
-            .scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)?
-            .into_iter()
-            .map(|(node, _, _)| NodeId(node))
-            .filter(|node| {
-                !informed.contains(node)
-                    && !membership.voters.contains(node)
-                    && !membership.learners.contains(node)
-            })
-            .collect())
+        push_targets_in(view.as_ref(), &current, &informed)
     }
 
     /// The controllers this history superseded that are neither members again nor removed
@@ -826,6 +821,31 @@ impl Peers {
             _ => false,
         }
     }
+}
+
+/// The controllers the push offers the record to: every superseded mark, revoked or not
+/// (revoking a side must never keep it from learning of this history), except a member
+/// again (`current`), one that holds this history already (`informed`) and one without a
+/// member record: a removed controller has no address to call, and would show as
+/// unreached for good.
+pub(super) fn push_targets_in(
+    view: &dyn tenko_store::ReadView,
+    current: &BTreeSet<NodeId>,
+    informed: &HashSet<NodeId>,
+) -> Result<Vec<NodeId>, ClusterError> {
+    let mut targets = Vec::new();
+    for (node, _, _) in view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)? {
+        let node = NodeId(node);
+        if !informed.contains(&node)
+            && !current.contains(&node)
+            && view
+                .get_typed(&crate::model::tables::MEMBERS, &node.0)?
+                .is_some()
+        {
+            targets.push(node);
+        }
+    }
+    Ok(targets)
 }
 
 fn no_root() -> ClusterError {

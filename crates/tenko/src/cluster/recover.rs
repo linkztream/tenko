@@ -1348,7 +1348,6 @@ async fn write_batch(
                 &SupersededMark {
                     generation: body.number,
                     record: hash,
-                    rejoin: false,
                 },
             )
             .map_err(Failure::other)?;

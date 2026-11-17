@@ -229,9 +229,9 @@ struct Inner {
     generations: generations::Generations,
     /// While this controller is being seeded (a joining learner with an empty store): the
     /// voters it takes its first copy from, with the serials and SHA-256 of the certificates
-    /// their records hold, as the join answer named them. A leader of an earlier version
-    /// names no SHA-256 (the serial alone then decides) or no certificate at all (`None`:
-    /// any certificate of that node id).
+    /// their records hold, as the join answer named them (`None`: any certificate of that
+    /// node id, from a leader of a released version, which names none; dropped with the
+    /// exception for controllers without a record, plan section 9.1).
     seeds: Mutex<Option<Seeds>>,
 }
 
@@ -457,10 +457,7 @@ impl Peers {
             .map(|seeds| {
                 seeds.get(&node).is_some_and(|serials| {
                     serials.as_ref().is_none_or(|held| {
-                        held.iter().any(|(held_serial, digest)| {
-                            held_serial == serial
-                                && (digest.is_empty() || digest.eq_ignore_ascii_case(sha256))
-                        })
+                        held.contains(&(serial.to_owned(), sha256.to_ascii_lowercase()))
                     })
                 })
             })
@@ -2446,6 +2443,52 @@ mod tests {
                 false
             )),
             Some(vec!["n".to_owned()])
+        );
+    }
+
+    /// The push calls a superseded controller that is revoked but still has its member
+    /// record, and skips one that is a member again, one that holds this history already
+    /// and one whose record a removal deleted (no address: it would stay unreached).
+    #[tokio::test]
+    async fn the_push_skips_a_removed_controller() {
+        use tenko_store::MemStore;
+        let store = MemStore::default();
+        let ctx = tenko_core::RequestCtx::system(tenko_core::SystemComponent::Cluster);
+        let mut batch = WriteBatch::for_request(&ctx);
+        let mark = crate::generation::SupersededMark {
+            generation: 1,
+            record: tenko_core::audit::Digest([1; 32]),
+        };
+        for node in [2_u64, 3, 4, 5] {
+            batch
+                .put_typed(&crate::generation::SUPERSEDED, &node, &mark)
+                .expect("mark");
+        }
+        for node in [2_u64, 3, 4] {
+            batch
+                .put_typed(
+                    &tables::MEMBERS,
+                    &node,
+                    &crate::model::MemberRecord {
+                        node: NodeId(node),
+                        address: format!("192.0.2.{node}:8444"),
+                        version: "0.0.1".to_owned(),
+                        data_format: 7,
+                        joined_at: tenko_core::Timestamp::now(),
+                        protocol_majors: Vec::new(),
+                        raft_wire: None,
+                        formats: Vec::new(),
+                    },
+                )
+                .expect("member");
+        }
+        store.propose(batch).await.expect("write");
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        let current = [NodeId(3)].into_iter().collect();
+        let informed = [NodeId(4)].into_iter().collect();
+        assert_eq!(
+            generations::push_targets_in(view.as_ref(), &current, &informed).expect("targets"),
+            vec![NodeId(2)]
         );
     }
 

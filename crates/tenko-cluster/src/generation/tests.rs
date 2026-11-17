@@ -52,6 +52,11 @@ struct Leaf {
 }
 
 fn leaf(ca: &Ca, node: u64, role: &str) -> Leaf {
+    leaf_until(ca, node, role, 2099)
+}
+
+/// A certificate of `node` with `role` that ends on the first day of `year`.
+fn leaf_until(ca: &Ca, node: u64, role: &str, year: i32) -> Leaf {
     let key = KeyPair::generate_for(&PKCS_ECDSA_P256_SHA256).expect("key");
     let mut params = CertificateParams::new(Vec::new()).expect("params");
     params.subject_alt_names = vec![
@@ -59,7 +64,7 @@ fn leaf(ca: &Ca, node: u64, role: &str) -> Leaf {
         rcgen::SanType::URI(format!("urn:tenko:role:{role}").try_into().expect("uri")),
     ];
     params.not_before = rcgen::date_time_ymd(2020, 1, 1);
-    params.not_after = rcgen::date_time_ymd(2099, 1, 1);
+    params.not_after = rcgen::date_time_ymd(year, 1, 1);
     let cert = params.signed_by(&key, &ca.issuer).expect("leaf");
     Leaf {
         chain: vec![cert.der().clone()],
@@ -415,8 +420,9 @@ fn a_controller_certificate_of_the_ca_is_all_a_record_needs() {
 }
 
 /// No difference of clocks makes a receiver ignore a record: a record dated far ahead of
-/// the receiver counts, and a lineage whose later record carries the earlier date (two hosts
-/// whose clocks disagree) is still one lineage.
+/// the receiver counts, a lineage whose later record carries the earlier date (two hosts
+/// whose clocks disagree) is still one lineage, and a signer's certificate that expired
+/// before the record's date does not refuse it.
 #[test]
 fn the_time_a_record_claims_never_refuses_it() {
     let ca = ca();
@@ -435,6 +441,16 @@ fn the_time_a_record_claims_never_refuses_it() {
         .expect("counts");
     assert_eq!(admission.relation, Relation::Descendant);
     assert_eq!(admission.new.len(), 2);
+    // Signed with a certificate that ended years before the record's date: a controller
+    // that was off longer than its certificate lasted, forced on its return.
+    let expired = leaf_until(&ca, 2, "controller", 2021);
+    assert_eq!(
+        Lineage::default()
+            .admit(&[sign(&expired, &body(1, None, 2))], &ca.root)
+            .expect("counts")
+            .relation,
+        Relation::Descendant
+    );
 }
 
 /// The envelope of a record is frozen (its bytes are pinned in
@@ -485,13 +501,12 @@ fn the_superseded_mark_layout_is_pinned() {
     let mark = SupersededMark {
         generation: 1,
         record: Digest([1; 32]),
-        rejoin: true,
     };
     let bytes = to_cbor(&mark).expect("cbor");
     assert_eq!(
         to_hex(&bytes),
         format!(
-            "a36a67656e65726174696f6e01667265636f72645820{}6672656a6f696ef5",
+            "a26a67656e65726174696f6e01667265636f72645820{}",
             "01".repeat(32)
         )
     );
