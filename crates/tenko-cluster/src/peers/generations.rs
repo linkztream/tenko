@@ -720,8 +720,8 @@ impl Peers {
     // The authority's push.
 
     /// Offers this history's record to every controller the store marks superseded and that
-    /// is not a member again, revoked or not, once every [`PUSH_INTERVAL`] on the leader,
-    /// until `stop` turns true.
+    /// is neither a member again nor removed, revoked or not (`push_targets_in`), once every
+    /// [`PUSH_INTERVAL`] on the leader, until `stop` turns true.
     pub(super) async fn push_loop(self, mut stop: watch::Receiver<bool>) {
         let mut tick = tokio::time::interval(PUSH_INTERVAL);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -825,23 +825,23 @@ impl Peers {
 
 /// The controllers the push offers the record to: every superseded mark, revoked or not
 /// (revoking a side must never keep it from learning of this history), except a member
-/// again (`current`), one that holds this history already (`informed`) and one without a
-/// member record: a removed controller has no address to call, and would show as
-/// unreached for good.
+/// again (`current`), one that holds this history already (`informed`) and a removed one
+/// (revoked and without a member record: no address to call, it would show as unreached
+/// for good). One that never had a member record stays a target, shown as unreached.
 pub(super) fn push_targets_in(
     view: &dyn tenko_store::ReadView,
     current: &BTreeSet<NodeId>,
     informed: &HashSet<NodeId>,
 ) -> Result<Vec<NodeId>, ClusterError> {
+    let revoked = crate::registry::revoked_nodes(view)?;
     let mut targets = Vec::new();
     for (node, _, _) in view.scan_typed(&SUPERSEDED, KeyRange::all(), usize::MAX, false)? {
         let node = NodeId(node);
-        if !informed.contains(&node)
-            && !current.contains(&node)
+        let removed = revoked.contains(&node)
             && view
                 .get_typed(&crate::model::tables::MEMBERS, &node.0)?
-                .is_some()
-        {
+                .is_none();
+        if !informed.contains(&node) && !current.contains(&node) && !removed {
             targets.push(node);
         }
     }

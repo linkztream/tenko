@@ -861,6 +861,9 @@ fn quorum_event(quorum: QuorumState) -> EventData {
 /// How often a member checks whether its cluster certificate is due for renewal.
 const IDENTITY_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 
+/// How often an expired cluster certificate is tried again.
+const EXPIRED_RETRY: Duration = Duration::from_secs(10);
+
 /// Renews the certificate of a member's cluster identity under `<data_dir>/node/` when it
 /// is due (a third of its lifetime or 30 days left): a new key and certificate from the
 /// internal CA through the registry (the node record keeps both serials until the old one
@@ -874,13 +877,18 @@ async fn renew_identity(
     paths: NodePaths,
     mut stop: watch::Receiver<bool>,
 ) {
-    let mut tick = tokio::time::interval(IDENTITY_INTERVAL);
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let mut wait = Duration::ZERO;
     loop {
         tokio::select! {
             () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
-            _ = tick.tick() => {}
+            () = tokio::time::sleep(wait) => {}
         }
+        // Soon again while the certificate has expired (a forced controller waiting to
+        // take office): it reaches nobody until it is renewed.
+        wait = match Credentials::load(&paths) {
+            Ok(current) if current.info.not_after <= Timestamp::now() => EXPIRED_RETRY,
+            _ => IDENTITY_INTERVAL,
+        };
         // A controller that presents the vault's certificate has nothing here yet.
         if !node_local(&registry, &paths, true).await {
             continue;
@@ -1018,9 +1026,21 @@ async fn renew_once(
         return Ok(());
     }
     let (key, csr) = generate_csr()?;
-    let issued = registry
-        .renew(current.identity.node, &current.info.serial, &csr, now)
-        .await?;
+    // An expired certificate is renewed only by the controller a forced step left as the
+    // only voter: it can present nothing else to the controllers it superseded.
+    let membership = peers.store().membership();
+    let issued = if current.info.not_after <= now
+        && membership.learners.is_empty()
+        && membership.voters.iter().eq([&current.identity.node])
+    {
+        registry
+            .renew_own_expired(&current.info.serial, &csr, now)
+            .await?
+    } else {
+        registry
+            .renew(current.identity.node, &current.info.serial, &csr, now)
+            .await?
+    };
     // On disk first: a stop while it waits keeps the new key, and the next start presents
     // it.
     let renewed = current.renewed(paths, issued.chain, key)?;

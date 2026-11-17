@@ -18,8 +18,8 @@
 //! generations behind can link the newest record to its own.
 //!
 //! The rule: a record counts when it verifies under the installation's CA as signed by a
-//! controller's certificate naming the forced node (the chain at the record's own time, the
-//! signature over [`SIGNING_CONTEXT`] and the body) and is not older than the receiver's
+//! controller's certificate naming the forced node (the chain at the start of that
+//! certificate's validity, the signature over [`SIGNING_CONTEXT`] and the body) and is not older than the receiver's
 //! history. Nothing about the signer is looked up in the receiver's store: not the
 //! certificates its node record holds, not a revocation, not a superseded mark. A receiver
 //! needs nothing from the other side but the CA, so two forced histories that meet always

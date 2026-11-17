@@ -1998,6 +1998,44 @@ impl NodeRegistry {
         csr_der: &[u8],
         now: Timestamp,
     ) -> Result<NodeCert, ClusterError> {
+        self.renew_as(node, serial, csr_der, now, false).await
+    }
+
+    /// Renews this controller's own certificate after it expired, which [`Self::renew`]
+    /// refuses so that an old certificate cannot renew itself: only the local node's
+    /// record, and only while the store's newest generation record was forced on it. The
+    /// caller, the controller's own renewal in its process (no service reaches this), checks
+    /// that it is the only voter. Without it a controller forced after more time off than
+    /// its certificate lasted could present nothing, and its record would reach nobody.
+    ///
+    /// # Errors
+    ///
+    /// `cluster.node.certificate_unknown` (403) when the last forced step was not this
+    /// controller's or `serial` is not its record's, else as [`Self::renew`].
+    pub async fn renew_own_expired(
+        &self,
+        serial: &str,
+        csr_der: &[u8],
+        now: Timestamp,
+    ) -> Result<NodeCert, ClusterError> {
+        let node = self.config.local_node;
+        let view = self.store.read(ReadConsistency::Local).await?;
+        let lineage = crate::generation::Lineage::read(view.as_ref())?;
+        drop(view);
+        if lineage.tip().map(crate::generation::Signed::forced) != Some(node) {
+            return Err(unknown_certificate());
+        }
+        self.renew_as(node, serial, csr_der, now, true).await
+    }
+
+    async fn renew_as(
+        &self,
+        node: NodeId,
+        serial: &str,
+        csr_der: &[u8],
+        now: Timestamp,
+        expired: bool,
+    ) -> Result<NodeCert, ClusterError> {
         let (mut record, mut revision) = self
             .record_for_edit(node, 1)
             .await?
@@ -2006,7 +2044,7 @@ impl NodeRegistry {
         // once, due or not: the key must leave the vault, where every controller and every
         // copy of a data directory can read it (`retire_vault_keys`).
         let rotating = self.vault_serial(node).await?.as_deref() == Some(serial);
-        self.check_renewal(&record, serial, now, rotating)?;
+        self.check_renewal(&record, serial, now, rotating, expired)?;
         let issued = self
             .ca
             .issue_node_cert_for(node, record.role_set(), csr_der, now)?;
@@ -2056,7 +2094,7 @@ impl NodeRegistry {
                         .await?
                         .ok_or_else(|| not_found(node))?;
                     // A renewal through another controller that won the race counts.
-                    self.check_renewal(&record, serial, now, rotating)?;
+                    self.check_renewal(&record, serial, now, rotating, expired)?;
                 }
                 Err(error) => return Err(error),
             }
@@ -2065,22 +2103,24 @@ impl NodeRegistry {
         Ok(issued)
     }
 
-    /// Whether `serial` of `record` may be renewed at `now`.
+    /// Whether `serial` of `record` may be renewed at `now`; `expired` also takes one that
+    /// ended ([`Self::renew_own_expired`]).
     fn check_renewal(
         &self,
         record: &NodeRecord,
         serial: &str,
         now: Timestamp,
         rotating: bool,
+        expired: bool,
     ) -> Result<(), ClusterError> {
         let Some(cert) = record
             .serials
             .iter()
-            .find(|cert| cert.serial == serial && cert.not_after > now)
+            .find(|cert| cert.serial == serial && (expired || cert.not_after > now))
         else {
             return Err(unknown_certificate());
         };
-        if rotating {
+        if rotating || expired {
             return Ok(());
         }
         if let Some(at) = record.renewed_at
@@ -3067,6 +3107,69 @@ mod tests {
                 .expect("again"),
             Vec::<String>::new()
         );
+    }
+
+    /// An expired certificate renews only as the local controller's own, through
+    /// `renew_own_expired`, and only once the newest generation record was forced on it:
+    /// `renew`, which the node service runs, refuses it whatever the store holds.
+    #[tokio::test]
+    async fn only_a_forced_controller_renews_its_own_expired_certificate() {
+        use crate::generation::{ForkPoint, GENERATION, GenerationBody, GenerationRecord, LAYOUT};
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let (store, vault, registry) = registry_with_vault().await;
+        let (chain, key) = registry
+            .controller_identity(&*vault, &ctx)
+            .await
+            .expect("the vault identity");
+        record_member(&store, &chain).await;
+        let info = crate::ca::CertInfo::from_der(&chain[0]).expect("certificate");
+        let later = Timestamp(info.not_after.0 + time::Duration::days(1));
+        let (_, csr) = crate::ca::generate_csr().expect("csr");
+        let refused =
+            |result: Result<NodeCert, ClusterError>| result.expect_err("refused").code().to_owned();
+        let unknown = "cluster.node.certificate_unknown";
+        assert_eq!(
+            refused(registry.renew(NodeId(1), &info.serial, &csr, later).await),
+            unknown
+        );
+        assert_eq!(
+            refused(registry.renew_own_expired(&info.serial, &csr, later).await),
+            unknown
+        );
+        let body = GenerationBody {
+            layout: LAYOUT,
+            number: 1,
+            parent: None,
+            forced: NodeId(1),
+            fork: ForkPoint {
+                term: 1,
+                leader: 1,
+                index: 1,
+                revision: Revision(1),
+                audit: tenko_core::audit::ChainHead::default(),
+            },
+            superseded: vec![NodeId(2)],
+            at: later,
+            nonce: tenko_core::serde_util::HexBytes(vec![7; 16]),
+        };
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch
+            .put_typed(
+                &GENERATION,
+                &1_u64,
+                &GenerationRecord::sign(&body, &chain, &key).expect("sign"),
+            )
+            .expect("record");
+        store.propose(batch).await.expect("write");
+        assert_eq!(
+            refused(registry.renew(NodeId(1), &info.serial, &csr, later).await),
+            unknown
+        );
+        let renewed = registry
+            .renew_own_expired(&info.serial, &csr, later)
+            .await
+            .expect("the forced controller's own");
+        assert!(renewed.info.not_after > later);
     }
 
     #[tokio::test]

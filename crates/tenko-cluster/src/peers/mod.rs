@@ -2446,9 +2446,58 @@ mod tests {
         );
     }
 
+    /// A member of the store's Raft membership without a node record takes Raft by its node
+    /// id alone, until a join pin decides: the empty pin a joining controller sets before
+    /// its port opens (a rerun on a copy that stopped half way) takes Raft from nobody.
+    #[tokio::test]
+    async fn an_empty_join_pin_takes_raft_from_nobody() {
+        let mut config = tenko_store::raft::RaftStoreConfig::new(std::env::temp_dir());
+        config.node_id = NodeId(1);
+        config.bootstrap = true;
+        config.fsync_probe_samples = 0;
+        let store = RaftStore::open_temp(config).await.expect("store");
+        tenko_core::testing::wait_until_async("the membership applied", async || {
+            store.applied_index().is_some()
+        })
+        .await;
+        let peers = Peers::new(
+            store.clone(),
+            PeerNetwork::new(NodeId(1), network::PeerTimings::default()),
+            PeerConfig::new(NodeId(1), 2),
+        );
+        let caller = crate::mtls::PeerInfo {
+            identity: crate::mtls::PeerIdentity {
+                node: NodeId(1),
+                roles: [Role::Controller].into_iter().collect(),
+                serial: "0a".to_owned(),
+                sha256: "00".to_owned(),
+                not_after: Timestamp::now(),
+            },
+            remote: None,
+            local: None,
+            kill: crate::mtls::KillSwitch::new(),
+            revoked: false,
+        };
+        peers
+            .authenticate(&caller, Access::Raft)
+            .await
+            .expect("a member by its node id, without a pin");
+        peers.seed_from(&v1::JoinResponse::default());
+        let refused = peers
+            .authenticate(&caller, Access::Raft)
+            .await
+            .expect_err("nobody before the join answer");
+        assert_eq!(
+            crate::server::code_of(&refused),
+            Some("cluster.node.unknown")
+        );
+        let _ = store.shutdown().await;
+    }
+
     /// The push calls a superseded controller that is revoked but still has its member
-    /// record, and skips one that is a member again, one that holds this history already
-    /// and one whose record a removal deleted (no address: it would stay unreached).
+    /// record and one that never had a member record, and skips one that is a member again,
+    /// one that holds this history already and one a removal revoked and took the record of
+    /// (no address: it would stay unreached).
     #[tokio::test]
     async fn the_push_skips_a_removed_controller() {
         use tenko_store::MemStore;
@@ -2459,10 +2508,24 @@ mod tests {
             generation: 1,
             record: tenko_core::audit::Digest([1; 32]),
         };
-        for node in [2_u64, 3, 4, 5] {
+        for node in [2_u64, 3, 4, 5, 6] {
             batch
                 .put_typed(&crate::generation::SUPERSEDED, &node, &mark)
                 .expect("mark");
+        }
+        for (serial, node) in [("02", 2_u64), ("05", 5)] {
+            batch
+                .put_typed(
+                    &tables::REVOCATIONS,
+                    &serial.to_owned(),
+                    &crate::model::Revocation {
+                        node: NodeId(node),
+                        revoked_at: tenko_core::Timestamp::now(),
+                        not_after: tenko_core::Timestamp::now(),
+                        controller: true,
+                    },
+                )
+                .expect("revocation");
         }
         for node in [2_u64, 3, 4] {
             batch
@@ -2488,7 +2551,7 @@ mod tests {
         let informed = [NodeId(4)].into_iter().collect();
         assert_eq!(
             generations::push_targets_in(view.as_ref(), &current, &informed).expect("targets"),
-            vec![NodeId(2)]
+            vec![NodeId(2), NodeId(6)]
         );
     }
 

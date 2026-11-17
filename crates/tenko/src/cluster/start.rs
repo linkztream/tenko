@@ -493,8 +493,14 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
     let deadline = Instant::now() + Duration::from_secs(resolved.config.cluster.recover_probe_secs);
     let claim = recover::parent_claim(notice).render();
     let mut answers: BTreeMap<NodeId, Answer> = BTreeMap::new();
+    // With an expired certificate every handshake fails, so silence cannot be told from a
+    // live majority: undecided, without asking.
+    let expired = Credentials::load(&NodePaths::new(&resolved.data_dir))
+        .ok()
+        .map(|own| own.info.not_after)
+        .filter(|end| *end <= tenko_core::Timestamp::now());
     let mut tick = tokio::time::interval(Duration::from_secs(1));
-    loop {
+    while expired.is_none() {
         tick.tick().await;
         // Every voter is asked again at every tick until the deadline: one that answers
         // alone now may be part of a majority that elects a moment later (a power outage
@@ -547,13 +553,19 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
             break;
         }
     }
-    let live: Vec<String> = answers
-        .iter()
-        .filter_map(|(node, answer)| match answer {
+    let live: Vec<String> = expired
+        .map(|end| {
+            format!(
+                "none asked: this controller's cluster certificate expired at {end}, so every \
+                 handshake fails and silence cannot be told from a live majority (undecided)"
+            )
+        })
+        .into_iter()
+        .chain(answers.iter().filter_map(|(node, answer)| match answer {
             Answer::Alive(state) => Some(format!("{node} ({state})")),
             Answer::Unreadable(state) => Some(format!("{node} ({state}, undecided)")),
             Answer::Alone(_) => None,
-        })
+        }))
         .collect();
     if !live.is_empty() && !notice.despite_majority {
         tracing::error!(
