@@ -12,6 +12,14 @@ feature-depth = 1
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 unmaintained = "all"
+# An accepted advisory names its reason and ends it with "review by <date>". cargo-deny has
+# no expiry for an entry, so `scripts/deny-ignore.test.mjs` fails once that date has passed.
+ignore = [
+  # chrono is flagged as unmaintained, with no vulnerability named. It enters only through
+  # openraft, which uses it to format timestamps in log text; openraft 0.9.26 and 0.10.0
+  # still depend on it.
+  { id = "RUSTSEC-2026-0543", reason = "only through openraft, for log timestamps; no release of openraft is without it; review by 2027-02-17" },
+]
 
 # The project license is the Business Source License 1.1 with AGPL-3.0-or-later as the
 # Change License (ADR 0022). A copyleft dependency would bind the converted versions, so
