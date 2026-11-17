@@ -6,8 +6,10 @@
 #
 #   1. verify      resolves the tag to its commit (a tag by its full ref name, never a branch
 #                  of that name), checks that the commit is on main, and checks the tag against
-#                  the crate version and the changelog. Every later job builds that commit; the
-#                  tag name is not resolved again, so a tag moved during the run changes nothing;
+#                  the crate version and the changelog, and that CI's push run on that commit
+#                  passed (a run still going, failed, canceled or missing is refused). Every
+#                  later job builds that commit; the tag name is not resolved again, so a tag
+#                  moved during the run changes nothing;
 #   2. ui          installs the web UI's dependencies without their install scripts, audits the
 #                  whole dependency tree (npm audit, blocking on high and critical), then builds
 #                  and tests the web UI once;
@@ -68,7 +70,8 @@
 # (the platform of the musl binary stays linux-x86_64). SECURITY.md, "Verifying a release",
 # says how a user checks the attestations with `gh attestation verify`.
 #
-# Re-running: when a run fails before `publish`, re-run the failed jobs. When `publish`
+# Re-running: when a run fails before `publish`, re-run the failed jobs (a tag pushed with
+# its commit fails `verify` until CI has passed on that commit). When `publish`
 # failed after the release was created, delete that release (not the tag) and re-run; the
 # image tags are written again from the same digest. The workflow_dispatch trigger builds an
 # existing tag by hand; it never creates a tag, and it accepts a tag only (on main).
@@ -138,6 +141,10 @@ jobs:
   verify:
     name: Verify the tag
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # To read the CI runs of the tag's commit.
+      actions: read
     outputs:
       version: ${{ steps.tag.outputs.version }}
       prerelease: ${{ steps.tag.outputs.prerelease }}
@@ -205,6 +212,29 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           echo "Releasing $version from $sha (prerelease: $prerelease)"
+      - name: CI passed on the commit
+        # The release runs no tests of its own: it ships only a commit whose push to main
+        # CI ran to success. A run still going is refused rather than awaited (no bound to
+        # pick, no runner held): re-run this workflow once CI is green.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.tag.outputs.sha }}
+        run: |
+          set -euo pipefail
+          runs="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&event=push&per_page=100" \
+            --jq '.workflow_runs[] | "\(.status) \(.conclusion // "none")"')"
+          if grep -qx 'completed success' <<< "$runs"; then
+            echo "CI passed on $SHA."
+          elif [ -z "$runs" ]; then
+            echo "::error::CI has no push run for the commit $SHA (CI runs on the last commit of each push to main and skips a push that changes only documentation). Tag a commit whose CI passed."
+            exit 1
+          elif grep -qv '^completed ' <<< "$runs"; then
+            echo "::error::CI is still running for the commit $SHA. Re-run this workflow when CI is green."
+            exit 1
+          else
+            echo "::error::CI did not pass for the commit $SHA (conclusions: $(cut -d' ' -f2 <<< "$runs" | sort -u | paste -sd, -)). Re-run a canceled CI run, or fix main and tag a commit whose CI passed; then re-run this workflow."
+            exit 1
+          fi
 
   # -------------------------------------------------------------------------------------
   ui:

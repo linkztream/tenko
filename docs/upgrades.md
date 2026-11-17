@@ -953,8 +953,12 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
 1. **Verify.** The tag is resolved by its full ref name to its commit (a branch of the same
    name is refused), the commit must be on `main`, the crate version must equal the tag, and
    the changelog has a section `## [<version>] - <date>` for it
-   (`node scripts/changelog.mjs notes <version>` fails when it is missing). Every later job
-   builds that commit, not the tag name.
+   (`node scripts/changelog.mjs notes <version>` fails when it is missing). The CI workflow
+   (`ci.yml`) must have run to success on the push of that commit to `main`: a commit whose
+   CI failed or was canceled is refused, and so is one CI never ran on (CI runs on the last
+   commit of each push to `main` and skips a push that changes only documentation). A CI
+   run still going is refused too: re-run the release workflow once CI is green. Every later
+   job builds that commit, not the tag name.
 2. **Build.** The web UI (`npm ci --ignore-scripts`, an audit of the whole dependency tree
    that stops on a high or critical advisory, `npm run build` in `ui/`) and then the
    binaries for Linux x86_64 and Windows x86_64 with the real UI embedded. A release build
