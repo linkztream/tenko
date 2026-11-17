@@ -40,6 +40,7 @@ When the signer signs:
 - After every change of the zone's records (the store's change stream, gathered for 50 ms): an incremental pass over the changed RRsets, the owners whose NSEC must point elsewhere, and for NSEC3 the empty non-terminals above a change and the hashed owners before it.
 - After a change of the zone's settings, of its keys, and when a controller takes over as leader: a full pass that keeps every signature that can stay.
 - On its timer (every minute it looks): when `next_resign` (the earliest expiry less `resign_before_days`) has come, a full pass that renews every signature with less than `resign_before_days` and one day left, so the next renewal of the zone is about a day later.
+- After a pass that failed at the start or after a change (the vault or the store could not be used): at the next timer look, a full pass that verifies every signature it keeps, so the change that pass carried is signed once the cause is gone. A zone that keeps failing is tried again every minute and logged each time.
 
 A pass that writes anything moves the zone's serial once and journals its rows, so secondaries get the signatures by IXFR. A pass that changes more than 10,000 records (the first signing of a large zone, a key change, a renewal pass of a large zone) resets the zone's journal, as a large import does; a secondary then asks for IXFR, gets AXFR once, and IXFR again afterwards. Each change of records therefore shows as two serial steps on a secondary: the change and the signer's pass right after it.
 

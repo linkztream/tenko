@@ -11,7 +11,10 @@ mod support;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::SocketAddr,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -46,7 +49,9 @@ use tenko_dns::{
 };
 use tenko_jobs::{Job, JobError, JobSpec};
 use tenko_store::{KeyRange, MemStore, ReadView, ReadViewExt, Store, WriteBatch};
-use tenko_vault::{MemVault, Vault as _};
+use tenko_vault::{
+    DataKey, KekProtection, KekProvider, KekRing, MemKek, MemVault, Vault as _, VaultError,
+};
 use tokio_util::sync::CancellationToken;
 
 fn name(text: &str) -> DnsName {
@@ -80,11 +85,60 @@ struct Setup {
     signer: Arc<Signer>,
     jobs: Arc<DirectJobs>,
     vault: Arc<MemVault>,
+    kek: Arc<Kek>,
+}
+
+/// The vault's key-encryption key, which a test can take down; it counts the uses it refused.
+#[derive(Debug)]
+struct Kek {
+    key: MemKek,
+    down: AtomicBool,
+    refused: AtomicUsize,
+}
+
+impl Kek {
+    fn up(&self) -> Result<(), VaultError> {
+        if self.down.load(Ordering::SeqCst) {
+            self.refused.fetch_add(1, Ordering::SeqCst);
+            return Err(VaultError::KekUnavailable {
+                reason: "taken down by the test".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl KekProvider for Kek {
+    fn id(&self) -> &str {
+        self.key.id()
+    }
+
+    fn protection(&self) -> KekProtection {
+        self.key.protection()
+    }
+
+    fn wrap(&self, dek: &DataKey, aad: &[u8]) -> Result<Vec<u8>, VaultError> {
+        self.up()?;
+        self.key.wrap(dek, aad)
+    }
+
+    fn unwrap(&self, wrapped: &[u8], aad: &[u8]) -> Result<DataKey, VaultError> {
+        self.up()?;
+        self.key.unwrap(wrapped, aad)
+    }
 }
 
 fn setup() -> Setup {
     let store = Arc::new(MemStore::default());
-    let vault = Arc::new(MemVault::with_store(Arc::clone(&store)));
+    let kek = Arc::new(Kek {
+        key: MemKek::generate("mem-1"),
+        down: AtomicBool::new(false),
+        refused: AtomicUsize::new(0),
+    });
+    let vault = Arc::new(MemVault::with_ring(
+        Arc::clone(&store),
+        KekRing::new(Arc::clone(&kek) as Arc<dyn KekProvider>),
+    ));
     let late = Arc::new(LateJobs::default());
     let staging = Arc::new(ImportStaging::default());
     let zones = ZoneService::new(
@@ -113,6 +167,7 @@ fn setup() -> Setup {
         signer,
         jobs: direct,
         vault,
+        kek,
     }
 }
 
@@ -1446,6 +1501,96 @@ async fn the_timer_re_signs_the_zones_after_one_that_cannot_be_signed() {
             .and_then(|state| state.next_resign),
         Some(past),
         "the zone without keys is not signed"
+    );
+    stop.cancel();
+    leader
+        .await
+        .expect("join")
+        .expect("the signer stops cleanly");
+}
+
+#[tokio::test]
+async fn a_pass_that_failed_is_done_again_at_the_next_tick() {
+    let setup = setup();
+    let zone = bare_zone(&setup, APEX).await;
+    setup.kek.down.store(true, Ordering::SeqCst);
+    let (stop, leader) = lead(&setup);
+    // The change: signing turns on, and its pass cannot store the zone's new keys.
+    setup
+        .zones
+        .update(
+            &cx(),
+            zone,
+            ZoneChange {
+                dnssec: Some(online(DnssecAlgorithm::EcdsaP256Sha256, Denial::Nsec)),
+                ..ZoneChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("policy");
+    wait_until_async("the pass failed", async || {
+        setup.kek.refused.load(Ordering::SeqCst) > 0
+    })
+    .await;
+    setup.kek.down.store(false, Ordering::SeqCst);
+    wait_until_async("the zone signed at a later tick", async || {
+        sign_state(&setup, zone)
+            .await
+            .is_some_and(|state| state.signed_serial.is_some())
+    })
+    .await;
+    check_zone(
+        &zone_rows(&setup, zone).await,
+        &signing_tags(&setup, zone).await,
+        false,
+    );
+    stop.cancel();
+    leader
+        .await
+        .expect("join")
+        .expect("the signer stops cleanly");
+}
+
+#[tokio::test]
+async fn a_record_set_changed_before_a_failed_pass_is_signed_over_its_new_data() {
+    let setup = setup();
+    let zone = new_zone(&setup).await;
+    enable(
+        &setup,
+        zone,
+        online(DnssecAlgorithm::EcdsaP256Sha256, Denial::Nsec),
+    )
+    .await;
+    // The signature of www now covers its old address.
+    setup
+        .zones
+        .change_records(
+            &cx(),
+            zone,
+            &[set("www.example.test", vec![a("192.0.2.12")])],
+            false,
+        )
+        .await
+        .expect("change");
+    // The leader's first pass cannot load the keys.
+    setup.kek.down.store(true, Ordering::SeqCst);
+    let (stop, leader) = lead(&setup);
+    wait_until_async("the pass failed", async || {
+        setup.kek.refused.load(Ordering::SeqCst) > 0
+    })
+    .await;
+    setup.kek.down.store(false, Ordering::SeqCst);
+    wait_until_async("the zone signed at a later tick", async || {
+        sign_state(&setup, zone)
+            .await
+            .is_some_and(|state| state.signed_revision.is_some())
+    })
+    .await;
+    check_zone(
+        &zone_rows(&setup, zone).await,
+        &signing_tags(&setup, zone).await,
+        false,
     );
     stop.cancel();
     leader

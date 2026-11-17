@@ -16,6 +16,9 @@
 //!   a zone whose ZSK is older than `zsk_rollover_days` gets a rollover job; an imported
 //!   zone has its signatures' expiry read again every hour.
 //! - When a rollover step asks ([`Signer::sync`]).
+//! - After a pass at the start or after a change failed (a vault or store error): at the
+//!   next tick, a full pass that verifies every signature it keeps, so the change the
+//!   failed pass carried is signed and the zone's state stays bounded.
 //!
 //! # Modes
 //!
@@ -99,7 +102,9 @@ pub struct Trigger {
     pub timer: bool,
     /// The changed RRsets by scope.
     pub changed: HashMap<ScopeName, HashSet<(DnsName, Rtype)>>,
-    /// The store revision the changes run to, recorded as `signed_revision`.
+    /// The store revision whose changes the pass signs, recorded as `signed_revision`; none
+    /// leaves it as it is (a pass that keeps signatures without knowing which changes are
+    /// still to come).
     pub position: Option<Revision>,
 }
 
@@ -745,8 +750,6 @@ impl Signer {
             }
             if let Some(position) = position {
                 state.signed_revision = Some(position);
-            } else if full {
-                state.signed_revision = Some(view.revision());
             }
             if rows == 0 && state == before {
                 return Ok(Report::default());
@@ -1004,7 +1007,7 @@ impl Signer {
         };
         let shared = Arc::new(Shared {
             inbox: std::sync::Mutex::new(Inbox {
-                position: start,
+                position: if verify { start } else { from.unwrap_or(start) },
                 ..Inbox::default()
             }),
             tracked: std::sync::Mutex::new(tracked.clone()),
@@ -1036,12 +1039,14 @@ impl Signer {
             if stop.is_cancelled() {
                 return Ok(());
             }
+            // Without verifying, a pass keeps signatures over data the replay has yet to
+            // re-sign, so only a pass that verifies records where it stands.
             let trigger = Trigger {
-                position: Some(start),
+                position: verify.then_some(start),
                 ..Trigger::full(verify && *mode == DnssecMode::Online)
             };
-            if let Err(error) = self.sync(*id, trigger).await {
-                tracing::warn!(zone = %id, %error, "the zone could not be signed at the start");
+            if self.sync(*id, trigger).await.is_err() {
+                shared.again(*id);
             }
         }
         let mut tick = tokio::time::interval(self.config.tick);
@@ -1060,8 +1065,8 @@ impl Signer {
                     }
                     for (id, mut trigger) in pending {
                         trigger.position = Some(position);
-                        if let Err(error) = self.sync(id, trigger).await {
-                            tracing::warn!(zone = %id, %error, "signing failed");
+                        if self.sync(id, trigger).await.is_err() {
+                            shared.again(id);
                         }
                         if let Ok(view) = self.zones.view(None).await
                             && let Ok(row) = ZoneService::zone(view.as_ref(), id)
@@ -1075,13 +1080,17 @@ impl Signer {
                     }
                 }
                 _ = tick.tick() => {
-                    let tracked = shared
-                        .tracked
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone();
-                    if let Err(error) = self.on_timer(&tracked).await {
+                    if let Err(error) = self.on_timer(shared).await {
                         tracing::warn!(%error, "the signing timer could not look at the zones");
+                    }
+                    let mut inbox = shared.inbox();
+                    let retry = std::mem::take(&mut inbox.retry);
+                    for id in &retry {
+                        inbox.zones.insert(*id, Trigger::full(true));
+                    }
+                    drop(inbox);
+                    if !retry.is_empty() {
+                        shared.notify.notify_one();
                     }
                 }
             }
@@ -1090,15 +1099,31 @@ impl Signer {
 
     /// The timer: re-signs zones that are due, starts scheduled rollovers, reads the
     /// expiry of imported zones again. A zone that fails ([`Signer::sync`] logs it with the
-    /// zone) does not hold up the zones after it.
-    async fn on_timer(&self, tracked: &BTreeMap<ZoneId, DnssecMode>) -> ZoneResult<()> {
+    /// zone) does not hold up the zones after it; a zone with a pass waiting gets that pass
+    /// first. A re-signing records the position of the gathered changes: the zone has none
+    /// waiting, so its signatures cover every change up to there.
+    async fn on_timer(&self, shared: &Shared) -> ZoneResult<()> {
         let at = now();
-        for (id, mode) in tracked {
+        let tracked = shared.tracked().clone();
+        for (id, mode) in &tracked {
+            let position = {
+                let inbox = shared.inbox();
+                if inbox.zones.contains_key(id) || inbox.retry.contains(id) {
+                    continue;
+                }
+                inbox.position
+            };
             let view = self.zones.view(None).await?;
             let Ok(row) = ZoneService::zone(view.as_ref(), *id) else {
                 continue;
             };
-            let state = ZoneService::sign_state(view.as_ref(), *id)?.map(|(state, _)| state);
+            let state = match ZoneService::sign_state(view.as_ref(), *id) {
+                Ok(state) => state.map(|(state, _)| state),
+                Err(error) => {
+                    tracing::warn!(zone = %row.zone.name, %error, "the signing state could not be read");
+                    continue;
+                }
+            };
             drop(view);
             let due = state
                 .as_ref()
@@ -1109,6 +1134,7 @@ impl Signer {
                     if due {
                         let trigger = Trigger {
                             timer: true,
+                            position: Some(position),
                             ..Trigger::full(false)
                         };
                         if self.sync(*id, trigger).await.is_err() {
@@ -1141,6 +1167,8 @@ struct Inbox {
     zones: HashMap<ZoneId, Trigger>,
     /// The revision the gathered changes run to.
     position: Revision,
+    /// The zones whose pass failed, for a full pass that verifies at the next tick.
+    retry: HashSet<ZoneId>,
     /// Why the change stream ended, which stops the service.
     failed: Option<String>,
 }
@@ -1172,6 +1200,14 @@ impl Shared {
         for id in tracked.keys() {
             inbox.zones.insert(*id, Trigger::full(true));
         }
+    }
+
+    /// A zone whose pass failed gets, at the next tick (not at the next change, so a zone
+    /// that keeps failing is tried once a tick), a full pass that verifies every signature
+    /// it keeps: it covers whatever the failed pass carried, in a size that does not grow
+    /// with the changes.
+    fn again(&self, zone: ZoneId) {
+        self.inbox().retry.insert(zone);
     }
 
     /// Stops the service with `reason` at its next look at the inbox.
