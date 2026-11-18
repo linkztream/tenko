@@ -721,7 +721,7 @@ impl StoreVault {
 
     /// Re-wraps every envelope not under the active KEK of `ring`, pass after pass until a
     /// pass finds nothing; every batch expects `epoch` and `fence` (the leader epoch of an
-    /// online rotation). `progress` sees the running total.
+    /// online rotation). `progress` sees the running total after every committed batch.
     pub(crate) async fn rewrap_all(
         &self,
         ctx: &RequestCtx,
@@ -735,9 +735,10 @@ impl StoreVault {
         let mut passes = 0u32;
         loop {
             passes += 1;
-            let done = self.rewrap_pass(ctx, ring, epoch, fence).await?;
+            let done = self
+                .rewrap_pass(ctx, ring, epoch, fence, rewrapped, &mut progress)
+                .await?;
             rewrapped += done;
-            progress(rewrapped);
             if done == 0 {
                 return Ok(rewrapped);
             }
@@ -756,6 +757,8 @@ impl StoreVault {
         ring: &KekRing,
         epoch: u64,
         fence: Option<&Precondition>,
+        before: usize,
+        progress: &mut impl FnMut(usize),
     ) -> Result<usize, VaultError> {
         let view = self.store.read(ReadConsistency::Local).await?;
         let mut pending: Vec<(Bytes, Revision, Bytes)> = Vec::new();
@@ -787,6 +790,7 @@ impl StoreVault {
                     committed += self
                         .commit_rewraps(ctx, epoch, fence, std::mem::take(&mut pending))
                         .await?;
+                    progress(before + committed);
                     pending_bytes = 0;
                 }
             }
@@ -795,6 +799,7 @@ impl StoreVault {
             }
         }
         committed += self.commit_rewraps(ctx, epoch, fence, pending).await?;
+        progress(before + committed);
         Ok(committed)
     }
 

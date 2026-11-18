@@ -7,6 +7,7 @@
 mod common;
 
 use std::{
+    collections::VecDeque,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
@@ -20,15 +21,19 @@ use tenko_core::{
     testing::{TempDir, wait_until_async},
 };
 use tenko_store::{
-    ChangeStream, Committed, DerivedIndex, MemStore, MemberStatus, QuorumState, ReadConsistency,
-    ReadView, ReadViewExt, Store, StoreError, StoreStatus, WatchFilter, WriteBatch,
+    ChangeStream, Committed, DerivedIndex, MemStore, MemberStatus, Mutation, QuorumState,
+    ReadConsistency, ReadView, ReadViewExt, Store, StoreError, StoreStatus, WatchFilter,
+    WriteBatch,
 };
 use tenko_vault::{
     KekConfig, KekInit, KekOptions, KekProtection, KekRing, MemPeers, StoreVault, Vault,
     VaultError, VaultStart,
-    distribution::{KekAdmin, KekPeers, NoPeers, RotationStep, deposed, fetch_missing},
+    distribution::{
+        DISTRIBUTE_TIMEOUT, KekAdmin, KekPeers, NoPeers, RotationStep, deposed, fetch_missing,
+    },
     kek::{KekDir, KekSealer, LocalKek, PlainSealer},
     kek_state::{self, KekState, RotationPhase, VaultAlarmKind},
+    tables,
     transfer::{self, TransferKey},
 };
 use zeroize::Zeroizing;
@@ -38,6 +43,8 @@ use zeroize::Zeroizing;
 struct ClusterStore {
     inner: MemStore,
     members: Mutex<Vec<MemberStatus>>,
+    /// The answers to the next writes of a secret: `true` refuses one with a timeout.
+    refusals: Mutex<VecDeque<bool>>,
 }
 
 impl ClusterStore {
@@ -45,7 +52,12 @@ impl ClusterStore {
         Arc::new(Self {
             inner: MemStore::default(),
             members: Mutex::new(Vec::new()),
+            refusals: Mutex::new(VecDeque::new()),
         })
+    }
+
+    fn script_secret_writes(&self, refusals: &[bool]) {
+        *self.refusals.lock().expect("refusals") = refusals.iter().copied().collect();
     }
 
     /// Members: `(node, reachable)`.
@@ -66,6 +78,12 @@ impl ClusterStore {
 #[async_trait::async_trait]
 impl Store for ClusterStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let writes_a_secret = batch.mutations.iter().any(
+            |mutation| matches!(mutation, Mutation::Put { table, .. } if *table == tables::SECRETS),
+        );
+        if writes_a_secret && self.refusals.lock().expect("refusals").pop_front() == Some(true) {
+            return Err(StoreError::Timeout);
+        }
         self.inner.propose(batch).await
     }
 
@@ -444,6 +462,12 @@ async fn a_reachable_member_that_does_not_take_the_generation_fails_the_rotation
     one.admin.request_rotation(&ctx()).await.expect("again");
 }
 
+/// Waits until the clock has moved past now, so that a zero timeout has passed.
+async fn clock_moves() {
+    let since = Timestamp::now();
+    wait_until_async("the clock to move on", async || Timestamp::now() > since).await;
+}
+
 /// The leader that created a generation stops for good before another controller fetched
 /// it: the next leader can never hold it, and the rotation must still end.
 async fn creator_lost(phase: RotationPhase, members: &[(u64, bool)]) {
@@ -468,19 +492,26 @@ async fn creator_lost(phase: RotationPhase, members: &[(u64, bool)]) {
     two.peers.set_source(None);
     store.set_members(&[(1, false), (1001, true)]);
     two.admin.set_distribute_timeout(Duration::ZERO);
+    let mut term = 0;
     if phase == RotationPhase::Rewrapping {
         // The first failure starts the count; only a later one past the timeout fails.
-        let error = two.admin.rotation_step(0).await.expect_err("missing");
+        let error = two.admin.rotation_step(term).await.expect_err("missing");
         assert!(
             matches!(error, VaultError::KekUnavailable { .. }),
             "{error:?}"
         );
+        // A new term of office starts a new count.
+        let mut batch = WriteBatch::for_request(&ctx());
+        batch.bump(LEADER_EPOCH);
+        store.propose(batch).await.expect("new term");
+        term = 1;
+        clock_moves().await;
+        two.admin.rotation_step(term).await.expect_err("new count");
         assert_eq!(state(&store).await.rotation.expect("rotation").phase, phase);
     }
-    let since = Timestamp::now();
-    wait_until_async("the clock to move on", async || Timestamp::now() > since).await;
+    clock_moves().await;
     two.admin
-        .rotation_step(0)
+        .rotation_step(term)
         .await
         .expect("fails the rotation");
     let failed = state(&store).await;
@@ -495,10 +526,63 @@ async fn creator_lost(phase: RotationPhase, members: &[(u64, bool)]) {
     } else {
         assert_eq!(failed.active, new, "the activation stands");
     }
-    assert!(failed.knows(&old), "the old generation stays listed");
-    assert_eq!(envelope_ids(&store, &secrets).await, vec![old; 2]);
+    assert!(
+        failed.ids().any(|id| id == old),
+        "the old generation stays listed"
+    );
+    assert_eq!(envelope_ids(&store, &secrets).await, vec![old.clone(); 2]);
     assert_reads(two.vault(), &secrets).await;
+    // The next rotation runs to the end on the controller that is left.
+    two.admin.set_distribute_timeout(DISTRIBUTE_TIMEOUT);
     two.admin.request_rotation(&ctx()).await.expect("again");
+    for _ in 0..10 {
+        two.admin.rotation_step(term).await.expect("next rotation");
+    }
+    let done = state(&store).await;
+    assert_eq!(done.rotation.expect("rotation").phase, RotationPhase::Done);
+    assert!(![old, new].contains(&done.active));
+    assert_eq!(envelope_ids(&store, &secrets).await, vec![done.active; 2]);
+    assert_reads(two.vault(), &secrets).await;
+}
+
+/// A re-wrap that fails half done leaves every secret readable, and a batch committed
+/// before the next failure starts the count again.
+#[tokio::test]
+async fn a_rewrap_that_fails_half_done_keeps_every_secret_and_counts_its_progress() {
+    let root_guard = TempDir::new("dist-half");
+    let root = root_guard.join("data");
+    let store = ClusterStore::new();
+    let one = first(&store, &root.join("c1")).await;
+    // Three batches of at most 512.
+    let secrets = put_secrets(one.vault(), 1_025).await;
+    one.admin.request_rotation(&ctx()).await.expect("request");
+    one.admin.rotation_step(0).await.expect("create");
+    one.admin.rotation_step(0).await.expect("activate");
+    let new = state(&store).await.active;
+    one.admin.set_distribute_timeout(Duration::ZERO);
+    // Each attempt commits one batch and has the next one refused.
+    store.script_secret_writes(&[false, true, false, true]);
+    one.admin.rotation_step(0).await.expect_err("refused");
+    let ids = envelope_ids(&store, &secrets).await;
+    assert_eq!(ids.iter().filter(|id| **id == new).count(), 512);
+    assert_reads(one.vault(), &secrets).await;
+    clock_moves().await;
+    one.admin
+        .rotation_step(0)
+        .await
+        .expect_err("refused after progress");
+    assert_eq!(
+        state(&store).await.rotation.expect("rotation").phase,
+        RotationPhase::Rewrapping,
+        "the committed batch started the count again"
+    );
+    one.admin.rotation_step(0).await.expect("the rest");
+    assert_eq!(
+        state(&store).await.rotation.expect("rotation").phase,
+        RotationPhase::Done
+    );
+    assert_eq!(envelope_ids(&store, &secrets).await, vec![new; 1_025]);
+    assert_reads(one.vault(), &secrets).await;
 }
 
 #[tokio::test]
@@ -514,8 +598,7 @@ async fn a_rewrap_that_starts_late_still_runs() {
     let new = state(&store).await.active;
     // A new leader takes over long after the activation: it re-wraps, it does not fail.
     one.admin.set_distribute_timeout(Duration::ZERO);
-    let since = Timestamp::now();
-    wait_until_async("the clock to move on", async || Timestamp::now() > since).await;
+    clock_moves().await;
     one.admin.rotation_step(0).await.expect("rewrap");
     let done = state(&store).await;
     assert_eq!(done.rotation.expect("rotation").phase, RotationPhase::Done);

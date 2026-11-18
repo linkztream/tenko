@@ -69,7 +69,7 @@ use crate::{
 /// A member counts as reachable when the leader heard from it within this time.
 pub const REACHABLE_MS: u64 = 10_000;
 /// How long the leader waits for reachable members to take a new generation, and how long
-/// it retries a re-wrap that fails with no pass completing in between; past it the
+/// it retries a re-wrap that fails with no batch committed in between; past it the
 /// rotation fails.
 pub const DISTRIBUTE_TIMEOUT: Duration = Duration::from_secs(120);
 /// How often a controller compares its keys with the replicated state without a change.
@@ -340,8 +340,9 @@ pub struct KekAdmin {
     peers: Arc<dyn KekPeers>,
     summary: RwLock<Option<KekSummary>>,
     distribute_timeout: RwLock<Duration>,
-    /// The generation whose re-wrap fails on this leader, and since when.
-    rewrap_failing: Mutex<Option<(String, Timestamp)>>,
+    /// The generation whose re-wrap fails on this leader, the leader epoch of that term,
+    /// and since when: a new term starts a new count.
+    rewrap_failing: Mutex<Option<(String, u64, Timestamp)>>,
 }
 
 impl std::fmt::Debug for KekAdmin {
@@ -687,7 +688,23 @@ impl KekAdmin {
             }
             RotationPhase::Rewrapping => match self.rewrap(&ctx, &guard, state.clone()).await {
                 Err(error) if !deposed(&error) => {
-                    let since = self.rewrap_failing_since(&state.active, ctx.now);
+                    let since = {
+                        let mut failing = self
+                            .rewrap_failing
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner);
+                        match &*failing {
+                            Some((id, epoch, since))
+                                if *id == state.active && *epoch == leader_epoch =>
+                            {
+                                *since
+                            }
+                            _ => {
+                                *failing = Some((state.active.clone(), leader_epoch, ctx.now));
+                                ctx.now
+                            }
+                        }
+                    };
                     let timeout = self.distribute_timeout();
                     if ctx.now.saturating_since(since) <= timeout {
                         return Err(error);
@@ -803,8 +820,13 @@ impl KekAdmin {
         let since = rotation.distributing_since.unwrap_or(rotation.updated_at);
         let timeout = self.distribute_timeout();
         if ctx.now.saturating_since(since) > timeout {
+            let leader = if waiting.contains(&self.node) {
+                " (the leader could not fetch it from any controller)"
+            } else {
+                ""
+            };
             let error = format!(
-                "the controllers {} did not take the new key generation within {} seconds",
+                "the controllers {} did not take the new key generation within {} seconds{leader}",
                 nodes(&waiting),
                 timeout.as_secs()
             );
@@ -881,7 +903,9 @@ impl KekAdmin {
             )));
         }
         let ring = self.vault.ring();
-        // A completed pass is progress: failures count again from the next one.
+        // A committed batch is progress: failures count again from the next one. Under
+        // constant write churn `rewrap_all` gives up after eight passes, each of which made
+        // progress, so such a rotation is retried for as long as the churn lasts.
         let rewrapped = self
             .vault
             .rewrap_all(ctx, &ring, state.epoch, Some(guard), |_| {
@@ -940,22 +964,6 @@ impl KekAdmin {
             .await?;
         tracing::error!("key rotation failed: {error}");
         Ok(RotationStep::Advanced)
-    }
-
-    /// Since when the re-wrap of `generation` fails on this leader (from `now` on a first
-    /// failure).
-    fn rewrap_failing_since(&self, generation: &str, now: Timestamp) -> Timestamp {
-        let mut failing = self
-            .rewrap_failing
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        match &*failing {
-            Some((id, since)) if id == generation => *since,
-            _ => {
-                *failing = Some((generation.to_owned(), now));
-                now
-            }
-        }
     }
 
     fn leader_batch(ctx: &RequestCtx, guard: &Precondition) -> WriteBatch {
