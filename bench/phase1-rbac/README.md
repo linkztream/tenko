@@ -52,14 +52,15 @@ hosts: `Authorizer::scope` (once per request), `ScopeIndex::anchors` (per object
 Two parts, on `MemStore`:
 
 1. The filter alone: `EventFilter::select(principal, Topic::Ipam, &[host])` for 1,000
-   subscribers per event, 100 events per second. 50 scoped principals (50 grants each, on a
+   subscribers per event, 100 events per second. 64 scoped principals (50 grants each, on a
    random half of the /56 prefixes) are shared round robin by the 1,000 subscribers; an
    administrator run is the control.
 2. Real streams: 1,000 `GET /api/v1/events?topics=ipam` streams through the router, each
-   drained by a task, 50 sessions shared round robin; the event hub is fed from the store
+   drained by a task, 64 sessions shared round robin (the server holds one user to 16
+   streams); the event hub is fed from the store
    journal (`Store::watch`, the loop of `EventHub::spawn_tasks`, which is crate-private) and
    100 `UpdateHost` commands per second change random hosts. Runs: no subscribers (publisher
-   and feeder only), 1,000 administrator streams (fan-out without filtering), 1,000 scoped
+   and feeder only), 1,000 streams of 64 administrators (fan-out without filtering), 1,000 scoped
    streams. Process CPU time over the publishing window (via `sysinfo`), divided by wall time,
    gives cores used. The drain tasks (counting frames) run in the same process and are part of
    the CPU figure.

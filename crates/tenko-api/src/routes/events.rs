@@ -68,7 +68,9 @@ struct EventsQuery {
         or reset, or the account disabled or deleted; a new stream with it is refused with \
         401) or no longer reads a topic of the stream (`access_changed`: open a new one). No \
         event of the commit that ends the access, or of a later commit, comes before `end`, \
-        on whichever controller the stream is open.",
+        on whichever controller the stream is open. One user holds at most 16 open streams, \
+        sessions and tokens together, and a controller at most a quarter of its \
+        `max_connections`; a stream beyond either is refused with 429.",
     params(
         EventsQuery,
         ("Last-Event-ID" = Option<String>, Header, description = "Revision of the last event the client received")
@@ -77,6 +79,7 @@ struct EventsQuery {
         (status = 200, description = "The event stream; each `data` field is an `EventData` (a `ResetData` for `reset`, an `EndData` for `end`)", content_type = "text/event-stream", body = EventData),
         (status = 400, description = "Unknown topic or malformed parameter", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated, or the credential ended while the stream opened", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "The principal or the server holds the most event streams it may (`sys.events.too_many_streams`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The server is shutting down, or the credential could not be read (`auth.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

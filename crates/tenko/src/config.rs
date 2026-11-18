@@ -3830,8 +3830,8 @@ impl LogSection {
 }
 
 impl SseSection {
-    /// The event hub settings.
-    pub fn to_config(&self) -> SseConfig {
+    /// The event hub settings; streams may take a quarter of the server's `max_connections`.
+    pub fn to_config(&self, max_connections: usize) -> SseConfig {
         SseConfig {
             channel_capacity: self.channel_capacity,
             ring_capacity: self.ring_capacity,
@@ -3840,6 +3840,7 @@ impl SseSection {
             journal_replay_limit: self.journal_replay_limit,
             retry: Duration::from_secs(self.retry_secs),
             max_objects_per_event: self.max_objects_per_event,
+            max_streams: (max_connections / 4).max(1),
         }
     }
 }

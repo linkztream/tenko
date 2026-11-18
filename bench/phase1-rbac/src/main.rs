@@ -95,8 +95,9 @@ pub struct SseArgs {
     /// Subscribers (streams, or filter calls per event).
     #[arg(long, default_value_t = 1000)]
     pub subscribers: usize,
-    /// Distinct scoped principals; subscribers share them round robin.
-    #[arg(long, default_value_t = 50)]
+    /// Distinct scoped principals, and administrators; subscribers share them round robin. The
+    /// server holds one user to 16 streams, so 1,000 subscribers need at least 63.
+    #[arg(long, default_value_t = 64)]
     pub principals: usize,
 }
 

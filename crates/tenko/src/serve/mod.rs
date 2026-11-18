@@ -1823,7 +1823,7 @@ async fn start(
             let mut state = AppState::with_options(
                 Arc::clone(&store_dyn),
                 StateOptions {
-                    sse: config.sse.to_config(),
+                    sse: config.sse.to_config(config.server.max_connections),
                     event_routes: event_routes(),
                     node: NodeStatus {
                         id: Some(resolved.node_id),

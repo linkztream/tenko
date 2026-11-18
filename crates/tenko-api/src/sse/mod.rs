@@ -78,6 +78,9 @@ pub struct SseConfig {
     /// Most object references in one event; a larger change sends `truncated: true` and no
     /// references, and the client reloads its view.
     pub max_objects_per_event: usize,
+    /// Most open streams in all; a new one beyond it is refused with 429. The server sets a
+    /// quarter of its connection limit, so streams never take the connections people need.
+    pub max_streams: usize,
 }
 
 impl Default for SseConfig {
@@ -90,6 +93,8 @@ impl Default for SseConfig {
             journal_replay_limit: 10_000,
             retry: Duration::from_secs(3),
             max_objects_per_event: 500,
+            // A quarter of the server's default `max_connections` (20,000).
+            max_streams: 5_000,
         }
     }
 }

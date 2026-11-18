@@ -2796,7 +2796,7 @@ export interface paths {
         };
         /**
          * Subscribe to server-sent events
-         * @description A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds. A stream lasts only as long as the session or token that opened it acts: `end` (data `EndData`) is its last event when that credential no longer acts (`access_ended`: signed out, revoked, expired, ended by a password change or reset, or the account disabled or deleted; a new stream with it is refused with 401) or no longer reads a topic of the stream (`access_changed`: open a new one). No event of the commit that ends the access, or of a later commit, comes before `end`, on whichever controller the stream is open.
+         * @description A `text/event-stream`. Data events have the topic as event name, the store revision as id and an `EventData` document as data. `reset` (data `ResetData`) tells the client to reload at the given revision; `shutdown` ends the stream. A `: keep-alive` comment arrives every 15 seconds. A stream lasts only as long as the session or token that opened it acts: `end` (data `EndData`) is its last event when that credential no longer acts (`access_ended`: signed out, revoked, expired, ended by a password change or reset, or the account disabled or deleted; a new stream with it is refused with 401) or no longer reads a topic of the stream (`access_changed`: open a new one). No event of the commit that ends the access, or of a later commit, comes before `end`, on whichever controller the stream is open. One user holds at most 16 open streams, sessions and tokens together, and a controller at most a quarter of its `max_connections`; a stream beyond either is refused with 429.
          */
         get: operations["events"];
         put?: never;
@@ -39520,6 +39520,15 @@ export interface operations {
             };
             /** @description Not authenticated, or the credential ended while the stream opened */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal or the server holds the most event streams it may (`sys.events.too_many_streams`) */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

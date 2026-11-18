@@ -66,6 +66,8 @@ pub mod codes {
     pub const AUDIT_NOT_FOUND: &str = "sys.audit.not_found";
     /// 400: an unknown event topic was requested.
     pub const UNKNOWN_TOPIC: &str = "sys.events.unknown_topic";
+    /// 429: the principal, or the server in all, holds the most event streams it may.
+    pub const TOO_MANY_STREAMS: &str = "sys.events.too_many_streams";
 }
 
 /// Body sent when a problem document cannot be serialized, which should never happen.

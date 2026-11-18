@@ -304,7 +304,15 @@ pub async fn run(args: SseArgs) -> Result<()> {
     );
 
     let mut rows = Vec::new();
-    let admin = vec![stack.admin_secret.clone()];
+    let mut admin = Vec::new();
+    for number in 0..args.principals {
+        let name = args.principals + number + 1;
+        admin.push(
+            world::scoped(&stack, name, "sse", RoleName::Admin, &[])
+                .await?
+                .secret,
+        );
+    }
     for scoped in [false, true] {
         let row = direct(&stack, &hosts, &principals, &args, scoped).await?;
         println!("{row:?}");

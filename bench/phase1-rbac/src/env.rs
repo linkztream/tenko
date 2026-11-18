@@ -207,8 +207,8 @@ pub fn passphrase(n: usize) -> String {
     )
 }
 
-/// Creates a user without a global role, accepts its initial password (as if the user had
-/// changed it) and grants `role`, with subtree, on each of `prefixes`.
+/// Creates a user, accepts its initial password (as if the user had changed it) and grants
+/// `role`, with subtree, on each of `prefixes`; with no prefixes, `role` is global.
 pub async fn create_operator(
     stack: &Stack,
     name: &str,
@@ -224,7 +224,11 @@ pub async fn create_operator(
                 name: name.to_owned(),
                 display_name: Some(format!("Operator {name}")),
                 password: Some(SecretString::new(passphrase)),
-                roles: Vec::new(),
+                roles: if prefixes.is_empty() {
+                    vec![role]
+                } else {
+                    Vec::new()
+                },
                 language: None,
             },
         )

@@ -58,7 +58,7 @@ name = "home"
 listen = ["0.0.0.0:8443"]
 # Worker threads of the API runtime, 1 to 16 (2 to 4 recommended, ADR 0008).
 workers = 2
-# Most open connections; more are closed at once.
+# Most open connections; more are closed at once. Event streams may take a quarter.
 max_connections = 20000
 # Seconds open requests may finish after a shutdown starts.
 shutdown_grace_secs = 10

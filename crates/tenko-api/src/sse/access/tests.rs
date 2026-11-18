@@ -868,8 +868,9 @@ async fn a_stream_is_refused_when_its_credential_ended_before_the_subscription()
         Some(Arc::new(held)),
     )
     .await;
-    assert!(
-        matches!(opened, Err(AuthError::Unauthenticated)),
+    assert_eq!(
+        opened.err().map(|error| error.status()),
+        Some(401),
         "refused as a request is"
     );
 }

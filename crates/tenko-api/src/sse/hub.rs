@@ -2,7 +2,7 @@
 //! per-subscriber stream.
 
 use std::{
-    collections::{BTreeMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     convert::Infallible,
     pin::Pin,
     sync::{
@@ -16,7 +16,7 @@ use arc_swap::ArcSwap;
 use bytes::{Bytes, BytesMut};
 use futures::{Stream, StreamExt, future::BoxFuture, stream};
 use tenko_auth::AuthError;
-use tenko_core::{ObjectRef, Principal, Revision, Timestamp, codec::decode_key};
+use tenko_core::{ObjectRef, Principal, Revision, Timestamp, UserId, codec::decode_key};
 use tenko_store::{
     ChangeSet, KeyRange, ReadConsistency, Store, StoreError, WatchError, WatchFilter, tables,
 };
@@ -33,7 +33,10 @@ use super::{
     Admission, AdmitAll, EventData, EventFilter, EventRoutes, ResetData, ResetReason, SseConfig,
     access::{AccessChange, AccessTables, Check, Held},
 };
-use crate::dto::events::{EndData, EndReason, Topic, TopicSet};
+use crate::{
+    dto::events::{EndData, EndReason, Topic, TopicSet},
+    problem::{ApiError, codes},
+};
 
 const KEEPALIVE_FRAME: Bytes = Bytes::from_static(b": keep-alive\n\n");
 const SHUTDOWN_FRAME: Bytes = Bytes::from_static(b"event: shutdown\ndata: {}\n\n");
@@ -122,6 +125,9 @@ struct Inner {
     filter: ArcSwap<Box<dyn EventFilter>>,
     shutting_down: AtomicBool,
     subscribers: AtomicUsize,
+    /// Open streams by user ([`SubscriberGuard::new`]); written under this lock with
+    /// `subscribers`, so neither cap is passed by streams opened at once.
+    streams: Mutex<HashMap<UserId, usize>>,
     /// Open streams by topic, in the order of [`Topic::ALL`].
     topic_subscribers: [AtomicUsize; Topic::ALL.len()],
     /// The source of the first event of a topic on a new stream.
@@ -159,6 +165,7 @@ impl EventHub {
                 filter: ArcSwap::from_pointee(Box::new(AdmitAll)),
                 shutting_down: AtomicBool::new(false),
                 subscribers: AtomicUsize::new(0),
+                streams: Mutex::default(),
                 topic_subscribers: std::array::from_fn(|_| AtomicUsize::new(0)),
                 first: Mutex::new(None),
                 published: AtomicU64::new(0),
@@ -577,28 +584,63 @@ fn reset_frame(reason: ResetReason, revision: Revision) -> Bytes {
     Bytes::from(format!("id: {revision}\nevent: reset\ndata: {data}\n\n"))
 }
 
-/// Counts an open stream, in all and per topic; dropped with the stream.
+/// Most open streams of one user: a browser tab opens at most two (the shell's, and the start
+/// page's for `metrics`), so eight tabs fit with room for streams the server has not seen close.
+const STREAMS_PER_USER: usize = 16;
+
+/// Counts an open stream, in all, per user and per topic; dropped with the stream.
 struct SubscriberGuard {
     inner: Arc<Inner>,
     topics: TopicSet,
+    user: Option<UserId>,
 }
 
 impl SubscriberGuard {
-    fn new(inner: &Arc<Inner>, topics: TopicSet) -> Self {
+    /// `None` when the user behind `principal` holds [`STREAMS_PER_USER`] streams or the hub
+    /// [`SseConfig::max_streams`]. Sessions and tokens of one user count together, so new
+    /// tokens add no streams; every principal of a request names a user, except the placeholder
+    /// of a server without authentication, which only the hub's cap bounds.
+    fn new(inner: &Arc<Inner>, topics: TopicSet, principal: &Principal) -> Option<Self> {
+        let user = principal.user();
+        let mut streams = inner.streams.lock().unwrap_or_else(PoisonError::into_inner);
+        if user.is_some_and(|user| streams.get(&user).is_some_and(|n| *n >= STREAMS_PER_USER))
+            || inner.subscribers.load(Ordering::Relaxed) >= inner.config.max_streams
+        {
+            return None;
+        }
+        if let Some(user) = user {
+            *streams.entry(user).or_default() += 1;
+        }
         inner.subscribers.fetch_add(1, Ordering::Relaxed);
+        drop(streams);
         for topic in topics.topics() {
             inner.topic_subscribers[topic as usize].fetch_add(1, Ordering::SeqCst);
         }
-        Self {
+        Some(Self {
             inner: Arc::clone(inner),
             topics,
-        }
+            user,
+        })
     }
 }
 
 impl Drop for SubscriberGuard {
     fn drop(&mut self) {
+        let mut streams = self
+            .inner
+            .streams
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if let Some(user) = self.user
+            && let Some(held) = streams.get_mut(&user)
+        {
+            *held -= 1;
+            if *held == 0 {
+                streams.remove(&user);
+            }
+        }
         self.inner.subscribers.fetch_sub(1, Ordering::Relaxed);
+        drop(streams);
         for topic in self.topics.topics() {
             self.inner.topic_subscribers[topic as usize].fetch_sub(1, Ordering::SeqCst);
         }
@@ -796,7 +838,8 @@ impl Subscriber {
 /// # Errors
 ///
 /// The refusal of that check: the credential ended between the request's authentication and
-/// the subscription, or could not be read.
+/// the subscription, or could not be read. `sys.events.too_many_streams` (429) when the
+/// principal or the hub holds the most streams it may.
 pub(crate) async fn event_stream(
     hub: &EventHub,
     store: &dyn Store,
@@ -804,7 +847,7 @@ pub(crate) async fn event_stream(
     topics: TopicSet,
     principal: Principal,
     held: Option<Arc<dyn Held>>,
-) -> Result<impl Stream<Item = Result<Bytes, Infallible>> + Send + use<>, AuthError> {
+) -> Result<impl Stream<Item = Result<Bytes, Infallible>> + Send + use<>, ApiError> {
     let mut topics = topics;
     // The metrics snapshots go only to principals that read the metrics; a stream that may
     // not does not count as a listener, so it does not start the publisher either.
@@ -818,7 +861,13 @@ pub(crate) async fn event_stream(
     {
         topics.remove(Topic::Metrics);
     }
-    let guard = SubscriberGuard::new(&hub.inner, topics);
+    let guard = SubscriberGuard::new(&hub.inner, topics, &principal).ok_or_else(|| {
+        ApiError::new(
+            codes::TOO_MANY_STREAMS,
+            429,
+            "too many event streams are open; close one and retry",
+        )
+    })?;
     let (rx, replay) = hub.subscribe(last);
     let mut subscriber = Subscriber {
         rx,
@@ -892,7 +941,9 @@ pub(crate) async fn event_stream(
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use tenko_core::{ObjectKind, SystemComponent, TableName, Timestamp, codec::encode_key};
+    use tenko_core::{
+        ApiTokenId, ObjectKind, SystemComponent, TableName, Timestamp, codec::encode_key,
+    };
     use tenko_store::Change;
 
     use super::*;
@@ -1300,5 +1351,77 @@ event: ipam
         };
         assert!(text(&frame).starts_with("event: system\ndata: {"));
         assert_eq!(hub.newest(), Revision(10), "not a revision");
+    }
+
+    async fn open(
+        hub: &EventHub,
+        principal: &Principal,
+    ) -> Result<impl Stream<Item = Result<Bytes, Infallible>> + use<>, ApiError> {
+        let store = tenko_store::MemStore::default();
+        event_stream(hub, &store, None, TopicSet::ALL, principal.clone(), None).await
+    }
+
+    fn token(owner: UserId) -> Principal {
+        Principal::Token {
+            id: ApiTokenId::generate(),
+            owner,
+        }
+    }
+
+    #[tokio::test]
+    async fn streams_are_capped_per_person() {
+        let hub = hub(SseConfig::default());
+        let owner = UserId::generate();
+        let first = token(owner);
+        let mut held = Vec::new();
+        for _ in 0..STREAMS_PER_USER {
+            held.push(open(&hub, &first).await.expect("under the cap"));
+        }
+        let refused = open(&hub, &first).await.err().expect("over the cap");
+        assert_eq!(refused.coded_error().code, codes::TOO_MANY_STREAMS);
+        assert_eq!(refused.status(), 429);
+        let same_owner = open(&hub, &token(owner)).await.err().expect("same owner");
+        assert_eq!(
+            same_owner.coded_error().code,
+            codes::TOO_MANY_STREAMS,
+            "a new token of the same owner adds no streams"
+        );
+        let other = open(&hub, &token(UserId::generate())).await;
+        assert!(other.is_ok(), "another person still opens one");
+
+        held.pop();
+        assert!(
+            open(&hub, &first).await.is_ok(),
+            "a closed stream frees its slot"
+        );
+        drop((held, other));
+        assert_eq!(hub.subscribers(), 0);
+        assert!(
+            hub.inner.streams.lock().expect("lock").is_empty(),
+            "no slot left behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn streams_are_capped_in_all_and_an_ended_stream_frees_its_slot() {
+        let hub = hub(SseConfig {
+            max_streams: 2,
+            ..SseConfig::default()
+        });
+        let mut first = Box::pin(open(&hub, &token(UserId::generate())).await.expect("opens"));
+        let _second = open(&hub, &token(UserId::generate())).await.expect("opens");
+        let refused = open(&hub, &token(UserId::generate()))
+            .await
+            .err()
+            .expect("full");
+        assert_eq!(refused.coded_error().code, codes::TOO_MANY_STREAMS);
+
+        hub.shutdown();
+        while first.next().await.is_some() {}
+        assert_eq!(
+            hub.subscribers(),
+            1,
+            "freed when it ends, before the client lets go"
+        );
     }
 }
