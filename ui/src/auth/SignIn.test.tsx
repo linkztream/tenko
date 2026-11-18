@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from "@solidjs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "../api/client";
 import { db, resetMockDb } from "../api/mock/db";
 import { MOCK_PASSWORDS, MOCK_RECOVERY_CODES, MOCK_TOTP_CODE } from "../api/mock/fixtures";
 import { PROFILE_MATRIX } from "../api/mock/profiles";
@@ -292,6 +293,43 @@ describe("the second step after a password", () => {
     const note = screen.queryByTestId("signin-passkey-blocked")?.textContent ?? null;
     if (why) expect(note).toMatch(why);
     else expect(note).toBeNull();
+    // A refusal for the origin leaves the passkey out; any other keeps it as a way to try again.
+    expect(screen.queryByRole("button", { name: "Use a passkey instead" }) === null).toBe(why !== null);
+  });
+
+  it("shows no error and keeps the user's choice when they leave a passkey request", async () => {
+    // A request the user leaves open: it ends only when the page aborts it.
+    const get = vi.fn(
+      (options: { signal: AbortSignal }) =>
+        new Promise<never>((_, reject) =>
+          options.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))),
+        ),
+    );
+    vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {});
+    Object.defineProperty(navigator, "credentials", { value: { get, create: vi.fn() }, configurable: true });
+    show();
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Break-glass access" }));
+    expect(await screen.findByRole("heading", { name: "Break-glass access" })).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: "Sign in with the break-glass key" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("goes back to the password when the passkey step fails after it started", async () => {
+    stubPasskey("ok");
+    const post = api.post.bind(api);
+    vi.spyOn(api, "post").mockImplementation(((path: string, ...rest: unknown[]) =>
+      path === "/api/v1/auth/webauthn/login/finish"
+        ? Promise.reject(new Error("The passkey could not be checked."))
+        : (post as (p: string, ...r: unknown[]) => unknown)(path, ...rest)) as typeof api.post);
+    show();
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeTruthy();
+    expect(screen.getByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Password")));
   });
 
   it("goes back to the password after a passkey step the browser refused, then asks for the code", async () => {

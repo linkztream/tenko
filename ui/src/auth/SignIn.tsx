@@ -126,26 +126,28 @@ export default function SignIn() {
     setError(null);
     setBusy(true);
     setWaiting(true);
-    controller = new AbortController();
+    const ac = (controller = new AbortController());
     const ch = challenge();
     try {
       await acceptLogin(
         await signInWithPasskey({
-          signal: controller.signal,
+          signal: ac.signal,
           ...(breakGlass ? { break_glass: true } : {}),
           ...(ch ? { challenge_id: ch.id } : {}),
         }),
       );
     } catch (err) {
+      // The page ended the ceremony itself: the user went elsewhere, nothing was refused.
+      if (ac.signal.aborted) return;
       if (err instanceof CeremonyError) {
         if (err.reason === "insecure" || err.reason === "unsupported") setBlocker(err.reason);
         setPasskeyFailed(true);
-        // The passkey step spent the password's challenge on the server: no code can finish it now.
-        if (ch) {
-          setChallenge(null);
-          setStage("password");
-          queueMicrotask(() => passwordInput?.focus());
-        }
+      }
+      // A passkey step spends the password's challenge on the server: no code can finish it now.
+      if (ch) {
+        setChallenge(null);
+        setStage("password");
+        queueMicrotask(() => passwordInput?.focus());
       }
       fail(err);
     } finally {
