@@ -1,0 +1,6 @@
+[
+  {
+    "id": "GHSA-fc5q-39xc-vjpf",
+    "reason": "picomatch, only in the build tools: vite, vitest and typescript-eslint through tinyglobby and fdir; not shipped in the embedded UI; no patched version exists; review by 2027-02-17"
+  }
+]

@@ -960,7 +960,8 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    run still going is refused too: re-run the release workflow once CI is green. Every later
    job builds that commit, not the tag name.
 2. **Build.** The web UI (`npm ci --ignore-scripts`, an audit of the whole dependency tree
-   that stops on a high or critical advisory, `npm run build` in `ui/`) and then the
+   that stops on a high or critical advisory not accepted in `ui/npm-audit-accepted.json`,
+   `npm run build` in `ui/`) and then the
    binaries for Linux x86_64 and Windows x86_64 with the real UI embedded. A release build
    refuses the placeholder page that `TENKO_UI_STUB=1` produces, so a release cannot ship
    without its UI. The Linux binary is described below.

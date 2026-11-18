@@ -265,7 +265,8 @@ jobs:
       # L1.4: the whole tree, development dependencies included, because the bundle is
       # produced by the build chain and not only by what it embeds. The full audit is printed
       # as a report (moderate and low advisories); a high or critical advisory anywhere in the
-      # tree stops the release in the next step.
+      # tree stops the release in the next step, unless ui/npm-audit-accepted.json accepts it
+      # with a reason and a review date (scripts/npm-audit.mjs).
       - name: Audit all dependencies (report)
         run: |
           status=0
@@ -281,8 +282,12 @@ jobs:
           if [ "$status" != 0 ]; then
             echo "::warning::npm audit lists advisories (above); those at high or critical block the release."
           fi
-      - name: Audit all dependencies (blocks on high and critical)
-        run: npm audit --audit-level=high
+      - name: Audit all dependencies (blocks on high and critical not accepted)
+        # npm audit exits 1 whenever it lists an advisory; the script decides, and fails on
+        # output it cannot read.
+        run: |
+          npm audit --json > "$RUNNER_TEMP/npm-audit.json" || true
+          node ../scripts/npm-audit.mjs "$RUNNER_TEMP/npm-audit.json" npm-audit-accepted.json
       - name: Typecheck
         run: npm run typecheck
       - name: Lint
