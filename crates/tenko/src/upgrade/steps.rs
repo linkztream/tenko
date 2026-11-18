@@ -435,6 +435,7 @@ async fn fetch(inner: &Inner, params: AssetParams, cx: &StepContext) -> Result<(
 }
 
 fn verify(inner: &Inner, params: &AssetParams) -> Result<(), StepError> {
+    inner.require_allowed(&params.version).map_err(coded)?;
     let layout = &inner.layout;
     let part = layout.staged(&params.version).map_err(io_failed)?;
     let target = layout.binary_path(&params.version).map_err(io_failed)?;
@@ -573,6 +574,7 @@ async fn run_new(
 }
 
 async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
+    inner.require_allowed(&params.version).map_err(coded)?;
     let binary = inner.layout.binary(&params.version);
     tracing::info!(binary = %binary.display(), "asking the new binary for its version");
     let version = run_new(
@@ -694,6 +696,7 @@ fn config_refused(version: &ReleaseVersion, config: &Path, stderr: &str) -> Step
 }
 
 fn switch(inner: &Inner, params: &SwitchParams, job: tenko_core::JobId) -> Result<(), StepError> {
+    inner.require_allowed(&params.version).map_err(coded)?;
     let layout = &inner.layout;
     let running = &inner.env.running;
     if !layout.binary(&params.version).is_file() {

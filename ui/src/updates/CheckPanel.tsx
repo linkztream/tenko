@@ -10,7 +10,6 @@ import { Switch } from "../components/Switch";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
 import { checkUpdates, setPrereleases, type UpdateStatus } from "./api";
-import { repositoryOf } from "./notes";
 import { StepUpNotice } from "./StepUpNotice";
 import { codeText, offReasonText, whenText } from "./words";
 
@@ -50,7 +49,8 @@ export function CheckPanel(props: {
   const prereleaseHint = () => {
     if (!check().prereleases_allowed) return t("updates.prerelease.locked");
     if (!check().enabled) return t("updates.prerelease.uploads_only");
-    if (!repositoryOf(check().source)) return t("updates.prerelease.mirror");
+    // The server searches a source of this form only (docs/upgrades.md section 8.13).
+    if (!check().source.includes("/releases/latest/download/")) return t("updates.prerelease.mirror");
     return t("updates.prerelease.hint");
   };
 

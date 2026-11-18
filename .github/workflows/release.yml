@@ -188,8 +188,9 @@ jobs:
             *+*) echo "::error::The tag '$TAG' has build metadata; container tags cannot hold '+'."; exit 1 ;;
           esac
           # Installations search for release candidates by this name only (docs/upgrades.md 8.13).
-          if [[ "$version" == *-* ]] && ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]; then
-            echo "::error::The pre-release tag '$TAG' is not vX.Y.Z-rc.N (N from 1, no leading zero); installations find no other pre-release."
+          # N stops at 30, the highest number they ask for (MAX_RC in crates/tenko/src/upgrade/updates.rs).
+          if [[ "$version" == *-* ]] && ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.([1-9]|[12][0-9]|30)$ ]]; then
+            echo "::error::The pre-release tag '$TAG' is not vX.Y.Z-rc.N (N from 1 to 30, no leading zero); installations find no other pre-release."
             exit 1
           fi
           # A tag, by its full ref name: a branch called the same is refused, not resolved.

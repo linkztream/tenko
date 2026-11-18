@@ -942,9 +942,9 @@ manifest and every message use the version without it. Versions are ordered by S
 precedence: a pre-release ranks below its release, and build metadata after `+` is shown but
 ignored in comparisons.
 
-A pre-release tag has the form `vX.Y.Z-rc.N`, with `N` from 1 and no leading zero; the release
-workflow refuses any other pre-release part, so that the search for release candidates of
-section 8.13 finds every pre-release.
+A pre-release tag has the form `vX.Y.Z-rc.N`, with `N` from 1 to 30 and no leading zero; the
+release workflow refuses any other pre-release part, so that the search for release
+candidates of section 8.13 finds every pre-release.
 
 The version of the `tenko` crate (`crates/tenko/Cargo.toml`) must equal the tag without the
 `v`. The binary reports the crate version, and the install job refuses a release file whose
@@ -958,7 +958,7 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    name is refused), the commit must be on `main`, the crate version must equal the tag, and
    the changelog has a section `## [<version>] - <date>` for it
    (`node scripts/changelog.mjs notes <version>` fails when it is missing). A tag with a
-   pre-release part must have the form `vX.Y.Z-rc.N` (section 6.1). The CI workflow
+   pre-release part must have the form `vX.Y.Z-rc.N`, `N` from 1 to 30 (section 6.1). The CI workflow
    (`ci.yml`) must have run to success on the push of that commit to `main`: a commit whose
    CI failed or was canceled is refused, and so is one CI never ran on (CI runs on the last
    commit of each push to `main` and skips a push that changes only documentation). A CI
@@ -2068,9 +2068,9 @@ allowing it, each check also asks the pinned release location (section 8.11) for
 of a tag, `.../releases/download/v<X.Y.Z>-rc.<N>/<file>`, where release hosting keeps each
 release's own manifest (section 6.2). The base is the newer of the running version and the
 newest final release; the rows are the base's own version when the base is a pre-release,
-and the next patch, minor and major version. Each row asks for `-rc.1`, `-rc.2` and so on and
-ends after two answers "not found" in a row, so one missing number is crossed, and at
-`-rc.30` at the latest: at most 120 requests a check, usually six (two per row). The
+and the next patch, minor and major version. Each row asks for `-rc.1`, `-rc.2` and so on (the
+base's own row from the number after its own) and ends after two answers "not found" in a
+row, so one missing number is crossed, and at `-rc.30` at the latest: at most 120 requests a check, usually six (two per row). The
 requests go through the same client as the check, with the same pin, redirect rules, size
 limit, validation and single `User-Agent` header; no other host is asked. Of what it finds,
 the node adds one release to the stored manifest: the newest one newer than the base whose
@@ -2079,6 +2079,12 @@ the check, which the status shows, but the final releases are stored all the sam
 broken or unreachable candidate never hides a final release. Each request may follow at most
 three redirects (section 8.11), and one check runs at a time: a check asked for while one
 runs ends at once.
+
+The rule holds for an install that is already running too: the install job checks it again
+when it verifies, dry-runs and switches the new version, so a job whose pre-release the rule
+no longer allows (the switch turned off meanwhile, or `prereleases = false` set and the
+service restarted) fails with `update.prerelease_off`, removes the file it fetched and
+unpacked, and leaves the running version in place, with the code in the update status.
 
 - **The end of a line.** Once `0.3.0` is out, the base is `0.3.0` and a node on
   `0.3.0-rc.2` is offered `0.3.0`, switch or no switch: a final release ranks above its
@@ -2094,7 +2100,10 @@ runs ends at once.
   nothing; the switch decides whether a pre-release in an uploaded manifest is offered and may
   be uploaded. Hardened checks as usual, so it searches too, and installs uploaded files only.
 - **Clusters.** The switch is one value for the installation; every controller runs its own
-  check as before.
+  check as before. While controllers run different versions, they can find different
+  candidates and store the manifest in turn (installs from the UI are refused on a cluster),
+  and a controller of a version without the switch that saves the security settings drops it,
+  so it falls back to off.
 
 ## 9 The layout and the service managers
 

@@ -17,7 +17,8 @@
 //! A node offers and installs a pre-release only when the switch TGL-45 is on and
 //! `updates.prereleases` in `tenko.toml` is not `false`. With both, the check also searches
 //! the pinned release location for the next release candidate ([`Updates::probe_prerelease`]):
-//! at most [`MAX_RC`] requests for each of at most four versions, so at most 120 a check.
+//! at most [`MAX_RC`] requests for each of at most four versions, so at most 120 a check. The
+//! install job checks the rule again before it verifies, dry-runs and switches.
 //!
 //! # The two manifests
 //!
@@ -373,6 +374,35 @@ impl std::fmt::Debug for Updates {
     }
 }
 
+impl Inner {
+    /// Whether pre-releases are offered and installed (OPS-30): the switch is on and
+    /// `tenko.toml` does not forbid them. Read live, so a change needs no restart.
+    pub(crate) fn prereleases(&self) -> bool {
+        self.section.prereleases && self.policy.prereleases()
+    }
+
+    /// Refuses `version` when it is a pre-release the rule does not allow: when an install or
+    /// upload is asked for, and again by the job steps that act on the file, since the rule
+    /// can change while a job runs.
+    ///
+    /// # Errors
+    ///
+    /// 409 `update.prerelease_off`.
+    pub(crate) fn require_allowed(&self, version: &ReleaseVersion) -> Result<(), CodedError> {
+        if version.is_prerelease() && !self.prereleases() {
+            return Err(CodedError::new(
+                "update.prerelease_off",
+                409,
+                format!(
+                    "{version} is a pre-release, and pre-releases are off on this installation \
+                     (the switch on the Updates page, or updates.prereleases in tenko.toml)"
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn store_error(error: &StoreError) -> CodedError {
     CodedError::new(
         "update.store",
@@ -558,10 +588,8 @@ impl Updates {
         }
     }
 
-    /// Whether pre-releases are offered and installed: the switch is on and `tenko.toml`
-    /// does not forbid them. Read live, so a change needs no restart.
     fn prereleases(&self) -> bool {
-        self.inner.section.prereleases && self.inner.policy.prereleases()
+        self.inner.prereleases()
     }
 
     /// Whether the scheduled check runs, and why not.
@@ -659,7 +687,8 @@ impl Updates {
     /// Searches the pinned release location for a pre-release newer than the running version
     /// and the newest final release of `stable`. The rows are the base's own version when the
     /// base is a pre-release, and the next patch, minor and major version; each asks for
-    /// `-rc.1`, `-rc.2`, ... up to [`MAX_RC`] and ends after two answers "not found" in a row,
+    /// `-rc.1`, `-rc.2`, ... (the base's own row from the number after its own) up to
+    /// [`MAX_RC`] and ends after two answers "not found" in a row,
     /// so one missing number is crossed. A source not of the release-hosting form is not
     /// searched. The newest entry found is returned with its file URLs resolved against its
     /// own manifest; an entry with a file outside the release prefix is dropped.
@@ -677,15 +706,23 @@ impl Updates {
             .map_or(running, |release| (&release.version).max(running));
         let (x, y, z) = (base.major(), base.minor(), base.patch());
         let next = |n: u64| n.saturating_add(1);
-        let own = base.is_prerelease().then_some((x, y, z));
-        let rows = own
-            .into_iter()
-            .chain([(x, y, next(z)), (x, next(y), 0), (next(x), 0, 0)]);
+        // The base's own row starts after its own `-rc.N`: the numbers up to it are not newer.
+        let own_rc = base
+            .to_string()
+            .rsplit_once("-rc.")
+            .and_then(|(_, n)| n.parse::<u64>().ok())
+            .unwrap_or(0);
+        let own = base
+            .is_prerelease()
+            .then_some((x, y, z, own_rc.saturating_add(1)));
+        let rows =
+            own.into_iter()
+                .chain([(x, y, next(z), 1), (x, next(y), 0, 1), (next(x), 0, 0, 1)]);
         let pin = self.inner.source.pin();
         let mut found: Option<Release> = None;
-        for (major, minor, patch) in rows {
+        for (major, minor, patch, first) in rows {
             let mut misses = 0;
-            for n in 1..=MAX_RC {
+            for n in first..=MAX_RC {
                 let Ok(version) =
                     format!("{major}.{minor}.{patch}-rc.{n}").parse::<ReleaseVersion>()
                 else {
@@ -1044,16 +1081,7 @@ impl Updates {
             };
             CodedError::new("update.version_unknown", 400, detail)
         })?;
-        if release.version.is_prerelease() && !self.prereleases() {
-            return Err(CodedError::new(
-                "update.prerelease_off",
-                409,
-                format!(
-                    "{version} is a pre-release, and pre-releases are off on this installation \
-                     (the switch on the Updates page, or updates.prereleases in tenko.toml)"
-                ),
-            ));
-        }
+        self.inner.require_allowed(&release.version)?;
         if release.version <= self.inner.env.running {
             return Err(CodedError::new(
                 "update.not_newer",
@@ -2839,6 +2867,113 @@ mod tests {
             failing.check_state().last_error.as_deref(),
             Some("update.fetch_failed")
         );
+        task.abort();
+    }
+
+    /// OPS-30: the steps that act on the file check the rule again, since it can change while
+    /// a job runs (the switch turned off, or `tenko.toml` changed and the service restarted
+    /// into the resumed job).
+    #[tokio::test]
+    async fn the_steps_refuse_a_pre_release_the_rule_no_longer_allows() {
+        let store = Arc::new(MemStore::default());
+        let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+        policy.switch(true);
+        let updates = build(
+            &store,
+            environment("0.1.0"),
+            section(),
+            Arc::clone(&policy),
+            false,
+        );
+        let candidate = release("0.3.0-rc.1", false, "- Candidate.");
+        let spec = steps::job_spec(&candidate.version, &candidate.assets[0], true, false, 180)
+            .expect("spec");
+        let cx = tenko_jobs::StepContext {
+            job: JobId::generate(),
+            step: 0,
+            attempt: 1,
+            request: admin(),
+            store: Arc::clone(&store) as Arc<dyn Store>,
+            deadline: None,
+        };
+        let run = |kind: &'static str, index: usize| {
+            let handler = steps::handler(kind, &updates.inner);
+            let params = spec.steps[index].params.0.clone();
+            let cx = &cx;
+            async move {
+                match handler.execute(&params, cx).await {
+                    Err(tenko_jobs::StepError::Coded(error)) => error.code.to_string(),
+                    other => format!("{other:?}"),
+                }
+            }
+        };
+        // Allowed: the switch gets past the rule and finds nothing installed.
+        assert_eq!(run(steps::SWITCH, 3).await, "update.io");
+        policy.switch(false);
+        for (kind, index) in [(steps::VERIFY, 1), (steps::CHECK, 2), (steps::SWITCH, 3)] {
+            assert_eq!(run(kind, index).await, "update.prerelease_off", "{kind}");
+        }
+    }
+
+    /// OPS-30: a source that answers every candidate with a manifest that does not name it
+    /// never ends a row early, so [`MAX_RC`] alone bounds the search: the manifest, the
+    /// base's own row after its `-rc.1`, and three full rows.
+    #[tokio::test]
+    async fn the_search_asks_at_most_max_rc_in_each_row() {
+        use super::super::source::tests::serve;
+        let latest = "/o/tenko/releases/latest/download/releases.json";
+        let other = serde_json::to_string(&manifest_of(vec![release("0.0.12", false, "- Final.")]))
+            .expect("json");
+        let mut routes = vec![(latest.to_owned(), Ok(other.clone()))];
+        for core in ["0.0.13", "0.0.14", "0.1.0", "1.0.0"] {
+            for n in 1..=MAX_RC + 5 {
+                let path = format!("/o/tenko/releases/download/v{core}-rc.{n}/releases.json");
+                routes.push((path, Ok(other.clone())));
+            }
+        }
+        let (port, task, requests) = serve(routes).await;
+        let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+        policy.switch(true);
+        let updates = build(
+            &Arc::new(MemStore::default()),
+            environment("0.0.13-rc.1"),
+            UpdatesSection {
+                source_url: format!("http://127.0.0.1:{port}{latest}"),
+                ..section()
+            },
+            policy,
+            false,
+        );
+        updates.check().await.expect("check");
+        let max_rc = usize::try_from(MAX_RC).expect("a small number");
+        assert_eq!(
+            requests.lock().expect("lock").len(),
+            1 + (max_rc - 1) + 3 * max_rc
+        );
+        task.abort();
+    }
+
+    /// Two checks asked for at once make one request to the source: the second returns while
+    /// the first runs.
+    #[tokio::test]
+    async fn one_check_runs_at_a_time() {
+        use super::super::source::tests::serve;
+        let body = serde_json::to_string(&manifest()).expect("json");
+        let (port, task, requests) = serve(vec![("/releases.json", Ok(body))]).await;
+        let updates = service_with(
+            &Arc::new(MemStore::default()),
+            environment("0.1.0"),
+            UpdateInstall::Ui,
+            true,
+            UpdatesSection {
+                source_url: format!("http://127.0.0.1:{port}/releases.json"),
+                ..section()
+            },
+        );
+        let (first, second) = tokio::join!(updates.check(), updates.check());
+        first.expect("the first check");
+        second.expect("the second check");
+        assert_eq!(requests.lock().expect("lock").len(), 1);
         task.abort();
     }
 }

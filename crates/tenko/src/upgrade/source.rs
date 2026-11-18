@@ -1069,6 +1069,10 @@ pub(crate) mod tests {
             .download(&file_asset("three", "the release"), &path)
             .await
             .expect("three redirects");
+        // A manifest outside the prefix is never asked for.
+        let outside = url(&format!("http://127.0.0.1:{port}/elsewhere/releases.json"));
+        let error = source.manifest_at(outside).await.expect_err("outside");
+        assert_eq!(error.code, "update.source_mismatch");
         task.abort();
     }
 
