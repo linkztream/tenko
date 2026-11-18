@@ -15,7 +15,7 @@
 //! chunks left it.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     net::IpAddr,
 };
 
@@ -254,6 +254,9 @@ struct Reconciler<'a> {
     vlans: HashMap<(Option<SiteId>, u16), Option<VlanId>>,
     hosts: HashMap<(String, HostName), Option<HostId>>,
     interfaces: HashMap<(HostId, String), InterfaceId>,
+    /// The model's hosts and the hosts with a credential, by name (see `hosts_by_name`).
+    model_hosts: HashMap<&'a HostName, &'a ModelHost>,
+    credential_hosts: HashSet<&'a HostName>,
     out: Reconciled,
 }
 
@@ -279,6 +282,8 @@ impl<'a> Reconciler<'a> {
             vlans: HashMap::new(),
             hosts: HashMap::new(),
             interfaces: HashMap::new(),
+            model_hosts: model.hosts_by_name(),
+            credential_hosts: model.credentials.iter().map(|c| &c.host).collect(),
             out: Reconciled::default(),
         })
     }
@@ -972,7 +977,7 @@ impl<'a> Reconciler<'a> {
             }
         };
         if self.options.credentials == CredentialPolicy::Import
-            && self.model.credentials.iter().any(|c| c.host == host.name)
+            && self.credential_hosts.contains(&host.name)
         {
             let existing = self
                 .view
@@ -1095,7 +1100,7 @@ impl<'a> Reconciler<'a> {
         let (Some(host), Some(name)) = (&address.host, &address.interface) else {
             return Ok(None);
         };
-        let tenant = self.model.host(host).and_then(|h| h.tenant.clone());
+        let tenant = self.model_hosts.get(host).and_then(|h| h.tenant.clone());
         let Some(host_id) = self.host_id(tenant.as_deref(), host)? else {
             return Ok(None);
         };
@@ -1307,5 +1312,54 @@ mod tests {
     fn hex_client_ids() {
         assert_eq!(hex_bytes("01ab"), Some(HexBytes(vec![0x01, 0xab])));
         assert_eq!(hex_bytes("zz"), None);
+    }
+
+    /// The addresses of a large file find their host, and its hosts their credential, by
+    /// name. Walking the host list once per address made this chunk take 286 s in a debug
+    /// build (about 2 * 10^10 comparisons); no time is asserted here (no bound on a measured
+    /// time in a pass/fail test), the removed linear lookup is the guard.
+    #[tokio::test]
+    async fn a_large_model_reconciles_without_walking_its_lists() {
+        use tenko_store::Store as _;
+        const HOSTS: usize = 200_000;
+        let origin = SourceLocation::default();
+        let mut model = ImportModel::default();
+        for n in 0..HOSTS {
+            let name = HostName::new(&format!("h{n:06}")).expect("name");
+            model
+                .hosts
+                .push(ModelHost::new(name.clone(), origin.clone()));
+            model
+                .credentials
+                .push(super::super::model::ModelCredential {
+                    host: name.clone(),
+                    login: true,
+                    password: false,
+                    origin: origin.clone(),
+                });
+            let ip = std::net::Ipv6Addr::from(0x2001_0db8_u128 << 96 | n as u128);
+            let mut address = ModelAddress::new(IpAddr::V6(ip), origin.clone());
+            address.host = Some(name);
+            address.interface = Some("eth0".to_owned());
+            model.addresses.push(address);
+        }
+        let options = ImportOptions {
+            credentials: CredentialPolicy::Import,
+            ..ImportOptions::default()
+        };
+        // The last chunk of hosts, then every address.
+        let items: Vec<WorkItem> = (HOSTS - 1_000..HOSTS)
+            .map(WorkItem::Host)
+            .chain((0..HOSTS).map(WorkItem::Address))
+            .collect();
+        let store = tenko_store::MemStore::default();
+        let view = store
+            .read(tenko_store::ReadConsistency::Local)
+            .await
+            .expect("view");
+        let out = reconcile(view.as_ref(), &model, &options, &items).expect("reconcile");
+        assert_eq!(out.outcomes.len(), items.len());
+        assert_eq!(out.credentials.len(), 1_000);
+        assert_eq!(out.credentials[0].host.as_str(), "h199000");
     }
 }

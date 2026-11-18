@@ -12,7 +12,7 @@
 //! [`CredentialValues`] and reach the vault only (IAM-15).
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fmt,
     net::IpAddr,
 };
@@ -302,14 +302,16 @@ impl ImportModel {
             && self.credentials.is_empty()
     }
 
-    /// The host with this name.
-    pub fn host(&self, name: &HostName) -> Option<&ModelHost> {
-        self.hosts.iter().find(|h| &h.name == name)
+    /// The hosts by name, built once: a file may hold hundreds of thousands, so no lookup
+    /// walks the list. Reversed, so that the first of equal names wins, as a search would.
+    pub fn hosts_by_name(&self) -> HashMap<&HostName, &ModelHost> {
+        self.hosts.iter().rev().map(|h| (&h.name, h)).collect()
     }
 
     /// The plain migration IR (MIG-01). Interfaces become the MAC list of the host and
     /// the MAC of each address; VRFs, tenants, roles and credentials have no place in it.
     pub fn to_ir(&self) -> Ir {
+        let by_name = self.hosts_by_name();
         let networks = self
             .prefixes
             .iter()
@@ -359,7 +361,8 @@ impl ImportModel {
                     .as_ref()
                     .zip(a.interface.as_ref())
                     .and_then(|(host, name)| {
-                        self.host(host)
+                        by_name
+                            .get(host)
                             .and_then(|h| h.interface(name))
                             .and_then(|i| i.mac)
                     });

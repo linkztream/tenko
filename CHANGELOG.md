@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Fixed
+
+- The import finds the host of each address and the credential of each host by name, instead of walking the whole host and credential lists for every row. A preview or an apply chunk of a file with 200,000 hosts and addresses spent minutes of the controller's CPU comparing names (286 seconds in a debug build for one chunk of every address), now under a second; the result is the same.
+
 ### Security
 
 - An online rotation of the key-encryption key always ends (`docs/secrets.md`, "Rotation"). When the controller that created the new generation stops before another controller fetched it, the next leader waits for it like for any member, and after two minutes the rotation fails and the generation is abandoned; nothing was wrapped with it. A re-wrap that keeps failing for two minutes with no completed pass ends the rotation as `failed` too: the envelopes not yet re-wrapped stay under the earlier generations, which the controllers keep, and a new request re-wraps them. Before, such a rotation stayed in progress for good, and every later online or offline rotation was refused with `vault.kek.rotation_in_progress`.
