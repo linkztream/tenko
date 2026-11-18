@@ -12,6 +12,13 @@
 //! the UI. The check runs only when TGL-23 has it on and `updates.air_gapped` is off; it
 //! sends nothing but the running version.
 //!
+//! # Pre-releases (OPS-30)
+//!
+//! A node offers and installs a pre-release only when the switch TGL-45 is on and
+//! `updates.prereleases` in `tenko.toml` is not `false`. With both, the check also searches
+//! the pinned release location for the next release candidate ([`Updates::probe_prerelease`]):
+//! at most [`MAX_RC`] requests for each of at most four versions, so at most 120 a check.
+//!
 //! # The two manifests
 //!
 //! An install from the release source takes the file's URL and digest from the fetched
@@ -101,6 +108,9 @@ pub const SEEN: TableDef<UserId, Seen> = TableDef::new("sys.update_seen");
 
 /// The changelog compiled into this binary: the notes of this version and the earlier ones.
 const CHANGELOG: &str = include_str!("../../../../CHANGELOG.md");
+
+/// The highest `-rc.N` the pre-release search asks for in each of its at most four rows.
+pub const MAX_RC: u64 = 30;
 
 /// How long the first check waits after the start.
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(60);
@@ -243,11 +253,14 @@ pub struct Seen {
     pub at: Timestamp,
 }
 
-/// TGL-23 and the step-up check, from the authentication service (or a fixed value in
-/// tests).
+/// TGL-23, TGL-45 and the step-up check, from the authentication service (or a fixed value
+/// in tests).
 pub trait Policy: Send + Sync + 'static {
     /// The effective TGL-23 value.
     fn policy(&self) -> UpdatePolicy;
+
+    /// The effective TGL-45 value: the pre-release switch.
+    fn prereleases(&self) -> bool;
 
     /// The selected security profile (TGL-37 follows it).
     fn profile(&self) -> Profile;
@@ -259,6 +272,10 @@ pub trait Policy: Send + Sync + 'static {
 impl Policy for tenko_auth::AuthService {
     fn policy(&self) -> UpdatePolicy {
         self.settings().updates()
+    }
+
+    fn prereleases(&self) -> bool {
+        self.settings().update_prereleases()
     }
 
     fn profile(&self) -> Profile {
@@ -334,6 +351,8 @@ pub(crate) struct Inner {
     /// registered); without it no backup is known and `run` is refused.
     pub(crate) backups: OnceLock<Arc<dyn Backups>>,
     check: Mutex<CheckState>,
+    /// Held while a check runs (one at a time).
+    checking: tokio::sync::Mutex<()>,
     job: Mutex<Option<JobId>>,
     changelog: Vec<Release>,
     cluster: Box<dyn Fn() -> bool + Send + Sync>,
@@ -430,6 +449,7 @@ impl Updates {
                 source,
                 backups: OnceLock::new(),
                 check: Mutex::new(CheckState::default()),
+                checking: tokio::sync::Mutex::new(()),
                 job: Mutex::new(None),
                 changelog,
                 cluster: parts.cluster,
@@ -538,6 +558,12 @@ impl Updates {
         }
     }
 
+    /// Whether pre-releases are offered and installed: the switch is on and `tenko.toml`
+    /// does not forbid them. Read live, so a change needs no restart.
+    fn prereleases(&self) -> bool {
+        self.inner.section.prereleases && self.inner.policy.prereleases()
+    }
+
     /// Whether the scheduled check runs, and why not.
     fn check_off(&self) -> Option<CheckOff> {
         if self.inner.section.air_gapped {
@@ -589,12 +615,16 @@ impl Updates {
         }
     }
 
-    /// Asks the source once and stores a changed manifest.
+    /// Asks the source once and stores a changed manifest. One check runs at a time: a check
+    /// asked for while one runs returns at once, so parallel requests send no more probes.
     ///
     /// # Errors
     ///
     /// The fetch or store error (also kept for the status).
     pub async fn check(&self) -> Result<(), CodedError> {
+        let Ok(_running) = self.inner.checking.try_lock() else {
+            return Ok(());
+        };
         let result = self.fetch_and_store().await;
         let mut state = self.check_state();
         state.last_checked = Some(Timestamp::now());
@@ -602,11 +632,95 @@ impl Updates {
         result
     }
 
+    /// Fetches the manifest, adds the release candidate the search finds, and stores it. A
+    /// failed search fails the check but still stores the final releases, so a broken or
+    /// unreachable candidate never hides a final release (a security fix among them).
     async fn fetch_and_store(&self) -> Result<(), CodedError> {
-        let manifest = self.inner.source.manifest().await?;
+        let mut manifest = self.inner.source.manifest().await?;
+        let probed = if self.prereleases() {
+            self.probe_prerelease(&manifest).await
+        } else {
+            Ok(None)
+        };
+        if let Ok(Some(release)) = &probed
+            && manifest.release(&release.version).is_none()
+        {
+            // Only the one entry: a final release that came out after the candidate is
+            // missing from the candidate's own manifest.
+            manifest.releases.push(release.clone());
+            manifest.releases.sort_by(|a, b| b.version.cmp(&a.version));
+        }
         let ctx = RequestCtx::system(SystemComponent::Api);
         self.store_manifest(&ctx, manifest, ManifestOrigin::Fetched)
-            .await
+            .await?;
+        probed.map(drop)
+    }
+
+    /// Searches the pinned release location for a pre-release newer than the running version
+    /// and the newest final release of `stable`. The rows are the base's own version when the
+    /// base is a pre-release, and the next patch, minor and major version; each asks for
+    /// `-rc.1`, `-rc.2`, ... up to [`MAX_RC`] and ends after two answers "not found" in a row,
+    /// so one missing number is crossed. A source not of the release-hosting form is not
+    /// searched. The newest entry found is returned with its file URLs resolved against its
+    /// own manifest; an entry with a file outside the release prefix is dropped.
+    ///
+    /// # Errors
+    ///
+    /// Any answer but a manifest or "not found" fails the check, as for the stable manifest.
+    async fn probe_prerelease(
+        &self,
+        stable: &ReleaseManifest,
+    ) -> Result<Option<Release>, CodedError> {
+        let running = &self.inner.env.running;
+        let base = stable
+            .latest(false)
+            .map_or(running, |release| (&release.version).max(running));
+        let (x, y, z) = (base.major(), base.minor(), base.patch());
+        let next = |n: u64| n.saturating_add(1);
+        let own = base.is_prerelease().then_some((x, y, z));
+        let rows = own
+            .into_iter()
+            .chain([(x, y, next(z)), (x, next(y), 0), (next(x), 0, 0)]);
+        let pin = self.inner.source.pin();
+        let mut found: Option<Release> = None;
+        for (major, minor, patch) in rows {
+            let mut misses = 0;
+            for n in 1..=MAX_RC {
+                let Ok(version) =
+                    format!("{major}.{minor}.{patch}-rc.{n}").parse::<ReleaseVersion>()
+                else {
+                    break;
+                };
+                let Some(url) = pin.prerelease_source(&version) else {
+                    return Ok(found);
+                };
+                let Some(manifest) = self.inner.source.manifest_at(url.clone()).await? else {
+                    misses += 1;
+                    if misses == 2 {
+                        break;
+                    }
+                    continue;
+                };
+                misses = 0;
+                let Some(mut release) = manifest.release(&version).cloned() else {
+                    continue;
+                };
+                let resolved = release.assets.iter_mut().try_for_each(|asset| {
+                    asset.url = pin.resolve(&url, &asset.url)?.into();
+                    Ok::<_, String>(())
+                });
+                if let Err(detail) = resolved {
+                    tracing::warn!(%version, %detail, "a pre-release was found but not offered");
+                } else if &release.version > base
+                    && found
+                        .as_ref()
+                        .is_none_or(|newest| release.version > newest.version)
+                {
+                    found = Some(release);
+                }
+            }
+        }
+        Ok(found)
     }
 
     fn check_state(&self) -> std::sync::MutexGuard<'_, CheckState> {
@@ -689,7 +803,7 @@ impl Updates {
             return Ok(());
         }
         let latest = manifest
-            .latest(self.inner.section.prereleases)
+            .latest(self.prereleases())
             .map(|release| release.version.to_string());
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(table, &(), current.as_ref().map(|(_, revision)| *revision));
@@ -801,7 +915,7 @@ impl Updates {
         let env = &inner.env;
         let manifests = self.manifests().await?;
         let backup = self.backup_status().await;
-        let prereleases = inner.section.prereleases;
+        let prereleases = self.prereleases();
         let offered = |release: &&Release| {
             release.version > env.running && (prereleases || !release.version.is_prerelease())
         };
@@ -831,6 +945,8 @@ impl Updates {
             interval_hours: u32::try_from(inner.section.check_interval_hours).unwrap_or(u32::MAX),
             last_checked: check_state.last_checked,
             last_error: check_state.last_error.clone(),
+            prereleases: inner.policy.prereleases(),
+            prereleases_allowed: inner.section.prereleases,
         };
         drop(check_state);
         let newest = source_releases.first();
@@ -928,6 +1044,16 @@ impl Updates {
             };
             CodedError::new("update.version_unknown", 400, detail)
         })?;
+        if release.version.is_prerelease() && !self.prereleases() {
+            return Err(CodedError::new(
+                "update.prerelease_off",
+                409,
+                format!(
+                    "{version} is a pre-release, and pre-releases are off on this installation \
+                     (the switch on the Updates page, or updates.prereleases in tenko.toml)"
+                ),
+            ));
+        }
         if release.version <= self.inner.env.running {
             return Err(CodedError::new(
                 "update.not_newer",
@@ -1418,7 +1544,7 @@ impl UpdateService for Updates {
 mod tests {
     use std::{
         collections::BTreeMap,
-        sync::atomic::{AtomicU64, Ordering},
+        sync::atomic::{AtomicBool, AtomicU64, Ordering},
     };
 
     use tenko_api::dto::release::{ReleaseAsset, ReleaseManifest};
@@ -1431,11 +1557,31 @@ mod tests {
     struct FixedPolicy {
         policy: UpdatePolicy,
         fresh: bool,
+        /// TGL-45, which a test may turn while the service runs.
+        prereleases: AtomicBool,
+    }
+
+    impl FixedPolicy {
+        fn new(install: UpdateInstall, fresh: bool) -> Arc<Self> {
+            Arc::new(Self {
+                policy: UpdatePolicy::new(install),
+                fresh,
+                prereleases: AtomicBool::new(false),
+            })
+        }
+
+        fn switch(&self, on: bool) {
+            self.prereleases.store(on, Ordering::Relaxed);
+        }
     }
 
     impl Policy for FixedPolicy {
         fn policy(&self) -> UpdatePolicy {
             self.policy
+        }
+
+        fn prereleases(&self) -> bool {
+            self.prereleases.load(Ordering::Relaxed)
         }
 
         /// The profile whose TGL-23 value the install mode is.
@@ -1495,6 +1641,17 @@ mod tests {
         fresh: bool,
         section: UpdatesSection,
     ) -> Updates {
+        build(store, env, section, FixedPolicy::new(install, fresh), false)
+    }
+
+    /// A service with the policy `policy`, which the test keeps to turn TGL-45.
+    fn build(
+        store: &Arc<MemStore>,
+        env: Environment,
+        section: UpdatesSection,
+        policy: Arc<FixedPolicy>,
+        cluster: bool,
+    ) -> Updates {
         let store_dyn: Arc<dyn Store> = Arc::clone(store) as Arc<dyn Store>;
         let engine = JobEngine::new(Arc::clone(&store_dyn), EngineConfig::default());
         Updates::new(
@@ -1503,13 +1660,10 @@ mod tests {
                 section,
                 store: store_dyn,
                 raft: None,
-                policy: Arc::new(FixedPolicy {
-                    policy: UpdatePolicy::new(install),
-                    fresh,
-                }),
+                policy,
                 engine,
                 restart: Restart::new(),
-                cluster: Box::new(|| false),
+                cluster: Box::new(move || cluster),
             },
         )
         .expect("service")
@@ -1526,16 +1680,9 @@ mod tests {
         service_with(store, environment("0.1.0"), install, fresh, section())
     }
 
-    fn manifest() -> ReleaseManifest {
-        let asset = ReleaseAsset {
-            platform: "linux-x86_64".to_owned(),
-            name: "tenko-0.2.0-linux-x86_64".to_owned(),
-            url: "tenko-0.2.0-linux-x86_64".to_owned(),
-            sha256: "a".repeat(64),
-            size: 1_024,
-            signature: None,
-        };
-        let release = |text: &str, security: bool, notes: &str| Release {
+    /// A release of `text` with one file for `linux-x86_64`, named and addressed relatively.
+    fn release(text: &str, security: bool, notes: &str) -> Release {
+        Release {
             version: version(text),
             date: "2026-11-01".to_owned(),
             notes: notes.to_owned(),
@@ -1544,20 +1691,30 @@ mod tests {
             action: None,
             format: Some(1),
             assets: vec![ReleaseAsset {
+                platform: "linux-x86_64".to_owned(),
                 name: format!("tenko-{text}-linux-x86_64"),
                 url: format!("tenko-{text}-linux-x86_64"),
-                ..asset.clone()
+                sha256: "a".repeat(64),
+                size: 1_024,
+                signature: None,
             }],
             image: None,
-        };
+        }
+    }
+
+    fn manifest_of(releases: Vec<Release>) -> ReleaseManifest {
         ReleaseManifest {
             schema: 1,
             project: "tenko".to_owned(),
-            releases: vec![
-                release("0.2.0", true, "### Security\n\n- A fix."),
-                release("0.1.0", false, "### Added\n\n- The first release."),
-            ],
+            releases,
         }
+    }
+
+    fn manifest() -> ReleaseManifest {
+        manifest_of(vec![
+            release("0.2.0", true, "### Security\n\n- A fix."),
+            release("0.1.0", false, "### Added\n\n- The first release."),
+        ])
     }
 
     fn admin() -> RequestCtx {
@@ -1779,24 +1936,13 @@ mod tests {
     #[tokio::test]
     async fn installs_from_the_ui_are_refused_on_a_cluster() {
         let store = Arc::new(MemStore::default());
-        let store_dyn: Arc<dyn Store> = Arc::clone(&store) as Arc<dyn Store>;
-        let engine = JobEngine::new(Arc::clone(&store_dyn), EngineConfig::default());
-        let updates = Updates::new(
+        let updates = build(
+            &store,
             environment("0.1.0"),
-            Parts {
-                section: section(),
-                store: store_dyn,
-                raft: None,
-                policy: Arc::new(FixedPolicy {
-                    policy: UpdatePolicy::new(UpdateInstall::Ui),
-                    fresh: true,
-                }),
-                engine,
-                restart: Restart::new(),
-                cluster: Box::new(|| true),
-            },
-        )
-        .expect("service");
+            section(),
+            FixedPolicy::new(UpdateInstall::Ui, true),
+            true,
+        );
         let ctx = admin();
         updates
             .put_manifest(&ctx, manifest())
@@ -2493,5 +2639,206 @@ mod tests {
             after.whats_new(&admin()).await.expect("other").last_seen,
             None
         );
+    }
+
+    /// OPS-30: a pre-release is offered and installed only when the switch is on and
+    /// `tenko.toml` does not forbid it; an install and an upload of a known pre-release are
+    /// refused otherwise, before a byte of the file is read.
+    #[tokio::test]
+    async fn pre_releases_need_the_switch_and_the_file() {
+        let candidate = || {
+            let mut releases = manifest().releases;
+            releases.insert(
+                0,
+                release("0.3.0-rc.1", false, "### Added\n\n- A candidate."),
+            );
+            manifest_of(releases)
+        };
+        let ctx = admin();
+        for (allowed, on) in [(true, false), (false, true), (true, true)] {
+            let store = Arc::new(MemStore::default());
+            let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+            policy.switch(on);
+            let updates = build(
+                &store,
+                environment("0.1.0"),
+                UpdatesSection {
+                    prereleases: allowed,
+                    ..section()
+                },
+                Arc::clone(&policy),
+                false,
+            );
+            fetched(&updates, candidate()).await;
+            let status = updates.status_now().await.expect("status");
+            assert_eq!(status.check.prereleases, on);
+            assert_eq!(status.check.prereleases_allowed, allowed);
+            let offered = status.releases.iter().any(|r| r.version.is_prerelease());
+            assert_eq!(offered, allowed && on, "allowed {allowed}, on {on}");
+            if allowed && on {
+                assert_eq!(status.latest, Some(version("0.3.0-rc.1")));
+                continue;
+            }
+            assert_eq!(status.latest, Some(version("0.2.0")));
+            let error = updates
+                .install(&ctx, request("0.3.0-rc.1", None))
+                .await
+                .expect_err("a pre-release with the switch or the file off");
+            assert_eq!(
+                (error.code.as_ref(), error.status),
+                ("update.prerelease_off", 409)
+            );
+            let body: UploadBody = futures::stream::once(async {
+                Err(std::io::Error::other("the body must not be read"))
+            })
+            .boxed();
+            let query = UploadQuery {
+                version: version("0.3.0-rc.1"),
+                backup: None,
+            };
+            let error = updates
+                .upload(&ctx, query, body)
+                .await
+                .expect_err("an upload of a pre-release");
+            assert_eq!(error.code, "update.prerelease_off");
+        }
+    }
+
+    /// OPS-30: the search for a release candidate inside the pinned release location. With
+    /// the switch on it asks the next patch, minor and major version for `-rc.N`, crosses one
+    /// missing number, and stores the final releases plus the newest candidate found; with it
+    /// off, or once the final release is out, nothing but the manifest is asked or stored.
+    #[tokio::test]
+    async fn the_check_finds_the_next_release_candidate_inside_the_prefix() {
+        use super::super::source::tests::serve;
+        let final_release = |text: &str| {
+            serde_json::to_string(&manifest_of(vec![release(text, false, "- Final.")]))
+                .expect("json")
+        };
+        let candidate = |text: &str, url: &str| {
+            let mut found = release(text, false, "- Candidate.");
+            found.assets[0].url = url.to_owned();
+            serde_json::to_string(&manifest_of(vec![found])).expect("json")
+        };
+        let latest = "/o/tenko/releases/latest/download/releases.json";
+        let at = |tag: &str| format!("/o/tenko/releases/download/v{tag}/releases.json");
+        let (rc1, rc3) = (
+            candidate("0.0.13-rc.1", "tenko-0.0.13-rc.1-linux-x86_64"),
+            candidate("0.0.13-rc.3", "tenko-0.0.13-rc.3-linux-x86_64"),
+        );
+        // A later candidate whose file lies outside the prefix is found but not offered.
+        let outside = candidate("0.1.0-rc.1", "/elsewhere/tenko-0.1.0-rc.1-linux-x86_64");
+        let (stable_12, stable_13) = (final_release("0.0.12"), final_release("0.0.13"));
+        let routes = |stable: &str| {
+            vec![
+                (latest.to_owned(), Ok(stable.to_owned())),
+                (at("0.0.13-rc.1"), Ok(rc1.clone())),
+                (at("0.0.13-rc.3"), Ok(rc3.clone())),
+                (at("0.1.0-rc.1"), Ok(outside.clone())),
+            ]
+        };
+        for (stable, on, wanted, asked) in [
+            (
+                &stable_12,
+                true,
+                vec!["0.0.13-rc.3", "0.0.12"],
+                1 + 5 + 3 + 2,
+            ),
+            (&stable_12, false, vec!["0.0.12"], 1),
+            (&stable_13, true, vec!["0.0.13"], 1 + 2 + 3 + 2),
+        ] {
+            let (port, task, requests) = serve(routes(stable)).await;
+            let store = Arc::new(MemStore::default());
+            let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+            policy.switch(on);
+            let updates = build(
+                &store,
+                environment("0.0.12"),
+                UpdatesSection {
+                    source_url: format!("http://127.0.0.1:{port}{latest}"),
+                    ..section()
+                },
+                policy,
+                false,
+            );
+            updates.check().await.expect("check");
+            let stored = updates
+                .manifests()
+                .await
+                .expect("read")
+                .fetched
+                .expect("stored");
+            let versions: Vec<String> = stored
+                .manifest
+                .releases
+                .iter()
+                .map(|r| r.version.to_string())
+                .collect();
+            assert_eq!(versions, wanted, "on {on}, {stable}");
+            assert_eq!(
+                requests.lock().expect("lock").len(),
+                asked,
+                "on {on}, {stable}"
+            );
+            if on && wanted.len() == 2 {
+                // The candidate's file is installed from its own release, not from the
+                // final one's.
+                let asset = &stored.manifest.releases[0].assets[0];
+                assert_eq!(
+                    updates.inner.source.asset_url(asset).expect("inside"),
+                    format!("http://127.0.0.1:{port}{}", at("0.0.13-rc.3"))
+                        .replace("releases.json", "tenko-0.0.13-rc.3-linux-x86_64")
+                );
+                let status = updates.status_now().await.expect("status");
+                assert_eq!(status.latest, Some(version("0.0.13-rc.3")));
+            }
+            task.abort();
+        }
+    }
+
+    /// OPS-30: a probe answered with neither a manifest nor "not found" (here a redirect out
+    /// of the prefix) fails the check and keeps its code, but the final releases are stored.
+    #[tokio::test]
+    async fn a_refused_probe_fails_the_check_and_keeps_the_final_releases() {
+        use super::super::source::tests::serve;
+        let latest = "/o/tenko/releases/latest/download/releases.json";
+        let stable =
+            serde_json::to_string(&manifest_of(vec![release("0.0.12", false, "- Final.")]))
+                .expect("json");
+        let (port, task, _) = serve(vec![
+            (latest.to_owned(), Ok(stable)),
+            (
+                "/o/tenko/releases/download/v0.0.13-rc.1/releases.json".to_owned(),
+                Err("/elsewhere/x".to_owned()),
+            ),
+        ])
+        .await;
+        let store = Arc::new(MemStore::default());
+        let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+        policy.switch(true);
+        let failing = build(
+            &store,
+            environment("0.0.12"),
+            UpdatesSection {
+                source_url: format!("http://127.0.0.1:{port}{latest}"),
+                ..section()
+            },
+            policy,
+            false,
+        );
+        let error = failing.check().await.expect_err("a refused redirect");
+        assert_eq!(error.code, "update.fetch_failed");
+        let stored = failing
+            .manifests()
+            .await
+            .expect("read")
+            .fetched
+            .expect("stored");
+        assert_eq!(stored.manifest.releases.len(), 1, "the final release only");
+        assert_eq!(
+            failing.check_state().last_error.as_deref(),
+            Some("update.fetch_failed")
+        );
+        task.abort();
     }
 }

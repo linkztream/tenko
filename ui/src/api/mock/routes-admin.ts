@@ -450,6 +450,8 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   if (body.audit_export !== undefined && body.audit_export !== null) {
     next.audit_export = oneOf(body.audit_export, AUDIT_EXPORT_VALUES, "audit_export");
   }
+  const prereleases = optBool(body, "update_prereleases");
+  if (prereleases !== undefined) next.update_prereleases = prereleases;
 
   // The server's rule (`update_security_settings` in crates/tenko-auth/src/service/admin.rs, IAM-07): a change is
   // refused when the vault holds an operator secret, the result lets a PIN stand alone (a policy that admits a

@@ -22180,6 +22180,12 @@ export interface components {
              *     settings stored before the rule: 30 days.
              */
             unconfirmed_pin_days?: number | null;
+            /**
+             * @description TGL-45: offer and install pre-release versions (OPS-30), unless `updates.prereleases
+             *     = false` in `tenko.toml` forbids them. `None` in settings stored before the toggle
+             *     existed: the profile's value applies ([`SecuritySettings::update_prereleases`]).
+             */
+            update_prereleases?: boolean | null;
             updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description `GET /settings/security`. */
@@ -22332,6 +22338,8 @@ export interface components {
              * @description The period of an unconfirmed PIN from before the six-digit minimum, in days.
              */
             unconfirmed_pin_days?: number | null;
+            /** @description TGL-45. */
+            update_prereleases?: boolean | null;
             updates?: components["schemas"]["UpdatePolicy"] | null;
         };
         /** @description The first administrator in `POST /setup`. */
@@ -24430,6 +24438,13 @@ export interface components {
             /** @description The code of the last failed check, for example `update.fetch_failed`. */
             last_error?: string | null;
             off_reason?: components["schemas"]["CheckOff"] | null;
+            /** @description The pre-release switch (TGL-45). */
+            prereleases: boolean;
+            /**
+             * @description Whether `tenko.toml` lets the switch be used (`updates.prereleases`, default true).
+             *     Pre-releases are offered and installed only when both are true (OPS-30).
+             */
+            prereleases_allowed: boolean;
             /** @description The URL of the release manifest. */
             source: string;
         };
@@ -53016,7 +53031,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: "skip"`) */
+            /** @description This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: "skip"`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -53164,7 +53179,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read */
+            /** @description This installation cannot install now (`update.install_blocked`, parameter `reason`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read */
             409: {
                 headers: {
                     [name: string]: unknown;

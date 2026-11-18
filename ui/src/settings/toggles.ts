@@ -1,4 +1,4 @@
-// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24, docs/SECURITY-PROFILES.md): their
+// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -23,7 +23,8 @@ export type ToggleSetting =
   | "lockout"
   | "audit_export"
   | "updates"
-  | "secret_reveal";
+  | "secret_reveal"
+  | "update_prereleases";
 
 export interface ToggleDef {
   id: string;
@@ -42,6 +43,7 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-21", setting: "audit_export", name: "toggles.audit_export.name" },
   { id: "TGL-23", setting: "updates", name: "toggles.updates.name" },
   { id: "TGL-24", setting: "secret_reveal", name: "toggles.secret_reveal.name" },
+  { id: "TGL-45", setting: "update_prereleases", name: "toggles.update_prereleases.name" },
 ];
 
 /** The total number of toggles in the profile matrix; later ones arrive with their features. */
@@ -227,6 +229,7 @@ export function formatToggle(setting: string, value: unknown): string {
     case "mfa":
       return t(`toggles.mfa.${value as MfaRequirement}`);
     case "passkey_for_admins":
+    case "update_prereleases":
       return value ? t("common.yes") : t("common.no");
     case "session":
       return formatSession(value as SessionLifetime);
@@ -310,5 +313,6 @@ export function settingValue(settings: SecuritySettings, setting: ToggleSetting)
   if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "updates") return updatesOf(settings);
   if (setting === "lockout") return lockoutOf(settings);
+  if (setting === "update_prereleases") return settings.update_prereleases ?? false;
   return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

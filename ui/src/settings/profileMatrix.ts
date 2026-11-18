@@ -7,13 +7,10 @@
 import type { MfaRequirement, PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
 import {
   AUDIT_EXPORT_DEFAULT,
-  auditExportOf,
-  lockoutOf,
   REVEAL_DEFAULT,
-  revealOf,
+  settingValue,
   TOGGLES,
   UPDATES_DEFAULT,
-  updatesOf,
   weakerThan,
   type ToggleDef,
   type ToggleSetting,
@@ -35,6 +32,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: AUDIT_EXPORT_DEFAULT.home,
     updates: UPDATES_DEFAULT.home,
     secret_reveal: REVEAL_DEFAULT.home,
+    update_prereleases: false,
   },
   standard: {
     profile: "standard",
@@ -48,6 +46,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: AUDIT_EXPORT_DEFAULT.standard,
     updates: UPDATES_DEFAULT.standard,
     secret_reveal: REVEAL_DEFAULT.standard,
+    update_prereleases: false,
   },
   hardened: {
     profile: "hardened",
@@ -61,6 +60,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: AUDIT_EXPORT_DEFAULT.hardened,
     updates: UPDATES_DEFAULT.hardened,
     secret_reveal: REVEAL_DEFAULT.hardened,
+    update_prereleases: false,
   },
   lab: {
     profile: "lab",
@@ -74,16 +74,13 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: AUDIT_EXPORT_DEFAULT.lab,
     updates: UPDATES_DEFAULT.lab,
     secret_reveal: REVEAL_DEFAULT.lab,
+    update_prereleases: false,
   },
 };
 
 /** The value of one setting the way a toggle reports it (`null` for no token maximum). */
 export function valueOf(settings: SecuritySettings, setting: ToggleSetting): unknown {
-  if (setting === "audit_export") return auditExportOf(settings);
-  if (setting === "updates") return updatesOf(settings);
-  if (setting === "lockout") return lockoutOf(settings);
-  if (setting === "secret_reveal") return revealOf(settings);
-  return setting === "token_max_days" ? (settings.token_max_days ?? null) : settings[setting];
+  return setting === "token_max_days" ? (settings.token_max_days ?? null) : settingValue(settings, setting);
 }
 
 /** The Home value of a setting: the baseline for "weaker than Home". */

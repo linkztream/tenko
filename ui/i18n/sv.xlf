@@ -1689,7 +1689,7 @@
         <segment><source>Security settings</source><target>Säkerhetsinställningar</target></segment>
       </unit>
       <unit id="settings.security.toggles.range">
-        <segment><source>TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24</source><target>TGL-01 till TGL-07, TGL-21, TGL-23 och TGL-24</target></segment>
+        <segment><source>TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45</source><target>TGL-01 till TGL-07, TGL-21, TGL-23, TGL-24 och TGL-45</target></segment>
       </unit>
       <unit id="settings.security.toggles.table">
         <segment><source>Security settings and their values</source><target>Säkerhetsinställningar och deras värden</target></segment>

@@ -942,6 +942,10 @@ manifest and every message use the version without it. Versions are ordered by S
 precedence: a pre-release ranks below its release, and build metadata after `+` is shown but
 ignored in comparisons.
 
+A pre-release tag has the form `vX.Y.Z-rc.N`, with `N` from 1 and no leading zero; the release
+workflow refuses any other pre-release part, so that the search for release candidates of
+section 8.13 finds every pre-release.
+
 The version of the `tenko` crate (`crates/tenko/Cargo.toml`) must equal the tag without the
 `v`. The binary reports the crate version, and the install job refuses a release file whose
 binary reports another version than the manifest names (`update.version_mismatch`).
@@ -953,7 +957,8 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
 1. **Verify.** The tag is resolved by its full ref name to its commit (a branch of the same
    name is refused), the commit must be on `main`, the crate version must equal the tag, and
    the changelog has a section `## [<version>] - <date>` for it
-   (`node scripts/changelog.mjs notes <version>` fails when it is missing). The CI workflow
+   (`node scripts/changelog.mjs notes <version>` fails when it is missing). A tag with a
+   pre-release part must have the form `vX.Y.Z-rc.N` (section 6.1). The CI workflow
    (`ci.yml`) must have run to success on the push of that commit to `main`: a commit whose
    CI failed or was canceled is refused, and so is one CI never ran on (CI runs on the last
    commit of each push to `main` and skips a push that changes only documentation). A CI
@@ -1677,6 +1682,7 @@ the request comes from, and nothing else. The answer is limited to 1 MiB and val
 (section 6.3). A manifest that differs from the stored one is stored in the table
 `sys.update_manifest`; the UI hears of it as one event.
 
+With the pre-release switch on, a check also asks for release candidates (section 8.13).
 The check is off when TGL-23 has the check off, and when `updates.air_gapped` is true.
 `POST /api/v1/system/updates/check` (administrators) asks the source at once; it answers
 409 `update.check_off` when the check is off. The `[updates]` section of `tenko.toml`
@@ -1689,7 +1695,7 @@ The check is off when TGL-23 has the check off, and when `updates.air_gapped` is
 | `redirect_hosts` | `["release-assets.githubusercontent.com"]` while `source_url` is on `github.com`, otherwise none | Exact host names, no wildcard, that a response from inside the prefix may redirect to over HTTPS (section 8.11) |
 | `air_gapped` | `false` | Never contact the release source: no check, no download (section 8.8) |
 | `check_interval_hours` | `24` | Hours between two checks, 1 to 720 |
-| `prereleases` | `false` | Offer pre-release versions |
+| `prereleases` | `true` | Whether the pre-release switch (TGL-45) may be used; `false` forbids pre-releases whatever the switch says (section 8.13) |
 | `ready_timeout_secs` | `180` | Seconds a new version has to become ready, 30 to 3600 (section 8.6) |
 | `keep_versions` | `2` | Versions kept in `<data_dir>/updates` besides the ones `current` and `previous` point at, 1 to 10; older ones are removed after a confirmed install |
 | `container` | `false` | The server runs in a container (section 8.9); the image sets it |
@@ -1707,7 +1713,7 @@ When a release newer than the running version is in the stored manifest, adminis
 `/updates`. The page lists the notes (Markdown) of every release between the running version
 and the newest, newest first. A release with security fixes is marked, and a release that
 requires an action is marked and shows the text of that action. Pre-releases appear only
-when `updates.prereleases` is true.
+under the rule of section 8.13.
 
 The version in the status bar is a link to the page `/updates` for an administrator. The page
 shows a "Release notes" link beside the running version and beside each release. The manifest
@@ -1759,6 +1765,9 @@ for an upload, whether it would start and why not. A refused install answers 409
 | `unsupported_platform` | source | No release of the fetched manifest has a file for this platform. Install by hand (section 7). |
 | `no_asset` | source | The newest release has no file for this platform, although earlier ones had. |
 | `up_to_date` | source | The running version is the newest one. |
+
+An install or an upload of a pre-release that the rule of section 8.13 does not allow is
+refused with 409 `update.prerelease_off`.
 
 ### 8.5 The install job
 
@@ -1876,7 +1885,9 @@ The install job itself is a job of kind `sys.update` whose transitions are audit
 principal that started it; its step kinds are those of section 8.5. A backup taken before an
 install is also audited as `sys.backup.create` with the reason `before_update`
 ([backup.md](backup.md) section 10). A manifest that the
-scheduled check fetched is stored without an audit record, because no person acted.
+scheduled check fetched is stored without an audit record, because no person acted. A change
+of the pre-release switch is a change of the security settings, `auth.settings.update` with
+the field `TGL-45` and its old and new value.
 
 ### 8.8 Air-gapped installations
 
@@ -1900,7 +1911,8 @@ is air-gapped or not. To update:
 
 The version must be in the uploaded manifest (or, when the upload lacks it, in the manifest
 fetched from the release source) and newer than the running one, otherwise the upload is
-refused with `update.version_unknown` or `update.not_newer`.
+refused with `update.version_unknown` or `update.not_newer`. A pre-release is accepted only
+under the rule of section 8.13.
 
 An uploaded manifest serves only installs of an uploaded file. It is stored in its own table,
 `sys.update_manifest_uploaded`, and an install from the release source never reads it: that
@@ -1947,7 +1959,9 @@ safe are these:
 A network service that replaces its own binary is a supply-chain path (R17,
 `docs/plans/phase-1-execution.md`). The design limits it in these ways:
 
-- **A pinned source.** The manifest comes from `updates.source_url`. A release file is
+- **A pinned source.** The manifest comes from `updates.source_url`, and with the
+  pre-release switch on, the manifests of release candidates from inside the release prefix
+  (section 8.13). A release file is
   downloaded only from an address inside the release prefix (`updates.release_prefix`:
   scheme, host, port and path, by default the repository's release path), whatever the
   manifest says; a file elsewhere, such as another repository on the same hosting site, is
@@ -2033,6 +2047,54 @@ The backup lands in the backup target directory and is listed on the Backup page
 reason "Before update <version>". It is stored as a manual backup with the version beside
 it, so a previous release reads the record after a switch back; no new data format is
 needed. There is no client command that installs an update; the client installs nothing.
+
+### 8.13 Pre-releases
+
+A pre-release (a release candidate, `0.3.0-rc.1`) is offered to installations that ask for
+one (OPS-30). An administrator turns the switch "Pre-release updates" on or off on the page
+`/updates` or among the security settings (TGL-45, off in every profile). The change goes
+through `PATCH /api/v1/settings/security`: it needs the settings permission and a sign-in
+within the last five minutes, refuses personal tokens, and is audited (section 8.7). It holds
+for the whole installation and is read at once, without a restart. On is a deviation from the
+profile, not a weakening: pre-releases pass the same release workflow as final releases.
+
+The rule: **a node offers and installs a pre-release only when the switch is on and
+`tenko.toml` does not set `updates.prereleases = false`.** Only root (on Windows an
+administrator) writes that file, so `false` locks the switch off and the page says so.
+
+How a node finds a pre-release. The default source always gives the newest final release.
+With the switch on, a source of the form `.../releases/latest/download/<file>` and the file
+allowing it, each check also asks the pinned release location (section 8.11) for the manifest
+of a tag, `.../releases/download/v<X.Y.Z>-rc.<N>/<file>`, where release hosting keeps each
+release's own manifest (section 6.2). The base is the newer of the running version and the
+newest final release; the rows are the base's own version when the base is a pre-release,
+and the next patch, minor and major version. Each row asks for `-rc.1`, `-rc.2` and so on and
+ends after two answers "not found" in a row, so one missing number is crossed, and at
+`-rc.30` at the latest: at most 120 requests a check, usually six (two per row). The
+requests go through the same client as the check, with the same pin, redirect rules, size
+limit, validation and single `User-Agent` header; no other host is asked. Of what it finds,
+the node adds one release to the stored manifest: the newest one newer than the base whose
+files lie inside the release prefix. An answer other than a manifest or "not found" fails
+the check, which the status shows, but the final releases are stored all the same, so a
+broken or unreachable candidate never hides a final release. Each request may follow at most
+three redirects (section 8.11), and one check runs at a time: a check asked for while one
+runs ends at once.
+
+- **The end of a line.** Once `0.3.0` is out, the base is `0.3.0` and a node on
+  `0.3.0-rc.2` is offered `0.3.0`, switch or no switch: a final release ranks above its
+  pre-releases. A line that is abandoned (`0.3.0-rc.1` without a `0.3.0`) leaves a node on it
+  without offers until a later final release exists.
+- **Naming.** Only tags `vX.Y.Z-rc.N` of the next patch, minor or major version are found; a
+  jump such as `0.2.0` to `0.4.0-rc.1` is not.
+- **Mirrors.** A source of another form gets no requests for release candidates: the mirror
+  decides what its manifest lists, and the switch decides only whether its pre-releases are
+  offered. A mirror that copies the layout of release hosting under its prefix is searched
+  like the default source.
+- **Air-gapped installations and the Hardened profile.** An air-gapped installation asks
+  nothing; the switch decides whether a pre-release in an uploaded manifest is offered and may
+  be uploaded. Hardened checks as usual, so it searches too, and installs uploaded files only.
+- **Clusters.** The switch is one value for the installation; every controller runs its own
+  check as before.
 
 ## 9 The layout and the service managers
 

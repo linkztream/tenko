@@ -4681,6 +4681,7 @@ export type MessageKey =
   | "errors.update.manifest.too_large"
   | "errors.update.not_executable"
   | "errors.update.not_newer"
+  | "errors.update.prerelease_off"
   | "errors.update.signature_unverified"
   | "errors.update.size_mismatch"
   | "errors.update.source_mismatch"
@@ -8033,6 +8034,7 @@ export type MessageKey =
   | "toggles.token_max_days.days"
   | "toggles.token_max_days.name"
   | "toggles.token_max_days.unlimited"
+  | "toggles.update_prereleases.name"
   | "toggles.updates.check_off"
   | "toggles.updates.check_on"
   | "toggles.updates.install.ui"
@@ -8263,6 +8265,11 @@ export type MessageKey =
   | "updates.module.name.dns"
   | "updates.module.name.ipam"
   | "updates.module.title"
+  | "updates.prerelease.hint"
+  | "updates.prerelease.locked"
+  | "updates.prerelease.mirror"
+  | "updates.prerelease.stepup"
+  | "updates.prerelease.uploads_only"
   | "updates.progress.failed"
   | "updates.progress.failed_unknown"
   | "updates.progress.heading"
@@ -14699,6 +14706,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.update.manifest.too_large",
   "errors.update.not_executable",
   "errors.update.not_newer",
+  "errors.update.prerelease_off",
   "errors.update.signature_unverified",
   "errors.update.size_mismatch",
   "errors.update.source_mismatch",
@@ -18051,6 +18059,7 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.token_max_days.days",
   "toggles.token_max_days.name",
   "toggles.token_max_days.unlimited",
+  "toggles.update_prereleases.name",
   "toggles.updates.check_off",
   "toggles.updates.check_on",
   "toggles.updates.install.ui",
@@ -18281,6 +18290,11 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.module.name.dns",
   "updates.module.name.ipam",
   "updates.module.title",
+  "updates.prerelease.hint",
+  "updates.prerelease.locked",
+  "updates.prerelease.mirror",
+  "updates.prerelease.stepup",
+  "updates.prerelease.uploads_only",
   "updates.progress.failed",
   "updates.progress.failed_unknown",
   "updates.progress.heading",

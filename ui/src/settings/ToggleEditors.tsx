@@ -340,20 +340,14 @@ export function LockoutEditor(props: EditorProps<LockoutValue> & { profileDefaul
 }
 
 // ---------------------------------------------------------------------------------
-// TGL-03: passkey for administrators
+// On or off: TGL-03 (passkey for administrators), TGL-45 (pre-release updates)
 
-export function PasskeyEditor(props: EditorProps<boolean>) {
+export function OnOffEditor(props: EditorProps<boolean> & { id: string; label: string; hint: string }) {
   const [value, setValue] = createSignal(untrack(() => props.initial));
   createEffect(() => props.onDraft(value()));
   return (
     <div class="field">
-      <SwitchControl
-        id="tg-passkey"
-        checked={value()}
-        onChange={setValue}
-        label={t("toggles.passkey_for_admins.name")}
-        hint={t("settings.security.passkey.hint")}
-      />
+      <SwitchControl id={props.id} checked={value()} onChange={setValue} label={props.label} hint={props.hint} />
     </div>
   );
 }

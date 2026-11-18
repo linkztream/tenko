@@ -1,6 +1,9 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
+import { http, HttpResponse } from "msw";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "../api/mock/db";
+import { server } from "../api/mock/node";
+import { Problem } from "../api/mock/reply";
 import { backupState } from "../api/mock/routes-backup";
 import { mockReleaseFile, mockUpdates } from "../api/mock/routes-updates";
 import { iso } from "../api/mock/util";
@@ -640,5 +643,51 @@ describe("an install that is under way when the page opens", () => {
     expect(notice.textContent).toContain("The new version did not become ready in time.");
     // The install is possible again.
     expect(screen.getByTestId("updates-install")).toBeTruthy();
+  });
+});
+
+describe("the pre-release switch (TGL-45)", () => {
+  const prereleaseSwitch = () => screen.getByRole<HTMLInputElement>("switch", { name: /^Pre-release updates/ });
+
+  it("turns pre-releases on through the security settings and then lists them", async () => {
+    await signInAdmin();
+    const [newest] = mockUpdates.releases;
+    if (!newest) throw new Error("the mock has releases");
+    mockUpdates.releases = [{ ...newest, version: "0.3.0-rc.1" }, ...mockUpdates.releases];
+    await openPage();
+    expect(document.querySelector('[data-testid="update-release"][data-key="0.3.0-rc.1"]')).toBeNull();
+    expect(prereleaseSwitch().checked).toBe(false);
+    fireEvent.click(prereleaseSwitch());
+    await waitFor(() => expect(release("0.3.0-rc.1")).toBeTruthy());
+    expect(db.settings.update_prereleases).toBe(true);
+    expect(prereleaseSwitch().checked).toBe(true);
+  });
+
+  it("is locked off when tenko.toml forbids pre-releases", async () => {
+    await signInAdmin();
+    mockUpdates.prereleasesAllowed = false;
+    db.settings.update_prereleases = true;
+    await openPage();
+    expect(prereleaseSwitch().checked).toBe(false);
+    expect(prereleaseSwitch().disabled).toBe(true);
+    expect(screen.getByTestId("updates-prereleases").textContent).toContain(
+      "tenko.toml forbids pre-releases (updates.prereleases = false).",
+    );
+  });
+
+  it("asks for a fresh sign-in and keeps the switch off until then", async () => {
+    await signInAdmin();
+    await openPage();
+    server.use(
+      http.patch("/api/v1/settings/security", () => {
+        const reply = new Problem("auth.step_up_required", { status: 403 }).reply;
+        return HttpResponse.json(reply.body, { status: 403, headers: { "content-type": "application/problem+json" } });
+      }),
+    );
+    fireEvent.click(prereleaseSwitch());
+    const notice = await screen.findByTestId("updates-stepup");
+    expect(notice.textContent).toContain("Changing this switch needs a sign-in within the last five minutes.");
+    expect(prereleaseSwitch().checked).toBe(false);
+    expect(db.settings.update_prereleases).toBe(false);
   });
 });

@@ -21,7 +21,7 @@ import {
   BreachEditor,
   LockoutEditor,
   MfaEditor,
-  PasskeyEditor,
+  OnOffEditor,
   PolicyEditor,
   RevealEditor,
   SessionEditor,
@@ -122,7 +122,22 @@ export function ToggleDialog(props: {
               <MfaEditor initial={initial as MfaRequirement} onDraft={onDraft} />
             </Match>
             <Match when={setting === "passkey_for_admins"}>
-              <PasskeyEditor initial={Boolean(initial)} onDraft={onDraft} />
+              <OnOffEditor
+                id="tg-passkey"
+                label={t("toggles.passkey_for_admins.name")}
+                hint={t("settings.security.passkey.hint")}
+                initial={Boolean(initial)}
+                onDraft={onDraft}
+              />
+            </Match>
+            <Match when={setting === "update_prereleases"}>
+              <OnOffEditor
+                id="tg-prereleases"
+                label={t("toggles.update_prereleases.name")}
+                hint={t("updates.prerelease.hint")}
+                initial={Boolean(initial)}
+                onDraft={onDraft}
+              />
             </Match>
             <Match when={setting === "session"}>
               <SessionEditor initial={initial as SessionLifetime} onDraft={onDraft} />

@@ -6,6 +6,7 @@
 // release file (`application/octet-stream`, up to hundreds of megabytes), where the client
 // sends JSON or multipart only. It uses `fetch` here, with the same problem handling.
 import { api } from "../api/client";
+import { updateBanner } from "../auth/session";
 import type { components } from "../api/generated/schema";
 import { ApiError, CLIENT_CODES, toProblem } from "../api/problem";
 import type { JobDetail } from "../api/types";
@@ -34,6 +35,15 @@ export function readUpdates(signal?: AbortSignal): Promise<UpdateStatus> {
 /** Asks the release source now (409 `update.check_off`, 502 `update.fetch_failed`). */
 export function checkUpdates(): Promise<UpdateStatus> {
   return api.post("/api/v1/system/updates/check");
+}
+
+/**
+ * Turns the pre-release switch (TGL-45) on or off through the security settings: an
+ * administrator with a sign-in in the last five minutes (403 `auth.step_up_required`).
+ */
+export async function setPrereleases(on: boolean): Promise<void> {
+  const view = await api.patch("/api/v1/settings/security", { body: { update_prereleases: on } });
+  updateBanner(view.banner);
 }
 
 /** Hands the server a `releases.json` read from a file (air-gapped installations). */

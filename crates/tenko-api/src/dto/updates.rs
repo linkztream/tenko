@@ -49,6 +49,11 @@ pub struct UpdateCheck {
     pub last_checked: Option<Timestamp>,
     /// The code of the last failed check, for example `update.fetch_failed`.
     pub last_error: Option<String>,
+    /// The pre-release switch (TGL-45).
+    pub prereleases: bool,
+    /// Whether `tenko.toml` lets the switch be used (`updates.prereleases`, default true).
+    /// Pre-releases are offered and installed only when both are true (OPS-30).
+    pub prereleases_allowed: bool,
 }
 
 /// Where the stored release manifest came from.

@@ -1,6 +1,6 @@
 //! Security profiles, the authentication toggles TGL-01 to TGL-07, the in-app update
-//! toggle TGL-23, the secret reveal toggle TGL-24 and the audit export toggle TGL-21
-//! (SECURITY-PROFILES.md).
+//! toggle TGL-23, the secret reveal toggle TGL-24, the audit export toggle TGL-21 and the
+//! pre-release toggle TGL-45 (SECURITY-PROFILES.md).
 //!
 //! A profile is a bundle of toggle values, not a code path: [`Profile::defaults`] gives the
 //! values, every toggle can then be changed on its own, and [`SecuritySettings::toggles`]
@@ -81,6 +81,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
+                update_prereleases: Some(false),
                 transfer_site: None,
             },
             Self::Standard => SecuritySettings {
@@ -100,6 +101,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::UiStepUp)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
                 audit_export: Some(AuditExport::Optional),
+                update_prereleases: Some(false),
                 transfer_site: None,
             },
             Self::Hardened => SecuritySettings {
@@ -119,6 +121,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::UploadOnly)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
                 audit_export: Some(AuditExport::Required),
+                update_prereleases: Some(false),
                 transfer_site: None,
             },
             Self::Lab => SecuritySettings {
@@ -138,6 +141,7 @@ impl Profile {
                 updates: Some(UpdatePolicy::new(UpdateInstall::Ui)),
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
+                update_prereleases: Some(false),
                 transfer_site: None,
             },
         }
@@ -323,6 +327,11 @@ pub struct SecuritySettings {
     /// profile's value applies ([`SecuritySettings::audit_export`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub audit_export: Option<AuditExport>,
+    /// TGL-45: offer and install pre-release versions (OPS-30), unless `updates.prereleases
+    /// = false` in `tenko.toml` forbids them. `None` in settings stored before the toggle
+    /// existed: the profile's value applies ([`SecuritySettings::update_prereleases`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_prereleases: Option<bool>,
     /// TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
     /// transfer to an address outside them needs XoT; an empty list makes every transfer
     /// need it. Absent in settings stored before the setting existed, and after a change of
@@ -416,7 +425,15 @@ impl SecuritySettings {
             .unwrap_or(RevealPolicy::new(RevealStepUp::Fresh, false))
     }
 
-    /// The toggles TGL-01 to TGL-07, TGL-21, TGL-23 and TGL-24 with deviation and weakness markers.
+    /// The effective TGL-45 value: the stored one, else the profile's (off in every profile).
+    pub fn update_prereleases(&self) -> bool {
+        self.update_prereleases
+            .or_else(|| self.profile.defaults().update_prereleases)
+            .unwrap_or(false)
+    }
+
+    /// The toggles TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 with deviation and
+    /// weakness markers.
     pub fn toggles(&self) -> Vec<ToggleState> {
         let profile = self.profile.defaults();
         let home = Profile::Home.defaults();
@@ -515,6 +532,15 @@ impl SecuritySettings {
                 self.secret_reveal().step_up < home.secret_reveal().step_up
                     || (!self.secret_reveal().bound_host_only
                         && home.secret_reveal().bound_host_only),
+            ),
+            // Pre-releases pass the same release workflow as final releases and open no
+            // attack path, so "on" is a deviation only, never weaker than Home.
+            entry(
+                "TGL-45",
+                "update_prereleases",
+                serde_json::Value::Bool(self.update_prereleases()),
+                serde_json::Value::Bool(profile.update_prereleases()),
+                false,
             ),
         ]
     }
@@ -638,6 +664,9 @@ pub struct SettingsPatch {
     /// TGL-21.
     #[serde(default)]
     pub audit_export: Option<AuditExport>,
+    /// TGL-45.
+    #[serde(default)]
+    pub update_prereleases: Option<bool>,
     /// TGL-10: the networks that count as the site, in CIDR notation; an empty list is
     /// allowed (every transfer needs XoT under Hardened).
     #[serde(default)]
@@ -698,6 +727,9 @@ impl SettingsPatch {
         }
         if let Some(export) = self.audit_export {
             next.audit_export = Some(export);
+        }
+        if let Some(on) = self.update_prereleases {
+            next.update_prereleases = Some(on);
         }
         if let Some(site) = &self.transfer_site {
             next.transfer_site = Some(
@@ -1104,5 +1136,42 @@ mod tests {
         let mut settings = Profile::Standard.defaults();
         settings.token_max_days = Some(0);
         assert!(settings.validate().is_err());
+    }
+
+    /// TGL-45: off in every profile and in settings stored before it; a patch turns it on as
+    /// a deviation that is audited and never weaker than Home; a new profile turns it off.
+    #[test]
+    fn prerelease_updates_are_off_until_turned_on_and_a_profile_resets_them() {
+        for profile in Profile::ALL {
+            let mut stored = serde_json::to_value(profile.defaults()).expect("json");
+            stored
+                .as_object_mut()
+                .expect("an object")
+                .remove("update_prereleases");
+            let old: SecuritySettings = serde_json::from_value(stored).expect("older settings");
+            assert!(!old.update_prereleases(), "{profile:?}");
+            assert!(!profile.defaults().update_prereleases(), "{profile:?}");
+        }
+        let home = Profile::Home.defaults();
+        let on = SettingsPatch {
+            update_prereleases: Some(true),
+            ..SettingsPatch::default()
+        }
+        .apply(&home);
+        assert!(on.update_prereleases());
+        let banner = on.banner();
+        assert_eq!(banner.deviations, vec!["TGL-45".to_owned()]);
+        assert!(!banner.weaker_than_home);
+        let audit = changes(&home, &on);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].field, "TGL-45");
+        assert_eq!(audit[0].old.as_deref(), Some("false"));
+        assert_eq!(audit[0].new.as_deref(), Some("true"));
+        let reset = SettingsPatch {
+            profile: Some(Profile::Hardened),
+            ..SettingsPatch::default()
+        }
+        .apply(&on);
+        assert!(!reset.update_prereleases());
     }
 }

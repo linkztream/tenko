@@ -13,6 +13,8 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
       return { mfa: value as NonNullable<SettingsPatch["mfa"]> };
     case "passkey_for_admins":
       return { passkey_for_admins: Boolean(value) };
+    case "update_prereleases":
+      return { update_prereleases: Boolean(value) };
     case "session":
       return { session: value as SessionLifetime };
     case "token_max_days":

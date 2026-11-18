@@ -1102,6 +1102,7 @@ describe("settings", () => {
     const view = await get<SecuritySettingsView>("/api/v1/settings/security");
     expect(view.status).toBe(200);
     expect(view.body.settings).toEqual(PROFILE_MATRIX.standard);
+    // The matrix's own toggles first; the update and reveal routes add TGL-23 and TGL-24.
     expect(view.body.toggles.map((t) => t.id)).toEqual([
       "TGL-01",
       "TGL-02",
@@ -1111,6 +1112,7 @@ describe("settings", () => {
       "TGL-06",
       "TGL-07",
       "TGL-21",
+      "TGL-45",
       "TGL-23",
       "TGL-24",
     ]);

@@ -9,8 +9,8 @@
 //! | `GET /system/updates` | read on the system | 200 [`UpdateStatus`] | |
 //! | `POST /system/updates/check` | administer the system | 200 [`UpdateStatus`] after asking the source | 409 `update.check_off`, 502 `update.fetch_failed` |
 //! | `PUT /system/updates/manifest` | administer, step-up per TGL-23 | 200 [`UpdateStatus`] | 400 `update.manifest.*`, 403 `auth.step_up_required` |
-//! | `POST /system/updates/install` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 403 `auth.step_up_required`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
-//! | `POST /system/updates/upload?version=&backup=` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 400 `update.checksum_mismatch`, 409 `update.install_blocked`, `update.backup_required`, 422 `backup.key.missing` |
+//! | `POST /system/updates/install` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 403 `auth.step_up_required`, 409 `update.install_blocked`, `update.prerelease_off`, `update.backup_required`, 422 `backup.key.missing` |
+//! | `POST /system/updates/upload?version=&backup=` | administer, step-up per TGL-23 | 202 [`InstallStarted`] | 400 `update.checksum_mismatch`, 409 `update.install_blocked`, `update.prerelease_off`, `update.backup_required`, 422 `backup.key.missing` |
 //! | `GET /system/updates/whats-new` | any signed-in user | 200 [`WhatsNew`] | |
 //! | `POST /system/updates/whats-new/seen` | any signed-in user | 204 | |
 //!
@@ -238,7 +238,7 @@ async fn put_update_manifest(
         (status = 400, description = "The version is not in the manifest fetched from the release source or not newer (`update.version_unknown`, `update.not_newer`), or its file is not under the pinned release prefix (`update.source_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "`backup: \"run\"` without a configured backup recipient (`backup.key.missing`): take the backup with a passphrase through `POST /system/backups` first", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
@@ -273,7 +273,7 @@ async fn install_update(
         (status = 400, description = "The file does not match the manifest (`update.checksum_mismatch`, `update.size_mismatch`), or the version is unknown (`update.version_unknown`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "Not authenticated", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a fresh authentication is needed (`auth.forbidden`, `auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "This installation cannot install now (`update.install_blocked`, parameter `reason`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "`backup=run` without a configured backup recipient (`backup.key.missing`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The file is larger than the manifest says (`update.size_mismatch`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "No update service (`update.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")

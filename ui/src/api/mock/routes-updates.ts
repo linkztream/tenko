@@ -155,6 +155,8 @@ export interface MockUpdates {
   source: string;
   /** `tenko.toml` says `air_gapped`: no check, no download. */
   airGapped: boolean;
+  /** `tenko.toml` lets the pre-release switch be used (`updates.prereleases`, default true). */
+  prereleasesAllowed: boolean;
   /** Why this installation cannot install by itself (a container, a cluster, ...), or null. */
   blocked: InstallBlock | null;
   /** The session that has to sign in again before an install is accepted (step-up), or null. */
@@ -189,6 +191,7 @@ function fresh(): MockUpdates {
     source: "https://github.example.org/example/tenko/releases/latest/download/releases.json",
     fetchFails: false,
     airGapped: false,
+    prereleasesAllowed: true,
     blocked: null,
     stepUpSession: null,
     attempt: null,
@@ -326,8 +329,15 @@ function settleRestart(): void {
   mockUpdates.restart = null;
 }
 
+/** Whether pre-releases are offered: the switch (TGL-45) is on and `tenko.toml` allows it. */
+function prereleasesOffered(): boolean {
+  return mockUpdates.prereleasesAllowed && db.settings.update_prereleases === true;
+}
+
 function newer(): Release[] {
-  return mockUpdates.releases.filter((r) => compareVersions(r.version, mockUpdates.running) > 0);
+  return mockUpdates.releases.filter(
+    (r) => compareVersions(r.version, mockUpdates.running) > 0 && (prereleasesOffered() || !r.version.includes("-")),
+  );
 }
 
 function checkOffReason(): "air_gapped" | "setting" | null {
@@ -371,6 +381,8 @@ export function updateStatus(): UpdateStatus {
       enabled: reason === null,
       interval_hours: 24,
       source: mockUpdates.source,
+      prereleases: db.settings.update_prereleases === true,
+      prereleases_allowed: mockUpdates.prereleasesAllowed,
     },
     install: {
       policy: policy.install,

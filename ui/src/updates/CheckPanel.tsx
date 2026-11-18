@@ -1,12 +1,17 @@
 // The scheduled check of the release source: where it looks, when it last did, what went
-// wrong, why it is off, and "Check now". An uploaded release list is named here too.
+// wrong, why it is off, and "Check now". An uploaded release list is named here too, and the
+// pre-release switch (TGL-45, OPS-30).
 import { A } from "@solidjs/router";
-import { createSignal, Show } from "solid-js";
+import { createEffect, createSignal, Show } from "solid-js";
+import { isApiError } from "../api/problem";
 import { paths } from "../app/paths";
 import { ErrorNotice } from "../components/Notice";
+import { Switch } from "../components/Switch";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
-import { checkUpdates, type UpdateStatus } from "./api";
+import { checkUpdates, setPrereleases, type UpdateStatus } from "./api";
+import { repositoryOf } from "./notes";
+import { StepUpNotice } from "./StepUpNotice";
 import { codeText, offReasonText, whenText } from "./words";
 
 export function CheckPanel(props: {
@@ -19,6 +24,35 @@ export function CheckPanel(props: {
   const [error, setError] = createSignal<unknown>(null);
   const check = () => props.status.check;
   const manifest = () => props.status.manifest;
+
+  // The switch shows the stored value while tenko.toml allows it; a refused change flips it back.
+  const [prereleases, setPrereleasesShown] = createSignal(false);
+  createEffect(() => setPrereleasesShown(check().prereleases && check().prereleases_allowed));
+  const [switching, setSwitching] = createSignal(false);
+  const [switchError, setSwitchError] = createSignal<unknown>(null);
+  const switchPrereleases = async (on: boolean) => {
+    setPrereleasesShown(on);
+    setSwitching(true);
+    setSwitchError(null);
+    try {
+      await setPrereleases(on);
+      // Ask the source at once, so that a release candidate shows now, not at the next check.
+      const next = on && check().enabled ? await checkUpdates().catch(() => null) : null;
+      if (next) props.onStatus(next);
+      else props.onReload();
+    } catch (err) {
+      setPrereleasesShown(!on);
+      setSwitchError(err);
+    } finally {
+      setSwitching(false);
+    }
+  };
+  const prereleaseHint = () => {
+    if (!check().prereleases_allowed) return t("updates.prerelease.locked");
+    if (!check().enabled) return t("updates.prerelease.uploads_only");
+    if (!repositoryOf(check().source)) return t("updates.prerelease.mirror");
+    return t("updates.prerelease.hint");
+  };
 
   const checkNow = async () => {
     if (busy()) return;
@@ -81,6 +115,19 @@ export function CheckPanel(props: {
             )}
           </Show>
         </dl>
+        <div data-testid="updates-prereleases">
+          <Switch
+            id="upd-prereleases"
+            checked={prereleases()}
+            disabled={switching() || !check().prereleases_allowed}
+            onChange={(on) => void switchPrereleases(on)}
+            label={t("toggles.update_prereleases.name")}
+            hint={prereleaseHint()}
+          />
+        </div>
+        <Show when={isApiError(switchError(), "auth.step_up_required")} fallback={<ErrorNotice error={switchError()} />}>
+          <StepUpNotice body={t("updates.prerelease.stepup")} />
+        </Show>
         <Show when={!check().enabled && check().off_reason === "setting"}>
           <p class="muted">
             <A href={paths.settings("security")}>{t("updates.check.settings_link")}</A>

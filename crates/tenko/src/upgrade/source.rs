@@ -26,7 +26,9 @@ use std::{
 
 use reqwest::Url;
 use sha2::{Digest as _, Sha256};
-use tenko_api::dto::release::{MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, ReleaseAsset, ReleaseManifest};
+use tenko_api::dto::release::{
+    MAX_ASSET_BYTES, MAX_MANIFEST_BYTES, ReleaseAsset, ReleaseManifest, ReleaseVersion,
+};
 use tenko_core::CodedError;
 
 /// The most redirects one request follows.
@@ -260,6 +262,16 @@ impl Pin {
     ///
     /// A message for an unusable URL or one outside the prefix.
     pub fn asset_url(&self, asset: &str) -> Result<Url, String> {
+        self.resolve(&self.source, asset)
+    }
+
+    /// The URL of an asset listed in the manifest at `base`, resolved by the client's parser
+    /// and refused unless it lies inside the release prefix.
+    ///
+    /// # Errors
+    ///
+    /// A message for an unusable URL or one outside the prefix.
+    pub fn resolve(&self, base: &Url, asset: &str) -> Result<Url, String> {
         if asset.is_empty()
             || asset
                 .chars()
@@ -270,7 +282,7 @@ impl Pin {
                 asset.escape_debug()
             ));
         }
-        let url = self.source.join(asset).map_err(|error| {
+        let url = base.join(asset).map_err(|error| {
             format!(
                 "the release file URL `{}` cannot be used: {error}",
                 asset.escape_debug()
@@ -285,6 +297,32 @@ impl Pin {
             ))
         }
     }
+
+    /// The manifest of the pre-release `version` (OPS-30): for a source of the form
+    /// `.../releases/latest/download/<file>` the URL `.../releases/download/v<version>/<file>`,
+    /// where release hosting keeps the files of each tag. `None` for any other source (a
+    /// mirror decides itself what its manifest lists) and for a URL outside the prefix.
+    pub fn prerelease_source(&self, version: &ReleaseVersion) -> Option<Url> {
+        let segments: Vec<&str> = self.source.path_segments()?.collect();
+        if !release_hosting(&segments) {
+            return None;
+        }
+        let n = segments.len();
+        let mut url = self.source.clone();
+        url.set_path(&format!(
+            "/{}/download/v{version}/{}",
+            segments[..n - 3].join("/"),
+            segments[n - 1]
+        ));
+        self.within_prefix(&url).then_some(url)
+    }
+}
+
+/// Whether the path segments of a source have the release-hosting form
+/// `<owner>/<repo>/releases/latest/download/<file>`.
+fn release_hosting(segments: &[&str]) -> bool {
+    let n = segments.len();
+    n >= 6 && segments[n - 4..n - 1] == ["releases", "latest", "download"]
 }
 
 /// The default prefix of a source: the release path of a repository on release hosting, or
@@ -297,13 +335,8 @@ fn default_prefix(source: &Url) -> Result<Url, String> {
         .path_segments()
         .map(Iterator::collect)
         .unwrap_or_default();
-    let n = segments.len();
-    let release_hosting = n >= 6
-        && segments[n - 4] == "releases"
-        && segments[n - 3] == "latest"
-        && segments[n - 2] == "download";
-    let path = if release_hosting {
-        format!("/{}/", segments[..n - 3].join("/"))
+    let path = if release_hosting(&segments) {
+        format!("/{}/", segments[..segments.len() - 3].join("/"))
     } else {
         let path = source.path();
         path.rfind('/')
@@ -348,6 +381,12 @@ pub struct Downloaded {
 
 fn fetch_failed(detail: impl Into<String>) -> CodedError {
     CodedError::new("update.fetch_failed", 502, detail)
+}
+
+/// The error of a manifest request that the source answered with `status`.
+fn answered(status: reqwest::StatusCode) -> CodedError {
+    fetch_failed(format!("the release source answered {status}"))
+        .with_param("status", status.as_u16().to_string())
 }
 
 /// An error with its causes, so that a refused redirect says why.
@@ -418,9 +457,28 @@ impl Source {
     /// `update.fetch_failed` for a failed request, a refused redirect or a body over the
     /// limit, and the `update.manifest.*` codes of an invalid manifest (status 502).
     pub async fn manifest(&self) -> Result<ReleaseManifest, CodedError> {
+        self.manifest_at(self.pin.source.clone())
+            .await?
+            .ok_or_else(|| answered(reqwest::StatusCode::NOT_FOUND))
+    }
+
+    /// Fetches and validates the manifest at `url`, which must lie inside the release prefix;
+    /// `None` when the source answers 404 (not found).
+    ///
+    /// # Errors
+    ///
+    /// As [`Source::manifest`]; `update.source_mismatch` for a URL outside the prefix.
+    pub async fn manifest_at(&self, url: Url) -> Result<Option<ReleaseManifest>, CodedError> {
+        if !self.pin.within_prefix(&url) {
+            return Err(CodedError::new(
+                "update.source_mismatch",
+                400,
+                format!("{url} is not under the release prefix (pinned source)"),
+            ));
+        }
         let response = self
             .client
-            .get(self.pin.source.clone())
+            .get(url)
             .header(reqwest::header::ACCEPT, "application/json")
             .timeout(Duration::from_secs(30))
             .send()
@@ -431,11 +489,11 @@ impl Source {
                     chain(&error)
                 ))
             })?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
         if !response.status().is_success() {
-            return Err(
-                fetch_failed(format!("the release source answered {}", response.status()))
-                    .with_param("status", response.status().as_u16().to_string()),
-            );
+            return Err(answered(response.status()));
         }
         let mut body = Vec::new();
         let mut response = response;
@@ -450,6 +508,7 @@ impl Source {
             body.extend_from_slice(&chunk);
         }
         ReleaseManifest::parse(&body)
+            .map(Some)
             .map_err(|error| CodedError::new(error.code(), 502, error.to_string()))
     }
 
@@ -620,7 +679,7 @@ pub fn sha256_file(path: &Path) -> Result<(u64, String), CodedError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn asset(url: &str) -> ReleaseAsset {
@@ -677,6 +736,34 @@ mod tests {
         )
         .expect_err("the source outside the prefix");
         assert!(outside.contains("not inside"), "{outside}");
+    }
+
+    /// OPS-30: the manifest of a pre-release lies in its tag's directory of the release path,
+    /// and only a source of the release-hosting form has one.
+    #[test]
+    fn a_prerelease_manifest_lies_in_its_tags_directory() {
+        let rc: ReleaseVersion = "0.0.13-rc.1".parse().expect("a version");
+        assert_eq!(
+            github().prerelease_source(&rc).map(String::from).as_deref(),
+            Some(
+                "https://github.com/example-owner/tenko/releases/download/v0.0.13-rc.1/releases.json"
+            )
+        );
+        let mirror = Pin::new(
+            "https://mirror.example.test/tenko/releases.json",
+            None,
+            None,
+        )
+        .expect("a mirror");
+        assert_eq!(mirror.prerelease_source(&rc), None);
+        // A prefix that leaves out the tag directories: nothing outside it is asked for.
+        let narrow = Pin::new(
+            GITHUB_SOURCE,
+            Some(GITHUB_SOURCE.trim_end_matches("releases.json")),
+            None,
+        )
+        .expect("a narrow prefix");
+        assert_eq!(narrow.prerelease_source(&rc), None);
     }
 
     #[test]
@@ -857,11 +944,22 @@ mod tests {
     }
 
     /// A plain HTTP server on the loopback interface that answers each path from `routes`:
-    /// `Ok(body)` with 200, `Err(location)` with 302. Unknown paths get 404.
-    async fn serve(
-        routes: Vec<(&'static str, Result<&'static str, String>)>,
-    ) -> (u16, tokio::task::JoinHandle<()>) {
+    /// `Ok(body)` with 200, `Err(location)` with 302. Unknown paths get 404. The paths asked
+    /// for are logged in order.
+    pub(crate) async fn serve(
+        routes: Vec<(impl Into<String>, Result<impl Into<String>, String>)>,
+    ) -> (
+        u16,
+        tokio::task::JoinHandle<()>,
+        Arc<std::sync::Mutex<Vec<String>>>,
+    ) {
         use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let routes: Vec<(String, Result<String, String>)> = routes
+            .into_iter()
+            .map(|(path, answer)| (path.into(), answer.map(Into::into)))
+            .collect();
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let requests = Arc::clone(&log);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("a port");
@@ -875,6 +973,7 @@ mod tests {
                 let read = stream.read(&mut request).await.unwrap_or(0);
                 let text = String::from_utf8_lossy(&request[..read]).to_string();
                 let path = text.split_whitespace().nth(1).unwrap_or("/").to_owned();
+                requests.lock().expect("lock").push(path.clone());
                 let answer = match routes.iter().find(|(route, _)| *route == path) {
                     Some((_, Ok(body))) => format!(
                         "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -892,7 +991,7 @@ mod tests {
                 let _ = stream.shutdown().await;
             }
         });
-        (port, task)
+        (port, task, log)
     }
 
     fn file_asset(url: &str, body: &str) -> ReleaseAsset {
@@ -908,7 +1007,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_download_follows_redirects_inside_the_prefix_and_reports_the_final_url() {
-        let (port, task) = serve(vec![
+        let (port, task, _) = serve(vec![
             ("/rel/a", Err("/rel/b".to_owned())),
             ("/rel/b", Ok("the release")),
             ("/rel/out", Err("/elsewhere/c".to_owned())),

@@ -37,7 +37,7 @@ const OLD: &str = env!("CARGO_PKG_VERSION");
 
 /// The version the test installs: the release of this build's pre-release, or this build's
 /// version with the patch number raised by one. A later pre-release would not do: a node
-/// is offered none unless `updates.prereleases` is on.
+/// is offered none unless the pre-release switch (TGL-45) is on.
 static NEW: LazyLock<String> = LazyLock::new(|| {
     if let Some((release, _)) = OLD.split_once('-') {
         return release.to_owned();

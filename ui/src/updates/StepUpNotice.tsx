@@ -8,7 +8,7 @@ import { Notice } from "../components/Notice";
 import { t } from "../i18n";
 import { UPDATES_PATH } from "./paths";
 
-export function StepUpNotice() {
+export function StepUpNotice(props: { body?: string }) {
   const navigate = useNavigate();
   const signInAgain = async () => {
     await signOut();
@@ -16,7 +16,7 @@ export function StepUpNotice() {
   };
   return (
     <Notice kind="warn" title={t("updates.stepup.title")} role="alert" testid="updates-stepup">
-      <p>{t("updates.stepup.body")}</p>
+      <p>{props.body ?? t("updates.stepup.body")}</p>
       <p>
         <button type="button" class="btn" onClick={() => void signInAgain()} data-testid="updates-signin-again">
           {t("updates.stepup.button")}

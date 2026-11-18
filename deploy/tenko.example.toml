@@ -292,8 +292,9 @@ source_url = "https://github.com/linkztream/tenko/releases/latest/download/relea
 air_gapped = false
 # Hours between two checks.
 check_interval_hours = 24
-# Offer pre-release versions.
-prereleases = false
+# Whether the pre-release switch on the Updates page may be used. false forbids pre-releases,
+# whatever the switch on the Updates page says.
+prereleases = true
 # Seconds a newly installed version has to become ready before the previous one is
 # switched back in.
 ready_timeout_secs = 180

@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --check`
 
-86 Phase 1 requirements; 71 named by at least one test, 15 not; 0 named by no test, measurement or document.
+87 Phase 1 requirements; 72 named by at least one test, 15 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -90,6 +90,7 @@ This file is generated. It lists every Phase 1 requirement of `docs/REQUIREMENTS
 | OPS-25 | Must | `crates/tenko/tests/upgrade_modules.rs` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/lib.rs`<br>`crates/tenko-api/src/modules.rs`<br>`crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dns.rs`<br>and 21 more |
 | OPS-26 | Must | `crates/tenko/tests/acceptance_partition.rs`<br>`crates/tenko/tests/acceptance_partition.rs::ops_26_an_isolated_controller_shows_its_banner_data_and_drains_its_queue_after_the_heal`<br>`crates/tenko/tests/cluster_partition.rs`<br>`crates/tenko/tests/cluster_recovery.rs`<br>`crates/tenko/tests/cluster_support/scenarios.rs`<br>and 4 more | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/middleware/quorum.rs`<br>`crates/tenko-api/src/routes/queue.rs`<br>`crates/tenko-cluster/src/admin.rs`<br>`crates/tenko-cluster/src/generation.rs`<br>and 29 more |
 | OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>and 21 more |
+| OPS-30 | Should | `crates/tenko/src/upgrade/source.rs::a_prerelease_manifest_lies_in_its_tags_directory`<br>`crates/tenko/src/upgrade/updates.rs::a_refused_probe_fails_the_check_and_keeps_the_final_releases`<br>`crates/tenko/src/upgrade/updates.rs::pre_releases_need_the_switch_and_the_file`<br>`crates/tenko/src/upgrade/updates.rs::the_check_finds_the_next_release_candidate_inside_the_prefix` | - | `crates/tenko-api/src/dto/updates.rs`<br>`crates/tenko-auth/src/settings.rs`<br>`crates/tenko/src/config.rs`<br>`crates/tenko/src/upgrade/source.rs`<br>`crates/tenko/src/upgrade/updates.rs`<br>and 2 more |
 | SCAN-01 | Must | - | - | `crates/tenko-scan/src/lib.rs`<br>`crates/tenko/src/config.rs`<br>`crates/tenko/src/node/scan/mod.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/ROADMAP.md`<br>and 7 more |
 | SCAN-02 | Must | `crates/tenko/tests/node_scan_raw.rs` | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/config.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko-scan/src/methods/neighbors.rs`<br>and 13 more |
 | SCAN-03 | Should | `crates/tenko/tests/node_scan_raw.rs` | - | `crates/tenko-core/src/observe.rs`<br>`crates/tenko-scan/src/config.rs`<br>`crates/tenko-scan/src/lib.rs`<br>`crates/tenko-scan/src/methods/names.rs`<br>`crates/tenko-scan/src/methods/raw/dhcp_snoop.rs`<br>and 11 more |

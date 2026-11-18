@@ -36440,7 +36440,7 @@
             }
           },
           "409": {
-            "description": "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)",
+            "description": "This installation cannot install from the UI now (`update.install_blocked`, parameter `reason`: an `InstallBlock`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, parameters `max_age_seconds`, `age_seconds` of the newest good backup when there is one, and `skip_allowed`: `false` when the profile refused `backup: \"skip\"`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -36639,7 +36639,7 @@
             }
           },
           "409": {
-            "description": "This installation cannot install now (`update.install_blocked`, parameter `reason`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read",
+            "description": "This installation cannot install now (`update.install_blocked`, parameter `reason`), a pre-release while pre-releases are off (`update.prerelease_off`), or a backup must be taken first (`update.backup_required`, as for `POST /system/updates/install`); both are answered before the body is read",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -80835,6 +80835,13 @@
             "description": "Days a PIN stored before the six-digit minimum keeps working without a sign-in that\nshows it meets the policy, counted from the upgrade (1 to 365). Afterwards it is\nrefused like a wrong PIN until an administrator resets it, or, for the last\nadministrator, until `tenko user unlock` on the host starts a new period. `None` in\nsettings stored before the rule: 30 days.",
             "minimum": 0
           },
+          "update_prereleases": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TGL-45: offer and install pre-release versions (OPS-30), unless `updates.prereleases\n= false` in `tenko.toml` forbids them. `None` in settings stored before the toggle\nexisted: the profile's value applies ([`SecuritySettings::update_prereleases`])."
+          },
           "updates": {
             "oneOf": [
               {
@@ -81299,6 +81306,13 @@
             "format": "int32",
             "description": "The period of an unconfirmed PIN from before the six-digit minimum, in days.",
             "minimum": 0
+          },
+          "update_prereleases": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TGL-45."
           },
           "updates": {
             "oneOf": [
@@ -86533,7 +86547,9 @@
         "required": [
           "enabled",
           "source",
-          "interval_hours"
+          "interval_hours",
+          "prereleases",
+          "prereleases_allowed"
         ],
         "properties": {
           "enabled": {
@@ -86574,6 +86590,14 @@
                 "type": "null"
               }
             ]
+          },
+          "prereleases": {
+            "type": "boolean",
+            "description": "The pre-release switch (TGL-45)."
+          },
+          "prereleases_allowed": {
+            "type": "boolean",
+            "description": "Whether `tenko.toml` lets the switch be used (`updates.prereleases`, default true).\nPre-releases are offered and installed only when both are true (OPS-30)."
           },
           "source": {
             "type": "string",

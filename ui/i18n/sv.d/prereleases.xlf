@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="prereleases">
+      <unit id="toggles.update_prereleases.name">
+        <notes><note category="description">TGL-45: the pre-release switch, on the Updates page and in the security settings.</note></notes>
+        <segment><source>Pre-release updates</source><target>Förhandsversioner</target></segment>
+      </unit>
+      <unit id="updates.prerelease.hint">
+        <segment><source>Offers release candidates of the next version. They are tested less than final releases.</source><target>Erbjuder releasekandidater för nästa version. De är mindre testade än färdiga utgåvor.</target></segment>
+      </unit>
+      <unit id="updates.prerelease.locked">
+        <notes><note category="description">The configuration file forbids the switch; only root can change the file.</note></notes>
+        <segment><source>tenko.toml forbids pre-releases (updates.prereleases = false).</source><target>tenko.toml förbjuder förhandsversioner (updates.prereleases = false).</target></segment>
+      </unit>
+      <unit id="updates.prerelease.uploads_only">
+        <segment><source>No check runs; this decides only whether an uploaded pre-release is offered.</source><target>Ingen kontroll körs; detta avgör bara om en uppladdad förhandsversion erbjuds.</target></segment>
+      </unit>
+      <unit id="updates.prerelease.mirror">
+        <segment><source>The mirror decides which releases its list holds.</source><target>Spegeln avgör vilka utgåvor dess lista innehåller.</target></segment>
+      </unit>
+      <unit id="updates.prerelease.stepup">
+        <segment><source>Changing this switch needs a sign-in within the last five minutes. Sign in again and you return to this page.</source><target>Att ändra den här inställningen kräver en inloggning inom de senaste fem minuterna. Logga in igen så kommer du tillbaka till den här sidan.</target></segment>
+      </unit>
+      <unit id="errors.update.prerelease_off">
+        <segment><source>Pre-releases are off on this installation.</source><target>Förhandsversioner är avstängda i den här installationen.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

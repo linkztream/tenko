@@ -204,7 +204,7 @@ mod tests {
             ids,
             [
                 "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21",
-                "TGL-23", "TGL-24"
+                "TGL-23", "TGL-24", "TGL-45"
             ]
         );
         for toggle in toggles {

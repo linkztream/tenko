@@ -2968,7 +2968,9 @@ pub struct UpdatesSection {
     pub air_gapped: bool,
     /// Hours between two checks (default 24).
     pub check_interval_hours: u64,
-    /// Offer pre-release versions (default off).
+    /// Whether the pre-release switch (TGL-45) may be used (default true). `false` forbids
+    /// pre-releases whatever the switch says: a node offers and installs a pre-release only
+    /// when the switch is on and this key is not `false` (OPS-30).
     pub prereleases: bool,
     /// Seconds a newly installed version has to become ready before the previous version
     /// is switched back in (default 180).
@@ -2993,7 +2995,7 @@ impl Default for UpdatesSection {
             redirect_hosts: None,
             air_gapped: false,
             check_interval_hours: 24,
-            prereleases: false,
+            prereleases: true,
             ready_timeout_secs: 180,
             keep_versions: 2,
             container: false,

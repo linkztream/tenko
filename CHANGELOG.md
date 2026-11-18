@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Added
+
+- Pre-release updates (OPS-30, TGL-45; `docs/upgrades.md` section 8.13): a switch on the Updates page, also among the security settings, offers release candidates of the next version. It is off in every profile, needs a sign-in within the last five minutes to change, and is audited. With it on, the daily check also asks the pinned release location for the manifests of the tags `vX.Y.Z-rc.N` of the next patch, minor and major version (at most 120 requests a check, usually six) and contacts no other host. A node offers and installs a pre-release only when the switch is on and `tenko.toml` does not set `updates.prereleases = false`. An install or upload of a pre-release that the rule does not allow is refused with 409 `update.prerelease_off`; before, a pre-release in the stored manifest could be installed while pre-releases were not offered. The release workflow refuses a pre-release tag of any other form than `vX.Y.Z-rc.N`.
+
 ### Fixed
 
 - The import finds the host of each address and the credential of each host by name, instead of walking the whole host and credential lists for every row. A preview or an apply chunk of a file with 200,000 hosts and addresses spent minutes of the controller's CPU comparing names (286 seconds in a debug build for one chunk of every address), now under a second; the result is the same.
@@ -12,6 +16,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 - An online rotation of the key-encryption key always ends (`docs/secrets.md`, "Rotation"). When the controller that created the new generation stops before another controller fetched it, the next leader waits for it like for any member, and after two minutes the rotation fails and the generation is abandoned; nothing was wrapped with it. A re-wrap that keeps failing for two minutes with nothing re-wrapped in between ends the rotation as `failed` too: the envelopes not yet re-wrapped stay under the earlier generations, which the controllers keep, and a new request re-wraps them. Before, such a rotation stayed in progress for good, and every later online or offline rotation was refused with `vault.kek.rotation_in_progress`.
 - A new key-encryption key file survives a power loss right after it was written: on Linux the write now syncs the key directory after the rename, so the store never names a generation whose file a restart no longer finds. Windows offers no directory sync; there the rename stays as durable as NTFS makes it. The write also no longer follows a link planted at its temporary name; it replaces whatever lies there, as the writes of the cluster's node files already did. The DNS query log's pseudonymization key file and the command-line client's credentials file are written the same way. Action required only where `kek.dir`, the directory of a key file that Tenko creates, or the directory of the client's credentials file is a symbolic link (or a junction on Windows): such a directory is now refused when the file is written; point the setting (or `TENKO_CREDENTIALS`) at the real directory.
+
+### Action required
+
+- `updates.prereleases` in `tenko.toml` now means "the pre-release switch may be used" and defaults to `true`. A file that copied the old example line `prereleases = false` keeps the switch locked off: remove the line, or set it to `true`, to use the switch. A file with `prereleases = true` no longer offers pre-releases by itself: turn the switch on in the UI.
 
 ## [0.0.12-rc.2] - 2026-11-18
 
