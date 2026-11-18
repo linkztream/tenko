@@ -18,7 +18,6 @@ use std::{
     collections::BTreeMap,
     fmt::Write as _,
     fs, io,
-    io::Write as _,
     net::IpAddr,
     path::{Path, PathBuf},
 };
@@ -128,32 +127,11 @@ impl Keys {
             hex_into(&mut text, key);
             text.push('\n');
         }
-        let temporary = self.path.with_extension("tmp");
-        let result = write_private(&temporary, text.as_bytes())
-            .and_then(|()| fs::rename(&temporary, &self.path));
+        let result = tenko_store::fs::write_private(&self.path, text.as_bytes())
+            .map_err(|error| io::Error::new(error.error.kind(), error.to_string()));
         text.zeroize();
         result
     }
-}
-
-#[cfg(unix)]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
-}
-
-#[cfg(not(unix))]
-fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = fs::File::create(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
 }
 
 fn parse_key(hex: &str) -> Option<[u8; 32]> {

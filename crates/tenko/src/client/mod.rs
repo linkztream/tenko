@@ -188,9 +188,7 @@ pub fn store_credentials(credentials: &Credentials) -> anyhow::Result<PathBuf> {
         create_private_dir(parent)?;
     }
     let bytes = serde_json::to_vec_pretty(credentials).context("encoding the credentials")?;
-    let temporary = path.with_extension("json.tmp");
-    write_private(&temporary, &bytes)?;
-    std::fs::rename(&temporary, &path)
+    tenko_store::fs::write_private(&path, &bytes)
         .with_context(|| format!("cannot write credentials {}", path.display()))?;
     Ok(path)
 }
@@ -227,28 +225,6 @@ fn create_private_dir(dir: &Path) -> anyhow::Result<()> {
     {
         std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))
     }
-}
-
-fn write_private(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
-    let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(path)
-        .with_context(|| format!("cannot write {}", path.display()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))
-            .with_context(|| format!("cannot restrict {}", path.display()))?;
-    }
-    file.write_all(bytes)
-        .and_then(|()| file.sync_all())
-        .with_context(|| format!("cannot write {}", path.display()))
 }
 
 /// A connection to a controller: where it is and how to authenticate.
