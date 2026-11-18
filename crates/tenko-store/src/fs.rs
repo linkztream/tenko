@@ -125,13 +125,13 @@ mod tests {
     fn a_symbolic_link_at_the_temporary_name_is_not_followed() {
         let (temp, dir, outside) = planted("fs-symlink");
         let target = dir.join("node-cert.pem.new");
-        let tmp = dir.join("node-cert.pem.new.tmp");
-        std::os::unix::fs::symlink(&outside, &tmp).expect("symlink");
+        let link = dir.join("node-cert.pem.new.tmp");
+        std::os::unix::fs::symlink(&outside, &link).expect("symlink");
         write_private(&target, b"the new certificate").expect("written");
         assert_eq!(fs::read(&outside).expect("outside"), b"not yours");
         assert_eq!(fs::read(&target).expect("target"), b"the new certificate");
         let missing = temp.join("created-by-root");
-        std::os::unix::fs::symlink(&missing, &tmp).expect("dangling symlink");
+        std::os::unix::fs::symlink(&missing, &link).expect("dangling symlink");
         write_private(&target, b"again").expect("written");
         assert_eq!(
             fs::symlink_metadata(&missing)
