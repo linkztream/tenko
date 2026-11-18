@@ -149,11 +149,13 @@ step_clippy() {
 }
 
 # The checkout inside WSL fetches merge-<name> from this repository's git directory.
+# pipefail carries a failure out: wsl.exe hands the command line to a shell that expands it
+# once more, so a `${PIPESTATUS[0]}` in it is empty before the pipeline has run.
 step_clippy_linux() {
   local sha common
   sha=$(git rev-parse HEAD)
   common=$(git rev-parse --path-format=absolute --git-common-dir)
-  (wsl -d "$DISTRO" -- bash -lc "cd $WSL_CHECKOUT && git fetch -q \"\$(wslpath -u '$common')\" merge-$NAME && git checkout -q --detach $sha && TENKO_UI_STUB=1 CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | grep -vE '^\s*(Compiling|Checking)' | tail -20; exit \${PIPESTATUS[0]}" 2>&1 |
+  (wsl -d "$DISTRO" -- bash -lc "set -o pipefail; cd $WSL_CHECKOUT && git fetch -q \"\$(wslpath -u '$common')\" merge-$NAME && git checkout -q --detach $sha && TENKO_UI_STUB=1 CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets --locked -- -D warnings 2>&1 | { grep -vE '^\s*(Compiling|Checking)' || true; } | tail -20" 2>&1 |
     grep -v "Failed to translate"; exit "${PIPESTATUS[0]}") || fail clippy-linux
 }
 
