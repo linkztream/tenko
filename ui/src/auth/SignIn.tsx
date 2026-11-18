@@ -19,6 +19,8 @@ type Stage = "passkey" | "password" | "second" | "break-glass";
 
 /** The second factors, strongest first: a recovery code is the last resort. */
 const PREFERENCE: SecondFactorMethod[] = ["webauthn", "totp", "recovery"];
+/** After a passkey failed on this page: the authenticator code first, a recovery code still last. */
+const AFTER_PASSKEY_FAILED: SecondFactorMethod[] = ["totp", "webauthn", "recovery"];
 
 /**
  * Sign-in, passkey first (design/mockups/signin.html). A password sign-in continues with
@@ -52,13 +54,18 @@ export default function SignIn() {
     clearInterval(countdown);
   });
 
-  const blocker = passkeyBlocker();
+  // Why a passkey cannot work here: known from the page, or learned from a refused ceremony.
+  const [blocker, setBlocker] = createSignal(passkeyBlocker());
+  const [passkeyFailed, setPasskeyFailed] = createSignal(false);
   /** The listed factors that work on this page, in the order of preference. */
-  const usable = () => PREFERENCE.filter((m) => challenge()?.methods.includes(m) && (m !== "webauthn" || !blocker));
+  const usable = () =>
+    (passkeyFailed() ? AFTER_PASSKEY_FAILED : PREFERENCE).filter(
+      (m) => challenge()?.methods.includes(m) && (m !== "webauthn" || !blocker()),
+    );
   /** A recovery code is all that is left: the listed passkey does not work here. */
   const recoveryOnly = () => method() === "recovery" && usable().length === 1;
   const passkeyBlocked = () =>
-    blocker === "unsupported" ? t("auth.signin.second_passkey_unsupported") : t("auth.signin.second_passkey_address");
+    blocker() === "unsupported" ? t("auth.signin.second_passkey_unsupported") : t("auth.signin.second_passkey_address");
   /** The step's lead; with no usable factor it says why the passkey cannot work here. */
   const secondLead = (): string => {
     switch (method()) {
@@ -120,8 +127,8 @@ export default function SignIn() {
     setBusy(true);
     setWaiting(true);
     controller = new AbortController();
+    const ch = challenge();
     try {
-      const ch = challenge();
       await acceptLogin(
         await signInWithPasskey({
           signal: controller.signal,
@@ -130,6 +137,16 @@ export default function SignIn() {
         }),
       );
     } catch (err) {
+      if (err instanceof CeremonyError) {
+        if (err.reason === "insecure" || err.reason === "unsupported") setBlocker(err.reason);
+        setPasskeyFailed(true);
+        // The passkey step spent the password's challenge on the server: no code can finish it now.
+        if (ch) {
+          setChallenge(null);
+          setStage("password");
+          queueMicrotask(() => passwordInput?.focus());
+        }
+      }
       fail(err);
     } finally {
       setBusy(false);
@@ -347,7 +364,7 @@ export default function SignIn() {
                       />
                     </div>
                   </Show>
-                  <Show when={blocker && method() && challenge()?.methods.includes("webauthn")}>
+                  <Show when={blocker() && method() && challenge()?.methods.includes("webauthn")}>
                     <p class="help" data-testid="signin-passkey-blocked">
                       {passkeyBlocked()}
                     </p>

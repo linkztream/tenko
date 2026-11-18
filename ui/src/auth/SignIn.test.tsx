@@ -259,23 +259,53 @@ describe("the second step after a password", () => {
     expect(get).toHaveBeenCalledTimes(1);
   });
 
-  it("after a canceled passkey, switches to the authenticator code, then to a recovery code", async () => {
+  it("switches from the passkey to the authenticator code, then to a recovery code", async () => {
     stubPasskey("cancel");
     show();
     signInWithPassword("alex", MOCK_PASSWORDS.alex);
-    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
-    expect((await screen.findByRole("alert")).textContent).toContain("canceled or timed out");
+    expect(await screen.findByRole("button", { name: PASSKEY })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: USE_TOTP }));
     const totp = screen.getByLabelText(TOTP);
     await waitFor(() => expect(document.activeElement).toBe(totp));
     expect(totp.getAttribute("autocomplete")).toBe("one-time-code");
-    expect(screen.queryByRole("alert")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: USE_RECOVERY }));
     const recovery = screen.getByLabelText(RECOVERY);
     await waitFor(() => expect(document.activeElement).toBe(recovery));
     expect(recovery.getAttribute("autocomplete")).toBe("off");
     // The passkey link starts the ceremony again from where it is.
     expect(screen.getByRole("button", { name: "Use a passkey instead" })).toBeTruthy();
+  });
+
+  // The browser refuses a ceremony the page could not foresee: "SecurityError" for an origin
+  // the passkey does not belong to, "NotAllowedError" as Chrome answers on a certificate error.
+  it.each([
+    ["SecurityError", /not its IP address\.$/],
+    ["NotAllowedError", null],
+  ] as const)("asks for the authenticator code first after the browser refused a passkey (%s)", async (name, why) => {
+    stubPasskey("cancel").mockRejectedValue(new DOMException("refused", name));
+    show();
+    fireEvent.click(screen.getByRole("button", { name: PASSKEY }));
+    await screen.findByRole("alert");
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    expect(await screen.findByLabelText(TOTP)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: PASSKEY })).toBeNull();
+    const note = screen.queryByTestId("signin-passkey-blocked")?.textContent ?? null;
+    if (why) expect(note).toMatch(why);
+    else expect(note).toBeNull();
+  });
+
+  it("goes back to the password after a passkey step the browser refused, then asks for the code", async () => {
+    stubPasskey("cancel");
+    show();
+    signInWithPassword("alex", MOCK_PASSWORDS.alex);
+    fireEvent.click(await screen.findByRole("button", { name: PASSKEY }));
+    // The passkey step spent the password's challenge: a code typed now could only be refused.
+    expect((await screen.findByRole("alert")).textContent).toContain("canceled or timed out");
+    expect(screen.getByRole("heading", { name: "Sign in" })).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Password")));
+    fireEvent.input(screen.getByLabelText("Password"), { target: { value: MOCK_PASSWORDS.alex } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    expect(await screen.findByLabelText(TOTP)).toBeTruthy();
   });
 
   it("knows a passkey cannot work on an IP address", () => {
