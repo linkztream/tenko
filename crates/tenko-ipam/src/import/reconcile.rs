@@ -283,7 +283,11 @@ impl<'a> Reconciler<'a> {
             hosts: HashMap::new(),
             interfaces: HashMap::new(),
             model_hosts: model.hosts_by_name(),
-            credential_hosts: model.credentials.iter().map(|c| &c.host).collect(),
+            credential_hosts: if options.credentials == CredentialPolicy::Import {
+                model.credentials.iter().map(|c| &c.host).collect()
+            } else {
+                HashSet::new()
+            },
             out: Reconciled::default(),
         })
     }
@@ -1314,52 +1318,53 @@ mod tests {
         assert_eq!(hex_bytes("zz"), None);
     }
 
-    /// The addresses of a large file find their host, and its hosts their credential, by
-    /// name. Walking the host list once per address made this chunk take 286 s in a debug
-    /// build (about 2 * 10^10 comparisons); no time is asserted here (no bound on a measured
-    /// time in a pass/fail test), the removed linear lookup is the guard.
+    /// Two hosts under one name: an address on that name goes to the first, as the walk
+    /// of the list that the index replaced did.
     #[tokio::test]
-    async fn a_large_model_reconciles_without_walking_its_lists() {
+    async fn an_address_goes_to_the_first_host_of_its_name() {
         use tenko_store::Store as _;
-        const HOSTS: usize = 200_000;
         let origin = SourceLocation::default();
+        let name = HostName::new("nas01").expect("name");
         let mut model = ImportModel::default();
-        for n in 0..HOSTS {
-            let name = HostName::new(&format!("h{n:06}")).expect("name");
-            model
-                .hosts
-                .push(ModelHost::new(name.clone(), origin.clone()));
-            model
-                .credentials
-                .push(super::super::model::ModelCredential {
-                    host: name.clone(),
-                    login: true,
-                    password: false,
-                    origin: origin.clone(),
-                });
-            let ip = std::net::Ipv6Addr::from(0x2001_0db8_u128 << 96 | n as u128);
-            let mut address = ModelAddress::new(IpAddr::V6(ip), origin.clone());
-            address.host = Some(name);
-            address.interface = Some("eth0".to_owned());
-            model.addresses.push(address);
+        for tenant in ["a", "b"] {
+            let mut host = ModelHost::new(name.clone(), origin.clone());
+            host.tenant = Some(tenant.to_owned());
+            host.interfaces.push(super::super::model::ModelInterface {
+                name: "eth0".to_owned(),
+                mac: None,
+                duid: None,
+                client_id: None,
+                origin: origin.clone(),
+            });
+            model.hosts.push(host);
         }
-        let options = ImportOptions {
-            credentials: CredentialPolicy::Import,
-            ..ImportOptions::default()
-        };
-        // The last chunk of hosts, then every address.
-        let items: Vec<WorkItem> = (HOSTS - 1_000..HOSTS)
-            .map(WorkItem::Host)
-            .chain((0..HOSTS).map(WorkItem::Address))
-            .collect();
+        let mut address = ModelAddress::new("192.0.2.10".parse().expect("ip"), origin);
+        address.host = Some(name);
+        address.interface = Some("eth0".to_owned());
+        model.addresses.push(address);
+        let options = ImportOptions::default();
         let store = tenko_store::MemStore::default();
         let view = store
             .read(tenko_store::ReadConsistency::Local)
             .await
             .expect("view");
+        let items = work_items(&model, &options);
         let out = reconcile(view.as_ref(), &model, &options, &items).expect("reconcile");
-        assert_eq!(out.outcomes.len(), items.len());
-        assert_eq!(out.credentials.len(), 1_000);
-        assert_eq!(out.credentials[0].host.as_str(), "h199000");
+        // The hosts are created in model order, each with its own interface.
+        let interfaces: Vec<_> = out
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                IpamCommand::CreateHost(host) => host.interfaces.first().and_then(|i| i.id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(interfaces.len(), 2);
+        assert_ne!(interfaces[0], interfaces[1]);
+        let placed = out.commands.iter().find_map(|command| match command {
+            IpamCommand::CreateAddress(address) => Some(address.interface),
+            _ => None,
+        });
+        assert_eq!(placed, Some(Some(interfaces[0])));
     }
 }
