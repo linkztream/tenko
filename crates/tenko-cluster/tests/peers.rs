@@ -454,8 +454,12 @@ impl Lab {
         let lab = Self::first_with(configure, policy).await;
         lab.join("controller-two", configure).await;
         lab.join("controller-three", configure).await;
-        wait_until_async("three voters", async || {
-            lab.first.store.membership().voters.len() == 3
+        // On every member, and settled: a follower may still be applying the last change.
+        wait_until_async("three voters on every member", async || {
+            lab.members().iter().all(|member| {
+                let membership = member.store.membership();
+                membership.voters.len() == 3 && !membership.changing
+            })
         })
         .await;
         lab
