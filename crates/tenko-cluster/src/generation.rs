@@ -94,7 +94,7 @@ use tenko_vault::SecretBytes;
 
 use crate::{
     error::ClusterError,
-    identity::{NODE_DIR, files_error, write_private},
+    identity::{NODE_DIR, files_error},
     mtls::PeerIdentity,
 };
 
@@ -864,7 +864,10 @@ impl FenceFile {
     pub fn save(&self, data_dir: &Path) -> Result<(), ClusterError> {
         let dir = data_dir.join(NODE_DIR);
         crate::identity::create_private_dir(&dir)?;
-        write_private(&dir.join(FENCE_FILE), &to_cbor(self)?)
+        Ok(tenko_store::fs::write_private(
+            &dir.join(FENCE_FILE),
+            &to_cbor(self)?,
+        )?)
     }
 }
 

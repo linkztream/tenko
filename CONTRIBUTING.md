@@ -220,7 +220,7 @@ never goes in, and who may depend on it.
 | Use another crate's error code | its `codes::*` constant, never the string (planned) | the producing crate |
 | Use a metric family name | the producer's `metrics::names::*` (planned) | the producing crate |
 | A setting's bound or default | the constant or `Default` on the setting's type | the owning crate |
-| Write a private file, or replace a file atomically | `tenko_store::fs` (planned) | `crates/tenko-store` |
+| Write a private file, or replace a file atomically | `tenko_store::fs::write_private` | `crates/tenko-store` |
 | Follow a table's changes | `tenko_store::follow` (planned) | `crates/tenko-store` |
 | Send tables to a node | `tenko_store::feed` (planned) | `crates/tenko-store` |
 | Read job tables, or stage inside a job step | `tenko_jobs::read`, `tenko_jobs::stage_or_propose` (planned) | `crates/tenko-jobs` |

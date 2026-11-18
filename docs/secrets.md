@@ -334,6 +334,8 @@ The provider is chosen per host in `[kek]` of `tenko.toml`; it is a property of 
 
 The identifier of a key file or a credential is `file-` and eight hexadecimal digits of the key's SHA-256, so an installation that passed the credential to the `file` provider (the unit of Slice 2) switches to `systemd_credential` without re-wrapping anything. Generation identifiers are `<sealer>-<number>-<8 random hexadecimal digits>` (`dpapi-2-3f9a0c2e`, `cred-1-…`, `wrap-1-…`, `plain-1-…`).
 
+A new generation or key file is written to a temporary file next to it, synced, renamed and the directory synced (on Windows the directory sync does not exist). A `kek.dir`, or the directory of a key file that Tenko creates, that is a symbolic link (or a junction on Windows) is refused when a key is written: point the setting at the real directory.
+
 A wrapped generation (`kek-NNNNNN.wrap`) is the generation file encrypted with AES-256-GCM under the root key (the key file or the credential), with the file name bound into the additional data. It has the protection of its root: whoever cannot read the root key cannot read it. The `file` and `systemd_credential` providers need it because the service account cannot seal anything with the host's own key store.
 
 ### Generations and the KEK state

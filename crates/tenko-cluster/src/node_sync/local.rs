@@ -25,7 +25,7 @@ use super::{
     codes,
     payload::{self, ConfigEntry, ConfigPayload, MAX_PAYLOAD_BYTES},
 };
-use crate::{error::ClusterError, identity::write_private, proto::v1};
+use crate::{error::ClusterError, proto::v1};
 
 /// The file of the configuration in the configuration directory.
 pub const STATE_FILE: &str = "state.cbor";
@@ -226,7 +226,7 @@ impl ConfigFiles {
     pub fn save(&self, config: &NodeConfig) -> Result<(), ClusterError> {
         crate::identity::create_private_dir(&self.dir)?;
         let bytes = to_cbor(config)?;
-        write_private(&self.state(), &bytes)
+        Ok(tenko_store::fs::write_private(&self.state(), &bytes)?)
     }
 }
 

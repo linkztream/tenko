@@ -11,7 +11,6 @@
 
 use std::{
     fs,
-    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -306,7 +305,8 @@ impl KekDir {
             if let Some(generation) = name
                 .to_str()
                 .and_then(|name| name.split_once('.'))
-                .filter(|(_, extension)| *extension != "tmp")
+                // A temporary file of a write (`kek-NNNNNN.<sealer>.tmp`) is no generation.
+                .filter(|(_, extension)| extension.rsplit('.').next() != Some("tmp"))
                 .and_then(|(stem, _)| parse_stem(stem))
             {
                 numbers.push(generation);
@@ -401,7 +401,8 @@ impl KekDir {
             .join(format!("{}.{}", stem(generation), self.primary.name()));
         let plain = encode(generation, id, key)?;
         let sealed = self.primary.seal(&stem(generation), &plain)?;
-        write_private(&path, &sealed)?;
+        tenko_store::fs::write_private(&path, &sealed)
+            .map_err(|e| io_error("write", &e.path, &e.error))?;
         Ok(Arc::new(LocalKek::new(id, self.primary.protection(), key)?))
     }
 }
@@ -523,29 +524,6 @@ pub(crate) fn create_private_dir(dir: &Path) -> Result<(), VaultError> {
         .map_err(|e| io_error("create directory", dir, &e))
 }
 
-/// Writes a file atomically (temporary file, sync, rename) with mode 0600 on Unix.
-pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), VaultError> {
-    let tmp = path.with_extension("tmp");
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let result = (|| {
-        let mut file = options.open(&tmp)?;
-        file.write_all(bytes)?;
-        file.sync_all()?;
-        drop(file);
-        fs::rename(&tmp, path)
-    })();
-    result.map_err(|e| {
-        let _ = fs::remove_file(&tmp);
-        io_error("write", path, &e)
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use tenko_core::testing::TempDir;
@@ -635,6 +613,18 @@ mod tests {
             .expect("load");
         assert!(allowed.active().id().starts_with("plain-2-"));
         assert_eq!(allowed.refused(), []);
+    }
+
+    /// A temporary file left by a write that stopped is no generation.
+    #[test]
+    fn a_stale_temporary_file_is_no_generation() {
+        let temp = TempDir::new("dir-stale-tmp");
+        let dir = temp.join("kek");
+        let kek = KekDir::new(&dir, Arc::new(Sealed));
+        kek.load(KekInit::CreateIfMissing).expect("create");
+        fs::write(dir.join("kek-000002.sealed.tmp"), b"half").expect("stale");
+        let next = kek.create_next().expect("next");
+        assert!(next.id().starts_with("sealed-2-"), "{}", next.id());
     }
 
     #[test]

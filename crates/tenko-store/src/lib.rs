@@ -51,6 +51,7 @@
 
 pub mod api;
 pub mod format;
+pub mod fs;
 mod layout;
 pub mod mem;
 #[cfg(feature = "raft")]

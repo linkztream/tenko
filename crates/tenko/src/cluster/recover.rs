@@ -53,7 +53,7 @@ use tenko_cluster::{
         self, Claim, FenceFile, ForkPoint, GENERATION, GenerationBody, GenerationRecord, LAYOUT,
         Lineage, SUPERSEDED, SupersededMark, codes,
     },
-    identity::{Credentials, NodePaths, write_private},
+    identity::{Credentials, NodePaths},
     model::{MemberRecord, tables},
     registry,
 };
@@ -64,6 +64,7 @@ use tenko_core::{
 };
 use tenko_store::{
     KeyRange, ReadViewExt as _, Store as _, WriteBatch,
+    fs::write_private,
     raft::{
         recover::{CopyFacts, OfflineCopy, Replayed, inspect, replay},
         types::TypeConfig,
@@ -199,7 +200,7 @@ impl Notice {
         let text = serde_json::to_vec_pretty(self).map_err(|error| error.to_string())?;
         // Durable before the store moves: a power loss after the rename must find the
         // notice, or the next start would make an empty installation.
-        write_private(&data_dir.join(NOTICE_FILE), &text).map_err(|error| error.detail().to_owned())
+        write_private(&data_dir.join(NOTICE_FILE), &text).map_err(|error| error.to_string())
     }
 
     /// Writes the first notice of a step: only when there is none, so of two steps run at
@@ -1300,7 +1301,7 @@ fn write_tail(path: &Path, replayed: &Replayed) -> Result<(), Failure> {
         });
         let _ = writeln!(text, "{line}");
     }
-    write_private(path, text.as_bytes()).map_err(|error| Failure::other(error.detail()))
+    write_private(path, text.as_bytes()).map_err(Failure::other)
 }
 
 /// An entry of the tail as JSON: each write batch decoded (its keys and values stay bytes).

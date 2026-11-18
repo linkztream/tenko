@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 
 use super::{
     DataKey, KekInit, KekOptions, KekProtection, KekProvider, LocalKek, Rooted,
-    dir::{create_private_dir, write_private},
+    dir::{create_private_dir, io_error},
 };
 use crate::VaultError;
 
@@ -106,7 +106,8 @@ impl FileKek {
                 hex.push(char::from(HEX[usize::from(byte & 0x0f)]));
             }
             hex.push('\n');
-            write_private(path, hex.as_bytes())?;
+            tenko_store::fs::write_private(path, hex.as_bytes())
+                .map_err(|e| io_error("write", &e.path, &e.error))?;
             tracing::info!(path = %path.display(), "created a key-encryption key file");
         }
         Self::open(path)
@@ -242,6 +243,22 @@ mod tests {
             dek.as_bytes()
         );
         assert_eq!(opened.protection(), KekProtection::PlainFile);
+    }
+
+    /// Links planted at the temporary names a writer may use are never written through.
+    #[test]
+    fn a_link_at_the_temporary_name_is_not_written_through() {
+        let temp = TempDir::new("file-kek-link");
+        let path = temp.join("kek").join("kek.key");
+        create_private_dir(path.parent().expect("parent")).expect("dir");
+        let outside = temp.join("outside");
+        fs::write(&outside, b"not yours").expect("outside");
+        for tmp in ["kek.tmp", "kek.key.tmp"] {
+            fs::hard_link(&outside, path.with_file_name(tmp)).expect("hard link");
+        }
+        FileKek::open_or_create(&path).expect("create");
+        assert_eq!(fs::read(&outside).expect("outside"), b"not yours");
+        assert!(!path.with_file_name("kek.key.tmp").exists());
     }
 
     #[test]
