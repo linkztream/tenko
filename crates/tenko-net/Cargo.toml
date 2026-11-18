@@ -1,6 +1,6 @@
 [package]
 name = "tenko-net"
-version = "0.0.12-rc.2"
+version = "0.0.12-rc.3"
 description = "Network rules a published standard defines, over std::net types: address classes, reverse names, the client address behind proxies"
 edition.workspace = true
 rust-version.workspace = true
