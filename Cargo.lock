@@ -3155,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "tenko"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "anyhow",
  "argon2",
@@ -3218,7 +3218,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-api"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "aws-lc-rs",
@@ -3264,7 +3264,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-auth"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "argon2",
@@ -3301,7 +3301,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-cluster"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3344,7 +3344,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3386,7 +3386,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-hass"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3402,7 +3402,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-proxmox"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "futures",
@@ -3417,7 +3417,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-unifi"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "axum",
@@ -3435,11 +3435,11 @@ dependencies = [
 
 [[package]]
 name = "tenko-connect-windows"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 
 [[package]]
 name = "tenko-core"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3460,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-dhcp"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3490,7 +3490,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-dns"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3535,7 +3535,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-ipam"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-jobs"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3588,7 +3588,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-krb"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "aws-lc-rs",
  "tenko-core",
@@ -3599,15 +3599,15 @@ dependencies = [
 
 [[package]]
 name = "tenko-migrate"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 
 [[package]]
 name = "tenko-net"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 
 [[package]]
 name = "tenko-scan"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
@@ -3638,7 +3638,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-store"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
  "async-trait",
@@ -3658,7 +3658,7 @@ dependencies = [
 
 [[package]]
 name = "tenko-vault"
-version = "0.0.12-rc.3"
+version = "0.0.12-rc.4"
 dependencies = [
  "async-trait",
  "aws-lc-rs",

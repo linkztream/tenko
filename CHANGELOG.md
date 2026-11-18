@@ -4,7 +4,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
-## [0.0.12-rc.3] - 2026-11-18
+## [0.0.12-rc.4] - 2026-11-18
 
 ### Added
 
