@@ -1006,7 +1006,9 @@ The file name stays `tenko-<version>-linux-x86_64`, so the manifest and `current
 do not change.
 
 After the build, the job `smoke-linux` runs the binary in `debian:12-slim` and
-`rockylinux/rockylinux:9-minimal`, both with only `sh`. Each run prints the version and the
+`rockylinux/rockylinux:9-minimal`, both with only `sh`. As on an installed node, the binary
+is put into the version layout of the service account `tenko`, owned by it, and every command
+runs as that account, never as root (ADR 0023). Each run prints the version and the
 data-directory format, checks `deploy/tenko.example.toml` with `tenko config check`, and
 starts `tenko serve` with a temporary data directory and a file KEK on `127.0.0.1`. It waits
 for `tenko health --ca-file` to report ready, then stops the server with SIGTERM and requires

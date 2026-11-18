@@ -16,8 +16,10 @@
 #   3. build       builds the binaries for Linux and Windows with the real UI embedded. The Linux
 #                  binary is static, built for x86_64-unknown-linux-musl (S3-Q10, OPS-01), so one
 #                  file runs on every distribution; the job fails when it is not static;
-#   4. smoke-linux runs the Linux binary in a Debian 12 and a RHEL 9 compatible container
-#                  (version, config check, a real start and a stop with SIGTERM);
+#   4. smoke-linux runs the Linux binary in a Debian 12 and a RHEL 9 compatible container,
+#                  as the service account from its version layout as an installation does
+#                  (version, config check, a real start and a stop with SIGTERM), and
+#                  deploy/install.sh with it;
 #      sign-binary (WP6.7) signs the Windows binary with Authenticode when a certificate is
 #                  configured, in a job of its own that holds the signing secrets and runs
 #                  nothing else (below);
@@ -478,12 +480,24 @@ jobs:
           set -euo pipefail
           chmod +x "dist/tenko-${VERSION}-linux-x86_64"
           # The script that runs inside the container: POSIX sh only (minimal images have no
-          # bash). It uses `sh`, `kill`, `sleep` and `mktemp` and nothing else.
+          # bash). It uses `sh`, `id`, `useradd`, `install`, `runuser`, `kill`, `sleep` and
+          # `mktemp` and nothing else.
           cat > "$RUNNER_TEMP/smoke.sh" <<'SMOKE_END'
           #!/bin/sh
-          # In: TENKO_BIN (binary), TENKO_VERSION, SMOKE_CONFIG (example config), SMOKE_PORT.
+          # In: TENKO_BIN (the released file), TENKO_VERSION, SMOKE_CONFIG (example config), SMOKE_PORT.
           set -eu
-          bin="$TENKO_BIN"
+          # As deploy/install.sh leaves a node: the binary in the version layout of the service
+          # account tenko, owned by it, and every command run as that account, never as root
+          # (docs/adr/0023-no-root-after-installation.md). Root only sets this up.
+          bin="/var/lib/tenko/updates/$TENKO_VERSION/tenko"
+          if [ "$(id -u)" = 0 ]; then
+            useradd --system --home-dir /var/lib/tenko --no-create-home --shell /usr/sbin/nologin tenko
+            install -d -m 0711 -o tenko -g tenko /var/lib/tenko
+            install -d -m 0750 -o tenko -g tenko /var/lib/tenko/updates
+            install -d -m 0755 -o tenko -g tenko "${bin%/tenko}"
+            install -m 0755 -o tenko -g tenko "$TENKO_BIN" "$bin"
+            exec runuser -u tenko -- sh "$0"
+          fi
           work="$(mktemp -d)"
           export TENKO_DATA_DIR="$work/data"
           mkdir -p "$TENKO_DATA_DIR"
@@ -551,8 +565,9 @@ jobs:
       # WP6.6: the installer with this binary, unattended and with --no-start (the container
       # has no systemd): the account, /etc/tenko, the key file and the unit, the version layout
       # and the command line (one version: no binary on root's PATH), tenko config check on
-      # the written file with root's own copy, a rerun that changes nothing, and --uninstall
-      # --purge. The release files are mounted at /dist: the installer creates /opt/tenko.
+      # the written file through that command line as the account tenko, not as
+      # root, a rerun that changes nothing, and --uninstall --purge. The release files are
+      # mounted at /dist: the installer creates /opt/tenko.
       # The minimal RHEL image lacks useradd, which a RHEL host has (shadow-utils).
       - name: Install with deploy/install.sh in ${{ matrix.name }}
         run: |
@@ -562,8 +577,7 @@ jobs:
           if ! command -v useradd > /dev/null 2>&1; then microdnf install -y shadow-utils > /dev/null; fi
           bin="/dist/tenko-${TENKO_VERSION}-linux-x86_64"
           bash /opt/install.sh --yes --no-start --binary "$bin" --host-name tenko.example.test
-          install -m 0755 "$bin" /root/tenko
-          /root/tenko config check --config /etc/tenko/tenko.toml > /dev/null
+          runuser -u tenko -- /opt/tenko/cli/tenko config check --config /etc/tenko/tenko.toml > /dev/null
           test -f /etc/tenko/kek.key && test -f /etc/systemd/system/tenko.service && id tenko
           test "$(readlink /var/lib/tenko/updates/current)" = "$TENKO_VERSION"
           test "$(readlink /opt/tenko/cli/tenko)" = /var/lib/tenko/updates/current/tenko
