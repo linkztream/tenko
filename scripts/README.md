@@ -162,5 +162,6 @@ and separately those that no test, measurement or document names.
 - `.github/workflows/release.yml` (tags `v*`): `verify` runs `changelog.mjs notes <version>` to
   prove that the section exists; `sbom` runs `sbom-prune.mjs` on the SBOM of each binary;
   `manifest` runs `release-manifest.mjs` over the binaries; `publish` runs
-  `changelog.mjs notes <version>` for the release text and attaches `releases.json`,
+  `release-manifest.mjs --release-notes` for the release text (the section, shortened when
+  GitHub would refuse its length) and attaches `releases.json`,
   `SHA256SUMS` and the other release files, which `attest` attested, to the GitHub release.

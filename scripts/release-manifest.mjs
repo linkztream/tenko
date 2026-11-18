@@ -74,6 +74,8 @@ export const READER_LIMITS = Object.freeze({ manifest: 1024 * 1024, notes: 64 * 
 /** What the generator writes: a quarter below each bound of the readers. */
 export const MAX_MANIFEST_BYTES = (READER_LIMITS.manifest * 3) / 4;
 export const MAX_NOTES_BYTES = (READER_LIMITS.notes * 3) / 4;
+/** The text of a GitHub release: GitHub refuses more than 125,000 characters. */
+export const MAX_RELEASE_TEXT_BYTES = 120_000;
 export const MAX_ACTION_BYTES = (READER_LIMITS.action * 3) / 4;
 
 /** @param {string} text */
@@ -900,6 +902,9 @@ Options:
   --format <n>       data-directory format number of the binaries
   --out <file>       the manifest to write (default releases.json); SHA256SUMS, which lists
                      it, goes next to it
+  --release-notes <file>
+                     write only the release text of --version to <file>, shortened to what
+                     GitHub takes as the text of a release; needs no --assets
   --help             print this text
 `;
 
@@ -922,6 +927,7 @@ export async function main(argv) {
     image: { type: "string" },
     format: { type: "string" },
     out: { type: "string" },
+    "release-notes": { type: "string" },
     help: { type: "boolean", short: "h" },
   };
   try {
@@ -937,7 +943,8 @@ export async function main(argv) {
       return 0;
     }
     if (parsed.positionals.length > 0) throw new UsageError(`unexpected argument ${JSON.stringify(parsed.positionals[0])}`);
-    for (const required of ["version", "assets", "base-url"]) {
+    const notesFile = v["release-notes"];
+    for (const required of typeof notesFile === "string" ? ["version", "base-url"] : ["version", "assets", "base-url"]) {
       if (typeof v[required] !== "string" || v[required] === "") throw new UsageError(`--${required} is required`);
     }
     let format;
@@ -971,13 +978,21 @@ export async function main(argv) {
       }
     }
 
-    const assetsDir = /** @type {string} */ (v.assets);
-    if (!(await stat(assetsDir)).isDirectory()) throw new ManifestError(`${assetsDir} is not a directory`);
-
     /** @param {string} line */
     const log = (line) => {
       process.stdout.write(`release-manifest: ${line}\n`);
     };
+    if (typeof notesFile === "string") {
+      const version = /** @type {string} */ (v.version);
+      const section = parseChangelog(changelogText).sections.find((s) => s.version === version);
+      if (section === undefined) throw new ManifestError(`${changelogFile} has no section for version ${version}`);
+      const notes = shortenNotes(section.body, { maxBytes: MAX_RELEASE_TEXT_BYTES, version, repository: repositoryOf(/** @type {string} */ (v["base-url"])), log });
+      await writeFile(notesFile, notes === "" ? "" : `${notes}\n`);
+      return 0;
+    }
+
+    const assetsDir = /** @type {string} */ (v.assets);
+    if (!(await stat(assetsDir)).isDirectory()) throw new ManifestError(`${assetsDir} is not a directory`);
     const { release, ignored } = await buildRelease({
       version: /** @type {string} */ (v.version),
       changelogText,

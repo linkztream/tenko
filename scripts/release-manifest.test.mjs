@@ -30,6 +30,7 @@ import {
   MAX_ACTION_BYTES,
   MAX_MANIFEST_BYTES,
   MAX_NOTES_BYTES,
+  MAX_RELEASE_TEXT_BYTES,
   MAX_SENTENCE_BYTES,
   READER_LIMITS,
   firstSentence,
@@ -1042,6 +1043,22 @@ describe("command line", () => {
       const r = cli([flag]);
       assert.equal(r.status, 0);
       assert.match(r.stdout, /^Usage: node scripts\/release-manifest\.mjs/);
+    }
+  });
+
+  test("--release-notes writes the text of the repository's newest release within GitHub's bound", () => {
+    const changelog = path.join(here, "..", "CHANGELOG.md");
+    const version = /** @type {RegExpExecArray} */ (/^## \[(\d[^\]]*)\]/m.exec(readFileSync(changelog, "utf8")))[1];
+    const dir = tempDir();
+    try {
+      const out = path.join(dir, "notes.md");
+      const r = cli(["--version", /** @type {string} */ (version), "--base-url", BASE_URL, "--changelog", changelog, "--release-notes", out]);
+      assert.equal(r.status, 0, r.stderr);
+      const notes = readFileSync(out, "utf8");
+      assert.ok(notes.length > 0 && Buffer.byteLength(notes, "utf8") <= MAX_RELEASE_TEXT_BYTES + 1);
+      assert.equal(cli(["--version", "0.0.0", "--base-url", BASE_URL, "--changelog", changelog, "--release-notes", out]).status, 1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 
