@@ -39,7 +39,7 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex, PoisonError, RwLock},
     time::Duration,
 };
 
@@ -68,7 +68,9 @@ use crate::{
 
 /// A member counts as reachable when the leader heard from it within this time.
 pub const REACHABLE_MS: u64 = 10_000;
-/// How long the leader waits for reachable members to take a new generation.
+/// How long the leader waits for reachable members to take a new generation, and how long
+/// it retries a re-wrap that fails with no pass completing in between; past it the
+/// rotation fails.
 pub const DISTRIBUTE_TIMEOUT: Duration = Duration::from_secs(120);
 /// How often a controller compares its keys with the replicated state without a change.
 const RESYNC: Duration = Duration::from_secs(30);
@@ -338,6 +340,8 @@ pub struct KekAdmin {
     peers: Arc<dyn KekPeers>,
     summary: RwLock<Option<KekSummary>>,
     distribute_timeout: RwLock<Duration>,
+    /// The generation whose re-wrap fails on this leader, and since when.
+    rewrap_failing: Mutex<Option<(String, Timestamp)>>,
 }
 
 impl std::fmt::Debug for KekAdmin {
@@ -367,6 +371,7 @@ impl KekAdmin {
             peers,
             summary: RwLock::new(None),
             distribute_timeout: RwLock::new(DISTRIBUTE_TIMEOUT),
+            rewrap_failing: Mutex::new(None),
         })
     }
 
@@ -680,7 +685,22 @@ impl KekAdmin {
                 self.distribute(&ctx, &guard, view.as_ref(), state, revision, rotation)
                     .await
             }
-            RotationPhase::Rewrapping => self.rewrap(&ctx, &guard, state).await,
+            RotationPhase::Rewrapping => match self.rewrap(&ctx, &guard, state.clone()).await {
+                Err(error) if !deposed(&error) => {
+                    let since = self.rewrap_failing_since(&state.active, ctx.now);
+                    let timeout = self.distribute_timeout();
+                    if ctx.now.saturating_since(since) <= timeout {
+                        return Err(error);
+                    }
+                    let error = format!(
+                        "the re-wrap failed for {} seconds: {error}",
+                        timeout.as_secs()
+                    );
+                    self.fail(&ctx, &guard, state, revision, rotation, &error)
+                        .await
+                }
+                step => step,
+            },
             RotationPhase::Done | RotationPhase::Failed => Ok(RotationStep::Idle),
         }
     }
@@ -702,21 +722,9 @@ impl KekAdmin {
         let kek = match created {
             Ok(kek) => kek,
             Err(error) => {
-                tracing::error!(%error, "the key rotation could not create a new generation");
-                rotation.phase = RotationPhase::Failed;
-                rotation.error = Some(error.to_string());
-                rotation.updated_at = ctx.now;
-                rotation.finished_at = Some(ctx.now);
-                state.rotation = Some(rotation);
-                self.write_state(
-                    ctx,
-                    guard,
-                    &state,
-                    revision,
-                    Some(failed_audit(&error.to_string())),
-                )
-                .await?;
-                return Ok(RotationStep::Advanced);
+                return self
+                    .fail(ctx, guard, state, revision, rotation, &error.to_string())
+                    .await;
             }
         };
         self.vault.merge(&KekRing::new(Arc::clone(&kek)));
@@ -756,19 +764,10 @@ impl KekAdmin {
     ) -> Result<RotationStep, VaultError> {
         let Some(pending) = state.pending.clone() else {
             let error = "the new key generation is missing from the state";
-            rotation.phase = RotationPhase::Failed;
-            rotation.error = Some(error.to_owned());
-            rotation.updated_at = ctx.now;
-            rotation.finished_at = Some(ctx.now);
-            state.rotation = Some(rotation);
-            self.write_state(ctx, guard, &state, revision, Some(failed_audit(error)))
-                .await?;
-            return Ok(RotationStep::Advanced);
+            return self
+                .fail(ctx, guard, state, revision, rotation, error)
+                .await;
         };
-        if !self.vault.ring().contains(&pending.id) {
-            // A new leader that has not fetched the generation yet: its own sync does.
-            return Ok(RotationStep::Idle);
-        }
         let acks = kek_state::acks_of(view, &pending.id)?;
         let mut waiting = Vec::new();
         let mut unreachable = Vec::new();
@@ -781,6 +780,11 @@ impl KekAdmin {
             } else {
                 unreachable.push(member.node);
             }
+        }
+        if !self.vault.ring().contains(&pending.id) {
+            // A new leader that has not fetched the generation yet (its own sync does) waits
+            // like any member, so the timeout ends the rotation when the creator is gone.
+            waiting.insert(0, self.node);
         }
         if waiting.is_empty() {
             return self
@@ -804,18 +808,11 @@ impl KekAdmin {
                 nodes(&waiting),
                 timeout.as_secs()
             );
-            tracing::error!("key rotation failed: {error}");
-            rotation.phase = RotationPhase::Failed;
-            rotation.error = Some(error.clone());
             rotation.waiting_for = waiting;
             rotation.unreachable = unreachable;
-            rotation.updated_at = ctx.now;
-            rotation.finished_at = Some(ctx.now);
-            state.rotation = Some(rotation);
-            state.abandon_pending();
-            self.write_state(ctx, guard, &state, revision, Some(failed_audit(&error)))
-                .await?;
-            return Ok(RotationStep::Advanced);
+            return self
+                .fail(ctx, guard, state, revision, rotation, &error)
+                .await;
         }
         if rotation.waiting_for != waiting || rotation.unreachable != unreachable {
             rotation.waiting_for = waiting;
@@ -878,13 +875,21 @@ impl KekAdmin {
         guard: &Precondition,
         state: KekState,
     ) -> Result<RotationStep, VaultError> {
-        if let Refresh::Missing { .. } = self.vault.apply_state(&state, state.epoch) {
-            return Ok(RotationStep::Idle);
+        if let Refresh::Missing { id } = self.vault.apply_state(&state, state.epoch) {
+            return Err(VaultError::kek_unavailable(format!(
+                "this controller lacks the active key generation {id}"
+            )));
         }
         let ring = self.vault.ring();
+        // A completed pass is progress: failures count again from the next one.
         let rewrapped = self
             .vault
-            .rewrap_all(ctx, &ring, state.epoch, Some(guard), |_| {})
+            .rewrap_all(ctx, &ring, state.epoch, Some(guard), |_| {
+                *self
+                    .rewrap_failing
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = None;
+            })
             .await?;
         let view = self.vault.store().read(ReadConsistency::Local).await?;
         let Some((mut state, revision)) = kek_state::read_state(view.as_ref())? else {
@@ -910,6 +915,47 @@ impl KekAdmin {
             .await?;
         tracing::info!(kek = %state.active, rewrapped, "key rotation finished");
         Ok(RotationStep::Idle)
+    }
+
+    /// Ends the rotation as failed. A pending generation is abandoned: no envelope names it,
+    /// since only the activation (which clears it) lets anything be wrapped with it.
+    async fn fail(
+        &self,
+        ctx: &RequestCtx,
+        guard: &Precondition,
+        mut state: KekState,
+        revision: tenko_core::Revision,
+        mut rotation: RotationRecord,
+        error: &str,
+    ) -> Result<RotationStep, VaultError> {
+        rotation.phase = RotationPhase::Failed;
+        rotation.error = Some(error.to_owned());
+        rotation.updated_at = ctx.now;
+        rotation.finished_at = Some(ctx.now);
+        state.rotation = Some(rotation);
+        state.abandon_pending();
+        let audit = AuditDraft::success(kek_state::actions::ROTATE_FAILED, Vec::new())
+            .with_context("error", error.to_owned());
+        self.write_state(ctx, guard, &state, revision, Some(audit))
+            .await?;
+        tracing::error!("key rotation failed: {error}");
+        Ok(RotationStep::Advanced)
+    }
+
+    /// Since when the re-wrap of `generation` fails on this leader (from `now` on a first
+    /// failure).
+    fn rewrap_failing_since(&self, generation: &str, now: Timestamp) -> Timestamp {
+        let mut failing = self
+            .rewrap_failing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match &*failing {
+            Some((id, since)) if id == generation => *since,
+            _ => {
+                *failing = Some((generation.to_owned(), now));
+                now
+            }
+        }
     }
 
     fn leader_batch(ctx: &RequestCtx, guard: &Precondition) -> WriteBatch {
@@ -1013,11 +1059,6 @@ fn warnings(
         ));
     }
     warnings
-}
-
-fn failed_audit(error: &str) -> AuditDraft {
-    AuditDraft::success(kek_state::actions::ROTATE_FAILED, Vec::new())
-        .with_context("error", error.to_owned())
 }
 
 fn nodes(nodes: &[NodeId]) -> String {

@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Security
+
+- An online rotation of the key-encryption key always ends (`docs/secrets.md`, "Rotation"). When the controller that created the new generation stops before another controller fetched it, the next leader waits for it like for any member, and after two minutes the rotation fails and the generation is abandoned; nothing was wrapped with it. A re-wrap that keeps failing for two minutes with no completed pass ends the rotation as `failed` too: the envelopes not yet re-wrapped stay under the earlier generations, which the controllers keep, and a new request re-wraps them. Before, such a rotation stayed in progress for good, and every later online or offline rotation was refused with `vault.kek.rotation_in_progress`.
+
 ## [0.0.12-rc.2] - 2026-11-18
 
 ### Added

@@ -14,7 +14,7 @@ use std::{
 
 use common::{audit_of, ctx, spec, value};
 use tenko_core::{
-    NodeId, Revision,
+    NodeId, Revision, Timestamp,
     cluster::LEADER_EPOCH,
     secret::SecretRef,
     testing::{TempDir, wait_until_async},
@@ -442,6 +442,95 @@ async fn a_reachable_member_that_does_not_take_the_generation_fails_the_rotation
     );
     // A new request is accepted after a failure.
     one.admin.request_rotation(&ctx()).await.expect("again");
+}
+
+/// The leader that created a generation stops for good before another controller fetched
+/// it: the next leader can never hold it, and the rotation must still end.
+async fn creator_lost(phase: RotationPhase, members: &[(u64, bool)]) {
+    let root_guard = TempDir::new("dist-lost");
+    let root = root_guard.join("data");
+    let store = ClusterStore::new();
+    let one = first(&store, &root.join("c1")).await;
+    let secrets = put_secrets(one.vault(), 2).await;
+    let two = join(&store, &root.join("c2"), 1001, &one).await;
+    store.set_members(members);
+    let old = state(&store).await.active;
+    one.admin.request_rotation(&ctx()).await.expect("request");
+    while state(&store).await.rotation.expect("rotation").phase != phase {
+        one.admin.rotation_step(0).await.expect("creator step");
+    }
+    let new = state(&store)
+        .await
+        .rotation
+        .and_then(|r| r.generation)
+        .expect("new");
+    drop(one);
+    two.peers.set_source(None);
+    store.set_members(&[(1, false), (1001, true)]);
+    two.admin.set_distribute_timeout(Duration::ZERO);
+    if phase == RotationPhase::Rewrapping {
+        // The first failure starts the count; only a later one past the timeout fails.
+        let error = two.admin.rotation_step(0).await.expect_err("missing");
+        assert!(
+            matches!(error, VaultError::KekUnavailable { .. }),
+            "{error:?}"
+        );
+        assert_eq!(state(&store).await.rotation.expect("rotation").phase, phase);
+    }
+    let since = Timestamp::now();
+    wait_until_async("the clock to move on", async || Timestamp::now() > since).await;
+    two.admin
+        .rotation_step(0)
+        .await
+        .expect("fails the rotation");
+    let failed = state(&store).await;
+    assert_eq!(
+        failed.rotation.as_ref().expect("rotation").phase,
+        RotationPhase::Failed
+    );
+    assert!(failed.pending.is_none());
+    if phase == RotationPhase::Distributing {
+        assert_eq!(failed.abandoned, std::slice::from_ref(&new));
+        assert_eq!(failed.active, old);
+    } else {
+        assert_eq!(failed.active, new, "the activation stands");
+    }
+    assert!(failed.knows(&old), "the old generation stays listed");
+    assert_eq!(envelope_ids(&store, &secrets).await, vec![old; 2]);
+    assert_reads(two.vault(), &secrets).await;
+    two.admin.request_rotation(&ctx()).await.expect("again");
+}
+
+#[tokio::test]
+async fn a_rewrap_that_starts_late_still_runs() {
+    let root_guard = TempDir::new("dist-late");
+    let root = root_guard.join("data");
+    let store = ClusterStore::new();
+    let one = first(&store, &root.join("c1")).await;
+    let secrets = put_secrets(one.vault(), 2).await;
+    one.admin.request_rotation(&ctx()).await.expect("request");
+    one.admin.rotation_step(0).await.expect("create");
+    one.admin.rotation_step(0).await.expect("activate");
+    let new = state(&store).await.active;
+    // A new leader takes over long after the activation: it re-wraps, it does not fail.
+    one.admin.set_distribute_timeout(Duration::ZERO);
+    let since = Timestamp::now();
+    wait_until_async("the clock to move on", async || Timestamp::now() > since).await;
+    one.admin.rotation_step(0).await.expect("rewrap");
+    let done = state(&store).await;
+    assert_eq!(done.rotation.expect("rotation").phase, RotationPhase::Done);
+    assert_eq!(envelope_ids(&store, &secrets).await, vec![new; 2]);
+}
+
+#[tokio::test]
+async fn a_generation_whose_creator_never_returns_fails_the_distribution() {
+    creator_lost(RotationPhase::Distributing, &[(1, true), (1001, true)]).await;
+}
+
+#[tokio::test]
+async fn an_active_generation_the_next_leader_cannot_hold_fails_the_rewrap() {
+    // 1001 is unreachable while the creator activates, so nothing waits for it.
+    creator_lost(RotationPhase::Rewrapping, &[(1, true), (1001, false)]).await;
 }
 
 #[tokio::test]
