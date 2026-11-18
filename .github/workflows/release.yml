@@ -51,12 +51,14 @@
 #   9. security    the lab round of layer 2 on the binary being released, from the tag's commit;
 #  10. image       pushes the archive of `image-build` to ghcr.io by digest, with no tag, only
 #                  after the security round and the attestations passed; nothing is pullable by
-#                  name before `publish`, and a release that fails leaves no image behind a tag;
+#                  name before `publish`, and a release that fails before it leaves no image
+#                  behind a tag;
 #  11. attest-image the provenance attestation of the pushed digest and the SBOM attestation of
 #                  the image, pushed to the registry beside it;
 #  12. publish     gives the image its tags (<version>, and latest for a stable release, S3-Q9),
-#                  takes the release text from the changelog (scripts/changelog.mjs notes) and
-#                  creates the GitHub release with the files of `manifest`.
+#                  takes the release text from the changelog (scripts/changelog.mjs notes) and,
+#                  as the run's last act, creates the GitHub release with the files of
+#                  `manifest`.
 #
 # Files pass from job to job as artifacts of the run, which any process of the run that holds
 # the run's artifact token can replace (a dependency's build code, a scanner, a test tool, in
@@ -74,11 +76,15 @@
 # (the platform of the musl binary stays linux-x86_64). SECURITY.md, "Verifying a release",
 # says how a user checks the attestations with `gh attestation verify`.
 #
-# Re-running: when a run fails before `publish`, re-run the failed jobs (a tag pushed with
-# its commit fails `verify` until CI has passed on that commit). When `publish`
-# failed after the release was created, delete that release (not the tag) and re-run; the
-# image tags are written again from the same digest. The workflow_dispatch trigger builds an
-# existing tag by hand; it never creates a tag, and it accepts a tag only (on main).
+# Re-running: when a run fails, re-run the failed jobs within a day, while the artifacts of
+# the jobs that passed are kept (retention-days: 1); later, start a new run (a tag pushed
+# with its commit fails `verify` until CI has passed on that commit). A failed `publish` is
+# re-run the same way: the image tags are written again from the same digest, and the
+# release is created last. Immutable releases are on for this repository: a published
+# release keeps its files and its tag, and a deleted one leaves its tag name unusable for
+# another release, so a release is never deleted to be made again; a release that is wrong
+# is followed by a new version. The workflow_dispatch trigger builds an existing tag by hand;
+# it never creates a tag, and it accepts a tag only (on main).
 #
 # Not yet here: signatures a node verifies (API-19). The provenance of `attest` proves that
 # this repository's workflow built a file, not that the owner released it: whoever can push a
@@ -1392,7 +1398,7 @@ jobs:
       PRERELEASE: ${{ needs.verify.outputs.prerelease }}
       DIGEST: ${{ needs.image.outputs.digest }}
     # The token that can write the release and the packages is in the environment of only the
-    # two steps that use it (gh and skopeo): the release notes are written by the
+    # three steps that use it (gh and skopeo): the release notes are written by the
     # repository's own script before, without it. (GitHub's own actions of the job can read
     # the job's token as their default input; none of the others does here.)
     steps:
@@ -1430,29 +1436,23 @@ jobs:
             sudo apt-get install -y --no-install-recommends skopeo
           fi
           skopeo --version
-      - name: Create the release
+      - name: The tag still names the commit `verify` resolved
+        # A tag moved during the run is not published under its new commit. Read as a tag
+        # (refs/tags/), never a branch of the same name; an annotated tag is followed to its
+        # commit.
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          # The tag still names the commit verify resolved: a tag moved during the run is
-          # not published under its new commit. Read as a tag (refs/tags/), never a branch of
-          # the same name; an annotated tag is followed to its commit.
           ref="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}")"
           object="$(jq -r '.object.sha' <<< "$ref")"
           if [ "$(jq -r '.object.type' <<< "$ref")" = tag ]; then
             object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${object}" --jq .object.sha)"
           fi
           test "$object" = "$SHA"
-          ls -l dist
-          flags=()
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          gh release create "$TAG" dist/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Tenko DDI ${VERSION}" \
-            --notes-file notes.md \
-            --verify-tag \
-            "${flags[@]}"
+      # The image tags before the release: the release is immutable once created (immutable
+      # releases are on for this repository), so it is the last thing the run does, and a
+      # failure before it leaves only tags that a re-run writes again from the same digest.
       - name: Tag the image
         # The tags point at the attested digest, unchanged (skopeo copies the manifest as it
         # is). A pre-release never becomes latest (S3-Q9).
@@ -1470,3 +1470,18 @@ jobs:
             echo "${IMAGE}:${tag} -> ${DIGEST}"
           done
           skopeo logout ghcr.io || true
+      - name: Create the release
+        # gh uploads the files to a draft and publishes it when every upload has succeeded.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          gh release create "$TAG" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Tenko DDI ${VERSION}" \
+            --notes-file notes.md \
+            --verify-tag \
+            "${flags[@]}"

@@ -997,7 +997,11 @@ Pushing a tag `v*` runs `.github/workflows/release.yml`. It does these things:
    (provenance and SBOM, pushed to the registry beside it).
 10. **Publish.** The image gets its tags `<version>` and, for a stable release, `latest`,
     pointing at the attested digest; the release text is taken from the changelog section,
-    and the release files are attached to the release.
+    and, last, the release is created with the release files. Immutable releases are on
+    for the repository: a published release keeps its files and its tag, and the name of a
+    deleted one cannot carry another release. A run that fails is re-run within a day,
+    while the artifacts of its finished jobs are kept, and a release that turns out wrong
+    is followed by a new version, never made again under its tag.
 
 The Linux binary is built for `x86_64-unknown-linux-musl` on `ubuntu-latest` with
 `musl-tools`, so it is one static executable that does not depend on the glibc of the host
