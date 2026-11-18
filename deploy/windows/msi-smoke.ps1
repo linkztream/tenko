@@ -290,6 +290,7 @@ try {
     Assert-That (Test-Path -LiteralPath (Join-Path $DataDir 'store')) 'the uninstall removed the store'
     Assert-That ((Get-FileHash -LiteralPath $ConfigFile).Hash -eq $configHash) 'the uninstall changed or removed tenko.toml'
     Assert-That (Test-Path -LiteralPath 'HKLM:\SOFTWARE\Tenko\Installer') 'the uninstall removed the remembered properties'
+    $keptSddl = (Get-Acl -LiteralPath $DataDir).Sddl
 
     # -----------------------------------------------------------------------------------
     # No properties: the remembered ones apply, the data directory among them.
@@ -302,7 +303,10 @@ try {
     # changes nothing in it, and says so.
     $keptLog = Get-Content -LiteralPath $script:LastLog -Raw
     Assert-That ($keptLog -match 'left as it is') 'service install did not report the kept data directory as left as it is'
-    Assert-That ($keptLog -notmatch 'icacls') 'service install ran icacls on a data directory that holds data'
+    # `service install` runs icacls without echoing it and prints `access limited to` after
+    # each change; the word icacls is in every log anyway, from the grant on tenko.toml.
+    Assert-That ($keptLog -notmatch 'access limited to') 'service install changed the access list of a data directory that holds data'
+    Assert-That ((Get-Acl -LiteralPath $DataDir).Sddl -eq $keptSddl) 'the install changed the access list of the kept data directory'
     Assert-Privileges 'over the kept data'
 
     # -----------------------------------------------------------------------------------

@@ -302,8 +302,9 @@ alone), a silent upgrade to a second package of a higher version whose log shows
 `upgrade check` and no `upgrade layout` run by the installer, the service having looked at
 the new `tenko.exe` at its start (`nothing to adopt`, since both packages carry the same
 binary) and running again with the configuration and the data kept, a silent uninstall that
-keeps both, an install over the kept data that leaves the directory as it is (no `icacls`
-in its log), and the purge. The release workflow runs it on `windows-latest` before the MSI
+keeps both, an install over the kept data that leaves the directory as it is (`left as it
+is` in its log, no `access limited to`, and the directory's access list the same before and
+after), and the purge. The release workflow runs it on `windows-latest` before the MSI
 is published. On a machine of
 your own, run it only on a throw-away VM without Tenko, in an elevated PowerShell 7:
 
