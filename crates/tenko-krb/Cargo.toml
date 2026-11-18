@@ -1,6 +1,6 @@
 [package]
 name = "tenko-krb"
-version = "0.0.12-rc.1"
+version = "0.0.12-rc.2"
 description = "Kerberos for GSS-TSIG and web sign-in: the DER codec, the AES ciphers, keys and keytabs, the acceptor, MIC tokens and the KDC client, with no Kerberos library"
 edition.workspace = true
 rust-version.workspace = true
