@@ -302,7 +302,10 @@ jobs:
       # scanner in another, running at the same time); a job output cannot.
       - name: The digest of the bundle
         id: digest
-        run: echo "sha256=$(find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        # sha256sum marks a file read in binary mode with '*' before its name, which it does on
+        # Windows and not on Linux; `tr` makes the list, and so its digest, the same on both
+        # (the build job on Windows checks this value).
+        run: echo "sha256=$(find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | tr '*' ' ' | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-dist
@@ -377,7 +380,7 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
-          test "$(cd ui && find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)" = "$EXPECTED"
+          test "$(cd ui && find dist -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | tr '*' ' ' | sha256sum | cut -d' ' -f1)" = "$EXPECTED"
       - name: Build
         shell: bash
         run: cargo build --release --locked -p tenko --target "$TARGET"
