@@ -276,7 +276,7 @@ describe("the profile card", () => {
     expect(card.getAttribute("role")).toBe("dialog");
 
     const rows = within(card).getAllByTestId("profile-card-toggle");
-    expect(rows.length).toBe(10);
+    expect(rows.length).toBe(11);
     expect(rows.map((r) => r.dataset.toggle)).toEqual(TOGGLES.map((def) => def.id));
     const profile = session()?.profile ?? "standard";
     for (const [index, def] of TOGGLES.entries()) {
@@ -320,7 +320,7 @@ describe("the profile card", () => {
     await show(await status("leader", "single"));
     fireEvent.click(profileChip());
     const card = await screen.findByTestId("profile-card");
-    expect(within(card).getAllByTestId("profile-card-toggle").length).toBe(10);
+    expect(within(card).getAllByTestId("profile-card-toggle").length).toBe(11);
     expect(within(card).queryByTestId("profile-card-open")).toBeNull();
   });
 
