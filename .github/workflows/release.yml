@@ -65,8 +65,10 @@
 # release file against the SHA256SUMS whose own digest `manifest` stated. The image's
 # /usr/local/bin/tenko is checked against the Linux binary's digest after the image build.
 #
-# Running installations read releases.json from the latest release to learn about updates;
-# the file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md
+# Running installations read releases.json from the latest release to learn about updates,
+# and with the pre-release switch on, from the release of a probed vX.Y.Z-rc.N tag
+# (docs/upgrades.md section 8.13), which is why a pre-release tag has no other form; the
+# file names tenko-<version>-<platform>[.exe] are the contract with scripts/README.md
 # (the platform of the musl binary stays linux-x86_64). SECURITY.md, "Verifying a release",
 # says how a user checks the attestations with `gh attestation verify`.
 #
@@ -185,6 +187,11 @@ jobs:
           case "$version" in
             *+*) echo "::error::The tag '$TAG' has build metadata; container tags cannot hold '+'."; exit 1 ;;
           esac
+          # Installations search for release candidates by this name only (docs/upgrades.md 8.13).
+          if [[ "$version" == *-* ]] && ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-rc\.[1-9][0-9]*$ ]]; then
+            echo "::error::The pre-release tag '$TAG' is not vX.Y.Z-rc.N (N from 1, no leading zero); installations find no other pre-release."
+            exit 1
+          fi
           # A tag, by its full ref name: a branch called the same is refused, not resolved.
           if git show-ref --verify --quiet "refs/remotes/origin/$TAG"; then
             echo "::error::A branch named '$TAG' exists; the name is ambiguous. Release from a tag only."
