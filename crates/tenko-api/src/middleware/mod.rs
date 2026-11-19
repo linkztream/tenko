@@ -173,11 +173,24 @@ pub(crate) async fn api(
         request.method(),
     );
     let quorum = quorum::Quorum::read(&layers.state);
-    let refusal = match guard(&layers, &mut request).await {
-        Some(refusal) => Some(refusal),
-        None => integration::check(&request, layers.routes.is_public(route), quorum.since())
-            .or_else(|| quorum.check(&request)),
-    };
+    let mut refusal = guard(&layers, &mut request).await;
+    if refusal.is_none() {
+        let renewal = request.method() == axum::http::Method::POST
+            && layers.routes.route_of(route).strip_prefix(crate::API_BASE)
+                == Some(crate::routes::integrations::RENEW_PATH);
+        refusal = integration::check(
+            &request,
+            layers.routes.is_public(route),
+            renewal,
+            quorum.since(),
+        )
+        .or_else(|| quorum.check(&request));
+        if refusal.is_none()
+            && let Some((certs, serial)) = integration::first_presentation(&request)
+        {
+            integration::note_presented(certs, serial).await;
+        }
+    }
     let mut response = if let Some(refusal) = refusal {
         refusal
     } else {

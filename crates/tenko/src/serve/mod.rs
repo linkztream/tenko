@@ -2086,6 +2086,11 @@ async fn start(
             .await
             .map_err(|error| StartError::new("api", "start.metrics.bind", error.to_string()))?;
             metrics_tasks.push(findings_task);
+            metrics_tasks.push(tenko_api::routes::integrations::spawn_expiry_alarm(
+                Arc::clone(&client_certs),
+                state.clone(),
+                metrics_stop.clone(),
+            ));
             let events = state.events().clone();
             let warnings_state = state.clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {

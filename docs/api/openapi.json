@@ -22041,6 +22041,103 @@
         "security": []
       }
     },
+    "/api/v1/integrations/certificate/renew": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Renew an integration certificate",
+        "operationId": "renew_integration_certificate",
+        "requestBody": {
+          "content": {
+            "application/pkcs10": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Not due yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalNotDue"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new certificate (`Cache-Control: no-store`)",
+            "content": {
+              "application/pem-certificate-chain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The certificate is no longer accepted (`integration.certificate.refused`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not on the integration listener (`integration.certificate.required`), or a renewal from a replaced certificate (`integration.renew.reuse`; the lineage is revoked)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The lineage renewed within the hour (`integration.renew.too_soon`) or the key was enrolled for another lineage (`integration.key.used`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/pkcs10` (`integration.request.media_type`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is not usable (`integration.request.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
     "/api/v1/integrations/certificates": {
       "get": {
         "tags": [
@@ -78996,6 +79093,24 @@
           "degraded",
           "unreachable"
         ]
+      },
+      "RenewalNotDue": {
+        "type": "object",
+        "description": "The answer of a renewal that is not due yet.",
+        "required": [
+          "not_due",
+          "renew_after"
+        ],
+        "properties": {
+          "not_due": {
+            "type": "boolean",
+            "description": "Always `true`."
+          },
+          "renew_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "From when a renewal is accepted."
+          }
+        }
       },
       "RequestId": {
         "type": "string",

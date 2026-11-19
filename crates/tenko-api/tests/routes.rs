@@ -337,6 +337,11 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/integrations/ca", "integration_server_root"),
     ("POST", "/integrations/enroll", "enroll_integration"),
     (
+        "POST",
+        "/integrations/certificate/renew",
+        "renew_integration_certificate",
+    ),
+    (
         "GET",
         "/integrations/certificates",
         "list_integration_certificates",

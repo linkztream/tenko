@@ -42,7 +42,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use tenko_auth::{
     client_cert::{
-        ClientCertError, ClientCerts, CreatedCode, EnrollInput, Issued, Issuer, NewCode,
+        ClientCertError, ClientCerts, CreatedCode, EnrollInput, Issued, Issuer, NewCode, Renewal,
         model::{ClientCertRecord, EnrollmentCodeView},
     },
     settings::Profile,
@@ -65,7 +65,7 @@ use super::{
 use crate::{
     extract::{ClientInfo, Ctx},
     problem::{ApiError, ProblemDetails},
-    server::forwarded::UnstatedScheme,
+    server::forwarded::{ConnInfo, UnstatedScheme},
     state::AppState,
 };
 
@@ -88,6 +88,23 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(enroll_integration))
         .routes(routes!(list_integration_certificates))
         .routes(routes!(revoke_integration_certificate))
+        .routes(routes!(renew_integration_certificate))
+}
+
+/// The path of the renewal, relative to the API base: the one operation the integration
+/// listener serves without a token, to a certificate alone.
+pub const RENEW_PATH: &str = "/integrations/certificate/renew";
+
+/// The code of the status condition of lineages that do not renew (OPS-29).
+pub const EXPIRING_NOTICE: &str = "integration.certificate_expiring";
+
+/// The answer of a renewal that is not due yet.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RenewalNotDue {
+    /// Always `true`.
+    pub not_due: bool,
+    /// From when a renewal is accepted.
+    pub renew_after: Timestamp,
 }
 
 /// Body of `GET /integrations/enrollments`.
@@ -262,24 +279,8 @@ fn refusal(code: &'static str, status: u16, detail: &str) -> ApiError {
 /// 401 `integration.code.invalid` for a missing or malformed code id or proof, 415 for
 /// another media type, 422 `integration.request.invalid` for an empty or oversized body.
 pub fn read_enroll_request(headers: &HeaderMap, body: &[u8]) -> Result<(Uuid, Vec<u8>), ApiError> {
+    read_request_body(headers, body)?;
     let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
-    let media = header(header::CONTENT_TYPE.as_str())
-        .and_then(|value| value.split(';').next())
-        .map(str::trim);
-    if !media.is_some_and(|media| media.eq_ignore_ascii_case(PKCS10)) {
-        return Err(refusal(
-            "integration.request.media_type",
-            415,
-            "the body must be a PKCS#10 request (application/pkcs10, DER)",
-        ));
-    }
-    if body.is_empty() || body.len() > MAX_REQUEST {
-        return Err(refusal(
-            "integration.request.invalid",
-            422,
-            "the body must be one PKCS#10 request of at most 16 KiB",
-        ));
-    }
     let invalid = || {
         refusal(
             "integration.code.invalid",
@@ -296,6 +297,31 @@ pub fn read_enroll_request(headers: &HeaderMap, body: &[u8]) -> Result<(Uuid, Ve
         .and_then(|value| tenko_auth::encoding::hex_decode(value).ok())
         .ok_or_else(invalid)?;
     Ok((code, proof))
+}
+
+/// The media type and size of a request body that carries a PKCS#10 request, as enrollment
+/// and renewal read it.
+fn read_request_body(headers: &HeaderMap, body: &[u8]) -> Result<(), ApiError> {
+    let media = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(str::trim);
+    if !media.is_some_and(|media| media.eq_ignore_ascii_case(PKCS10)) {
+        return Err(refusal(
+            "integration.request.media_type",
+            415,
+            "the body must be a PKCS#10 request (application/pkcs10, DER)",
+        ));
+    }
+    if body.is_empty() || body.len() > MAX_REQUEST {
+        return Err(refusal(
+            "integration.request.invalid",
+            422,
+            "the body must be one PKCS#10 request of at most 16 KiB",
+        ));
+    }
+    Ok(())
 }
 
 /// Creates a single-use enrollment code for a service account, shown once in this answer.
@@ -518,6 +544,106 @@ async fn enroll_integration(
     Ok(response)
 }
 
+/// Renews the certificate the connection presented, on the integration listener only and
+/// with that certificate alone: the body is a PKCS#10 request over a new key, or over the
+/// same key when a TPM holds it. Not due yet (before the last third of the lifetime), the
+/// answer is 200 with the time it will be; renewed, it is 201 with the new certificate,
+/// which takes over at its first presentation. A renewal from a certificate the lineage has
+/// already replaced revokes the lineage.
+#[utoipa::path(
+    post,
+    path = "/integrations/certificate/renew",
+    tag = "access",
+    operation_id = "renew_integration_certificate",
+    summary = "Renew an integration certificate",
+    request_body(content = Vec<u8>, content_type = "application/pkcs10"),
+    responses(
+        (status = 200, description = "Not due yet", body = RenewalNotDue),
+        (status = 201, description = "The new certificate (`Cache-Control: no-store`)", body = String, content_type = "application/pem-certificate-chain"),
+        (status = 401, description = "The certificate is no longer accepted (`integration.certificate.refused`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not on the integration listener (`integration.certificate.required`), or a renewal from a replaced certificate (`integration.renew.reuse`; the lineage is revoked)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The lineage renewed within the hour (`integration.renew.too_soon`) or the key was enrolled for another lineage (`integration.key.used`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 415, description = "The body is not `application/pkcs10` (`integration.request.media_type`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 422, description = "The request is not usable (`integration.request.invalid`)", body = ProblemDetails, content_type = "application/problem+json")
+    ),
+    security()
+)]
+async fn renew_integration_certificate(
+    PublicCtx { ctx, .. }: PublicCtx,
+    connection: Option<Extension<ConnInfo>>,
+    service: Service,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, ApiError> {
+    let service = service_or_stub(service, "POST", RENEW_PATH)?;
+    let Some(client) = connection.and_then(|Extension(connection)| connection.client) else {
+        return Err(refusal(
+            "integration.certificate.required",
+            403,
+            "a renewal is served on the integration listener, to the certificate it renews",
+        ));
+    };
+    read_request_body(&headers, &body)?;
+    match service
+        .renew(&ctx, &client.serial, client.account, &body)
+        .await
+        .map_err(|error| failed(&error))?
+    {
+        Renewal::NotDue { renew_after } => Ok(Json(RenewalNotDue {
+            not_due: true,
+            renew_after,
+        })
+        .into_response()),
+        Renewal::Renewed { pem, .. } => {
+            let mut response = (StatusCode::CREATED, pem).into_response();
+            let headers = response.headers_mut();
+            headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(PEM_CHAIN));
+            headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            Ok(response)
+        }
+    }
+}
+
+/// Keeps the status condition [`EXPIRING_NOTICE`] current until `stop` turns true: set while a
+/// lineage is in the last sixth of its lifetime without having renewed, cleared otherwise.
+/// It is checked after every change of the records and every hour.
+pub fn spawn_expiry_alarm(
+    certs: Arc<ClientCerts>,
+    state: AppState,
+    mut stop: tokio::sync::watch::Receiver<bool>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut changes = certs.index().subscribe();
+        loop {
+            let expiring = certs.index().expiring(Timestamp::now());
+            match expiring.first() {
+                None => state.clear_notice(EXPIRING_NOTICE),
+                Some(first) => state.set_notice(crate::dto::system::StatusWarning {
+                    code: EXPIRING_NOTICE.to_owned(),
+                    detail: format!(
+                        "{} integration certificate(s) have not renewed and expire soon, the first ({}) on {}; check the renewal timer of the automation host",
+                        expiring.len(),
+                        first.label,
+                        first.not_after.to_rfc3339()
+                    ),
+                    params: [
+                        ("count".to_owned(), expiring.len().to_string()),
+                        ("label".to_owned(), first.label.clone()),
+                        ("not_after".to_owned(), first.not_after.to_rfc3339()),
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+            }
+            tokio::select! {
+                followed = changes.changed() => if followed.is_err() { return },
+                () = tokio::time::sleep(std::time::Duration::from_secs(3600)) => {}
+                _ = stop.changed() => return,
+            }
+        }
+    })
+}
+
 /// The stored security profile; Standard when none is stored, so that a missing record
 /// never allows plain HTTP.
 async fn profile(app: &AppState) -> Result<Profile, ApiError> {
@@ -611,7 +737,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::{API_BASE, problem::PROBLEM_JSON};
+    use crate::{API_BASE, problem::PROBLEM_JSON, server::forwarded::IntegrationClient};
 
     struct Env {
         router: Router,
@@ -921,6 +1047,59 @@ mod tests {
         let reply = send(&env.router, enroll_request(&empty, PKCS10, true, false)).await;
         assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(env.code_state(enrollment.code).await, CodeState::Pending);
+    }
+
+    /// `POST /integrations/certificate/renew` with `csr`, from the connection of `client`
+    /// when given (the integration listener), else from the API listener.
+    fn renew_request(client: Option<IntegrationClient>, csr: Vec<u8>) -> Request<Body> {
+        let mut request = Request::builder()
+            .method("POST")
+            .uri(format!("{API_BASE}{RENEW_PATH}"))
+            .header(header::CONTENT_TYPE, PKCS10)
+            .body(Body::from(csr))
+            .expect("request");
+        if let Some(client) = client {
+            request.extensions_mut().insert(ConnInfo {
+                peer: "192.0.2.21:40000".parse().expect("peer"),
+                tls: true,
+                mode: Arc::new(tenko_cluster::ca::TlsMode::InternalCa),
+                trusted: false,
+                proxy: None,
+                client: Some(Arc::new(client)),
+            });
+        }
+        request
+    }
+
+    #[tokio::test]
+    async fn a_renewal_is_served_to_the_certificate_on_the_integration_listener_only() {
+        let env = env(Profile::Standard).await;
+        let enrollment = env.enrollment().await;
+        let reply = send(
+            &env.router,
+            enroll_request(&enrollment, PKCS10, true, false),
+        )
+        .await;
+        let cert = CertificateDer::from_pem_slice(&reply.body).expect("certificate");
+        let identity = IntegrationIdentity::from_der(&cert).expect("identity");
+        let (_, csr) = generate_csr().expect("csr");
+
+        let reply = send(&env.router, renew_request(None, csr.clone())).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN);
+        assert_eq!(reply.problem(), "integration.certificate.required");
+
+        let client = IntegrationClient {
+            serial: identity.serial.clone(),
+            account: identity.account,
+        };
+        let reply = send(&env.router, renew_request(Some(client.clone()), csr)).await;
+        assert_eq!(reply.status, StatusCode::OK, "a new certificate is not due");
+        let body: RenewalNotDue = serde_json::from_slice(&reply.body).expect("JSON");
+        assert!(body.not_due);
+        assert!(body.renew_after.0 > identity.not_before.0);
+
+        let reply = send(&env.router, renew_request(Some(client), Vec::new())).await;
+        assert_eq!(reply.status, StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     #[tokio::test]

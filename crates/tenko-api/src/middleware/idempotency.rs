@@ -503,11 +503,12 @@ where
 
 /// The ceremonies that take no part (relative to [`API_BASE`]): exact paths, then path
 /// prefixes. They are safe to run again and their bodies are never fingerprinted.
-pub(crate) const CEREMONIES: [&str; 4] = [
+pub(crate) const CEREMONIES: [&str; 5] = [
     "/setup",
     "/auth/password/check",
     "/nodes/enroll",
     "/integrations/enroll",
+    "/integrations/certificate/renew",
 ];
 const CEREMONY_PREFIXES: [&str; 2] = ["/auth/login/", "/auth/webauthn/login/"];
 

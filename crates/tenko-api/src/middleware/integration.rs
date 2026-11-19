@@ -29,11 +29,13 @@ fn refuse(code: &'static str, status: u16, detail: &str) -> Response {
 }
 
 /// The refusal of a request on the integration listener, or `None`. `public` says whether
-/// the operation can be called without credentials; `isolated_since` is when the controller
-/// lost its quorum contact, if it did.
+/// the operation can be called without credentials, `renewal` whether it is the renewal of
+/// the connection's certificate (which the certificate alone authorizes, also a replaced
+/// one); `isolated_since` is when the controller lost its quorum contact, if it did.
 pub(crate) fn check(
     request: &Request,
     public: bool,
+    renewal: bool,
     isolated_since: Option<Timestamp>,
 ) -> Option<Response> {
     let client = request.extensions().get::<ConnInfo>()?.client.clone()?;
@@ -54,6 +56,7 @@ pub(crate) fn check(
     };
     match certs.index().accept(&client.serial, client.account, now) {
         Acceptance::Accepted(_) => {}
+        Acceptance::RenewOnly(_) if renewal => {}
         Acceptance::RenewOnly(_) => {
             return Some(refuse(
                 "integration.certificate.replaced",
@@ -68,6 +71,9 @@ pub(crate) fn check(
                 "this certificate is no longer accepted",
             ));
         }
+    }
+    if renewal {
+        return None;
     }
     if public {
         return Some(refuse(
@@ -92,6 +98,27 @@ pub(crate) fn check(
             401,
             "a token of the service account the certificate names is required",
         )),
+    }
+}
+
+/// The certificate of a request that is presented for the first time since its renewal:
+/// the records service and its serial, for [`note_presented`].
+pub(crate) fn first_presentation(request: &Request) -> Option<(Arc<ClientCerts>, String)> {
+    let client = request.extensions().get::<ConnInfo>()?.client.clone()?;
+    let certs = request.extensions().get::<Arc<ClientCerts>>()?;
+    let pending = certs
+        .index()
+        .record(&client.serial)
+        .is_some_and(|record| record.state == tenko_auth::client_cert::model::CertState::Pending);
+    pending.then(|| (Arc::clone(certs), client.serial.clone()))
+}
+
+/// Records the first presentation of a renewed certificate, which then replaces its
+/// predecessor (ADR 0035, decision 6). A failure is logged: the next request tries again.
+pub(crate) async fn note_presented(certs: Arc<ClientCerts>, serial: String) {
+    let ctx = tenko_core::RequestCtx::system(tenko_core::SystemComponent::Api);
+    if let Err(error) = certs.note_presented(&ctx, &serial).await {
+        tracing::warn!(%serial, "the first presentation of a renewed certificate was not recorded: {error}");
     }
 }
 
@@ -265,14 +292,22 @@ mod tests {
 
     #[test]
     fn a_request_of_the_api_listener_passes_untouched() {
-        assert!(check(&Request::new(Body::empty()), true, Some(ago(86_400))).is_none());
+        assert!(check(&Request::new(Body::empty()), true, false, Some(ago(86_400))).is_none());
     }
 
     #[tokio::test]
     async fn only_a_token_of_the_certificates_account_passes() {
         let env = env().await;
         let account = env.account;
-        assert!(check(&request(&env, "current", Some(token(account))), false, None).is_none());
+        assert!(
+            check(
+                &request(&env, "current", Some(token(account))),
+                false,
+                false,
+                None
+            )
+            .is_none()
+        );
         let session = Principal::User {
             id: account,
             session: SessionId::generate(),
@@ -287,7 +322,7 @@ mod tests {
             (Some(session), 403, "integration.token.wrong_account"),
             (None, 401, "integration.token.required"),
         ] {
-            let refusal = check(&request(&env, "current", principal), false, None);
+            let refusal = check(&request(&env, "current", principal), false, false, None);
             assert_eq!(code_of(refusal).await, Some((status, code.to_owned())));
         }
     }
@@ -317,6 +352,7 @@ mod tests {
             let refusal = check(
                 &request(&env, serial, Some(token(account))),
                 public,
+                false,
                 isolated,
             );
             assert_eq!(
@@ -331,15 +367,24 @@ mod tests {
             check(
                 &request(&env, "current", Some(token(account))),
                 false,
+                false,
                 recent
             )
             .is_none()
         );
 
+        // The renewal needs no token, and a replaced certificate still reaches it.
+        assert!(check(&request(&env, "replaced", None), true, true, None).is_none());
+        assert!(check(&request(&env, "current", None), true, true, None).is_none());
+        assert_eq!(
+            code_of(check(&request(&env, "unknown", None), true, true, None)).await,
+            Some((401, "integration.certificate.refused".to_owned()))
+        );
+
         let mut bare = request(&env, "current", Some(token(account)));
         bare.extensions_mut().remove::<Arc<ClientCerts>>();
         assert_eq!(
-            code_of(check(&bare, false, None)).await,
+            code_of(check(&bare, false, false, None)).await,
             Some((503, "integration.unavailable".to_owned()))
         );
     }
