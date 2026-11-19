@@ -7,7 +7,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - Regenerate: `node scripts/requirement-trace.mjs --phase 4`
 - Check that the committed file is current: `node scripts/requirement-trace.mjs --phase 4 --check`
 
-35 Phase 4 requirements; 5 named by at least one test, 30 not; 0 named by no test, measurement or document.
+39 Phase 4 requirements; 6 named by at least one test, 33 not; 0 named by no test, measurement or document.
 
 ## Requirements
 
@@ -29,6 +29,10 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | IAM-11 | Must | - | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>`docs/plans/identity-plan.md`<br>and 1 more |
 | IAM-12 | Must | - | - | `crates/tenko-api/src/routes/access/mappings.rs`<br>`crates/tenko-api/src/routes/auth/providers.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 3 more |
 | IAM-13 | Should | `crates/tenko-krb/src/acceptor/tests.rs::dns_28_recorded_exchanges_are_accepted` | - | `crates/tenko-api/src/routes/auth/providers.rs`<br>`crates/tenko-krb/src/acceptor/mod.rs`<br>`crates/tenko-krb/src/lib.rs`<br>`docs/CONFORMANCE.md`<br>`docs/ROADMAP.md`<br>and 3 more |
+| IAM-22 | Must | - | - | `crates/tenko-api/src/routes/integrations.rs`<br>`crates/tenko-auth/src/client_cert/mod.rs`<br>`docs/CONFORMANCE.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/integrations.md`<br>and 1 more |
+| IAM-23 | Must | `crates/tenko-auth/tests/token_binding.rs`<br>`ui/src/settings/access/AccessPage.test.tsx` | - | `crates/tenko-api/src/extract.rs`<br>`crates/tenko-auth/src/model.rs`<br>`crates/tenko-auth/src/secret.rs`<br>`crates/tenko-auth/src/service/access.rs`<br>`crates/tenko-auth/src/service/mod.rs`<br>and 6 more |
+| IAM-24 | Must | - | - | `docs/CONFORMANCE.md`<br>`docs/SECURITY-PROFILES.md`<br>`docs/adr/0035-integration-client-certificates.md`<br>`docs/integrations.md`<br>`docs/plans/integration-client-certificates.md` |
+| IAM-25 | Must | - | - | `crates/tenko-api/src/routes/integrations.rs`<br>`crates/tenko-auth/src/client_cert/mod.rs`<br>`docs/CONFORMANCE.md`<br>`docs/integrations.md`<br>`docs/plans/integration-client-certificates.md` |
 | IPAM-22 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/identity-plan.md` |
 | MIG-01 | Must | - | - | `crates/tenko-api/src/routes/migrate.rs`<br>`crates/tenko-connect/src/migration.rs`<br>`crates/tenko-core/src/ir.rs`<br>`crates/tenko-core/src/ir/mirror.rs`<br>`crates/tenko-core/src/migrate.rs`<br>and 10 more |
 | MIG-02 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/adr/0006-connector-architecture.md`<br>`docs/dns.md`<br>`docs/plans/windows-takeover-plan.md` |
@@ -47,7 +51,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | MIG-18 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/identity-plan.md`<br>`docs/plans/windows-takeover-plan.md` |
 | OPS-11 | Must | `crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_ktpass_keytab_imports_and_works`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_adopt_takes_over_the_pre_staged_account`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_the_recorded_samba_adopt_replays_through_the_controller` | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-dns/src/zone/kerberos.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>and 1 more |
 | OPS-12 | Should | - | - | `docs/plans/phase-3-status.md` |
-| OPS-29 | Must (MQTT: Should) | - | - | `crates/tenko-api/src/routes/integrations.rs`<br>`crates/tenko-auth/src/client_cert/follow.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0035-integration-client-certificates.md`<br>`docs/plans/cluster-recovery-plan.md`<br>and 2 more |
+| OPS-29 | Must (MQTT: Should) | - | - | `crates/tenko-api/src/routes/integrations.rs`<br>`crates/tenko-auth/src/client_cert/follow.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0035-integration-client-certificates.md`<br>`docs/integrations.md`<br>and 3 more |
 
 ## Exit criteria
 
@@ -91,6 +95,9 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 - DNS-35 (Must)
 - IAM-11 (Must)
 - IAM-12 (Must)
+- IAM-22 (Must)
+- IAM-24 (Must)
+- IAM-25 (Must)
 - IPAM-22 (Must)
 - MIG-01 (Must)
 - MIG-02 (Must)
