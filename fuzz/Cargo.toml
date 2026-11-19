@@ -477,3 +477,10 @@ path = "fuzz_targets/store_snapshot.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "integration_identity"
+path = "fuzz_targets/integration_identity.rs"
+test = false
+doc = false
+bench = false

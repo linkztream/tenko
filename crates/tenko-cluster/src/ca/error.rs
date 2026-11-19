@@ -30,6 +30,12 @@ pub enum CaError {
         /// Why.
         reason: String,
     },
+    /// A certificate is not an integration certificate of the form ADR 0035 gives.
+    #[error("not an integration certificate: {reason}")]
+    NotAnIntegration {
+        /// Why.
+        reason: String,
+    },
     /// Certificate generation or signing failed.
     #[error("certificate generation failed: {reason}")]
     Generation {
@@ -74,6 +80,7 @@ impl Coded for CaError {
             CaError::NotInitialized => "cluster.ca.not_initialized",
             CaError::InvalidName { .. } => "cluster.ca.invalid_name",
             CaError::InvalidCsr { .. } => "cluster.ca.invalid_csr",
+            CaError::NotAnIntegration { .. } => "cluster.ca.not_an_integration",
             CaError::Generation { .. } => "cluster.ca.generation",
             CaError::Corrupt { .. } => "cluster.ca.corrupt",
             CaError::Vault(error) => error.code(),
@@ -87,6 +94,7 @@ impl Coded for CaError {
             CaError::AlreadyInitialized => 409,
             CaError::NotInitialized => 404,
             CaError::InvalidName { .. } | CaError::InvalidCsr { .. } => 422,
+            CaError::NotAnIntegration { .. } => 403,
             CaError::Vault(error) => error.http_status(),
             CaError::Store(error) => error.http_status(),
             CaError::Tls(error) => error.http_status(),

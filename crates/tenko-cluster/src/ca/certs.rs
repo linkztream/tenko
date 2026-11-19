@@ -14,7 +14,7 @@ use rcgen::{
     SignatureAlgorithm, SigningKey, SubjectPublicKeyInfo, string::Ia5String,
 };
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use tenko_core::{NodeId, Role, RoleSet};
+use tenko_core::{NodeId, Role, RoleSet, UserId};
 use tenko_vault::SecretBytes;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use x509_parser::{
@@ -233,6 +233,39 @@ pub(crate) fn issue_node_with_roles(
     let key = generate_key()?;
     let cert = sign_leaf(signer, &params, &*key)?;
     Ok((cert, pkcs8_of(&key)))
+}
+
+/// Issues an integration certificate for the public key of a CSR (ADR 0035, decision 2):
+/// the subject `CN=tenko-integration`, one URI subject alternative name
+/// `urn:tenko:service-account:<id>`, client authentication only. The request is checked as in
+/// [`issue_node_from_csr`] and nothing but its key is used.
+pub(crate) fn issue_integration_from_csr(
+    signer: &Signer,
+    account: UserId,
+    csr_der: &[u8],
+    now: OffsetDateTime,
+    validity_days: u32,
+) -> Result<CertificateDer<'static>, CaError> {
+    let public_key = csr_public_key(csr_der)?;
+    let mut params = leaf_params(now, validity_days)?;
+    params.distinguished_name = distinguished_name(INTEGRATION_COMMON_NAME, None);
+    params.subject_alt_names = vec![SanType::URI(Ia5String::try_from(service_account_uri(
+        account,
+    ))?)];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    sign_leaf(signer, &params, &public_key)
+}
+
+/// The common name of every integration certificate; the account is in the URI.
+pub const INTEGRATION_COMMON_NAME: &str = "tenko-integration";
+
+/// The start of the URI subject alternative name of an integration certificate.
+pub const SERVICE_ACCOUNT_URI_PREFIX: &str = "urn:tenko:service-account:";
+
+/// The URI subject alternative name of an integration certificate:
+/// `urn:tenko:service-account:<id>`.
+pub fn service_account_uri(account: UserId) -> String {
+    format!("{SERVICE_ACCOUNT_URI_PREFIX}{account}")
 }
 
 /// A fresh ECDSA P-256 key and a PKCS#10 request over it, DER, for enrollment and renewal
