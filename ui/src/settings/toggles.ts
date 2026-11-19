@@ -48,8 +48,8 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-46", setting: "token_self_renewal", name: "toggles.token_self_renewal.name" },
 ];
 
-/** The total number of toggles in the profile matrix; later ones arrive with their features. */
-export const TOGGLE_TOTAL = 24;
+/** The number of toggles in the profile matrix (the TGL rows of docs/SECURITY-PROFILES.md); later ones arrive with their features. */
+export const TOGGLE_TOTAL = 43;
 
 export function toggleById(id: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.id === id);

@@ -51,7 +51,7 @@ describe("the security page", () => {
     // Everything follows the profile: no deviation, no reset button, no banner.
     expect(screen.getByText("Every setting follows the profile.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText(/of 24 settings are available/)).toBeTruthy();
+    expect(screen.getByText(/of 43 settings are available/)).toBeTruthy();
   });
 
   it("shows the profile with its description and how many settings differ", async () => {
