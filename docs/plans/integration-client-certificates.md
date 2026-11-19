@@ -59,25 +59,37 @@ An administrator opens the service account, chooses "Enroll a certificate", and 
 
 ```sh
 umask 077
-code='tnki.<code id>.<account id>.<secret>.<fingerprint>'   # from the administrator, used once
+# enroll.code holds the code from the administrator: tnki.<code id>.<account id>.<secret>.<fingerprint>
+IFS=. read -r _ id account secret fingerprint < enroll.code
 api=https://tenko.example.test:8443
-IFS=. read -r _ id account secret fingerprint <<EOF
-$code
-EOF
 curl -fsS -k "$api/api/v1/integrations/ca" -o tenko-ca.pem   # public data, checked on the next line
 [ "$(openssl x509 -in tenko-ca.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d : | tr A-F a-f)" = "$fingerprint" ] || exit 9
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out client.key
 openssl req -new -key client.key -subj /CN=tenko-integration -outform DER -out client.csr
-proof=$({ printf 'tenko-integration-enroll-v1\n%s\n%s\n' "$id" "$account"
-          openssl req -in client.csr -inform DER -noout -pubkey | openssl pkey -pubin -outform DER
-        } | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$secret" -binary | openssl base64 -A)
-printf 'Content-Type: application/pkcs10\nTenko-Enrollment-Code: %s\nTenko-Enrollment-Proof: %s\n' "$id" "$proof" > enroll.headers
-curl -fsS -H @enroll.headers --data-binary @client.csr \
-  "$api/api/v1/integrations/enroll?label=backup-host" -o client.crt
-cat client.key client.crt > client.pem && rm client.key client.crt client.csr enroll.headers
+openssl req -in client.csr -inform DER -noout -pubkey | openssl pkey -pubin -outform DER -out client.spki
+# The secret reaches Python on standard input, never as an argument.
+proof=$(python3 -c '
+import hashlib, hmac, sys
+key = bytes.fromhex(sys.stdin.readline().strip())
+message = b"tenko-integration-enroll-v1
+%s
+%s
+" % (sys.argv[1].encode(), sys.argv[2].encode())
+print(hmac.new(key, message + open(sys.argv[3], "rb").read(), hashlib.sha256).hexdigest())
+' "$id" "$account" client.spki <<EOF
+$secret
+EOF
+)
+printf 'Content-Type: application/pkcs10
+Tenko-Enrollment-Code: %s
+Tenko-Enrollment-Proof: %s
+' "$id" "$proof" > enroll.headers
+curl -fsS -H @enroll.headers --data-binary @client.csr   "$api/api/v1/integrations/enroll?label=backup-host" -o client.crt
+cat client.key client.crt > client.pem && rm client.key client.crt client.csr client.spki enroll.headers enroll.code
 ```
 
-- The code's secret never leaves the host: the request carries the code id and the HMAC. The only place it appears is the `openssl dgst` arguments while that command runs, which other local users can read on a host where process arguments are visible; `docs/integrations.md` says to run the enrollment on a host where they are not (Linux `/proc` mounted with `hidepid`), or from PowerShell, which computes the HMAC in process.
+- The code's secret never leaves the host: the request carries the code id and the HMAC (hexadecimal). The default computes the HMAC with Python's standard library (`hmac`, `hashlib`), which reads the secret on standard input, so it is never a process argument; an automation host that runs Ansible has Python. Without Python, the fallback is `openssl dgst -sha256 -mac HMAC -macopt "hexkey:$secret" -r` over the same bytes, which shows the secret in the process arguments while it runs: `docs/integrations.md` gives it with that warning, for a host where other users cannot read process arguments (Linux `/proc` mounted with `hidepid`). PowerShell computes it in process with `[Security.Cryptography.HMACSHA256]`.
+- **Test vector.** The secret `000102…1e1f` (the octets 0 to 31), the code id `0190d1c2-0000-7000-8000-000000000001`, the account id `0190d1c2-0000-7000-8000-000000000002`, and the key `3059301306072a8648ce3d020106082a8648ce3d03010703420004` followed by the octets 1 to 64 give the proof `2c7001035b8298745c7f0921f454bde9ac63c1585215a6ff15913367ef2a8f6f`. The Python default, the `openssl` fallback and PowerShell give these bytes, and the server test `the_proof_matches_the_documented_test_vector` (`crates/tenko-auth/tests/client_certs.rs`) holds the server to them; `docs/integrations.md` repeats the vector.
 - Headers go to `curl` from a file (`-H @file`), never as arguments.
 - When 8443 uses the internal CA, the `curl` of the enrollment adds `--cacert tenko-ca.pem`; with an imported certificate or a proxy the system roots verify 8443. The integration listener is always verified with `tenko-ca.pem`, passed per call. The root is never imported into a machine-wide trust store.
 - With a TPM on Linux the key is made and used through the `tpm2-openssl` provider, with an authorization value that only the integration's account can read (`openssl genpkey -provider tpm2 -algorithm EC -pkeyopt group:P-256 -pkeyopt user-auth:…`, then `-passin file:…` where the key is used), and `curl` reaches it through its OpenSSL backend. On Windows the key is made non-exportable by `certreq -new` with the Microsoft Platform Crypto Provider in the integration account's own key store and used from there (`curl.exe` with Schannel, or PowerShell with a validation callback that compares the root's fingerprint). Lab package CC8 proves the Linux path; the Windows path is proved in the owner's Windows lab (section 11).
@@ -177,7 +189,7 @@ One owner per file at a time; a file named by two packages passes from the first
 |---|---|---|---|---|---|
 | CC1 | The integration CA and issuance (built) | `crates/tenko-cluster/src/ca/client.rs` (new), `ca/authority.rs`, `ca/certs.rs`, `ca/error.rs`, `ca/mod.rs`, `crates/tenko-cluster/tests/integration_ca.rs` (new), `fuzz/fuzz_targets/integration_identity.rs` (new), its seed, `fuzz/Cargo.toml`, `fuzz/limits.txt`, `fuzz/README.md` | none | yes | S |
 | CC2 | The integration listener: TLS and its limits, the verified client identity, the route and account filter, the quorum refusal | `crates/tenko-cluster/src/client_tls.rs` (new), `crates/tenko-cluster/src/lib.rs` (appended line), `crates/tenko-api/src/server/listener.rs`, `server/forwarded.rs`, `server/mod.rs`, `crates/tenko/src/serve/tls.rs`, the configuration type that holds `[cluster] listen` | CC1, CC3 (the record index it asks) | yes | M |
-| CC3 | Certificate records and their in-memory index, enrollment codes, enrollment with the HMAC proof, revocation, the watch | `crates/tenko-auth/src/client_cert/` (new: `mod.rs`, `model.rs`, `enroll.rs`, `revoke.rs`, `follow.rs`), `crates/tenko-auth/src/lib.rs` (appended line), `crates/tenko-api/src/routes/integrations.rs` (new), `crates/tenko-api/src/routes/mod.rs` (appended line), `fuzz/fuzz_targets/integration_enroll.rs` (new) with its lines in `fuzz/Cargo.toml`, `fuzz/limits.txt` and `fuzz/README.md` | CC1 | yes | M |
+| CC3 | Certificate records and their in-memory index, enrollment codes, enrollment with the HMAC proof, revocation, the watch (built) | `crates/tenko-auth/src/client_cert/` (new: `mod.rs`, `model.rs`, `enroll.rs`, `revoke.rs`, `follow.rs`), `crates/tenko-auth/src/lib.rs` (one line), `crates/tenko-auth/Cargo.toml` (`ipnet`, already in the workspace), `crates/tenko-auth/tests/client_certs.rs` (new), `crates/tenko-api/src/routes/integrations.rs` (new, with the issuer over the integration CA), `crates/tenko-api/src/routes/mod.rs`, `routes/tests.rs`, `crates/tenko-api/tests/routes.rs`, `crates/tenko-api/src/middleware/idempotency.rs` (the enrollment as a ceremony, the code as a plain secret), `crates/tenko-api/src/fuzzing.rs`, `crates/tenko/src/serve/mod.rs` (the service and its task), `fuzz/fuzz_targets/integration_enroll.rs` (new) with its seeds and lines in `fuzz/Cargo.toml`, `fuzz/limits.txt` and `fuzz/README.md`, `docs/api/openapi.json` (regenerated) | CC1 | yes | M |
 | CC4 | Certificate renewal (current, pending, replaced), lineage reuse, the expiry alarm | `crates/tenko-auth/src/client_cert/renew.rs` (new), `routes/integrations.rs` (from CC3), the alarm's registration beside the existing certificate expiry alarms | CC2, CC3 | yes | S |
 | CC5 | Certificate-bound tokens and TGL-47 | `crates/tenko-auth/src/model.rs`, `secret.rs` (`tnkb_`), `service/mod.rs`, `service/access.rs`, `service/end.rs`, `client_cert/mod.rs` (from CC4), `crates/tenko-api/src/routes/access.rs`, `crates/tenko-api/src/extract.rs`, `crates/tenko-core/src/auth.rs` (`Credentials` carries the connection's certificate serial; a `tenko-core` change, merged first), the settings type that holds `token_max_days` | CC4 and the renewal package on `main` | no | M |
 | CC6a | UI: certificates of a service account, the enrollment code dialog with the filled-in commands, revoke | `ui/src/settings/access/Certificates.tsx` (new), `EnrollmentCode.tsx` (new), their tests, `ui/src/api/mock/routes-integrations.ts` (new), appended lines in the mock registry and the `sv` and `en` catalogs | CC3, CC4 | yes | S |
@@ -283,8 +295,8 @@ The phase was decided with them: Phase 4, after release 0.1.0. The design's secu
 - **Endpoints in a cluster.** Whether the enrollment answer lists every controller's integration endpoint (which needs an address per member that the member records do not hold today) or the integrator uses one name that resolves to several controllers. Recommended: the name, documented; the list later if integrators ask.
 - **TPM paths outside the lab.** `swtpm` with `tpm2-openssl` proves the Linux path in CC8; Windows with the Platform Crypto Provider and `curl.exe` or PowerShell needs the owner's Windows lab.
 - **The installer's firewall step** for 8445 (IC-Q10) and whether it moves the unit-hardening gates; the installer change belongs to CC2 or a small package of its own once decided.
-- **The HMAC on a POSIX host.** `openssl` takes an HMAC key only as an argument, so the code's secret is in the process arguments while that one command runs. The plan accepts this with the instruction of section 3.1; a host where that is not acceptable enrolls from PowerShell.
-- **The bounds chosen here** (512 connections, 16 per source, 5 seconds of handshake, 30 seconds without quorum) are first values; CC2 measures them against the lab and they become constants on the listener's settings type.
+- **The HMAC on a POSIX host.** The default uses Python's standard library and keeps the secret out of process arguments; the `openssl` fallback cannot, since `openssl` takes an HMAC key only as an argument, and is documented with that warning.
+- **The bounds chosen here** (512 connections, 16 per source, 5 seconds of handshake, 30 seconds without quorum) are first values, accepted as such. Package CC2 measures them in the three-controller lab (a flood without certificates beside a working integration, and a cut-off controller) and records the result in `bench/integration-listener/` with a results file, as CONTRIBUTING asks of a performance claim; the constants live on the listener's settings type.
 
 ## 12. Documents that change
 
