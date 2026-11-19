@@ -97,6 +97,9 @@ pub const RENEW_PATH: &str = "/integrations/certificate/renew";
 
 /// The code of the status condition of lineages that do not renew (OPS-29).
 pub const EXPIRING_NOTICE: &str = "integration.certificate_expiring";
+/// The health warning while TGL-47 lets the integration listener accept TLS 1.2, under which
+/// a host's client certificate is visible on the network path.
+pub const TLS12_NOTICE: &str = "integration.tls12_allowed";
 
 /// The answer of a renewal that is not due yet.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -604,9 +607,49 @@ async fn renew_integration_certificate(
     }
 }
 
-/// Keeps the status condition [`EXPIRING_NOTICE`] current until `stop` turns true: set while a
-/// lineage is in the last sixth of its lifetime without having renewed, cleared otherwise.
-/// It is checked after every change of the records and every hour.
+/// One pass of the integration alarms: removes the tokens of lapsed lineages, and sets or
+/// clears the status conditions [`TLS12_NOTICE`] (while TGL-47 allows TLS 1.2) and
+/// [`EXPIRING_NOTICE`] (while a lineage is in the last sixth of its lifetime without having
+/// renewed).
+pub async fn refresh_integration_notices(certs: &ClientCerts, state: &AppState) {
+    // A lapsed lineage's tokens are removed, never moved (ADR 0035, decision 7);
+    // another node's sweep of the same tokens ends in a conflict, harmless.
+    if let Err(error) = certs.remove_lapsed_tokens(Timestamp::now()).await {
+        tracing::debug!(%error, "lapsed bound tokens left for the next sweep");
+    }
+    if certs.index().policy().allow_tls12 {
+        state.set_notice(crate::dto::system::StatusWarning {
+            code: TLS12_NOTICE.to_owned(),
+            detail: "the integration listener accepts TLS 1.2 (TGL-47), under which client certificates are visible on the network path; turn it off once no host needs it".to_owned(),
+            params: std::collections::BTreeMap::new(),
+        });
+    } else {
+        state.clear_notice(TLS12_NOTICE);
+    }
+    let expiring = certs.index().expiring(Timestamp::now());
+    match expiring.first() {
+        None => state.clear_notice(EXPIRING_NOTICE),
+        Some(first) => state.set_notice(crate::dto::system::StatusWarning {
+            code: EXPIRING_NOTICE.to_owned(),
+            detail: format!(
+                "{} integration certificate(s) have not renewed and expire soon, the first ({}) on {}; check the renewal timer of the automation host",
+                expiring.len(),
+                first.label,
+                first.not_after.to_rfc3339()
+            ),
+            params: [
+                ("count".to_owned(), expiring.len().to_string()),
+                ("label".to_owned(), first.label.clone()),
+                ("not_after".to_owned(), first.not_after.to_rfc3339()),
+            ]
+            .into_iter()
+            .collect(),
+        }),
+    }
+}
+
+/// Runs [`refresh_integration_notices`] after every change of the records or the settings
+/// and every hour, until `stop` turns true.
 pub fn spawn_expiry_alarm(
     certs: Arc<ClientCerts>,
     state: AppState,
@@ -615,31 +658,7 @@ pub fn spawn_expiry_alarm(
     tokio::spawn(async move {
         let mut changes = certs.index().subscribe();
         loop {
-            // A lapsed lineage's tokens are removed, never moved (ADR 0035, decision 7);
-            // another node's sweep of the same tokens ends in a conflict, harmless.
-            if let Err(error) = certs.remove_lapsed_tokens(Timestamp::now()).await {
-                tracing::debug!(%error, "lapsed bound tokens left for the next sweep");
-            }
-            let expiring = certs.index().expiring(Timestamp::now());
-            match expiring.first() {
-                None => state.clear_notice(EXPIRING_NOTICE),
-                Some(first) => state.set_notice(crate::dto::system::StatusWarning {
-                    code: EXPIRING_NOTICE.to_owned(),
-                    detail: format!(
-                        "{} integration certificate(s) have not renewed and expire soon, the first ({}) on {}; check the renewal timer of the automation host",
-                        expiring.len(),
-                        first.label,
-                        first.not_after.to_rfc3339()
-                    ),
-                    params: [
-                        ("count".to_owned(), expiring.len().to_string()),
-                        ("label".to_owned(), first.label.clone()),
-                        ("not_after".to_owned(), first.not_after.to_rfc3339()),
-                    ]
-                    .into_iter()
-                    .collect(),
-                }),
-            }
+            refresh_integration_notices(&certs, &state).await;
             tokio::select! {
                 followed = changes.changed() => if followed.is_err() { return },
                 () = tokio::time::sleep(std::time::Duration::from_secs(3600)) => {}
@@ -746,6 +765,7 @@ mod tests {
 
     struct Env {
         router: Router,
+        store: Arc<dyn Store>,
         service: Arc<ClientCerts>,
         internal: Arc<InternalCa>,
         account: UserId,
@@ -784,10 +804,11 @@ mod tests {
             .nest(API_BASE, routes())
             .split_for_parts();
         let router = router
-            .with_state(AppState::new(store))
+            .with_state(AppState::new(Arc::clone(&store)))
             .layer(Extension(Arc::clone(&service)));
         Env {
             router,
+            store,
             service,
             internal,
             account: user.id,
@@ -1120,6 +1141,41 @@ mod tests {
         ] {
             let reply = send(&router, get(path)).await;
             assert_eq!(reply.status, StatusCode::NOT_IMPLEMENTED, "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn tls_1_2_raises_its_health_warning_while_allowed() {
+        let env = env(Profile::Home).await;
+        let state = AppState::new(Arc::clone(&env.store));
+        let allow = |allow_tls12| {
+            let mut settings = Profile::Home.defaults();
+            settings.integrations = Some(tenko_auth::client_cert::model::IntegrationPolicy {
+                allow_tls12,
+                ..tenko_auth::client_cert::model::IntegrationPolicy::of(Profile::Home)
+            });
+            settings
+        };
+        let codes = |state: &AppState| -> Vec<String> {
+            state
+                .notices_list()
+                .into_iter()
+                .map(|notice| notice.code)
+                .collect()
+        };
+        for (allowed, expected) in [(true, vec![TLS12_NOTICE.to_owned()]), (false, Vec::new())] {
+            let mut batch = WriteBatch::for_request(&RequestCtx::system(SystemComponent::Api));
+            batch
+                .put_typed(&tenko_auth::model::SETTINGS, &(), &allow(allowed))
+                .expect("settings");
+            env.store.propose(batch).await.expect("stored");
+            env.service
+                .index()
+                .load(env.store.as_ref())
+                .await
+                .expect("load");
+            refresh_integration_notices(&env.service, &state).await;
+            assert_eq!(codes(&state), expected, "allowed: {allowed}");
         }
     }
 }
