@@ -12,11 +12,12 @@ use async_trait::async_trait;
 use tenko_auth::{
     client_cert::{
         Acceptance, ClientCertError, ClientCerts, EnrollInput, Issued, Issuer, NewCode, OVERLAP,
-        enrollment_proof,
+        Renewal, alarm_after, enrollment_proof,
         model::{
-            CLIENT_CERT_KEYS, CLIENT_CERTS, CertState, CodeState, ENROLLMENT_CODES,
-            IntegrationPolicy,
+            CLIENT_CERT_KEYS, CLIENT_CERTS, CertState, ClientCertRecord, CodeState,
+            ENROLLMENT_CODES, IntegrationPolicy,
         },
+        renew_after,
     },
     encoding::{hex_decode, hex_encode},
     model::{USERS, UserKind, UserRecord},
@@ -728,4 +729,223 @@ async fn the_index_says_when_the_listener_is_wanted_and_signals_each_load() {
         .expect("revoke");
     index.load(env.store.as_ref()).await.expect("load");
     assert!(!index.wanted(now), "nothing is in use any more");
+}
+
+/// `days` and `hours` after `t0`.
+fn at(days: i64, hours: i64) -> Timestamp {
+    Timestamp(t0().0 + Duration::days(days) + Duration::hours(hours))
+}
+
+/// An account with one enrolled certificate over `key(1)`, issued at `t0` for 30 days.
+async fn enrolled(env: &Env) -> (UserRecord, ClientCertRecord) {
+    let account = env.service_account().await;
+    let code = env.code(account.id).await;
+    env.enroll(&code, &key(1)).await.expect("enroll");
+    let record = env.certs.list(Some(account.id)).await.expect("list")[0].clone();
+    (account, record)
+}
+
+async fn renew_at(
+    env: &Env,
+    at: Timestamp,
+    record: &ClientCertRecord,
+    csr: &[u8],
+) -> Result<Renewal, ClientCertError> {
+    env.certs
+        .renew(&ctx(at), &record.serial, record.account, csr)
+        .await
+}
+
+async fn state_of(env: &Env, serial: &str) -> CertState {
+    env.certs
+        .list(None)
+        .await
+        .expect("list")
+        .into_iter()
+        .find(|record| record.serial == serial)
+        .expect("recorded")
+        .state
+}
+
+fn renewed(result: Result<Renewal, ClientCertError>) -> String {
+    match result {
+        Ok(Renewal::Renewed { serial, .. }) => serial,
+        other => panic!("expected a renewal, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_renewal_is_due_in_the_last_third_and_at_most_hourly() {
+    let env = Env::new();
+    let (_, current) = enrolled(&env).await;
+    // Valid from t0 - 1 h for 30 days and 1 hour: due two thirds in, a little before day 20.
+    let due = renew_after(&current);
+    assert!(at(19, 0).0 < due.0 && due.0 < at(21, 0).0, "{due:?}");
+    let early = renew_at(&env, at(19, 0), &current, &key(2)).await;
+    assert_eq!(
+        early,
+        Ok(Renewal::NotDue {
+            renew_after: renew_after(&current)
+        })
+    );
+
+    let first = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    assert_eq!(state_of(&env, &first).await, CertState::Pending);
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Current);
+    let successor = env
+        .certs
+        .list(None)
+        .await
+        .expect("list")
+        .into_iter()
+        .find(|record| record.serial == first)
+        .expect("recorded");
+    assert_eq!(successor.lineage, current.lineage);
+    assert_eq!(successor.label, current.label);
+    assert_eq!(
+        env.audit_outcomes("auth.client_cert.renew").await,
+        [AuditOutcome::Success]
+    );
+
+    // Within the hour: refused. The answer was lost: an hour later the unseen successor is
+    // replaced by a new one.
+    assert_eq!(
+        renew_at(&env, at(21, 0), &current, &key(3)).await,
+        Err(ClientCertError::TooSoon)
+    );
+    let second = renewed(renew_at(&env, at(21, 2), &current, &key(3)).await);
+    assert_eq!(state_of(&env, &first).await, CertState::Withdrawn);
+    assert_eq!(state_of(&env, &second).await, CertState::Pending);
+    // A withdrawn successor's key does not enroll or renew again.
+    assert_eq!(
+        renew_at(&env, at(22, 0), &current, &key(2)).await,
+        Err(ClientCertError::KeyUsed)
+    );
+}
+
+#[tokio::test]
+async fn the_successor_takes_over_at_its_first_presentation_and_reuse_revokes() {
+    let env = Env::new();
+    let index = Arc::clone(env.certs.index());
+    let (account, current) = enrolled(&env).await;
+    let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    env.certs
+        .note_presented(&ctx(at(21, 1)), &successor)
+        .await
+        .expect("presented");
+    assert_eq!(state_of(&env, &successor).await, CertState::Current);
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Replaced);
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(matches!(
+        index.accept(&current.serial, account.id, at(21, 1)),
+        Acceptance::Accepted(_)
+    ));
+    assert!(matches!(
+        index.accept(&current.serial, account.id, at(21, 2)),
+        Acceptance::RenewOnly(_)
+    ));
+    // Presenting it again changes nothing.
+    env.certs
+        .note_presented(&ctx(at(21, 2)), &successor)
+        .await
+        .expect("again");
+
+    // A renewal from the replaced certificate: someone else holds a key of the lineage.
+    assert_eq!(
+        renew_at(&env, at(22, 0), &current, &key(9)).await,
+        Err(ClientCertError::Reuse)
+    );
+    assert_eq!(state_of(&env, &successor).await, CertState::Revoked);
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Revoked);
+}
+
+#[tokio::test]
+async fn the_same_key_renews_and_another_lineages_key_does_not() {
+    let env = Env::new();
+    let (_, current) = enrolled(&env).await;
+    let (_, other) = enrolled_with(&env, &key(50)).await;
+    assert_eq!(
+        renew_at(&env, at(21, 0), &current, &key(50)).await,
+        Err(ClientCertError::KeyUsed)
+    );
+    let same = renewed(renew_at(&env, at(21, 0), &current, &key(1)).await);
+    let records = env.certs.list(None).await.expect("list");
+    let successor = records
+        .iter()
+        .find(|record| record.serial == same)
+        .expect("recorded");
+    assert_eq!(successor.key_sha256, current.key_sha256);
+    assert_ne!(other.lineage, current.lineage);
+}
+
+async fn enrolled_with(env: &Env, spki: &[u8]) -> (UserRecord, ClientCertRecord) {
+    let account = env.service_account().await;
+    let code = env.code(account.id).await;
+    env.enroll(&code, spki).await.expect("enroll");
+    let record = env.certs.list(Some(account.id)).await.expect("list")[0].clone();
+    (account, record)
+}
+
+#[tokio::test]
+async fn a_lineage_that_does_not_renew_is_listed_as_expiring() {
+    let env = Env::new();
+    let index = Arc::clone(env.certs.index());
+    let (_, current) = enrolled(&env).await;
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(
+        index.expiring(at(24, 0)).is_empty(),
+        "not in the last sixth yet"
+    );
+    let alarm = alarm_after(&current);
+    assert!(at(24, 0).0 < alarm.0 && alarm.0 < at(26, 0).0, "{alarm:?}");
+    let expiring = index.expiring(at(26, 0));
+    assert_eq!(expiring.len(), 1);
+    assert_eq!(expiring[0].serial, current.serial);
+    assert!(
+        index.expiring(at(31, 0)).is_empty(),
+        "an expired one alarms no more"
+    );
+
+    renewed(renew_at(&env, at(26, 0), &current, &key(2)).await);
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(
+        index.expiring(at(26, 1)).is_empty(),
+        "a renewed lineage does not alarm"
+    );
+}
+
+#[tokio::test]
+async fn a_renewal_needs_a_certificate_that_still_passes() {
+    let env = Env::new();
+    let (account, current) = enrolled(&env).await;
+    assert_eq!(
+        env.certs
+            .renew(
+                &ctx(at(21, 0)),
+                &current.serial,
+                UserId::generate(),
+                &key(2)
+            )
+            .await,
+        Err(ClientCertError::Certificate)
+    );
+    assert_eq!(
+        env.certs
+            .renew(&ctx(at(21, 0)), "00", account.id, &key(2))
+            .await,
+        Err(ClientCertError::Certificate)
+    );
+    assert_eq!(
+        renew_at(&env, at(31, 0), &current, &key(2)).await,
+        Err(ClientCertError::Certificate),
+        "expired"
+    );
+    let mut ended = env.user(account.id).await;
+    ended.tokens_generation += 1;
+    env.put_user(&ended).await;
+    assert_eq!(
+        renew_at(&env, at(21, 0), &current, &key(2)).await,
+        Err(ClientCertError::Certificate),
+        "the account's tokens ended"
+    );
 }

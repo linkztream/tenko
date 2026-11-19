@@ -13,6 +13,7 @@
 mod enroll;
 mod follow;
 pub mod model;
+mod renew;
 mod revoke;
 
 use std::{collections::BTreeMap, sync::Arc};
@@ -27,6 +28,7 @@ use tenko_vault::{SecretPurpose, Vault, VaultError};
 
 pub use enroll::{CreatedCode, EnrollInput, NewCode, enrollment_proof};
 pub use follow::{Acceptance, CertIndex, OVERLAP};
+pub use renew::{RENEW_INTERVAL, Renewal, alarm_after, renew_after};
 
 use crate::{model::SETTINGS, settings::Profile};
 use model::IntegrationPolicy;
@@ -59,6 +61,10 @@ pub mod actions {
     pub const ISSUE: AuditAction = AuditAction::from_static("auth.client_cert.issue");
     /// A lineage was revoked.
     pub const REVOKE: AuditAction = AuditAction::from_static("auth.client_cert.revoke");
+    /// A certificate was renewed.
+    pub const RENEW: AuditAction = AuditAction::from_static("auth.client_cert.renew");
+    /// A renewed certificate was first presented and replaced its predecessor.
+    pub const PRESENT: AuditAction = AuditAction::from_static("auth.client_cert.present");
 }
 
 /// What the integration CA answers for an issued certificate.
@@ -164,6 +170,15 @@ pub enum ClientCertError {
         /// Why.
         reason: String,
     },
+    /// The connection's certificate does not pass.
+    #[error("this certificate is no longer accepted")]
+    Certificate,
+    /// A renewal from a certificate its lineage already replaced; the lineage is revoked.
+    #[error("this certificate was already replaced; its lineage is revoked")]
+    Reuse,
+    /// A renewal within [`RENEW_INTERVAL`] of the last one.
+    #[error("the lineage renewed within the last hour")]
+    TooSoon,
     /// Another write came first; nothing was written.
     #[error("another change came first; try again")]
     Conflict,
@@ -198,6 +213,9 @@ impl Coded for ClientCertError {
             Self::NotFound(_) => "integration.not_found",
             Self::Issuing { .. } => "integration.issuing",
             Self::Conflict => "integration.conflict",
+            Self::Certificate => "integration.certificate.refused",
+            Self::Reuse => "integration.renew.reuse",
+            Self::TooSoon => "integration.renew.too_soon",
             Self::Store(error) => error.code(),
             Self::Vault(error) => error.code(),
         }
@@ -205,10 +223,10 @@ impl Coded for ClientCertError {
 
     fn http_status(&self) -> u16 {
         match self {
-            Self::CodeInvalid | Self::CodeUsed | Self::CodeExpired => 401,
-            Self::CodeSource | Self::Transport(_) | Self::Account => 403,
+            Self::CodeInvalid | Self::CodeUsed | Self::CodeExpired | Self::Certificate => 401,
+            Self::CodeSource | Self::Transport(_) | Self::Account | Self::Reuse => 403,
             Self::NotFound(_) => 404,
-            Self::KeyUsed | Self::Lineages | Self::Conflict => 409,
+            Self::KeyUsed | Self::Lineages | Self::Conflict | Self::TooSoon => 409,
             Self::Lifetime | Self::Label | Self::InvalidRequest { .. } => 422,
             Self::Issuing { .. } => 500,
             Self::Store(error) => error.http_status(),

@@ -90,7 +90,7 @@ fn proof_message(code: Uuid, account: UserId, spki: &[u8]) -> Vec<u8> {
 }
 
 /// An enabled service account, with the revision of its record.
-fn usable_account(
+pub(super) fn usable_account(
     view: &dyn ReadView,
     id: UserId,
 ) -> Result<(UserRecord, Revision), ClientCertError> {

@@ -83,6 +83,26 @@ impl CertIndex {
         **self.policy.load()
     }
 
+    /// The current certificates in the last sixth of their lifetime whose lineage has not
+    /// renewed: the certificate expiry alarm (OPS-29).
+    pub fn expiring(&self, now: Timestamp) -> Vec<ClientCertRecord> {
+        let certs = self.certs.load();
+        let mut expiring: Vec<ClientCertRecord> = certs
+            .values()
+            .filter(|record| {
+                record.state == CertState::Current
+                    && now.0 >= super::alarm_after(record).0
+                    && now.0 < record.not_after.0
+                    && !certs.values().any(|other| {
+                        other.lineage == record.lineage && other.state == CertState::Pending
+                    })
+            })
+            .cloned()
+            .collect();
+        expiring.sort_by_key(|record| record.not_after);
+        expiring
+    }
+
     /// Whether the integration listener is wanted when it opens on demand: an enrollment
     /// code is waiting, or a certificate that has not ended or expired exists.
     pub fn wanted(&self, now: Timestamp) -> bool {
