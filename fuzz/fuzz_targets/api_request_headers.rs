@@ -249,6 +249,11 @@ fuzz_target!(|data: &[u8]| {
                 assert!(!token.is_empty() && token.trim() == token);
             }
             Credentials::None => {}
+            // Only the handshake of the integration listener binds a token to a certificate
+            // lineage; no header ever does (ADR 0035).
+            Credentials::CertifiedBearer { .. } => {
+                panic!("headers alone produced a certificate-bound credential")
+            }
         }
     }
     let _ = fuzzing::session_cookie(&headers);
