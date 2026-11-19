@@ -425,6 +425,7 @@ fn a_totp_code_typed_after_the_server_closed_the_idle_connection_still_signs_in(
     let mut login = Proc::spawn(login);
     login.write_stdin(&format!("{PASSWORD}\n"));
     // Longer than the password step plus the server's one-second limit.
+    // test-lint: allow sleep the server's idle limit is the subject; the client shows nothing while it waits
     std::thread::sleep(std::time::Duration::from_secs(6));
     login.write_stdin(&format!("{}\n", totp.code()));
     login.close_stdin();
