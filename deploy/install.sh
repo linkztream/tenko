@@ -8,7 +8,7 @@
 #   bash install.sh                                   # asks a few questions
 #   bash install.sh --yes --profile hardened --roles controller,dns   # unattended
 #   bash install.sh --binary ./tenko-0.2.0-linux-x86_64   # a local binary instead of a download
-#   bash install.sh --check                           # what the roles need: report only
+#   bash install.sh --check                           # an installed machine against what its roles need: report only
 #   bash install.sh --prepare                         # set up what the roles miss, nothing else
 #   bash install.sh --setup-token                     # print the setup token of this node
 #   bash install.sh --repair                          # bring an older installer's node to one version
@@ -56,7 +56,8 @@
 # operator trims the set on the Nodes page; --roles still names the starting set). Under
 # Hardened the question is asked and only the chosen roles are prepared. The dependency check
 # then tests what the prepared roles need and asks whether to set up what is missing (yes by
-# default; --yes answers yes). --check only reports (exit 11 when something is missing);
+# default; --yes answers yes). --check needs an installed machine (before installing, the
+# pre-flight is --dry-run) and only reports (exit 11 when something is missing);
 # --prepare sets up what is missing and changes nothing else (no download, no configuration),
 # with --roles under Hardened to prepare more roles. What was prepared is recorded in
 # /etc/tenko/prepared-roles (root's, readable by the service), which the node reads at start
@@ -211,10 +212,11 @@ Behavior:
                                       file, or sealed where that works [auto]
   --keep-resolved-stub                never turn off systemd-resolved's stub listener on port 53
                                       (remembered for later runs)
-  --check                             the dependency check only: what the prepared roles need
-                                      (drop-ins, CAP_NET_RAW of the running service, firewall
-                                      ports, the resolved stub, the record prepared-roles);
-                                      changes nothing, exit 11 when something is missing
+  --check                             compares an installed machine with what its prepared roles
+                                      need (drop-ins, CAP_NET_RAW of the running service,
+                                      firewall ports, the resolved stub, the record
+                                      prepared-roles); changes nothing, exit 11 when something
+                                      is missing. Before installing, use --dry-run
   --prepare                           set up what the prepared roles miss (asked, yes by
                                       default) and nothing else: no download, no configuration
                                       change; restarts the service when its unit changed. With

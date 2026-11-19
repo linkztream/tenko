@@ -79,7 +79,8 @@ Releases after 0.0.10 carry, besides the binaries, the MSI, `install.sh`,
 
 The release workflow (`.github/workflows/release.yml`) makes them; its jobs `attest` and
 `attest-image` are the only ones that can create attestations. To check a downloaded file with the
-[GitHub CLI](https://cli.github.com/):
+[GitHub CLI](https://cli.github.com/), version 2.49.0 or later (the package of some distributions
+is older; `gh --version` tells):
 
 ```sh
 gh attestation verify tenko-<version>-linux-x86_64 --repo linkztream/tenko \

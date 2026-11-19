@@ -102,7 +102,7 @@ What follows from it:
 - `sshd` runs as root, but loads only root-owned configuration and keys; `tenko-cert` writes none of it. Nothing in the upload directory is executed by anyone; if `/srv` is a filesystem of its own, mount it `noexec` and that is a rule of the system as well.
 - The file mode that the client asks for does not matter: `certs` is `2750`, so other accounts cannot enter it whatever the files say.
 
-What the upload account can do if it is taken over (for example if the OPNsense box is): replace the certificate and key the node serves with a pair of its choosing. For a name under a public CA that is as much as the ACME client could do anyway, since it holds the account that obtains certificates. That is the reason for the profile rule in section 4: on by default in Lab and Home, a deliberate opt-in in Standard, never in Hardened.
+What the upload account can do if it is taken over (for example if the OPNsense box is): replace the certificate and key the node serves with a pair of its choosing. The key is bound to the firewall's address (section 5.4), so a copy of it works from nowhere else. For a name under a public CA that is as much as the ACME client could do anyway, since it holds the account that obtains certificates. That is the reason for the profile rule in section 4: on by default in Lab and Home, a deliberate opt-in in Standard, never in Hardened.
 
 ### 5.2 On the node, once, as root
 
@@ -169,7 +169,13 @@ The labels below are the ones of the ACME client plugin (**Services → ACME Cli
 2. **Automations → Add**: Run Command "Upload certificate via SFTP".
    - Host: the node, `tenko-node-1.example.test`, port 22.
    - Host key: what `ssh-keyscan -t ed25519 tenko-node-1.example.test` prints for the node (check it against the node's own `/etc/ssh/ssh_host_ed25519_key.pub`).
-   - User: `tenko-cert`. Identity type: ed25519. Save the automation and open it again: the identity (a public key) is shown. Put that line in `/etc/ssh/tenko-cert.authorized_keys` on the node.
+   - User: `tenko-cert`. Identity type: ed25519. Save the automation and open it again: the identity (a public key) is shown. Put that line in `/etc/ssh/tenko-cert.authorized_keys` on the node, with the options `from="192.0.2.1",restrict` in front of it (here `192.0.2.1` is the firewall's address):
+
+     ```
+     from="192.0.2.1",restrict ssh-ed25519 AAAA... tenko-cert
+     ```
+
+     The key is then accepted only from that address, so a copy of it is useless elsewhere. If the firewall's address changes, root edits the line. `restrict` turns off everything the `Match User` block of section 5.2 already turns off, and anything a later OpenSSH adds. `from=` works together with `AuthorizedKeysFile` and `ForceCommand internal-sftp`: sshd checks the options of the line before it starts the forced command.
    - Remote path: `/certs` (inside the chroot).
    - Fullchain file name: `fullchain.pem`. Key file name: `privkey.pem`. Leave the certificate and CA file names empty, so that only these two files are written.
 3. In the certificate, set this automation as the one that runs after every issue and renewal, and press **Issue/Renew** once to upload the first pair.
