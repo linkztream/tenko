@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { activatePack, previewPack, removePack, uploadPack } from "../settings/languages/api";
 import { signInAs } from "../settings/testkit";
 import { server } from "../api/mock/node";
@@ -8,6 +8,13 @@ import { availableLocales, isAvailable, locale, setLocale, t } from ".";
 import { currentPreview, endPreview, isPackEvent, loadLanguages, resetLanguagesForTest, startPreview } from "./remote";
 
 const PREVIEW_KEY = "tenko-i18n-preview";
+
+// startPreview loads the preview bar without waiting for it. Its first load evaluates the module,
+// which needs `window`; still running when the file ends, it fails after the test environment
+// is gone. Loaded here, every later load finds the module evaluated.
+beforeAll(async () => {
+  await import("./PreviewBar");
+});
 
 beforeEach(async () => {
   await signInAs();
