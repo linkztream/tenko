@@ -1,24 +1,26 @@
 //! Self-renewal of service-account tokens (IAM-20, TGL-46) and source binding of scoped
 //! tokens (IAM-21): renewal, the old token's grace, the replaced successor, reuse detection
 //! of tokens and renewal secrets, wrong secrets, the lifetime cap, the source prefixes, the
-//! token's own description and the expiry warning.
+//! token's own description, the expiry warning, and the token form that keeps a constrained
+//! token away from a build that does not know its constraints.
 
 use std::{net::IpAddr, time::Duration};
 
 use tenko_auth::{
     AuthError,
     model::TokenScope,
+    model::{SCOPED_TOKENS, ScopedTokenRecord, USER_SCOPED_TOKENS},
     roles::RoleName,
-    secret::RENEWAL_PREFIX,
+    secret::{CONSTRAINED_PREFIX, RENEWAL_PREFIX, TOKEN_PREFIX},
     service::{
         CreatedToken, ServiceAccountCreate, TOKEN_EXPIRING, TOKEN_REVOKED, TokenRenew,
-        TokenRequest, UserInfo, token_warnings, types::SecretString,
+        TokenRequest, UserInfo, UserUpdate, types::SecretString,
     },
     settings::{Profile, SettingsPatch},
     testing::TestEnv,
 };
-use tenko_core::{Credentials, RequestCtx, audit::AuditOutcome};
-use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, tables};
+use tenko_core::{Credentials, Principal, RequestCtx, SystemComponent, audit::AuditOutcome};
+use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
 
 const DAY: u64 = 86_400;
 
@@ -62,19 +64,20 @@ impl Fixture {
         renewable: bool,
         source_prefixes: &[&str],
     ) -> Result<CreatedToken, AuthError> {
+        self.create(TokenRequest {
+            name: "dhcp-report".to_owned(),
+            scopes: vec![TokenScope::Metrics],
+            renewable,
+            source_prefixes: source_prefixes.iter().map(|p| (*p).to_owned()).collect(),
+            ..TokenRequest::default()
+        })
+        .await
+    }
+
+    async fn create(&self, request: TokenRequest) -> Result<CreatedToken, AuthError> {
         self.env
             .service
-            .create_account_token(
-                &self.admin,
-                self.account.id,
-                &TokenRequest {
-                    name: "dhcp-report".to_owned(),
-                    scopes: vec![TokenScope::Metrics],
-                    renewable,
-                    source_prefixes: source_prefixes.iter().map(|p| (*p).to_owned()).collect(),
-                    ..TokenRequest::default()
-                },
-            )
+            .create_account_token(&self.admin, self.account.id, &request)
             .await
     }
 
@@ -111,15 +114,16 @@ impl Fixture {
             .collect()
     }
 
+    /// The token warnings after a sweep at the current time.
     async fn warnings(&self) -> Vec<String> {
-        let view = self
-            .env
-            .store
-            .read(ReadConsistency::Local)
+        self.env
+            .service
+            .refresh_token_warnings(self.env.now())
             .await
-            .expect("view");
-        token_warnings(view.as_ref(), self.env.now())
-            .expect("the warnings")
+            .expect("the sweep");
+        self.env
+            .service
+            .token_warnings()
             .into_iter()
             .map(|warning| warning.code.into_owned())
             .collect()
@@ -132,6 +136,30 @@ impl Fixture {
             .await
             .expect("the list")
     }
+}
+
+/// Changes the stored record of `token` in place, as a tampered or foreign write would.
+async fn rewrite(fx: &Fixture, token: &CreatedToken, change: impl FnOnce(&mut ScopedTokenRecord)) {
+    let view = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let (key, _) = view
+        .get_typed(&USER_SCOPED_TOKENS, &(fx.account.id, token.info.id))
+        .expect("index")
+        .expect("indexed");
+    let (mut record, _) = view
+        .get_typed(&SCOPED_TOKENS, &key)
+        .expect("record")
+        .expect("stored");
+    change(&mut record);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), fx.env.now());
+    batch
+        .put_typed(&SCOPED_TOKENS, &key, &record)
+        .expect("encodes");
+    fx.env.store.propose(batch).await.expect("written");
 }
 
 fn bearer(created: &CreatedToken) -> Credentials {
@@ -198,10 +226,7 @@ async fn the_old_token_works_until_the_new_one_is_used_and_an_unused_one_is_repl
         .renew(&first, &secret(&first))
         .await
         .expect("renewed again");
-    assert!(
-        unauthenticated(&fx.use_token(&lost).await),
-        "the replaced successor is refused"
-    );
+    assert_ne!(lost.info.id, second.info.id);
     fx.use_token(&first)
         .await
         .expect("the old token works until then");
@@ -377,7 +402,24 @@ async fn a_token_acts_only_from_inside_its_source_prefixes() {
         unauthenticated(&fx.use_token(&token).await),
         "no known address"
     );
-    assert_eq!(fx.audited("auth.token.source_refused").await.len(), 3);
+    // Three refusals within a minute: one audit record; the next after it counts the others.
+    assert_eq!(fx.audited("auth.token.source_refused").await.len(), 1);
+    fx.env.clock.advance(Duration::from_secs(60));
+    assert!(unauthenticated(&from("203.0.113.7").await));
+    let view = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let since: Vec<_> = view
+        .scan_typed(&tables::AUDIT, KeyRange::all(), 100_000, false)
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str() == "auth.token.source_refused")
+        .map(|(_, record, _)| record.draft.details.context.get("refused_since").cloned())
+        .collect();
+    assert_eq!(since, [None, Some("2".to_owned())]);
     let renewed = fx
         .env
         .service
@@ -440,9 +482,75 @@ async fn a_superseded_token_from_outside_its_prefixes_does_not_revoke_the_family
         )
         .await;
     assert!(unauthenticated(&outside));
-    assert_eq!(fx.audited("auth.token.source_refused").await.len(), 1);
+    // The current token from outside cannot reach the renewal call either.
+    let renewal_from_outside = fx
+        .env
+        .service
+        .authenticate_from(
+            &bearer(&second),
+            Some("203.0.113.8".parse().expect("an address")),
+            fx.env.now(),
+        )
+        .await;
+    assert!(unauthenticated(&renewal_from_outside));
+    assert_eq!(fx.audited("auth.token.source_refused").await.len(), 2);
     assert_eq!(fx.audited("auth.token.reuse_detected").await.len(), 0);
     ctx(&second).await.expect("the family is intact");
+}
+
+/// IAM-20, IAM-21: a renewable or bound token has the form `tnkc_`, which the prefix check
+/// of a build that does not know these constraints (`tnk_` only) refuses before it reads or
+/// writes the record; a plain token keeps `tnk_`; a renewal returns the constrained form.
+#[tokio::test]
+async fn a_constrained_token_never_passes_the_plain_prefix_check() {
+    let fx = fixture().await;
+    let older_build_accepts = |text: &str| text.starts_with("tnk_") && text.len() <= 128;
+    let plain = fx.token(false, &[]).await;
+    assert!(plain.token.expose().starts_with(TOKEN_PREFIX));
+    assert!(older_build_accepts(plain.token.expose()));
+    let renewable = fx.token(true, &[]).await;
+    let bound = fx.token(false, &["192.0.2.0/24"]).await;
+    let renewed = fx
+        .renew(&renewable, &secret(&renewable))
+        .await
+        .expect("renewed");
+    for token in [&renewable, &bound, &renewed] {
+        assert!(token.token.expose().starts_with(CONSTRAINED_PREFIX));
+        assert!(
+            !older_build_accepts(token.token.expose()),
+            "{}",
+            token.info.name
+        );
+    }
+}
+
+/// IAM-20, IAM-21: a token whose form does not match its record is refused like an unknown
+/// token and audited, both ways.
+#[tokio::test]
+async fn a_token_whose_form_does_not_match_its_record_is_refused_and_audited() {
+    let fx = fixture().await;
+    let plain = fx.token(false, &[]).await;
+    rewrite(&fx, &plain, |record| {
+        record.source_prefixes = vec!["192.0.2.0/24".parse().expect("a prefix")];
+    })
+    .await;
+    let inside: IpAddr = "192.0.2.9".parse().expect("an address");
+    let presented = fx
+        .env
+        .service
+        .authenticate_from(&bearer(&plain), Some(inside), fx.env.now())
+        .await;
+    assert!(unauthenticated(&presented), "a constrained record as tnk_");
+    let renewable = fx.token(true, &[]).await;
+    rewrite(&fx, &renewable, |record| record.renewal = None).await;
+    assert!(
+        unauthenticated(&fx.use_token(&renewable).await),
+        "a plain record as tnkc_"
+    );
+    assert_eq!(
+        fx.audited("auth.token.form_refused").await,
+        [AuditOutcome::Denied, AuditOutcome::Denied]
+    );
 }
 
 /// IAM-20: the renewal secret is never a bearer token.
@@ -514,8 +622,270 @@ async fn the_expiry_warning_appears_below_14_days_and_clears_after_renewal() {
             .expect("the sweep");
     }
     assert_eq!(fx.audited("auth.token.expiring").await.len(), 1, "once");
-    fx.renew(&token, &secret(&token)).await.expect("renewed");
+    let renewed = fx.renew(&token, &secret(&token)).await.expect("renewed");
+    assert_eq!(
+        fx.warnings().await,
+        [TOKEN_EXPIRING],
+        "the old token still acts until the new one is used"
+    );
+    fx.use_token(&renewed).await.expect("the first use");
     assert_eq!(fx.warnings().await, Vec::<String>::new());
+}
+
+/// IAM-20: an unused successor that a renewal replaced is kept as superseded: presenting it
+/// later revokes the family at once, since the holder who lost the answer never had it.
+#[tokio::test]
+async fn a_replaced_successor_presented_later_revokes_the_family() {
+    let fx = fixture().await;
+    let first = fx.token(true, &[]).await;
+    let lost = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    let second = fx
+        .renew(&first, &secret(&first))
+        .await
+        .expect("renewed again");
+    assert!(unauthenticated(&fx.use_token(&lost).await));
+    assert!(unauthenticated(&fx.use_token(&second).await), "revoked");
+    assert_eq!(fx.audited("auth.token.reuse_detected").await.len(), 1);
+}
+
+/// IAM-20: a renewed token keeps the lifetime its family was created with, capped by the
+/// profile at the time of the renewal; a renewable token must expire.
+#[tokio::test]
+async fn a_renewal_keeps_the_family_lifetime_within_the_profile_cap() {
+    let fx = fixture().await;
+    let first = fx
+        .create(TokenRequest {
+            name: "monthly".to_owned(),
+            scopes: vec![TokenScope::Metrics],
+            renewable: true,
+            expires_in_days: Some(30),
+            ..TokenRequest::default()
+        })
+        .await
+        .expect("a token");
+    fx.env.clock.advance(Duration::from_secs(20 * DAY));
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    assert_eq!(
+        second.info.expires_at,
+        fx.env.now().checked_add(Duration::from_secs(30 * DAY)),
+        "30 days, not the profile's 365"
+    );
+    fx.env
+        .service
+        .update_security_settings(
+            &fx.admin,
+            &SettingsPatch {
+                token_max_lifetime: Some(tenko_auth::settings::TokenMaxLifetime::Days(10)),
+                ..SettingsPatch::default()
+            },
+            None,
+        )
+        .await
+        .expect("a tighter cap");
+    let third = fx.renew(&second, &secret(&second)).await.expect("renewed");
+    assert_eq!(
+        third.info.expires_at,
+        fx.env.now().checked_add(Duration::from_secs(10 * DAY)),
+        "capped by the profile now"
+    );
+}
+
+/// IAM-20: under Lab, which allows tokens without expiry, a renewable token still needs one.
+#[tokio::test]
+async fn a_renewable_token_without_an_expiry_is_refused() {
+    let (env, session) = TestEnv::installed(Profile::Lab).await;
+    let admin = env.session_ctx(&session).await.expect("ctx");
+    let account = env
+        .service
+        .create_service_account(
+            &admin,
+            &ServiceAccountCreate {
+                name: "lab-report".to_owned(),
+                display_name: None,
+                roles: vec![RoleName::Viewer],
+            },
+        )
+        .await
+        .expect("an account");
+    let request = |renewable: bool| TokenRequest {
+        name: "lab".to_owned(),
+        scopes: vec![TokenScope::Metrics],
+        renewable,
+        ..TokenRequest::default()
+    };
+    let refused = env
+        .service
+        .create_account_token(&admin, account.id, &request(true))
+        .await;
+    assert!(matches!(
+        refused,
+        Err(AuthError::Invalid {
+            field: "expires_in_days",
+            ..
+        })
+    ));
+    let plain = env
+        .service
+        .create_account_token(&admin, account.id, &request(false))
+        .await
+        .expect("a plain token without expiry");
+    assert_eq!(plain.info.expires_at, None);
+}
+
+/// IAM-20: an owner holds a bounded number of scoped tokens, superseded ones included.
+#[tokio::test]
+async fn an_owner_holds_at_most_the_cap_of_tokens() {
+    let fx = fixture().await;
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), fx.env.now());
+    for _ in 1..tenko_auth::service::types::SCOPED_TOKENS_MAX {
+        batch
+            .put_typed(
+                &USER_SCOPED_TOKENS,
+                &(fx.account.id, tenko_core::ApiTokenId::generate()),
+                &vec![0_u8; 32],
+            )
+            .expect("encodes");
+    }
+    fx.env.store.propose(batch).await.expect("written");
+    fx.token(false, &[]).await;
+    assert!(matches!(
+        fx.try_token(false, &[]).await,
+        Err(AuthError::TokenLimit { max: 500 })
+    ));
+}
+
+/// IAM-20: a renewal drops a grant the account no longer holds; a disabled account's token
+/// does not renew at all.
+#[tokio::test]
+async fn a_renewal_holds_no_more_than_the_account_does() {
+    let fx = fixture().await;
+    let first = fx
+        .create(TokenRequest {
+            name: "reader".to_owned(),
+            grants: Some(vec![tenko_auth::model::TokenGrant {
+                role: RoleName::Viewer,
+                scope: None,
+            }]),
+            scopes: vec![TokenScope::Metrics],
+            renewable: true,
+            ..TokenRequest::default()
+        })
+        .await
+        .expect("a token");
+    assert_eq!(first.info.grants.len(), 1);
+    fx.env
+        .service
+        .set_user_roles(&fx.admin, fx.account.id, &[], None)
+        .await
+        .expect("the role is taken away");
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    assert_eq!(second.info.grants, Vec::new(), "the lost grant is dropped");
+    fx.env
+        .service
+        .update_user(
+            &fx.admin,
+            fx.account.id,
+            &UserUpdate {
+                disabled: Some(true),
+                ..UserUpdate::default()
+            },
+            None,
+        )
+        .await
+        .expect("disabled");
+    assert!(unauthenticated(&fx.renew(&second, &secret(&second)).await));
+}
+
+/// IAM-20: an event stream opened with a token ends when the token is superseded and when
+/// its family is revoked.
+#[tokio::test]
+async fn an_event_stream_ends_on_supersede_and_on_revocation() {
+    let fx = fixture().await;
+    let first = fx.token(true, &[]).await;
+    let held = fx
+        .env
+        .service
+        .hold(&bearer(&first), fx.env.now())
+        .await
+        .expect("held");
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    let standing = |hold| {
+        let env = &fx.env;
+        async move {
+            let at = env
+                .store
+                .read(ReadConsistency::Local)
+                .await
+                .expect("view")
+                .revision();
+            env.service.standing(hold, at, env.now()).await
+        }
+    };
+    standing(&held).await.expect("still acting");
+    fx.use_token(&second)
+        .await
+        .expect("the first use supersedes");
+    assert!(unauthenticated(&standing(&held).await), "superseded");
+    let held = fx
+        .env
+        .service
+        .hold(&bearer(&second), fx.env.now())
+        .await
+        .expect("held");
+    fx.env.clock.advance(Duration::from_secs(61));
+    assert!(unauthenticated(&fx.use_token(&first).await), "reuse");
+    assert!(unauthenticated(&standing(&held).await), "revoked");
+}
+
+/// IAM-20, TGL-46: after a switch to Hardened, renewable tokens keep acting but no longer
+/// renew.
+#[tokio::test]
+async fn a_switch_to_hardened_stops_renewal() {
+    let fx = fixture().await;
+    let token = fx.token(true, &[]).await;
+    fx.env
+        .service
+        .update_security_settings(
+            &fx.admin,
+            &SettingsPatch {
+                profile: Some(Profile::Hardened),
+                audit_export: Some(tenko_auth::settings::AuditExport::Optional),
+                ..SettingsPatch::default()
+            },
+            None,
+        )
+        .await
+        .expect("Hardened");
+    assert!(refused(
+        &fx.renew(&token, &secret(&token)).await,
+        "disabled"
+    ));
+}
+
+/// IAM-20: a superseded token past its own expiry is refused like an unknown token and
+/// revokes nothing.
+#[tokio::test]
+async fn an_expired_superseded_token_revokes_nothing() {
+    let fx = fixture().await;
+    let first = fx
+        .create(TokenRequest {
+            name: "short".to_owned(),
+            scopes: vec![TokenScope::Metrics],
+            renewable: true,
+            expires_in_days: Some(2),
+            ..TokenRequest::default()
+        })
+        .await
+        .expect("a token");
+    fx.env.clock.advance(Duration::from_secs(DAY));
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    fx.use_token(&second)
+        .await
+        .expect("the first use supersedes");
+    fx.env.clock.advance(Duration::from_secs(DAY + 60));
+    assert!(unauthenticated(&fx.use_token(&first).await));
+    assert_eq!(fx.audited("auth.token.reuse_detected").await.len(), 0);
+    fx.use_token(&second).await.expect("the family is intact");
 }
 
 /// IAM-20: a token that revokes itself takes its unused successor with it.
@@ -559,6 +929,31 @@ async fn a_family_keeps_a_bounded_number_of_superseded_tokens() {
         .expect("index")
         .len();
     assert_eq!(records, 9, "the live token and eight superseded ones");
+}
+
+/// IAM-20: renewing again and again without using a successor keeps the family bounded too:
+/// each replaced successor is kept as superseded, the oldest beyond eight go.
+#[tokio::test]
+async fn renewals_that_replace_successors_keep_the_family_bounded() {
+    let fx = fixture().await;
+    let first = fx.token(true, &[]).await;
+    for _ in 0..12 {
+        fx.renew(&first, &secret(&first)).await.expect("renewed");
+    }
+    let view = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let records = view
+        .scan_typed(&USER_SCOPED_TOKENS, KeyRange::all(), 1_000, false)
+        .expect("index")
+        .len();
+    assert_eq!(
+        records, 10,
+        "the first token, its unused successor and eight replaced ones"
+    );
 }
 
 /// A token still never creates a token: the session-only routes refuse it.

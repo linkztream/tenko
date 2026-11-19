@@ -1,6 +1,7 @@
 //! Secrets refused a moment ago: a bounded negative cache for session cookies and bearer
-//! tokens that neither this controller's copy nor the leader holds, and a bound on the reads
-//! at the leader's commit index that unknown secrets may cause at once.
+//! tokens that neither this controller's copy nor the leader holds, a bound on the reads
+//! at the leader's commit index that unknown secrets may cause at once, and the audit pace of
+//! tokens a binding refuses (IAM-21).
 //!
 //! A session or a token exists only after its batch committed, and its secret has 256 (or
 //! more) random bits, so a secret the leader did not hold cannot become valid later: caching
@@ -12,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use tenko_core::Timestamp;
+use tenko_core::{ApiTokenId, Timestamp};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 /// Refused secrets kept at most.
@@ -23,11 +24,16 @@ pub(super) const TTL: Duration = Duration::from_secs(60);
 /// unknown secrets are refused without one.
 pub(super) const CONFIRMING: usize = 4;
 
-/// The negative cache and the bound on confirming reads.
+/// How often the refusals of one token by a binding are audited.
+pub(super) const REFUSAL_EVERY: Duration = Duration::from_secs(60);
+
+/// The negative cache, the bound on confirming reads and the audit pace of refused tokens.
 #[derive(Debug)]
 pub(super) struct Misses {
     refused: Mutex<HashMap<Vec<u8>, Timestamp>>,
     confirming: Arc<Semaphore>,
+    /// Per token: when its last refusal was audited and how many followed unaudited.
+    audited: Mutex<HashMap<ApiTokenId, (Timestamp, u64)>>,
 }
 
 impl Default for Misses {
@@ -35,6 +41,7 @@ impl Default for Misses {
         Self {
             refused: Mutex::new(HashMap::new()),
             confirming: Arc::new(Semaphore::new(CONFIRMING)),
+            audited: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -69,6 +76,30 @@ impl Misses {
         refused.insert(hash.to_vec(), until);
     }
 
+    /// Whether a binding's refusal of token `id` is audited now: `Some(n)` with the `n`
+    /// refusals since the last record, at most one a [`REFUSAL_EVERY`]; `None` (counted) until
+    /// then. At capacity the ended entries go first, then an arbitrary one.
+    pub(super) fn refusal(&self, id: ApiTokenId, now: Timestamp) -> Option<u64> {
+        let mut audited = self.audited.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some((at, since)) = audited.get_mut(&id)
+            && now.saturating_since(*at) < REFUSAL_EVERY
+        {
+            *since += 1;
+            return None;
+        }
+        let since = audited.get(&id).map_or(0, |(_, since)| *since);
+        if audited.len() >= CAPACITY && !audited.contains_key(&id) {
+            audited.retain(|_, (at, _)| now.saturating_since(*at) < REFUSAL_EVERY);
+            if audited.len() >= CAPACITY
+                && let Some(victim) = audited.keys().next().copied()
+            {
+                audited.remove(&victim);
+            }
+        }
+        audited.insert(id, (now, 0));
+        Some(since)
+    }
+
     /// A slot for one confirming read, or `None` when [`CONFIRMING`] are under way.
     pub(super) fn confirming(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.confirming).try_acquire_owned().ok()
@@ -90,6 +121,18 @@ mod tests {
 
     fn at(secs: i128) -> Timestamp {
         Timestamp::from_unix_nanos(secs * 1_000_000_000).expect("in range")
+    }
+
+    #[test]
+    fn a_tokens_refusals_are_audited_once_a_minute_with_the_count_between() {
+        let misses = Misses::default();
+        let id = ApiTokenId::generate();
+        assert_eq!(misses.refusal(id, at(1_000)), Some(0));
+        assert_eq!(misses.refusal(id, at(1_010)), None);
+        assert_eq!(misses.refusal(id, at(1_059)), None);
+        assert_eq!(misses.refusal(ApiTokenId::generate(), at(1_059)), Some(0));
+        assert_eq!(misses.refusal(id, at(1_060)), Some(2));
+        assert_eq!(misses.refusal(id, at(1_061)), None);
     }
 
     #[test]

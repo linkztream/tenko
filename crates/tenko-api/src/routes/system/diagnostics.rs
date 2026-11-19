@@ -343,11 +343,12 @@ async fn system_diagnostics(
     ipam: Option<Extension<Arc<tenko_ipam::IpamService>>>,
     connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
     tail: Option<Extension<Arc<LogTail>>>,
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemDiagnostics>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &super::system_object())?;
     let status = super::assemble(
-        &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
+        auth, &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
     )
     .await;
     let view = state.store.read(ReadConsistency::Local).await?;

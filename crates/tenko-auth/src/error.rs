@@ -96,6 +96,12 @@ pub enum AuthError {
         /// Why.
         reason: &'static str,
     },
+    /// The owner holds the most scoped tokens it may (IAM-20).
+    #[error("the owner holds the most tokens it may ({max})")]
+    TokenLimit {
+        /// The most tokens an owner holds.
+        max: usize,
+    },
     /// An object does not exist (or is not visible to the caller).
     #[error("{kind} not found")]
     NotFound {
@@ -236,6 +242,7 @@ impl Coded for AuthError {
             Self::TotpCodeMismatch => "auth.totp.code_mismatch",
             Self::TokenLifetime { .. } => "auth.token.lifetime_exceeded",
             Self::TokenRenewalRefused { .. } => "auth.token.renewal_refused",
+            Self::TokenLimit { .. } => "auth.token.limit",
             Self::NotFound { kind } => match *kind {
                 "user" => "users.not_found",
                 "session" => "auth.session.not_found",
@@ -305,7 +312,8 @@ impl Coded for AuthError {
             | Self::AuditExportRequired
             | Self::GrantDuplicate
             | Self::ServiceAccountNoLogin
-            | Self::PreferenceLimit { .. } => 409,
+            | Self::PreferenceLimit { .. }
+            | Self::TokenLimit { .. } => 409,
             Self::PreferenceTooLarge { .. } => 413,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
@@ -330,6 +338,7 @@ impl Coded for AuthError {
             Self::TokenRenewalRefused { reason } => {
                 BTreeMap::from([("reason", (*reason).to_owned())])
             }
+            Self::TokenLimit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),
             Self::GrantInvalidScope(reason) => {

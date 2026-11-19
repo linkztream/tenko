@@ -199,7 +199,7 @@ A grant without a scope applies to the whole installation, and its role must be 
 
 **Lifetime.** `expires_in_days` defaults to the maximum of the profile (TGL-05: 365 days in Home, 90 in Standard, 30 in Hardened, no maximum in Lab) and may not exceed it (422 `auth.token.lifetime_exceeded`). The cap is checked again at every use against the creation time of the token, so tightening it shortens the tokens that exist.
 
-**Creating.** A person creates a scoped token for themselves with `POST /auth/tokens` and `grants` or `scopes` in the body; without them the call creates a personal token. An administrator creates one for a service account with `POST /access/service-accounts/{id}/tokens`. The session that creates a token must meet the strength required of its user and have signed in within the last five minutes (403 `auth.step_up_required` with `required: fresh` otherwise); for a service account's token it must also meet the account's requirement. A password change or an administrator's reset revokes the owner's personal and scoped tokens. The secret (`tnk_...`) is shown once; the listing shows the first characters only.
+**Creating.** A person creates a scoped token for themselves with `POST /auth/tokens` and `grants` or `scopes` in the body; without them the call creates a personal token. An administrator creates one for a service account with `POST /access/service-accounts/{id}/tokens`. The session that creates a token must meet the strength required of its user and have signed in within the last five minutes (403 `auth.step_up_required` with `required: fresh` otherwise); for a service account's token it must also meet the account's requirement. A password change or an administrator's reset revokes the owner's personal and scoped tokens. The secret (`tnk_...`, or `tnkc_...` for a renewable or bound token, section 7.1) is shown once; the listing shows the first characters only. An owner holds at most 500 scoped tokens, superseded ones kept for reuse detection included (409 `auth.token.limit`).
 
 ```json
 POST /api/v1/access/service-accounts/0190d1c2-0000-7000-8000-000000000002/tokens
@@ -226,13 +226,15 @@ A token of a service account may renew itself, so that an integration keeps work
 
 **The right.** `"renewable": true` in the creation request gives the token the right, under the creation rules above (an administrator with a fresh sign-in). The answer then carries a **renewal secret** (`tnr_...`, 256 random bits) beside the token, shown once like the token. The right needs TGL-46 ("Service-account tokens may renew themselves": on in Home, Standard and Lab, off in Hardened). With TGL-46 off, a creation request with the right is refused with 403 `auth.token.renewal_refused` (`reason: disabled`) and no token renews, whatever its flag says; turning it on under Hardened is a recorded deviation like the other toggles. A person's own tokens never renew (400 `auth.invalid_request`); a person creates a new one.
 
+**The token form.** A token with the renewal right or with source prefixes (section 7.2) starts with `tnkc_` instead of `tnk_`, and so does every token a renewal returns; a plain scoped or personal token keeps `tnk_`. The form and the record go together: a record with a renewal right or source prefixes is accepted only when its token is presented as `tnkc_`, a record without them only as `tnk_`, and any other pairing is refused like an unknown token and audited as `auth.token.form_refused`. A build that does not know these constraints accepts `tnk_` only, so it refuses a constrained token before it reads or writes its record (section 14).
+
 **The renewal secret** is stored only as its SHA-256 hash on the token's record, never logged and never accepted as a bearer token: it starts with `tnr_`, and every other route refuses it like an unknown token. It is sent only in the body of the renewal call.
 
-**The call.** `POST /api/v1/access/token/renew`, authenticated by the token itself (`Authorization: Bearer tnk_...`), with `{"renewal_secret": "tnr_..."}`. It answers 200 with a new token, a new renewal secret and the token's description (`expires_at` among it). The new token has the same owner, name, grants, scopes and source binding (section 7.2); its lifetime is the maximum of the profile counted from the renewal, never longer (in Lab, which has no maximum, it does not expire). A token and its successors form a **family**. The renewal is audited as `auth.token.renew` with the old and the new token.
+**The call.** `POST /api/v1/access/token/renew`, authenticated by the token itself (`Authorization: Bearer tnkc_...`), with `{"renewal_secret": "tnr_..."}`. It answers 200 with a new token, a new renewal secret and the token's description (`expires_at` among it). The new token has the same owner, name, grants, scopes and source binding (section 7.2), except a grant its account no longer holds, which is dropped; a token left with no grant and no scope does not renew (403 `auth.grant.exceeds_own`). Its lifetime is the one the family's first token was created with, counted from the renewal and capped by the profile's maximum at that moment. A renewable token always expires: in Lab, which has no maximum, a creation request with the right and without `expires_in_days` is refused with 400 `auth.invalid_request`. A token and its successors form a **family**. The renewal is audited as `auth.token.renew` with the old and the new token.
 
-**The old token** stays valid until the new one is used for the first time, or until its own expiry, whichever comes first, so an answer lost on the way does not lock the integration out: it still holds the old token and secret. Renewing again with the old token while the new one is unused replaces the unused one, which is then refused. The first use of the new token, or a renewal with it, supersedes the old one.
+**The old token** stays valid until the new one is used for the first time, or until its own expiry, whichever comes first, so an answer lost on the way does not lock the integration out: it still holds the old token and secret. Renewing again with the old token while the new one is unused replaces the unused one: it is kept as superseded, and presenting it later counts as reuse, since an integration that lost the answer never held it. The first use of the new token, or a renewal with it, supersedes the old one.
 
-**Reuse detection.** A use of a superseded token, as a bearer token or in the renewal call, or of a superseded renewal secret, means that two parties hold the family's secrets. It revokes the whole family at once: every token of it is refused from that commit on. In the first minute after the supersede the old token is only refused, without revoking anything, since requests the integration sent before it switched may still arrive. Reuse detection applies only to presentations that pass the source check of section 7.2: a superseded token presented from outside its prefixes is refused and audited as `auth.token.source_refused`, and nothing more. A family keeps its eight most recently superseded tokens for this check; an older one is refused like an unknown token. The newest token stays in the token list as revoked, with the reason, and the health warning `auth.token.revoked` (with the `reason`) stands until an administrator removes that entry (`DELETE` on it), which is the acknowledgment. The detection is audited as `auth.token.reuse_detected` with the token that was presented and the client address. An integration must therefore store the new token and the new secret together before it uses the new token.
+**Reuse detection.** A use of a superseded token, as a bearer token or in the renewal call, or of a superseded renewal secret, means that two parties hold the family's secrets. It revokes the whole family at once: every token of it is refused from that commit on. In the first minute after the supersede the old token is only refused, without revoking anything, since requests the integration sent before it switched may still arrive. Reuse detection applies only to presentations that pass the source check of section 7.2: a superseded token presented from outside its prefixes is refused and audited as `auth.token.source_refused`, and nothing more. A family keeps its eight most recently superseded tokens for this check; an older one, and a superseded token past its own expiry, is refused like an unknown token and revokes nothing. The newest token stays in the token list as revoked, with the reason, and the health warning `auth.token.revoked` stands until an administrator removes that entry (`DELETE` on it), which is the acknowledgment. The detection is audited as `auth.token.reuse_detected` with the token that was presented and the client address. An integration must therefore store the new token and the new secret together before it uses the new token.
 
 **A wrong renewal secret** with a valid token is refused with 403 `auth.token.renewal_refused` (`reason: wrong_secret`) and audited as a failed `auth.token.renew`. The third wrong secret within a family revokes the family as above, with the reason `renewal_failures`: the secrets carry 256 bits, so a wrong one comes from someone who holds the token without the secret, or from an integration that lost its secret; neither may go on renewing. The count is reset by a successful renewal. The rate limits of every request apply in addition.
 
@@ -240,7 +242,7 @@ A token of a service account may renew itself, so that an integration keeps work
 
 ### 7.2 Source binding (IAM-21)
 
-`"source_prefixes": ["192.0.2.0/24", "2001:db8:42::/48"]` in the creation request binds a scoped token to client addresses: at most 64 IPv4 or IPv6 prefixes, a host address written without a length. A use from an address outside them is refused with 401 `auth.unauthenticated`, exactly like an unknown token, and audited as `auth.token.source_refused` with the address. The address is the client address the server already derives: the peer of the connection, or the address a trusted proxy reports (`[tls] trusted_proxies`, through `X-Forwarded-For` or the PROXY protocol). An IPv4 address reached as an IPv4-mapped IPv6 address counts as the IPv4 address. A bound token used where the server knows no client address is refused. Renewal keeps the list; it is changed only by creating a new token, which takes a session with a fresh sign-in.
+`"source_prefixes": ["192.0.2.0/24", "2001:db8:42::/48"]` in the creation request binds a scoped token to client addresses: at most 64 IPv4 or IPv6 prefixes, a host address written without a length. A use from an address outside them is refused with 401 `auth.unauthenticated`, exactly like an unknown token, and audited as `auth.token.source_refused` with the address. The address is the client address the server already derives: the peer of the connection, or the address a trusted proxy reports (`[tls] trusted_proxies`, through `X-Forwarded-For` or the PROXY protocol). An IPv4 address reached as an IPv4-mapped IPv6 address counts as the IPv4 address. A bound token used where the server knows no client address is refused. A prefix of length zero is refused (it would bind nothing), and an IPv4-mapped IPv6 prefix is stored as the IPv4 prefix it covers. The refusals of one token are audited once a minute, the first of them with the number of those that followed the previous record, so that a token presented from many addresses cannot flood the audit log. Renewal keeps the list; it is changed only by creating a new token, which takes a session with a fresh sign-in.
 
 ### 7.3 The token's own description
 
@@ -248,7 +250,7 @@ A token of a service account may renew itself, so that an integration keeps work
 
 ### 7.4 Expiry warning
 
-A service-account token with fewer than 14 days left, and no successor, raises the health warning `auth.token.expiring` with the account, the token and its end, on the start page and in `GET /system/status`. The hourly sweep of the controller writes the audit record `auth.token.expiring` once per token, which reaches the `audit` event topic and the audit export. The warning clears when the token is renewed (its successor exists), replaced by removing it, or revoked.
+A service-account token with fewer than 14 days left raises the health warning `auth.token.expiring` on the start page and in `GET /system/status`, with the number of such tokens and the first end. The hourly sweep of each controller computes the token warnings (this one and `auth.token.revoked`) and writes the audit record `auth.token.expiring` once per token, which reaches the `audit` event topic and the audit export; a controller that revokes a family or removes a token computes them again at once, the others at their next sweep. The warning clears when the token is replaced by its successor's first use, removed, or revoked. Neither warning names an account or a token, since whoever may read the system status sees it; the token list of each service account shows which tokens expire and which family was revoked, with the reason.
 
 ### 7.5 A worked example
 
@@ -264,10 +266,10 @@ curl -sS -b cookies.txt -H 'Origin: https://tenko.example.test' \
 
 ```json
 {
-  "token": "tnk_3q2-7wEXAMPLEaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "token": "tnkc_3q2-7wEXAMPLEaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "renewal_secret": "tnr_Zm9vEXAMPLEbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "info": {"id": "0190d1c2-0000-7000-8000-0000000000a1", "name": "dhcp-report",
-           "prefix": "tnk_3q2-7wEX", "created_at": "2026-01-05T09:00:00Z",
+           "prefix": "tnkc_3q2-7wE", "created_at": "2026-01-05T09:00:00Z",
            "expires_at": "2026-04-05T09:00:00Z", "scoped": true, "scopes": ["metrics"],
            "renewable": true, "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"]}
 }
@@ -276,14 +278,14 @@ curl -sS -b cookies.txt -H 'Origin: https://tenko.example.test' \
 The script uses the token, and reads what it is:
 
 ```sh
-curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
-curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/access/token
+curl -sS -H 'Authorization: Bearer tnkc_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
+curl -sS -H 'Authorization: Bearer tnkc_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/access/token
 ```
 
 Some time before `expires_at` it renews, stores both new secrets, and only then uses the new token:
 
 ```sh
-curl -sS -X POST -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' \
+curl -sS -X POST -H 'Authorization: Bearer tnkc_3q2-7wEXAMPLE...' \
   -H 'Content-Type: application/json' \
   https://tenko.example.test/api/v1/access/token/renew \
   -d '{"renewal_secret": "tnr_Zm9vEXAMPLE..."}'
@@ -291,10 +293,10 @@ curl -sS -X POST -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' \
 
 ```json
 {
-  "token": "tnk_Q1w2EXAMPLEcccccccccccccccccccccccccccccccc",
+  "token": "tnkc_Q1w2EXAMPLEccccccccccccccccccccccccccccccc",
   "renewal_secret": "tnr_R5t6EXAMPLEdddddddddddddddddddddddddddddddd",
   "info": {"id": "0190d1c2-0000-7000-8000-0000000000a2", "name": "dhcp-report",
-           "prefix": "tnk_Q1w2EXAM", "created_at": "2026-03-20T09:00:00Z",
+           "prefix": "tnkc_Q1w2EXA", "created_at": "2026-03-20T09:00:00Z",
            "expires_at": "2026-06-18T09:00:00Z", "renewed_at": "2026-03-20T09:00:00Z",
            "scoped": true, "scopes": ["metrics"], "renewable": true,
            "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"]}
@@ -306,7 +308,7 @@ If the answer is lost, the script repeats the call with the old token and the ol
 Once the new token has been used, the old one is superseded. If someone presents it again, here from a copy of the old configuration, the family is revoked:
 
 ```sh
-curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
+curl -sS -H 'Authorization: Bearer tnkc_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
 ```
 
 ```json
@@ -318,7 +320,7 @@ From then on the new token is refused the same way, the token list shows the fam
 
 ### 7.6 In a cluster
 
-Token records replicate through the store like every other record, and each change above is one write of the store, ordered with every other write: the renewal, the first use of a new token (which supersedes the old one in the same write), and the revocation of a family. Each write names the revisions of the records it read, so of two writes that read the same family, the second fails: a renewal with the old token and the first use of the new token on two controllers cannot both win, and two controllers that detect the same reuse revoke the family once. A detection whose write lost such a race is made again at the next presentation of the token or secret. A controller decides a use from its own copy, so it accepts the old token until it has applied the write that superseded it, as it does for any revoked token (section 1); the next use after that is detected as reuse. The hourly use time of a token, the expiry warning and the sweep are best effort: a write that loses to another is left for the next use or sweep.
+Token records replicate through the store like every other record, and each change above is one write of the store, ordered with every other write: the renewal, the first use of a new token (which supersedes the old one in the same write), and the revocation of a family. Each write names the revisions of the records it read, so of two writes that read the same family, the second fails: a renewal with the old token and the first use of the new token on two controllers cannot both win, and two controllers that detect the same reuse revoke the family once. A detection whose write lost such a race is decided once more on the newer state; if that write fails too, its audit record is written alone. An administrator's removal of a family that a holder keeps renewing is tried up to three times before it answers 409 `auth.conflict`. A controller decides a use from its own copy, so it accepts the old token until it has applied the write that superseded it, as it does for any revoked token (section 1); the next use after that is detected as reuse. The hourly use time of a token, the expiry warning and the sweep are best effort: a write that loses to another is left for the next use or sweep.
 
 ## 8. Multi-factor policy per role
 
@@ -483,6 +485,7 @@ PUT /api/v1/access/role-policies/viewer
 | `auth.scope.unavailable` | 503 | The server has no IP address management to resolve scopes |
 | `auth.token.lifetime_exceeded` | 422 | The lifetime exceeds the maximum of the profile (TGL-05); the problem carries `max_days` |
 | `auth.token.not_found` | 404 | No such token |
+| `auth.token.limit` | 409 | The owner holds the most scoped tokens it may, 500, superseded ones kept for reuse detection included; the problem carries `max` |
 | `auth.token.renewal_refused` | 403 | The token may not renew: `reason` is `disabled` (TGL-46 is off), `not_renewable` (created without the right) or `wrong_secret` (section 7.1) |
 | `auth.invalid_request` | 400 | A name, role or lifetime is invalid, or a scoped token has neither grants nor scopes |
 | `users.name_taken` | 409 | The service account name is taken |
@@ -495,7 +498,7 @@ PUT /api/v1/access/role-policies/viewer
 
 ## 14. Rollback
 
-Global roles stay in the user record with the meaning they always had. Grants (`auth.grants`), scoped tokens (`auth.scoped_tokens` and the owner index `auth.user_scoped_tokens`) and role policies (`auth.role_policies`) are tables that an older build does not read. After a rollback to such a build, a grant gives nothing and a scoped token is not found, so the person or the automation is refused; nothing is ever read as a global role. Restoring the newer build brings them back unchanged. A rollback to a build without self-renewal and source binding (IAM-20, IAM-21) reads a renewable or bound token as a plain scoped token: it accepts it from any address, and its hourly record of the last use drops the renewal state and the prefixes for good. Revoke the renewable and bound tokens before such a rollback and create them again after it. The rollback rules of the installation are in [upgrades.md](upgrades.md).
+Global roles stay in the user record with the meaning they always had. Grants (`auth.grants`), scoped tokens (`auth.scoped_tokens` and the owner index `auth.user_scoped_tokens`) and role policies (`auth.role_policies`) are tables that an older build does not read. After a rollback to such a build, a grant gives nothing and a scoped token is not found, so the person or the automation is refused; nothing is ever read as a global role. Restoring the newer build brings them back unchanged. On a controller that runs a build without self-renewal and source binding (IAM-20, IAM-21), after a rollback or during an upgrade one controller at a time, the renewable and bound tokens (`tnkc_`, section 7.1) stop working: that build accepts `tnk_` tokens only and refuses them before it reads their record, so it never writes one back either. They work again, with their prefixes and renewal state intact, once the controller runs a build that knows them. Plain tokens are unaffected. Such a build lists the superseded and unused tokens of a family as separate tokens and removes only the one named; remove a renewable token on a build that knows families. The rollback rules of the installation are in [upgrades.md](upgrades.md).
 
 ## 15. Personal preferences
 

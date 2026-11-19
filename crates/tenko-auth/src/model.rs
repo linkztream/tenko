@@ -429,7 +429,13 @@ impl ScopedTokenRecord {
     pub fn retired(&self) -> bool {
         self.renewal
             .as_ref()
-            .is_some_and(|renewal| renewal.superseded_at.is_some() || renewal.revoked.is_some())
+            .is_some_and(|renewal| renewal.superseded() || renewal.revoked.is_some())
+    }
+
+    /// Whether the token carries a constraint an older build does not know (IAM-20, IAM-21):
+    /// it is then issued and accepted in the form [`crate::secret::CONSTRAINED_PREFIX`] only.
+    pub fn constrained(&self) -> bool {
+        self.renewal.is_some() || !self.source_prefixes.is_empty()
     }
 
     /// Whether a request from `source` may use the token (IAM-21): always without
@@ -450,7 +456,7 @@ impl ScopedTokenRecord {
 pub fn retired_key(hash: &[u8]) -> Vec<u8> {
     use sha2::{Digest as _, Sha256};
     Sha256::new()
-        .chain_update(b"tenko retired token ")
+        .chain_update(b"tenko retired token\0")
         .chain_update(hash)
         .finalize()
         .to_vec()
@@ -475,6 +481,21 @@ pub struct TokenRenewal {
     /// Why and when the family was revoked; kept on its newest token.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<TokenRevocation>,
+    /// The token was an unused successor that a renewal of its predecessor replaced: only a
+    /// second holder of the family's secrets can present it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub replaced: bool,
+    /// The lifetime the family's first token was created with, which each renewal keeps
+    /// (capped by the profile at the time). Zero in a record written without it.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lifetime_secs: u64,
+}
+
+impl TokenRenewal {
+    /// Whether the token was superseded or replaced and is kept for reuse detection.
+    pub fn superseded(&self) -> bool {
+        self.superseded_at.is_some() || self.replaced
+    }
 }
 
 /// The revocation of a token family by the server (IAM-20).

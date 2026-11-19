@@ -634,26 +634,19 @@ impl AuthService {
         id: UserId,
         token: ApiTokenId,
     ) -> Result<(), AuthError> {
-        let (_, view) = self.service_account(ctx, id).await?;
-        let (hash, _) = view
-            .get_typed(&USER_SCOPED_TOKENS, &(id, token))?
-            .ok_or(AuthError::NotFound { kind: "token" })?;
-        let mut batch = WriteBatch::for_request(ctx);
-        Self::stage_token_removal(view.as_ref(), &mut batch, id, token, hash)?;
-        batch.audit(Self::audit(
-            actions::TOKEN_REVOKE,
-            vec![ObjectRef::from(id), ObjectRef::from(token)],
-            ctx,
-        ));
-        self.commit(batch).await?;
-        Ok(())
+        self.service_account(ctx, id).await?;
+        if self.remove_scoped_token(ctx, id, token).await? {
+            Ok(())
+        } else {
+            Err(AuthError::NotFound { kind: "token" })
+        }
     }
 
     /// Checks the grants and scopes of a scoped token against its owner: every global
     /// grant needs a global role of the owner that covers it, every scoped grant a global
     /// role or a grant of the owner that covers its role over a scope that contains it; the
     /// special scopes need an owner who reads the system, or a service account.
-    fn validate_token_grants(
+    pub(super) fn validate_token_grants(
         &self,
         view: &dyn ReadView,
         owner: &UserRecord,
@@ -747,12 +740,18 @@ impl AuthService {
         }
         let name: String = name.chars().take(64).collect();
         let (grants, scopes) = self.validate_token_grants(view, owner, request)?;
+        super::renewal::check_token_room(view, owner.id)?;
         let settings = self.settings();
         let expires_at = token_expiry(&settings, request.expires_in_days, ctx.now)?;
         let id = ApiTokenId::generate();
+        let lifetime = expires_at.map(|end| end.saturating_since(ctx.now));
         let (renewal, source_prefixes) =
-            super::renewal::creation_terms(owner, request, &settings, id)?;
-        let token = new_api_token()?;
+            super::renewal::creation_terms(owner, request, &settings, id, lifetime)?;
+        let token = if renewal.is_some() || !source_prefixes.is_empty() {
+            crate::secret::new_constrained_token()?
+        } else {
+            new_api_token()?
+        };
         let record = ScopedTokenRecord {
             id,
             owner: owner.id,

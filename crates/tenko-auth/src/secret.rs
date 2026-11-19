@@ -19,6 +19,16 @@ use crate::{
 /// Prefix of personal API tokens, so secret scanners can recognize them.
 pub const TOKEN_PREFIX: &str = "tnk_";
 
+/// Prefix of a scoped token that carries a renewal right or source prefixes (IAM-20,
+/// IAM-21). A build that does not know those constraints accepts `tnk_` only, so it refuses
+/// such a token before it reads, or writes back, its record.
+pub const CONSTRAINED_PREFIX: &str = "tnkc_";
+
+/// Whether a presented bearer secret has the form of an API token, plain or constrained.
+pub fn looks_like_api_token(text: &str) -> bool {
+    (text.starts_with(TOKEN_PREFIX) || text.starts_with(CONSTRAINED_PREFIX)) && text.len() <= 128
+}
+
 /// Prefix of the renewal secrets of scoped tokens (IAM-20): never a bearer token.
 pub const RENEWAL_PREFIX: &str = "tnr_";
 
@@ -73,6 +83,15 @@ pub fn new_api_token() -> Result<BearerSecret, AuthError> {
     prefixed_secret(TOKEN_PREFIX)
 }
 
+/// A new constrained scoped token: `tnkc_` and 256 random bits, base64url.
+///
+/// # Errors
+///
+/// [`AuthError::Internal`] if the random source fails.
+pub fn new_constrained_token() -> Result<BearerSecret, AuthError> {
+    prefixed_secret(CONSTRAINED_PREFIX)
+}
+
 /// A new renewal secret of a scoped token (IAM-20): `tnr_` and 256 random bits, base64url.
 ///
 /// # Errors
@@ -84,7 +103,7 @@ pub fn new_renewal_secret() -> Result<BearerSecret, AuthError> {
 
 fn prefixed_secret(prefix: &str) -> Result<BearerSecret, AuthError> {
     let bytes = Zeroizing::new(random::array::<32>()?);
-    let mut text = Zeroizing::new(String::with_capacity(47));
+    let mut text = Zeroizing::new(String::with_capacity(48));
     text.push_str(prefix);
     text.push_str(&base64url_encode(&*bytes));
     Ok(BearerSecret(text))

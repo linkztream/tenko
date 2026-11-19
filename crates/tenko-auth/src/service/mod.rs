@@ -44,7 +44,7 @@ pub use devices::{
 };
 pub use guard::default_hash_memory_mib;
 pub use hold::{Follow, Hold};
-pub use renewal::{RENEWAL_FAILURES_MAX, TOKEN_EXPIRING, TOKEN_REVOKED, token_warnings};
+pub use renewal::{RENEWAL_FAILURES_MAX, TOKEN_EXPIRING, TOKEN_REVOKED};
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
@@ -137,6 +137,9 @@ pub mod actions {
     /// A token was presented from outside its source prefixes (IAM-21).
     pub const TOKEN_SOURCE_REFUSED: AuditAction =
         AuditAction::from_static("auth.token.source_refused");
+    /// A token was presented in a form that does not match its record: a constrained record
+    /// as a plain `tnk_` token, or a plain record as `tnkc_` (IAM-20, IAM-21).
+    pub const TOKEN_FORM_REFUSED: AuditAction = AuditAction::from_static("auth.token.form_refused");
     /// A service-account token has fewer than 14 days left (IAM-20).
     pub const TOKEN_EXPIRING: AuditAction = AuditAction::from_static("auth.token.expiring");
     /// A user created.
@@ -244,6 +247,8 @@ pub struct AuthService {
     known_networks: Arc<guard::KnownNetworks>,
     devices_in_flight: devices::DevicesInFlight,
     misses: misses::Misses,
+    /// The token warnings the last sweep computed (IAM-20).
+    token_warnings: Mutex<Vec<tenko_core::CodedError>>,
     ceremonies: Ceremonies,
     setup_token: Mutex<Option<SetupTokenVerifier>>,
     relying_party: ArcSwapOption<RelyingParty>,
@@ -401,6 +406,7 @@ impl AuthService {
             known_networks: Arc::new(guard::KnownNetworks::default()),
             devices_in_flight: devices::DevicesInFlight::default(),
             misses: misses::Misses::default(),
+            token_warnings: Mutex::new(Vec::new()),
             scope: Arc::new(ScopeSupport::default()),
             ceremonies: Ceremonies::new(config.ceremony_capacity),
             store,
@@ -812,15 +818,10 @@ impl AuthService {
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
         let (hash, found, view) = self.token_of(token, now).await?;
-        let presented = match &found {
-            FoundToken::Retired(record) => Some((record, true)),
-            FoundToken::Scoped(record, _) => Some((record, false)),
-            FoundToken::Personal(..) => None,
-        };
-        if let Some((record, retired)) = presented
-            && self
-                .presentation_refused(view.as_ref(), record, retired, source_ip, now)
-                .await
+        let constrained = token.starts_with(crate::secret::CONSTRAINED_PREFIX);
+        if self
+            .presentation_refused(&view, &found, constrained, source_ip, now)
+            .await
         {
             return Err(AuthError::Unauthenticated);
         }
@@ -905,7 +906,7 @@ impl AuthService {
         token: &str,
         now: Timestamp,
     ) -> Result<(Vec<u8>, FoundToken, Arc<dyn ReadView>), AuthError> {
-        if !token.starts_with(crate::secret::TOKEN_PREFIX) || token.len() > 128 {
+        if !crate::secret::looks_like_api_token(token) {
             return Err(AuthError::Unauthenticated);
         }
         let hash = hash_secret(token);

@@ -1177,16 +1177,9 @@ impl AuthService {
             return Err(AuthError::NotFound { kind: "token" });
         }
         let view = self.view().await?;
-        // A scoped token of the caller's own.
-        if let Some(hash) = Self::scoped_token_hash(view.as_ref(), caller, id)? {
-            let mut batch = WriteBatch::for_request(ctx);
-            Self::stage_token_removal(view.as_ref(), &mut batch, caller, id, hash)?;
-            batch.audit(Self::audit(
-                actions::TOKEN_REVOKE,
-                vec![ObjectRef::from(caller), ObjectRef::from(id)],
-                ctx,
-            ));
-            self.commit(batch).await?;
+        // A scoped token of the caller's own, with its family (IAM-20).
+        if Self::scoped_token_hash(view.as_ref(), caller, id)?.is_some() {
+            self.remove_scoped_token(ctx, caller, id).await?;
             return Ok(());
         }
         // The owner's own token, or, for an administrator, anybody's.

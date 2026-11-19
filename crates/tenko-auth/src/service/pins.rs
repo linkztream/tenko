@@ -172,6 +172,9 @@ impl AuthService {
             {
                 tracing::debug!(%error, "the PIN rule date is not written yet");
             }
+            if let Some(service) = weak.upgrade() {
+                service.refresh_warnings_quietly(SystemClock.now()).await;
+            }
             tokio::time::sleep(FIRST_SWEEP).await;
             loop {
                 let Some(service) = weak.upgrade() else {
@@ -189,6 +192,7 @@ impl AuthService {
                 if let Err(error) = service.notice_expiring_tokens(SystemClock.now()).await {
                     tracing::debug!(%error, "expiring tokens could not be noted");
                 }
+                service.refresh_warnings_quietly(SystemClock.now()).await;
                 if let Err(error) = service.resume_account_ends(SystemClock.now()).await {
                     tracing::warn!(%error, "the credentials of ended accounts could not be removed");
                 }

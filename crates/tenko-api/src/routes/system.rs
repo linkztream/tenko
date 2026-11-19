@@ -736,11 +736,13 @@ async fn system_status(
     connectors: Option<Extension<Arc<tenko_connect::host::ConnectorHost>>>,
     // U1: the warnings are the health conditions of the findings index.
     findings: Option<Extension<Arc<crate::findings::FindingsService>>>,
+    // IAM-20: the token warnings.
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
     let status = assemble(
-        &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
+        auth, &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
     )
     .await;
     if let Some(Extension(findings)) = findings {
@@ -763,6 +765,8 @@ pub(crate) struct StatusSources {
     dhcp: Option<super::dhcp::DhcpNodeSlot>,
     // ADR 0028: the switch ports a bounce left down.
     connectors: Option<Arc<tenko_connect::host::ConnectorHost>>,
+    // IAM-20: the token warnings.
+    auth: Option<Arc<tenko_auth::AuthService>>,
 }
 
 impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
@@ -788,6 +792,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
             connectors: extensions
                 .get::<Arc<tenko_connect::host::ConnectorHost>>()
                 .cloned(),
+            auth: extensions.get::<Arc<tenko_auth::AuthService>>().cloned(),
         }))
     }
 }
@@ -796,6 +801,7 @@ impl StatusSources {
     /// The warnings of the status document without the lease conflicts.
     pub(crate) async fn warnings(self, state: &AppState, now: Timestamp) -> Vec<StatusWarning> {
         assemble(
+            self.auth.map(Extension),
             state,
             now,
             self.running.map(Extension),
@@ -822,6 +828,7 @@ impl StatusSources {
     reason = "one source per part of the status, each optional"
 )]
 pub(crate) async fn assemble(
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     state: &AppState,
     now: Timestamp,
     running: Option<Extension<RunningVersion>>,
@@ -922,26 +929,24 @@ pub(crate) async fn assemble(
     }
     // WP13.3: the findings of the Kerberos account's last self-test (identity plan section
     // 3.10), each with the values its localized text and its fix need.
-    if let Ok(view) = state.store.read(tenko_store::ReadConsistency::Local).await {
-        if let Ok(Some((account, _))) =
+    if let Ok(view) = state.store.read(tenko_store::ReadConsistency::Local).await
+        && let Ok(Some((account, _))) =
             tenko_dns::zone::kerberos::KerberosService::account(view.as_ref())
-        {
-            status
-                .warnings
-                .extend(account.findings.into_iter().map(|finding| StatusWarning {
-                    code: finding.code,
-                    detail: finding.detail,
-                    params: finding.params,
-                }));
-        }
-        // WP13.3: end.
-        // IAM-20: service-account tokens about to expire, and token families the server
-        // revoked.
-        if let Ok(warnings) = tenko_auth::service::token_warnings(view.as_ref(), now) {
-            status
-                .warnings
-                .extend(warnings.into_iter().map(coded_warning));
-        }
+    {
+        status
+            .warnings
+            .extend(account.findings.into_iter().map(|finding| StatusWarning {
+                code: finding.code,
+                detail: finding.detail,
+                params: finding.params,
+            }));
+    }
+    // WP13.3: end.
+    // IAM-20: the token warnings of the authentication service's last sweep.
+    if let Some(Extension(auth)) = auth {
+        status
+            .warnings
+            .extend(auth.token_warnings().into_iter().map(coded_warning));
     }
     // ADR 0028: every switch port a bounce left down (`connect.port_stuck`), with the
     // connector, the device and the port, until the connector host brought it up.

@@ -296,7 +296,7 @@ async fn list_service_account_tokens(
     params(("id" = String, Path, description = "Service account identifier")),
     request_body = TokenRequest,
     responses(
-        (status = 201, description = "The token: its secret (`tnk_...`, shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata", body = CreatedToken),
+        (status = 201, description = "The token: its secret (`tnk_...`, or `tnkc_...` with `renewable` or `source_prefixes`; shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata", body = CreatedToken),
         (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name, lifetime or source prefixes are invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), a grant goes beyond the account's (`auth.grant.exceeds_own`), or `renewable` while TGL-46 is off (`auth.token.renewal_refused`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such service account (`auth.service_account.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),

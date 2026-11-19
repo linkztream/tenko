@@ -514,6 +514,10 @@ pub struct TokenRequest {
 /// The most source prefixes of one token (IAM-21).
 pub const SOURCE_PREFIXES_MAX: usize = 64;
 
+/// The most scoped tokens one owner holds, superseded ones kept for reuse detection included
+/// (IAM-20): every scan of an owner's tokens stays complete and cheap.
+pub const SCOPED_TOKENS_MAX: usize = 500;
+
 impl TokenRequest {
     /// Whether the request asks for a scoped token.
     pub fn is_scoped(&self) -> bool {
