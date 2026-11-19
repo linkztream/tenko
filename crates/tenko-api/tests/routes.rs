@@ -322,6 +322,30 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/system/kek", "get_kek_status"),
     ("POST", "/system/kek/rotate", "rotate_kek"),
     ("POST", "/nodes/enroll", "enroll_node"),
+    // integrations (ADR 0035)
+    ("GET", "/integrations/enrollments", "list_integration_codes"),
+    (
+        "POST",
+        "/integrations/enrollments",
+        "create_integration_code",
+    ),
+    (
+        "DELETE",
+        "/integrations/enrollments/{id}",
+        "withdraw_integration_code",
+    ),
+    ("GET", "/integrations/ca", "integration_server_root"),
+    ("POST", "/integrations/enroll", "enroll_integration"),
+    (
+        "GET",
+        "/integrations/certificates",
+        "list_integration_certificates",
+    ),
+    (
+        "DELETE",
+        "/integrations/certificates/{serial}",
+        "revoke_integration_certificate",
+    ),
     // audit_export
     ("GET", "/settings/audit-export", "get_audit_export"),
     ("PUT", "/settings/audit-export", "put_audit_export"),

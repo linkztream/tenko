@@ -26,6 +26,7 @@
 //! | [`encoding`] | base64url, base32, hexadecimal |
 //! | [`clock`] | the time source |
 //! | [`error`] | [`AuthError`] and its codes |
+//! | [`client_cert`] | integration client certificates: records, enrollment codes, enrollment, revocation, the index of the integration listener (ADR 0035) |
 
 #![forbid(unsafe_code)]
 
@@ -34,6 +35,7 @@ pub mod authz;
 pub mod challenge;
 pub mod clock;
 // WP13.0: the contracts of directory sign-in (identity plan section 4.1).
+pub mod client_cert;
 pub mod directory;
 pub mod encoding;
 pub mod error;

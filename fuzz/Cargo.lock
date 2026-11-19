@@ -3012,6 +3012,7 @@ name = "tenko-api"
 version = "0.0.12-rc.4"
 dependencies = [
  "arc-swap",
+ "async-trait",
  "aws-lc-rs",
  "axum",
  "brotli",

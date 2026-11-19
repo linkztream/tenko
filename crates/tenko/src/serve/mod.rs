@@ -1770,6 +1770,20 @@ async fn start(
         )
         .await?;
     running.tasks.extend(cluster.tasks());
+    // Integration client certificates (ADR 0035): the service and the task that keeps the
+    // index of its certificate records current.
+    let client_certs = Arc::new(tenko_auth::client_cert::ClientCerts::new(
+        Arc::clone(&store_dyn),
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+        Arc::new(tenko_api::routes::integrations::CaIssuer::new(
+            Arc::clone(&store_dyn),
+            Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+            Arc::clone(cluster.registry().ca()),
+        )),
+    ));
+    running
+        .tasks
+        .push(client_certs.follow(running.stop.subscribe()));
     leaders.extend(cluster.leader_services());
     let mut scans = steps
         .run(
@@ -1980,6 +1994,7 @@ async fn start(
             connectors.register(&mut server);
             connectors.publish_health(&state);
             cluster.register(&mut server, &state);
+            server.extensions.insert(Arc::clone(&client_certs));
             scans.register(&mut server);
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));

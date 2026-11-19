@@ -49,6 +49,7 @@ dns_xfr_message          65535    MAX_MESSAGE_LEN: a request over TCP or UDP, a 
 dns_zonefile             65536    an import body may reach 512 MiB (MAX_ZONE_FILE_REQUEST, crates/tenko-api/src/routes/dns.rs); 64 KiB holds hundreds of records, $GENERATE, $ORIGIN and multi-line entries, while the token cap of 262,140 octets stays out of reach
 gss_mic                  65563    a 28-octet MIC token (TOKEN_LEN, crates/tenko-krb/src/mic.rs) over a DNS message of at most MAX_MESSAGE_LEN
 import_files             65537    1 octet that picks the file name; uploads may reach max_upload (20 MiB, crates/tenko-ipam/src/import/service.rs); compressed workbooks reach the cell and text limits from small inputs
+integration_enroll       65536    header lines, one octet and the body of POST /integrations/enroll: the body is read up to MAX_REQUEST (16 KiB, crates/tenko-api/src/routes/integrations.rs) and the headers up to hyper's limit; 64 KiB reaches both
 integration_identity     65536    a client certificate from the TLS handshake of the integration listener, after the chain check; a handshake message is at most 64 KiB in rustls
 kek_transfer             6280     MAX_SEALED_LEN (6,279, crates/tenko-vault/src/transfer.rs) and one octet more, so the refusal above it is reached
 krb_ap_req               16387    1 mode octet, 2 octets of split and a token of at most MAX_KEY_DATA (16 KiB): the acceptor reads tokens from TKEY only

@@ -484,3 +484,10 @@ path = "fuzz_targets/integration_identity.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "integration_enroll"
+path = "fuzz_targets/integration_enroll.rs"
+test = false
+doc = false
+bench = false
