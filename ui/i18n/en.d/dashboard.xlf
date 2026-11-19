@@ -113,6 +113,14 @@
         <notes><note category="description">A node set up by an older installer: the version the server runs and the one root command that brings the node to one version (docs/upgrades.md section 9.5).</note></notes>
         <segment><source>The server runs {version}, but this node is not yet set up to run one version. Run {command} once as root.</source></segment>
       </unit>
+      <unit id="dashboard.finding.health.auth.token.expiring">
+        <notes><note category="description">A service-account token with fewer than 14 days left (IAM-20): the account, the token's name and its end.</note></notes>
+        <segment><source>The token {token} of {account} expires at {expires_at}. Renew or replace it.</source></segment>
+      </unit>
+      <unit id="dashboard.finding.health.auth.token.revoked">
+        <notes><note category="description">A token family the server revoked (IAM-20); reason is reuse_detected or renewal_failures. It stands until an administrator removes the token.</note></notes>
+        <segment><source>The token {token} of {account} was revoked with its family ({reason}). Look into it, then remove the token.</source></segment>
+      </unit>
       <unit id="dashboard.finding.action.resolve">
         <segment><source>Resolve conflict</source></segment>
       </unit>

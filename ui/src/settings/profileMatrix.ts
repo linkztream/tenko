@@ -9,6 +9,7 @@ import {
   AUDIT_EXPORT_DEFAULT,
   REVEAL_DEFAULT,
   settingValue,
+  TOKEN_SELF_RENEWAL_DEFAULT,
   TOGGLES,
   UPDATES_DEFAULT,
   weakerThan,
@@ -33,6 +34,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     updates: UPDATES_DEFAULT.home,
     secret_reveal: REVEAL_DEFAULT.home,
     update_prereleases: false,
+    token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.home,
   },
   standard: {
     profile: "standard",
@@ -47,6 +49,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     updates: UPDATES_DEFAULT.standard,
     secret_reveal: REVEAL_DEFAULT.standard,
     update_prereleases: false,
+    token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.standard,
   },
   hardened: {
     profile: "hardened",
@@ -61,6 +64,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     updates: UPDATES_DEFAULT.hardened,
     secret_reveal: REVEAL_DEFAULT.hardened,
     update_prereleases: false,
+    token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.hardened,
   },
   lab: {
     profile: "lab",
@@ -75,6 +79,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     updates: UPDATES_DEFAULT.lab,
     secret_reveal: REVEAL_DEFAULT.lab,
     update_prereleases: false,
+    token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.lab,
   },
 };
 

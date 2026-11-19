@@ -452,6 +452,8 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   }
   const prereleases = optBool(body, "update_prereleases");
   if (prereleases !== undefined) next.update_prereleases = prereleases;
+  const renewal = optBool(body, "token_self_renewal");
+  if (renewal !== undefined) next.token_self_renewal = renewal;
 
   // The server's rule (`update_security_settings` in crates/tenko-auth/src/service/admin.rs, IAM-07): a change is
   // refused when the vault holds an operator secret, the result lets a PIN stand alone (a policy that admits a

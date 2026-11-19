@@ -37,13 +37,13 @@ async function openEditor(name: string) {
 }
 
 describe("the security page", () => {
-  it("lists TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 in order with the current and the profile value", async () => {
+  it("lists TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46 in order with the current and the profile value", async () => {
     await signInAs();
     await openPage();
     const ids = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
     expect(ids).toEqual(TOGGLES.map((d) => d.id));
-    expect(ids).toHaveLength(11);
-    expect(ids).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21", "TGL-23", "TGL-24", "TGL-45"]);
+    expect(ids).toHaveLength(12);
+    expect(ids).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21", "TGL-23", "TGL-24", "TGL-45", "TGL-46"]);
     // The Standard profile: administrators need MFA, passwords are at least 12 characters.
     expect(within(row("TGL-02")).getAllByText("Required for administrators")).toHaveLength(2);
     expect(within(row("TGL-01")).getAllByText("Standard: at least 12 characters")).toHaveLength(2);
@@ -218,7 +218,7 @@ describe("the security page", () => {
     expect(
       await within(dialog).findByText("Switching to Hardened resets every setting to the Hardened values."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("10 settings change:")).toBeTruthy();
+    expect(within(dialog).getByText("11 settings change:")).toBeTruthy();
     const table = within(dialog).getByRole("table", { name: "Settings that change" });
     expect(within(table).getByText("Password policy preset")).toBeTruthy();
     expect(within(table).getByText("Lockout")).toBeTruthy();
@@ -532,7 +532,7 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     expect(within(reveal).getAllByText(STANDARD)).toHaveLength(2);
     expect(within(reveal).getByText("Follows the profile")).toBeTruthy();
     expect(within(reveal).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText("TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45")).toBeTruthy();
+    expect(screen.getByText("TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46")).toBeTruthy();
     expect(session()?.banner.deviations).toEqual([]);
   });
 

@@ -186,6 +186,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/access/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Describe the calling token */
+        get: operations["describe_own_token"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/access/token/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Renew the calling token, shown once */
+        post: operations["renew_own_token"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/addresses": {
         parameters: {
             query?: never;
@@ -8039,10 +8073,11 @@ export interface components {
             /** @description The token text. It is shown only in this answer and cannot be read again. */
             token: string;
         };
-        /** @description A new token: the secret is shown once. */
+        /** @description A new token: the secrets are shown once. */
         CreatedToken: {
             /** @description Its metadata. */
             info: components["schemas"]["TokenInfo"];
+            renewal_secret?: components["schemas"]["SecretString"] | null;
             /** @description The token, for `Authorization: Bearer`. */
             token: components["schemas"]["SecretString"];
         };
@@ -16201,6 +16236,15 @@ export interface components {
             /** @description The SHA-256 of its record, hexadecimal. */
             record: string;
         };
+        /** @description `GET /access/token`: the calling token's own description (IAM-20). */
+        OwnToken: {
+            /** @description The service account the token acts for. */
+            account: components["schemas"]["UserId"];
+            /** @description Its name. */
+            account_name: string;
+            /** @description The token, without its secrets; `renewable` with TGL-46 applied. */
+            token: components["schemas"]["TokenInfo"];
+        };
         /**
          * @description How a name got its owner.
          * @enum {string}
@@ -18280,10 +18324,16 @@ export interface components {
                 name: string;
                 /** @description The first characters of the token. */
                 prefix: string;
+                /** @description IAM-20: the token may renew itself. */
+                renewable?: boolean;
+                renewed_at?: components["schemas"]["Timestamp"] | null;
+                revoked?: components["schemas"]["TokenRevocation"] | null;
                 /** @description A scoped token (IAM-10); absent for a personal token. */
                 scoped?: boolean;
                 /** @description The special scopes of a scoped token. */
                 scopes?: components["schemas"]["TokenScope"][];
+                /** @description IAM-21: the client prefixes the token is accepted from; absent for anywhere. */
+                source_prefixes?: string[];
             }[];
             /** @description Cursor of the next page; `null` on the last page. */
             next_cursor?: string | null;
@@ -21002,6 +21052,11 @@ export interface components {
          *     `Revision(0)` is the empty store; the first batch commits as `Revision(1)`.
          */
         Revision: number;
+        /**
+         * @description Why the server revoked a token family.
+         * @enum {string}
+         */
+        RevocationReason: "reuse_detected" | "renewal_failures" | "other";
         /** @description A role in `GET /roles`. */
         RoleInfo: {
             /** @description What it grants. */
@@ -22164,6 +22219,12 @@ export interface components {
              */
             token_max_days?: number | null;
             /**
+             * @description TGL-46: service-account tokens may renew themselves (IAM-20). `None` in settings
+             *     stored before the toggle existed: the profile's value applies
+             *     ([`SecuritySettings::token_self_renewal`]).
+             */
+            token_self_renewal?: boolean | null;
+            /**
              * @description TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
              *     transfer to an address outside them needs XoT; an empty list makes every transfer
              *     need it. Absent in settings stored before the setting existed, and after a change of
@@ -22328,6 +22389,8 @@ export interface components {
             secret_reveal?: components["schemas"]["RevealPolicy"] | null;
             session?: components["schemas"]["SessionLifetime"] | null;
             token_max_lifetime?: components["schemas"]["TokenMaxLifetime"] | null;
+            /** @description TGL-46. */
+            token_self_renewal?: boolean | null;
             /**
              * @description TGL-10: the networks that count as the site, in CIDR notation; an empty list is
              *     allowed (every transfer needs XoT under Hardened).
@@ -23866,8 +23929,18 @@ export interface components {
             grants?: components["schemas"]["TokenGrant"][] | null;
             /** @description A name for the token. */
             name: string;
+            /**
+             * @description IAM-20: a service account's scoped token may renew itself under TGL-46; the answer
+             *     then carries its renewal secret.
+             */
+            renewable?: boolean;
             /** @description The special scopes of a scoped token: `metrics`, `audit:read`. */
             scopes?: components["schemas"]["TokenScope"][];
+            /**
+             * @description IAM-21: the client prefixes a scoped token is accepted from (at most
+             *     [`SOURCE_PREFIXES_MAX`], a host address without a length); empty for anywhere.
+             */
+            source_prefixes?: string[];
         };
         /** @description One grant of a scoped token: a role, globally or over one scope rule. */
         TokenGrant: {
@@ -23889,10 +23962,16 @@ export interface components {
             name: string;
             /** @description The first characters of the token. */
             prefix: string;
+            /** @description IAM-20: the token may renew itself. */
+            renewable?: boolean;
+            renewed_at?: components["schemas"]["Timestamp"] | null;
+            revoked?: components["schemas"]["TokenRevocation"] | null;
             /** @description A scoped token (IAM-10); absent for a personal token. */
             scoped?: boolean;
             /** @description The special scopes of a scoped token. */
             scopes?: components["schemas"]["TokenScope"][];
+            /** @description IAM-21: the client prefixes the token is accepted from; absent for anywhere. */
+            source_prefixes?: string[];
         };
         /** @description The TGL-05 value in a patch. */
         TokenMaxLifetime: {
@@ -23902,6 +23981,18 @@ export interface components {
              */
             days: number;
         } | "unlimited";
+        /** @description `POST /access/token/renew` (IAM-20). */
+        TokenRenew: {
+            /** @description The renewal secret that came with the token. */
+            renewal_secret: components["schemas"]["SecretString"];
+        };
+        /** @description The revocation of a token family by the server (IAM-20). */
+        TokenRevocation: {
+            /** @description When the family was revoked. */
+            at: components["schemas"]["Timestamp"];
+            /** @description Why. */
+            reason: components["schemas"]["RevocationReason"];
+        };
         /**
          * @description A special scope of a scoped token: `metrics`, `audit:read`, or `mirror:<id>` (the push of one mirrored source; minted when the mirror is created, never requested here)
          * @example metrics
@@ -26683,7 +26774,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The token: its secret (`tnk_...`, shown once) and its metadata */
+            /** @description The token: its secret (`tnk_...`, shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata */
             201: {
                 headers: {
                     [name: string]: unknown;
@@ -26692,7 +26783,7 @@ export interface operations {
                     "application/json": components["schemas"]["CreatedToken"];
                 };
             };
-            /** @description The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`) */
+            /** @description The body is malformed (`sys.invalid_request`) or the name, lifetime or source prefixes are invalid (`auth.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -26710,7 +26801,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`) */
+            /** @description The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), a grant goes beyond the account's (`auth.grant.exceeds_own`), or `renewable` while TGL-46 is off (`auth.token.renewal_refused`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -26845,6 +26936,113 @@ export interface operations {
             };
             /** @description The principal may not do this: it lacks the permission, a personal token tries to administer (users, settings, tokens and sessions need an interactive session), or the action needs a fresh or stronger authentication (`auth.forbidden`, `auth.out_of_scope`, `auth.step_up_required`) */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    describe_own_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The calling scoped token */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OwnToken"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    renew_own_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TokenRenew"];
+            };
+        };
+        responses: {
+            /** @description The new token and renewal secret (shown once) and the token's metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedToken"];
+                };
+            };
+            /** @description The body is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The token may not renew (`auth.token.renewal_refused`: `reason` is `disabled`, `not_renewable` or `wrong_secret`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another renewal or use of the family came first (`auth.conflict`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

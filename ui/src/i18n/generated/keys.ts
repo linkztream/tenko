@@ -122,6 +122,7 @@ export type MessageKey =
   | "access.token.error.name"
   | "access.token.error.scope"
   | "access.token.expired"
+  | "access.token.from"
   | "access.token.grants"
   | "access.token.grants_help"
   | "access.token.kind"
@@ -137,10 +138,22 @@ export type MessageKey =
   | "access.token.no_expiry"
   | "access.token.personal"
   | "access.token.remove_grant"
+  | "access.token.renewable"
+  | "access.token.renewable_help"
+  | "access.token.renewable_off"
+  | "access.token.renewal_secret"
+  | "access.token.renewal_secret_body"
+  | "access.token.renewed_at"
+  | "access.token.renews"
   | "access.token.revoke_body"
   | "access.token.revoke_named"
   | "access.token.revoke_title"
+  | "access.token.revoked.other"
+  | "access.token.revoked.renewal_failures"
+  | "access.token.revoked.reuse_detected"
   | "access.token.scopes"
+  | "access.token.source_prefixes"
+  | "access.token.source_prefixes_help"
   | "access.token.stored"
   | "access.token_scope.audit_read"
   | "access.token_scope.audit_read_help"
@@ -342,7 +355,11 @@ export type MessageKey =
   | "audit.action.auth.settings.update"
   | "audit.action.auth.setup.complete"
   | "audit.action.auth.token.create"
+  | "audit.action.auth.token.expiring"
+  | "audit.action.auth.token.renew"
+  | "audit.action.auth.token.reuse_detected"
   | "audit.action.auth.token.revoke"
+  | "audit.action.auth.token.source_refused"
   | "audit.action.auth.totp.enroll"
   | "audit.action.auth.totp.remove"
   | "audit.action.auth.user.create"
@@ -1540,6 +1557,8 @@ export type MessageKey =
   | "dashboard.finding.evidence.job_step"
   | "dashboard.finding.evidence.utilization"
   | "dashboard.finding.evidence.utilization_bare"
+  | "dashboard.finding.health.auth.token.expiring"
+  | "dashboard.finding.health.auth.token.revoked"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -4332,6 +4351,7 @@ export type MessageKey =
   | "errors.auth.step_up_required"
   | "errors.auth.throttled"
   | "errors.auth.token.lifetime_exceeded"
+  | "errors.auth.token.renewal_refused"
   | "errors.auth.totp.already_enrolled"
   | "errors.auth.totp.code_mismatch"
   | "errors.auth.totp.not_enrolled"
@@ -8034,6 +8054,8 @@ export type MessageKey =
   | "toggles.token_max_days.days"
   | "toggles.token_max_days.name"
   | "toggles.token_max_days.unlimited"
+  | "toggles.token_self_renewal.hint"
+  | "toggles.token_self_renewal.name"
   | "toggles.update_prereleases.name"
   | "toggles.updates.check_off"
   | "toggles.updates.check_on"
@@ -8417,8 +8439,10 @@ export interface MessageArgs {
   "access.subject.service": { name: string | number };
   "access.token.created_body": { name: string | number };
   "access.token.days": { count: number };
+  "access.token.from": { prefixes: string | number };
   "access.token.max_days": { days: string | number };
   "access.token.remove_grant": { n: string | number };
+  "access.token.renewed_at": { when: string | number };
   "access.token.revoke_body": { account: string | number };
   "access.token.revoke_named": { name: string | number };
   "access.token.revoke_title": { name: string | number };
@@ -8624,6 +8648,8 @@ export interface MessageArgs {
   "dashboard.finding.evidence.job_step": { step: string | number };
   "dashboard.finding.evidence.utilization": { percent: string | number; threshold: string | number };
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
+  "dashboard.finding.health.auth.token.expiring": { account: string | number; expires_at: string | number; token: string | number };
+  "dashboard.finding.health.auth.token.revoked": { account: string | number; reason: string | number; token: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -9164,6 +9190,7 @@ export interface MessageArgs {
   "errors.auth.setup.invalid_host_name": { host_name: string | number };
   "errors.auth.throttled": { retry_after: string | number };
   "errors.auth.token.lifetime_exceeded": { max_days: string | number };
+  "errors.auth.token.renewal_refused": { reason: string | number };
   "errors.auth.webauthn.origin_mismatch": { origin: string | number };
   "errors.client.bad_response": { status: string | number };
   "errors.connect.port_stuck": { cause: string | number; connector: string | number; device: string | number; port: string | number };
@@ -10147,6 +10174,7 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.error.name",
   "access.token.error.scope",
   "access.token.expired",
+  "access.token.from",
   "access.token.grants",
   "access.token.grants_help",
   "access.token.kind",
@@ -10162,10 +10190,22 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.no_expiry",
   "access.token.personal",
   "access.token.remove_grant",
+  "access.token.renewable",
+  "access.token.renewable_help",
+  "access.token.renewable_off",
+  "access.token.renewal_secret",
+  "access.token.renewal_secret_body",
+  "access.token.renewed_at",
+  "access.token.renews",
   "access.token.revoke_body",
   "access.token.revoke_named",
   "access.token.revoke_title",
+  "access.token.revoked.other",
+  "access.token.revoked.renewal_failures",
+  "access.token.revoked.reuse_detected",
   "access.token.scopes",
+  "access.token.source_prefixes",
+  "access.token.source_prefixes_help",
   "access.token.stored",
   "access.token_scope.audit_read",
   "access.token_scope.audit_read_help",
@@ -10367,7 +10407,11 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.settings.update",
   "audit.action.auth.setup.complete",
   "audit.action.auth.token.create",
+  "audit.action.auth.token.expiring",
+  "audit.action.auth.token.renew",
+  "audit.action.auth.token.reuse_detected",
   "audit.action.auth.token.revoke",
+  "audit.action.auth.token.source_refused",
   "audit.action.auth.totp.enroll",
   "audit.action.auth.totp.remove",
   "audit.action.auth.user.create",
@@ -11565,6 +11609,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.evidence.job_step",
   "dashboard.finding.evidence.utilization",
   "dashboard.finding.evidence.utilization_bare",
+  "dashboard.finding.health.auth.token.expiring",
+  "dashboard.finding.health.auth.token.revoked",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
@@ -14357,6 +14403,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.auth.step_up_required",
   "errors.auth.throttled",
   "errors.auth.token.lifetime_exceeded",
+  "errors.auth.token.renewal_refused",
   "errors.auth.totp.already_enrolled",
   "errors.auth.totp.code_mismatch",
   "errors.auth.totp.not_enrolled",
@@ -18059,6 +18106,8 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.token_max_days.days",
   "toggles.token_max_days.name",
   "toggles.token_max_days.unlimited",
+  "toggles.token_self_renewal.hint",
+  "toggles.token_self_renewal.name",
   "toggles.update_prereleases.name",
   "toggles.updates.check_off",
   "toggles.updates.check_on",

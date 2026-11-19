@@ -1,7 +1,7 @@
 // Service accounts (IAM-10, docs/access.md section 6): accounts for automation, without a
 // password, a second factor or a session, that act only through scoped tokens. The list, the
 // dialog that creates one, and the tokens of one account (`ServiceAccountTokens`, also on the
-// account's user page).
+// account's user page) with their renewal (IAM-20) and client networks (IAM-21).
 import { A } from "@solidjs/router";
 import { createEffect, createSignal, For, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
@@ -168,10 +168,30 @@ export function ServiceAccountTokens(props: { account: UserInfo; catalog: ScopeC
                       <tr data-testid="access-sa-token" data-key={token.name}>
                         <td>
                           {token.name} <span class="mono muted">{token.prefix}…</span>
+                          <Show when={token.revoked}>
+                            {(revoked) => (
+                              <>
+                                {" "}
+                                <span class="tag conflict" data-testid="access-sa-token-revoked">
+                                  {t(`access.token.revoked.${revoked().reason}`)}
+                                </span>
+                              </>
+                            )}
+                          </Show>
+                          <Show when={!token.revoked && token.renewable}>
+                            {" "}
+                            <span class="tag">{t("access.token.renews")}</span>
+                          </Show>
+                          <Show when={token.renewed_at}>
+                            {(at) => <div class="muted">{t("access.token.renewed_at", { when: formatRelative(at()) })}</div>}
+                          </Show>
                         </td>
                         <td>
                           <ul class="plain-list">
                             <For each={tokenReach(token, names())}>{(line) => <li>{line}</li>}</For>
+                            <Show when={(token.source_prefixes ?? []).length > 0}>
+                              <li class="mono">{t("access.token.from", { prefixes: (token.source_prefixes ?? []).join(", ") })}</li>
+                            </Show>
                           </ul>
                         </td>
                         <td class="num">

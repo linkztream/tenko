@@ -15,6 +15,8 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
       return { passkey_for_admins: Boolean(value) };
     case "update_prereleases":
       return { update_prereleases: Boolean(value) };
+    case "token_self_renewal":
+      return { token_self_renewal: Boolean(value) };
     case "session":
       return { session: value as SessionLifetime };
     case "token_max_days":

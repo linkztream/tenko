@@ -1,4 +1,4 @@
-// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45, docs/SECURITY-PROFILES.md): their
+// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -24,7 +24,8 @@ export type ToggleSetting =
   | "audit_export"
   | "updates"
   | "secret_reveal"
-  | "update_prereleases";
+  | "update_prereleases"
+  | "token_self_renewal";
 
 export interface ToggleDef {
   id: string;
@@ -44,6 +45,7 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-23", setting: "updates", name: "toggles.updates.name" },
   { id: "TGL-24", setting: "secret_reveal", name: "toggles.secret_reveal.name" },
   { id: "TGL-45", setting: "update_prereleases", name: "toggles.update_prereleases.name" },
+  { id: "TGL-46", setting: "token_self_renewal", name: "toggles.token_self_renewal.name" },
 ];
 
 /** The total number of toggles in the profile matrix; later ones arrive with their features. */
@@ -68,6 +70,14 @@ export const AUDIT_EXPORT_DEFAULT: Readonly<Record<Profile, AuditExport>> = {
   standard: "optional",
   hardened: "required",
   lab: "local",
+};
+
+/** TGL-46 (IAM-20): whether service-account tokens may renew themselves, per profile. */
+export const TOKEN_SELF_RENEWAL_DEFAULT: Readonly<Record<Profile, boolean>> = {
+  home: true,
+  standard: true,
+  hardened: false,
+  lab: true,
 };
 
 /** The audit export of a settings object; one without it (an older answer) follows its profile. */
@@ -230,6 +240,7 @@ export function formatToggle(setting: string, value: unknown): string {
       return t(`toggles.mfa.${value as MfaRequirement}`);
     case "passkey_for_admins":
     case "update_prereleases":
+    case "token_self_renewal":
       return value ? t("common.yes") : t("common.no");
     case "session":
       return formatSession(value as SessionLifetime);
@@ -314,5 +325,6 @@ export function settingValue(settings: SecuritySettings, setting: ToggleSetting)
   if (setting === "updates") return updatesOf(settings);
   if (setting === "lockout") return lockoutOf(settings);
   if (setting === "update_prereleases") return settings.update_prereleases ?? false;
+  if (setting === "token_self_renewal") return settings.token_self_renewal ?? TOKEN_SELF_RENEWAL_DEFAULT[settings.profile];
   return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

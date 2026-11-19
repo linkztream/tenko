@@ -19,11 +19,13 @@
 // strength a role policy asks for.
 import type { components } from "../generated/schema";
 import type { AuthStrength, RoleName, SecuritySettings, TokenInfo, UserInfo } from "../types";
+import { parseCidr } from "../../ipam/ip";
 import { db, onMockReset, toUserInfo, type MockToken, type MockUser } from "./db";
 import { MOCK_USER_IDS } from "./fixtures";
 import { IPAM_IDS } from "./ipam/seed";
 import { ipamState } from "./ipam/state";
 import { VrfView } from "./ipam/tree";
+import { tokenSelfRenewal } from "./profiles";
 import { Problem, fail } from "./reply";
 import { DAY_MS, iso, randomId, randomToken, uuidHandle } from "./util";
 import { invalid, isRecord, ROLE_NAMES } from "./validate";
@@ -410,6 +412,10 @@ export interface TokenRequest {
   /** Null when the body has no `grants`. */
   grants: TokenGrant[] | null;
   scopes: TokenScope[];
+  /** IAM-20: the token may renew itself. */
+  renewable: boolean;
+  /** IAM-21: the client networks the token is accepted from. */
+  sourcePrefixes: string[];
 }
 
 /** Reads the body of `POST /auth/tokens` and `POST /access/service-accounts/{id}/tokens`. */
@@ -440,7 +446,18 @@ export function parseTokenRequest(body: Record<string, unknown>): TokenRequest {
     }
     scopes = [...new Set(list as TokenScope[])].sort();
   }
-  return { name: rawName, days: typeof days === "number" ? days : undefined, grants, scopes };
+  const prefixes = body.source_prefixes ?? [];
+  if (!Array.isArray(prefixes) || prefixes.length > 64 || prefixes.some((p) => typeof p !== "string" || parseCidr(p.includes("/") ? p : `${p}/${p.includes(":") ? 128 : 32}`, { strict: false }) === null)) {
+    return invalid("source_prefixes", "each entry is an address or a network such as 192.0.2.0/24");
+  }
+  return {
+    name: rawName,
+    days: typeof days === "number" ? days : undefined,
+    grants,
+    scopes,
+    renewable: body.renewable === true,
+    sourcePrefixes: prefixes as string[],
+  };
 }
 
 /** Whether a request asks for a scoped token (`grants` present, or any special scope). */
@@ -506,10 +523,18 @@ function tokenName(raw: string): string {
  * lifetime), the record in `db.tokens` and the grants and scopes in the access state. The
  * caller commits the change and checks the strength of the session.
  */
-export function issueScopedToken(owner: MockUser, request: TokenRequest): { token: string; info: TokenInfo } {
+export function issueScopedToken(
+  owner: MockUser,
+  request: TokenRequest,
+): { token: string; renewal_secret?: string; info: TokenInfo } {
   const name = tokenName(request.name);
   const grants = validateTokenGrants(owner, request);
   const lifetime = tokenLifetimeDays(request.days);
+  // IAM-20: a service account's token renews under TGL-46 only.
+  if (request.renewable && !access.accounts.has(owner.id)) invalid("renewable", "only a service account's token renews itself");
+  if (request.renewable && !tokenSelfRenewal(db.settings)) {
+    problem("auth.token.renewal_refused", 403, { params: { reason: "disabled" } });
+  }
   const secret = `tnk_${randomToken(43)}`;
   const now = Date.now();
   const info: TokenInfo = {
@@ -522,9 +547,12 @@ export function issueScopedToken(owner: MockUser, request: TokenRequest): { toke
     scopes: [...request.scopes],
   };
   if (lifetime !== null) info.expires_at = iso(now + lifetime * DAY_MS);
+  if (request.renewable) info.renewable = true;
+  if (request.sourcePrefixes.length > 0) info.source_prefixes = [...request.sourcePrefixes];
   db.tokens.push({ user_id: owner.id, info });
   access.tokens.set(info.id, { grants: structuredClone(grants), scopes: [...request.scopes] });
-  return { token: secret, info: { ...info } };
+  const renewal = request.renewable ? { renewal_secret: `tnr_${randomToken(43)}` } : {};
+  return { token: secret, ...renewal, info: { ...info } };
 }
 
 // ---------------------------------------------------------------------------------

@@ -213,6 +213,44 @@ describe("the service accounts", () => {
     fireEvent.click(within(await screen.findByTestId("dialog-confirm")).getByTestId("confirm-ok"));
     await waitFor(() => expect(db.tokens.some((t) => t.info.name === "scraper")).toBe(false));
   });
+
+  it("creates a renewable token bound to client networks and shows its renewal secret once (IAM-20, IAM-21)", async () => {
+    await openPage();
+    const account = await screen.findByTestId("access-service-account");
+    fireEvent.click(within(account).getByTestId("access-service-account-tokens"));
+    fireEvent.click(await within(account).findByTestId("access-sa-token-create"));
+    const dialog = await screen.findByTestId("dialog-token");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "renewer" } });
+    fireEvent.click(within(dialog).getByTestId("token-grant-remove"));
+    fireEvent.click(within(dialog).getByTestId("field-token-scope-metrics"));
+    const renewable = within(dialog).getByTestId("field-renewable") as HTMLInputElement;
+    await waitFor(() => expect(renewable.disabled).toBe(false));
+    fireEvent.click(renewable);
+    fireEvent.input(within(dialog).getByTestId("field-source_prefixes"), {
+      target: { value: "198.51.100.0/24\n2001:db8:42::/48" },
+    });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+
+    const shown = await screen.findByTestId("dialog-token-created");
+    expect(within(shown).getByTestId("token-renewal-secret").textContent).toMatch(/^tnr_/);
+    fireEvent.click(within(shown).getByTestId("token-stored"));
+    fireEvent.click(within(shown).getByTestId("token-done"));
+    const token = db.tokens.find((t) => t.info.name === "renewer");
+    expect(token?.info).toMatchObject({ renewable: true, source_prefixes: ["198.51.100.0/24", "2001:db8:42::/48"] });
+    const row = (await within(account).findByText("From 198.51.100.0/24, 2001:db8:42::/48")).closest("tr")!;
+    expect(within(row).getByText("renews")).toBeTruthy();
+  });
+
+  it("offers no renewal while TGL-46 is off and says why", async () => {
+    db.settings.token_self_renewal = false;
+    await openPage();
+    const account = await screen.findByTestId("access-service-account");
+    fireEvent.click(within(account).getByTestId("access-service-account-tokens"));
+    fireEvent.click(await within(account).findByTestId("access-sa-token-create"));
+    const dialog = await screen.findByTestId("dialog-token");
+    await within(dialog).findByText("Tokens do not renew under the security settings (TGL-46 is off).");
+    expect((within(dialog).getByTestId("field-renewable") as HTMLInputElement).disabled).toBe(true);
+  });
 });
 
 describe("accessibility", () => {

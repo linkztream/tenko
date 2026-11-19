@@ -1,7 +1,9 @@
 // Creates an API token (IAM-10): a name, a lifetime within the profile's maximum (TGL-05) and,
 // for a scoped token, its grants and special scopes. The personal token page offers both kinds
-// (`personal`); a service account's tokens are always scoped. The new token is shown once.
-import { createMemo, createSignal, For, Show, untrack } from "solid-js";
+// (`personal`); a service account's tokens are always scoped, may renew themselves (IAM-20,
+// under TGL-46) and may be bound to client networks (IAM-21). The new token is shown once.
+import { createMemo, createResource, createSignal, For, Show, untrack } from "solid-js";
+import { api } from "../../api/client";
 import type { components } from "../../api/generated/schema";
 import { lifetimeChoices, tokenMaxDays } from "../../auth/account/client";
 import { session } from "../../auth/session";
@@ -26,6 +28,13 @@ export function TokenDialog(props: {
   onCreated: () => void;
   onClose: () => void;
 }) {
+  // TGL-46 decides whether a service account's token may renew itself.
+  const [renewal] = createResource(
+    () => !props.personal,
+    async () => (await api.get("/api/v1/settings/security")).toggles.some((tg) => tg.id === "TGL-46" && (tg.value as unknown) === true),
+  );
+  const [renewable, setRenewable] = createSignal(false);
+  const [prefixes, setPrefixes] = createSignal("");
   const max = createMemo(() => {
     const profile = session()?.profile;
     return profile ? tokenMaxDays(profile) : 30;
@@ -61,7 +70,13 @@ export function TokenDialog(props: {
     if (grantsError() || busy()) return;
     const days = lifetime() === NO_EXPIRY ? null : Number(lifetime());
     const body: TokenCreate = scoped()
-      ? scopedTokenBody(name().trim(), days, rowsToGrants(rows()) ?? [], scopes())
+      ? {
+          ...scopedTokenBody(name().trim(), days, rowsToGrants(rows()) ?? [], scopes()),
+          renewable: renewable() && renewal() === true,
+          source_prefixes: prefixes()
+            .split(/[\s,]+/)
+            .filter((entry) => entry !== ""),
+        }
       : { name: name().trim(), expires_in_days: days };
     setBusy(true);
     setError(null);
@@ -178,6 +193,41 @@ export function TokenDialog(props: {
                   error={grantsError()}
                 />
               </Show>
+              <Show when={!props.personal}>
+                <div class="field">
+                  <label class="ackrow">
+                    <input
+                      type="checkbox"
+                      class="cb"
+                      checked={renewable() && renewal() === true}
+                      disabled={renewal() !== true}
+                      data-testid="field-renewable"
+                      aria-describedby="token-renewable-help"
+                      onChange={(e) => setRenewable(e.currentTarget.checked)}
+                    />
+                    {t("access.token.renewable")}
+                  </label>
+                  <span class="help" id="token-renewable-help">
+                    {renewal() === false ? t("access.token.renewable_off") : t("access.token.renewable_help")}
+                  </span>
+                </div>
+                <div class="field">
+                  <label for="token-prefixes">{t("access.token.source_prefixes")}</label>
+                  <textarea
+                    id="token-prefixes"
+                    class="input mono"
+                    rows={3}
+                    spellcheck={false}
+                    data-testid="field-source_prefixes"
+                    aria-describedby="token-prefixes-help"
+                    value={prefixes()}
+                    onInput={(e) => setPrefixes(e.currentTarget.value)}
+                  />
+                  <span class="help" id="token-prefixes-help">
+                    {t("access.token.source_prefixes_help")}
+                  </span>
+                </div>
+              </Show>
             </div>
             <div class="dialog-actions">
               <button type="button" class="btn ghost" data-testid="form-cancel" onClick={() => props.onClose()}>
@@ -191,7 +241,14 @@ export function TokenDialog(props: {
         </Dialog>
       }
     >
-      {(token) => <TokenOnceDialog name={token().info.name} token={token().token} onClose={props.onClose} />}
+      {(token) => (
+        <TokenOnceDialog
+          name={token().info.name}
+          token={token().token}
+          renewalSecret={token().renewal_secret ?? undefined}
+          onClose={props.onClose}
+        />
+      )}
     </Show>
   );
 }

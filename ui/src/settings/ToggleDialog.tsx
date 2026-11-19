@@ -130,6 +130,15 @@ export function ToggleDialog(props: {
                 onDraft={onDraft}
               />
             </Match>
+            <Match when={setting === "token_self_renewal"}>
+              <OnOffEditor
+                id="tg-token-renewal"
+                label={t("toggles.token_self_renewal.name")}
+                hint={t("toggles.token_self_renewal.hint")}
+                initial={Boolean(initial)}
+                onDraft={onDraft}
+              />
+            </Match>
             <Match when={setting === "update_prereleases"}>
               <OnOffEditor
                 id="tg-prereleases"

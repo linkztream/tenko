@@ -150,9 +150,25 @@
         <notes><note category="description">What the audit action auth.token.create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create an API token</source></segment>
       </unit>
+      <unit id="audit.action.auth.token.expiring">
+        <notes><note category="description">What the audit action auth.token.expiring is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Warn that an API token expires soon</source></segment>
+      </unit>
+      <unit id="audit.action.auth.token.renew">
+        <notes><note category="description">What the audit action auth.token.renew is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Renew an API token</source></segment>
+      </unit>
+      <unit id="audit.action.auth.token.reuse_detected">
+        <notes><note category="description">What the audit action auth.token.reuse_detected is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revoke API tokens used again after renewal</source></segment>
+      </unit>
       <unit id="audit.action.auth.token.revoke">
         <notes><note category="description">What the audit action auth.token.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Revoke an API token</source></segment>
+      </unit>
+      <unit id="audit.action.auth.token.source_refused">
+        <notes><note category="description">What the audit action auth.token.source_refused is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse an API token from outside its networks</source></segment>
       </unit>
       <unit id="audit.action.auth.totp.enroll">
         <notes><note category="description">What the audit action auth.totp.enroll is called in the audit log, on a record page and on the dashboard.</note></notes>

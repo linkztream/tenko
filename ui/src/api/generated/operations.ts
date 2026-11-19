@@ -27,6 +27,8 @@ export const apiOperations = [
   { id: "create_service_account_token", method: "post", path: "/api/v1/access/service-accounts/{id}/tokens", tags: ["access"], summary: "Create a scoped token of a service account, shown once" },
   { id: "revoke_service_account_token", method: "delete", path: "/api/v1/access/service-accounts/{id}/tokens/{token}", tags: ["access"], summary: "Revoke a token of a service account" },
   { id: "list_grant_subjects", method: "get", path: "/api/v1/access/subjects", tags: ["access"], summary: "List the accounts a grant can name" },
+  { id: "describe_own_token", method: "get", path: "/api/v1/access/token", tags: ["access"], summary: "Describe the calling token" },
+  { id: "renew_own_token", method: "post", path: "/api/v1/access/token/renew", tags: ["access"], summary: "Renew the calling token, shown once" },
   { id: "list_addresses", method: "get", path: "/api/v1/addresses", tags: ["addresses"], summary: "List addresses" },
   { id: "create_address", method: "post", path: "/api/v1/addresses", tags: ["addresses"], summary: "Create an address" },
   { id: "bulk_addresses", method: "post", path: "/api/v1/addresses/bulk", tags: ["common"], summary: "Change several addresses in one request" },

@@ -427,6 +427,66 @@
       <unit id="access.token.revoke_body">
         <segment><source>Tools that use it lose the access of {account} at once.</source><target>Verktyg som använder det förlorar {account}s åtkomst direkt.</target></segment>
       </unit>
+      <unit id="access.token.renewable">
+        <notes><note category="description">Checkbox of the token dialog of a service account (IAM-20).</note></notes>
+        <segment><source>Let the token renew itself</source><target>Låt token förnya sig självt</target></segment>
+      </unit>
+      <unit id="access.token.renewable_help">
+        <segment><source>The token comes with a renewal secret, shown once. With both, the integration exchanges the token for a new one before it expires.</source><target>Token kommer med en förnyelsehemlighet som visas en gång. Med båda byter integrationen ut token mot ett nytt innan det går ut.</target></segment>
+      </unit>
+      <unit id="access.token.renewable_off">
+        <notes><note category="description">Why the renewal checkbox is disabled: the security toggle TGL-46 is off.</note></notes>
+        <segment><source>Tokens do not renew under the security settings (TGL-46 is off).</source><target>Token förnyas inte med säkerhetsinställningarna (TGL-46 är av).</target></segment>
+      </unit>
+      <unit id="access.token.source_prefixes">
+        <notes><note category="description">Field of the token dialog: the client networks the token is accepted from (IAM-21).</note></notes>
+        <segment><source>Allowed client networks</source><target>Tillåtna klientnätverk</target></segment>
+      </unit>
+      <unit id="access.token.source_prefixes_help">
+        <segment><source>One address or network per line, such as 192.0.2.0/24 or 2001:db8::/48; empty for any address. From anywhere else the token is refused.</source><target>En adress eller ett nätverk per rad, till exempel 192.0.2.0/24 eller 2001:db8::/48; tomt för alla adresser. Från andra adresser nekas token.</target></segment>
+      </unit>
+      <unit id="access.token.renewal_secret">
+        <notes><note category="description">Accessible name of the renewal secret shown once.</note></notes>
+        <segment><source>Renewal secret</source><target>Förnyelsehemlighet</target></segment>
+      </unit>
+      <unit id="access.token.renewal_secret_body">
+        <segment><source>The renewal secret below is shown once too. Send it only with the renewal call, never as a bearer token, and store it with the token: each renewal returns new ones.</source><target>Förnyelsehemligheten nedan visas också bara en gång. Skicka den bara med förnyelseanropet, aldrig som bearer-token, och förvara den med token: varje förnyelse ger nya.</target></segment>
+      </unit>
+      <unit id="access.token.renews">
+        <notes><note category="description">Tag of a token that may renew itself.</note></notes>
+        <segment><source>renews</source><target>förnyas</target></segment>
+      </unit>
+      <unit id="access.token.renewed_at">
+        <notes><note category="description">When a renewal made the token; when is a relative time.</note></notes>
+        <segment><source>Renewed {when}</source><target>Förnyat {when}</target></segment>
+      </unit>
+      <unit id="access.token.from">
+        <notes><note category="description">The client networks a token is bound to, comma-separated.</note></notes>
+        <segment><source>From {prefixes}</source><target>Från {prefixes}</target></segment>
+      </unit>
+      <unit id="access.token.revoked.reuse_detected">
+        <notes><note category="description">Tag of a token family the server revoked because a superseded token or renewal secret was used.</note></notes>
+        <segment><source>Revoked: used again after renewal</source><target>Återkallat: använt igen efter förnyelse</target></segment>
+      </unit>
+      <unit id="access.token.revoked.renewal_failures">
+        <notes><note category="description">Tag of a token family the server revoked after wrong renewal secrets.</note></notes>
+        <segment><source>Revoked: wrong renewal secrets</source><target>Återkallat: fel förnyelsehemligheter</target></segment>
+      </unit>
+      <unit id="access.token.revoked.other">
+        <notes><note category="description">Tag of a token family a newer server revoked for a reason this version does not know.</note></notes>
+        <segment><source>Revoked by the server</source><target>Återkallat av servern</target></segment>
+      </unit>
+      <unit id="toggles.token_self_renewal.name">
+        <notes><note category="description">TGL-46: the switch that lets service-account tokens renew themselves (IAM-20), in the security settings.</note></notes>
+        <segment><source>Self-renewing service-account tokens</source><target>Självförnyande token för tjänstekonton</target></segment>
+      </unit>
+      <unit id="toggles.token_self_renewal.hint">
+        <segment><source>A service account's token created with renewal exchanges itself for a new one with its renewal secret. Off: no token renews.</source><target>Ett tjänstekontos token som skapats med förnyelse byter sig självt mot ett nytt med sin förnyelsehemlighet. Av: inget token förnyas.</target></segment>
+      </unit>
+      <unit id="errors.auth.token.renewal_refused">
+        <notes><note category="description">The token may not renew; reason is disabled, not_renewable or wrong_secret.</note></notes>
+        <segment><source>This token cannot be renewed ({reason}).</source><target>Token kan inte förnyas ({reason}).</target></segment>
+      </unit>
       <unit id="access.token_scope.metrics">
         <notes><note category="description">A special token scope.</note></notes>
         <segment><source>Read the metrics</source><target>Läsa mätvärdena</target></segment>

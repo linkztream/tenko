@@ -1,4 +1,4 @@
-// The toggle matrix TGL-01 to TGL-07, TGL-21 and TGL-45 of the four security profiles
+// The toggle matrix TGL-01 to TGL-07, TGL-21, TGL-45 and TGL-46 of the four security profiles
 // (docs/SECURITY-PROFILES.md) and the rules that turn a set of settings into toggle states and a
 // banner. They mirror crates/tenko-auth/src/settings.rs. TGL-23 and TGL-24 are added by the
 // update and reveal routes (routes-updates.ts, routes-reveal-policy.ts).
@@ -47,6 +47,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "local",
     update_prereleases: false,
+    token_self_renewal: true,
   },
   standard: {
     profile: "standard",
@@ -61,6 +62,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "optional",
     update_prereleases: false,
+    token_self_renewal: true,
   },
   hardened: {
     profile: "hardened",
@@ -75,6 +77,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "required",
     update_prereleases: false,
+    token_self_renewal: false,
   },
   lab: {
     profile: "lab",
@@ -89,6 +92,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     unconfirmed_pin_days: UNCONFIRMED_PIN_DAYS_DEFAULT,
     audit_export: "local",
     update_prereleases: false,
+    token_self_renewal: true,
   },
 };
 
@@ -121,6 +125,7 @@ export const TOGGLE_IDS = {
   lockout: "TGL-07",
   audit_export: "TGL-21",
   update_prereleases: "TGL-45",
+  token_self_renewal: "TGL-46",
 } as const;
 
 type ToggleSetting = keyof typeof TOGGLE_IDS;
@@ -194,6 +199,9 @@ export function isWeakerThanHome(setting: ToggleSetting, settings: SecuritySetti
     case "update_prereleases":
       // Pre-releases open no attack path: "on" is a deviation only.
       return false;
+    case "token_self_renewal":
+      // Home lets tokens renew: no value is weaker than Home.
+      return false;
   }
 }
 
@@ -213,11 +221,17 @@ function stable(value: unknown): string {
 function toggleValue(setting: ToggleSetting, settings: SecuritySettings): unknown {
   if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "update_prereleases") return settings.update_prereleases ?? false;
+  if (setting === "token_self_renewal") return tokenSelfRenewal(settings);
   if (setting === "lockout") return { mode: settings.lockout, ...lockPolicyOf(settings) };
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : structuredClone(settings[setting]);
 }
 
-/** TGL-01 to TGL-07, TGL-21 and TGL-45 with their profile defaults, deviation and weakness markers. */
+/** The effective TGL-46: the stored value, else the profile's. */
+export function tokenSelfRenewal(settings: SecuritySettings): boolean {
+  return settings.token_self_renewal ?? PROFILE_MATRIX[settings.profile].token_self_renewal ?? false;
+}
+
+/** TGL-01 to TGL-07, TGL-21, TGL-45 and TGL-46 with their profile defaults, deviation and weakness markers. */
 export function toggleStates(settings: SecuritySettings): ToggleState[] {
   const profile = PROFILE_MATRIX[settings.profile];
   return (Object.keys(TOGGLE_IDS) as ToggleSetting[]).map((setting) => {

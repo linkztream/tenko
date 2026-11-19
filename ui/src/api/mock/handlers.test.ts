@@ -1113,6 +1113,7 @@ describe("settings", () => {
       "TGL-07",
       "TGL-21",
       "TGL-45",
+      "TGL-46",
       "TGL-23",
       "TGL-24",
     ]);

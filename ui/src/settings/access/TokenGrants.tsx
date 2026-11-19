@@ -142,7 +142,7 @@ export function TokenGrantsEditor(props: {
 }
 
 /** Shows a new token once; it closes only after the person confirms it is stored. */
-export function TokenOnceDialog(props: { name: string; token: string; onClose: () => void }) {
+export function TokenOnceDialog(props: { name: string; token: string; renewalSecret?: string; onClose: () => void }) {
   const [stored, setStored] = createSignal(false);
   const close = () => {
     if (stored()) props.onClose();
@@ -161,6 +161,22 @@ export function TokenOnceDialog(props: { name: string; token: string; onClose: (
             {t("common.action.copy")}
           </button>
         </div>
+        <Show when={props.renewalSecret}>
+          {(secret) => (
+            <>
+              <p>{t("access.token.renewal_secret_body")}</p>
+              <div class="form-row">
+                <code class="secret acct-token" data-testid="token-renewal-secret" aria-label={t("access.token.renewal_secret")}>
+                  {secret()}
+                </code>
+                <button type="button" class="btn sm" onClick={() => void copyText(secret())}>
+                  <Icon name="copy" size="sm" />
+                  {t("common.action.copy")}
+                </button>
+              </div>
+            </>
+          )}
+        </Show>
         <label class="ackrow">
           <input
             type="checkbox"
