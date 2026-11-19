@@ -86,3 +86,4 @@ The date is the date the ADR was written or last changed status.
 | [0032](0032-plugins-as-processes.md) | Plugins as processes from the `tenko-plugins` repository: the HTTP API as the contract, one transient user per plugin, scoped tokens from a manifest, verified, community and local tiers | Proposed | 2026-11-01 |
 | [0033](0033-mirrored-sources.md) | Mirrored sources: a pushed migration source with a token that writes one mirror and nothing else | Proposed | 2026-11-05 |
 | [0034](0034-zone-flip-and-adoption.md) | The flip of a zone in place and the adoption of mirrored leases and names | Proposed | 2026-11-05 |
+| [0035](0035-integration-client-certificates.md) | Client certificates for integrations: a separate integration CA, a dedicated mutual-TLS listener, enrollment with an HMAC proof, service-account tokens bound to a certificate lineage | Accepted | 2026-11-19 |

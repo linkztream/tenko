@@ -170,7 +170,7 @@ These rows are in `docs/REQUIREMENTS.md` and `docs/SECURITY-PROFILES.md`, which 
 |---|---|---|---|---|---|---|---|
 | TGL-47 | Integration client certificates: certificate lifetime / certificate-bound tokens required for service accounts / TLS 1.2 on the integration listener (for Windows Server 2019 and older; the client certificate is then visible on the path) | 90 days / no / off | 30 days / no / off | 7 days / yes, every token an administrator creates for a service account, mirror tokens once the pusher presents a certificate / off, and turning it on is refused | 365 days / no / off | 4 | IAM-22, IAM-23, IAM-24 |
 
-A lifetime longer than the profile's, binding switched off under Hardened, or TLS 1.2 allowed is a deviation that the UI shows; TLS 1.2 allowed also shows a warning row in the health view. TLS 1.2 is built as the other parts of the toggle are: a field of the same settings type with the profile's default, changed through the same route and audited the same way; the listener reads it per connection, so turning it off refuses the next TLS 1.2 handshake. A tightened lifetime applies at the next renewal. Tightening the binding requirement revokes the unbound tokens of service accounts in the same change, after the settings page has listed them; loosening it again revives nothing.
+A lifetime longer than the profile's, binding switched off under Hardened, or TLS 1.2 allowed is a deviation that the UI shows; TLS 1.2 allowed also shows the warning `integration.tls12_allowed` in the health view. TLS 1.2 is built as the other parts of the toggle are: a field of the same settings type with the profile's default, changed through the same route and audited the same way; the listener reads it per connection, so turning it off refuses the next TLS 1.2 handshake. A tightened lifetime applies at the next renewal. Tightening the binding requirement, also by a switch to Hardened, revokes the unbound tokens of service accounts in the same change, after the settings page or the profile dialog has shown how many of which accounts from a dry run of the same change (ADR 0035, decision 10); loosening it again revives nothing.
 
 ## 6. Cluster
 
@@ -245,7 +245,7 @@ CC8 skeleton after CC2 ······ CC8 in full after CC5
 |---|---|---|
 | PT-IC1 | An integration certificate on the cluster port, and as a server certificate toward a node | Handshake refused (unknown issuer) |
 | PT-IC2 | A node certificate, and a certificate of another installation, on the integration listener | Handshake refused |
-| PT-IC3 | A bound token on 8443 with `X-SSL-Client-Cert`, `X-Forwarded-Client-Cert`, `ssl-client-cert`, `X-Client-Cert` from a trusted proxy, and with a PROXY v2 header whose SSL TLV carries client-certificate fields | `auth.token.certificate_required` each time |
+| PT-IC3 | A bound token on 8443 with `X-SSL-Client-Cert`, `X-Forwarded-Client-Cert`, `ssl-client-cert`, `X-Client-Cert` from a trusted proxy, and with a PROXY v2 header whose SSL TLV carries client-certificate fields | 401 `auth.unauthenticated` and the audit record `auth.token.binding_refused` each time, nothing revoked |
 | PT-IC4 | A bound token of account A with a certificate of account B on 8445 | Refused |
 | PT-IC5 | A crafted PKCS#10 request (CA extension, node URI, server authentication, wrong curve, bad signature, nested length tricks) on `/integrations/enroll` | Refused, or issued without any requested field |
 | PT-IC6 | Replaying a used code, racing one code on two controllers, a code outside its source prefix | One success at most, refusals by code |
