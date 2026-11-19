@@ -609,3 +609,135 @@ Copy `C:\lab` of each machine into `results/` (one folder per machine) and the `
 files into `captures/`, fill in RESULTS.md, and hand both to the lead. The lab domain is
 thrown away afterwards; its keys never leave it, and its captures hold nothing that opens
 anything else.
+
+## Running the steps unattended
+
+The directory [steps/](steps/) holds the steps above as scripts, for a job that runs the lab
+without a person at a console. The runbook above stays the reference: the scripts run the
+same commands, and each script's header names the step it runs, what it expects, what it
+leaves, what it keeps, what it checks, and where it departs from the commands above and why.
+
+**The job.** Something outside this repository that can run one script inside one lab machine
+through the hypervisor's guest agent (as SYSTEM on the Windows machines, as root on `ns1`),
+restart a machine, take and restore a snapshot, run a readiness check, and fetch files from
+a machine afterwards. It takes the scripts from its checkout of this repository at one
+commit, the commit under test. It reads [steps/steps.json](steps/steps.json) and runs its
+entries one at a time, in the order of the file. It snapshots every machine after each
+entry that passed, so a script need not undo anything, but it must be safe to run again on a
+machine restored to the snapshot before it. A failed entry stops the run, its step directory
+is fetched, and every machine is left as it is.
+
+**The machines as the job hands them over.** The addresses of the names table; each
+computer already has its name (`dc1`, `dc2`, `srv1`, `pc1`); every machine's DNS server is
+`192.0.2.5`; no machine is promoted or joined; the Windows firewall at its defaults;
+`ns1` a plain Ubuntu 24.04 server without Tenko, which the first entry installs from the
+release media. There is no route out and no time source but the hypervisor's clock. A local
+administrator account that belongs to the job is neither used nor depended on; the first
+entry makes the built-in Administrator account of `dc1` (RID 500) the domain's
+`CORP\Administrator` by enabling it with the lab's password before the promotion.
+
+**The manifest.** A JSON array of entries in run order; every entry has exactly these keys:
+
+| Key | What it holds |
+|---|---|
+| `id` | The entry's name, lower case, digits and hyphens: a two-digit sequence, the W step and what it does (`12-w05-dc1-register`). It sorts in run order and names the step directory. |
+| `step` | The runbook's step, `W0` to `W14`. |
+| `title` | One line of what the entry does. |
+| `target` | `dc1`, `dc2`, `srv1`, `pc1` or `ns1`. It decides the account: SYSTEM on Windows, root on `ns1`. |
+| `script` | The script, as a path in this repository. The job copies it to `C:\lab\run\<id>.ps1` or `/root/lab/run/<id>.sh` and runs it there (Windows: `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`); the script takes its id from its own file name, so one script can serve several entries (W5 and W7 share the controller's registration; W9, W13 and W14 run one script on several machines). |
+| `timeout_minutes` | The longest the script may run; after a restart, also the longest the job waits for the machine to be ready. |
+| `restart` | `true`: the job restarts the machine after the script exits 0. Scripts never restart a machine themselves: they use the no-restart forms (`-NoRebootOnCompletion` on a promotion, no `-Restart` on a join or a role removal). A step that ends in a restart is split there, and the entry after it begins by checking the state it expects. |
+| `ready_check` | After a restart: a short script under [steps/checks/](steps/checks/) that exits 0 when the machine is ready (the job first waits for its agent, then runs the check until it passes or the time is up); `null` without a restart. The checks are self-contained: they need no helper. |
+| `secrets` | The secret files the entry needs, by name: `{"domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"}`. |
+| `needs_files` | What the job copies in before the script, each `{"from", "to"}` with `to` an absolute path on the machine. `from` is `media:<name>` for the release media of the run (`media:linux-binary`, the release's single Linux binary `tenko-<version>-linux-x86_64`, whose version is the run's tag without the `v`; `media:install.sh`; `media:SHA256SUMS`), `<machine>:<path>` for a file an earlier entry left on another machine, or else a path in this repository at the commit under test. Every entry lists the shared helper of its language here. |
+| `one_way` | `true` where only the snapshot before the entry goes back: a promotion, a join, the removal of a role, the Kerberos adoption (the account's password changes) and the Hardened profile. |
+| `manual` | Always `false`: no entry needs a person (below). |
+| `manual_reason` | Always `null`. |
+
+**The shared helpers.** [steps/lab-common.ps1](steps/lab-common.ps1) and
+[steps/lab-common.sh](steps/lab-common.sh), copied to `C:\lab\run\` and `/root/lab/run/`.
+They give every step strict error handling, its step directory, the log, the verdict, the
+reading of secret files and a clear failure; each script stops with a FAIL line when its
+helper is missing. The last line a script prints is its verdict, `PASS <id>: ...` or
+`FAIL <id>: <reason>`.
+
+**The step directory.** `C:\lab\<id>\` or `/root/lab/<id>/` holds what the runbook keeps for
+the step and nothing secret; the job fetches all of it after the entry, passed or failed. It
+always has `step.log` (everything the script printed) and `verdict.txt`; after a failure also
+`failure.txt` on Windows (the error with its stack, and the warnings and errors of the System
+and Application logs since the step began) or `journal-tenko.txt` on `ns1`. A part that runs
+as `CORP\Administrator` (below) adds `step-admin.log` and `verdict-admin.txt`. Inputs that
+the job copies in go to `C:\lab\in\` and `/root/lab/in/`, outside every step directory.
+When the files are filed, the step directory of an entry goes to `results/<W step>/<id>/`
+(for example `results/w5/12-w05-dc1-register/`), except the captures:
+
+| Entry | File in its step directory | Filed as |
+|---|---|---|
+| `12-w05-dc1-register` | `dc1.pcapng` | `captures/w5-dc1.pcapng` |
+| `19-w07-dc2-register` | `dc2.pcapng` | `captures/w7-dc2.pcapng` |
+| `24-w08-dc1-hour` | `dc1.pcapng` | `captures/w8-dc1.pcapng` |
+| `31-w10-pc1-join` | `join.pcapng` | `captures/w10-pc1.pcapng` |
+| `32-w10-pc1-register` | `after.pcapng` | `captures/w10-pc1-after.pcapng` |
+| `39-w13-dc1-renegotiate` | `dc1.pcapng` | `captures/w13-dc1.pcapng` |
+| `40-w13-pc1-renegotiate` | `pc1.pcapng` | `captures/w13-pc1.pcapng` |
+
+**Secrets.** The job writes each secret as one file, the value and a newline, before the
+entry starts: `C:\lab\secrets\<name>` on Windows (the directory readable by SYSTEM and
+Administrators only), `/root/lab/secrets/<name>` on `ns1` (mode 600). The names are the same
+on every machine: `domain_admin_password` (`CORP\Administrator`), `dsrm_password` (the
+directory services restore password of both controllers), `tenko_admin_password` (Tenko's
+`admin`) and `kerberos_onetime_password` (the one-time password of W3, on `dc1` and `ns1`). A
+script checks that the files it needs are there and refuses to start without them; a secret
+reaches a cmdlet as a SecureString or a credential object, or a program through a pipe or
+its standard input, never as an argument or an environment variable. W0 writes three more on
+`ns1`, in the same directory: `tenko_admin_totp` and `tenko_admin_recovery_codes` (the
+administrator's second factor) and `tenko_reader_token` (below), and root's API token goes to
+`/root/lab/secrets/tenko-credentials.json`.
+
+**Who acts.** Most Windows steps run as SYSTEM: the promotions and the joins take a
+credential object built from the secret file, and the registrations, captures and checks
+need nothing more. What must act as `CORP\Administrator` (the AD, DNS Server and group policy
+cmdlets, which take no credential, the block of section 4.1, and `dcdiag` and `repadmin`)
+runs the same script again through a one-shot scheduled task registered for
+`CORP\Administrator` with the password from its file, and removed when it ends: from SYSTEM,
+`Start-Process -Credential` does not work, and a remote session on the controller itself
+cannot reach the directory on the user's behalf. On `ns1`, root does not run the installed
+command line, which the service account can write (ADR 0023): it runs its own verified copy
+of the release binary, `/root/lab/media/tenko`, against `https://localhost:8443` with its
+copy of the node's CA root.
+
+**Signing in to Tenko without a person.** Standard requires a second factor for
+administrators (TGL-02), and the routes the later steps need refuse a session without one.
+W0 enrolls TOTP for `admin` through the API, as a person does in the web UI, keeps the seed
+in the secret file and computes each code from it (RFC 6238, the parameters the node states
+at enrollment). The Kerberos adoption (W3), the audit export and the profile (W9) need an
+interactive session, which the scripts open with the password and a TOTP code; the other
+writes use the API token of `tenko login`. The Hardened profile of W9 then requires a
+passkey of an administrator (TGL-03), which no script has, so from W9 on no script acts as
+`admin`: the later reads (records, owners, the audit, the metrics) use the token of a
+service account `lab-reader` that W0 creates with the `viewer` role and the scopes `metrics`
+and `audit:read`, and the restart of W13 needs no sign-in. W9 also adds an audit export file
+sink before the switch, because Hardened refuses to start without one (TGL-21). Nothing of
+the product's sign-in rules is relaxed for the lab.
+
+**The order.** The entries follow the runbook with one exception: W11 (`srv1` points its DNS
+client at Tenko and claims its names) runs right after W5, before W6. Until W11, `srv1` asks
+`192.0.2.5` for names, and from W6 on that server no longer serves DNS, so W7 (`nltest
+/dsgetdc` on `srv1`) and W9 (group policy on `srv1`) could not find a controller. The claim
+of W11 is the same, under Standard instead of Hardened.
+
+**Time.** The hourly registration of W8 is waited for as the runbook does it: a capture of
+4,200 seconds on `dc1` between two `ns1` entries that compare the zones' serials and read
+the audit (the entry's limit is 90 minutes). The other waits are the runbook's (60 or 120
+seconds after a registration) or bounded polls of a stated length. Every step on a machine
+other than `dc1` first compares its clock with `dc1`'s (`w32tm /stripchart`, which needs no
+account) and stops when they are more than two minutes apart; on `ns1` the Kerberos steps
+first require systemd-timesyncd to be synchronized to `dc1`, which W0 configures and W1 makes
+a reliable time source (`w32tm /config /reliable:yes`).
+
+**What still needs a person.** No entry: the job runs them all. What a person still does is
+what the runbook asks to read rather than check: the captures and the questions of
+[RESULTS.md](RESULTS.md) (R120, R121, the dcdiag tests that need the DNS Server role), and the
+filling of RESULTS.md from the step directories. Where the runbook says what you should see
+and a machine can tell, the script checks it and fails otherwise. W15 has no entry: its child
+domain needs a third controller and a person's reading, and its other two points run nothing.

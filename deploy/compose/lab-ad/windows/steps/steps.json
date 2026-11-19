@@ -1,0 +1,934 @@
+[
+  {
+    "id": "01-w00-ns1-install",
+    "step": "W0",
+    "title": "Install Tenko on ns1, its second factor, its tokens; check the node",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w00-ns1-install.sh",
+    "timeout_minutes": 30,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "tenko_admin_password": "/root/lab/secrets/tenko_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      },
+      {
+        "from": "media:linux-binary",
+        "to": "/root/lab/media/tenko"
+      },
+      {
+        "from": "media:install.sh",
+        "to": "/root/lab/media/install.sh"
+      },
+      {
+        "from": "media:SHA256SUMS",
+        "to": "/root/lab/media/SHA256SUMS"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "02-w01-dc1-forest",
+    "step": "W1",
+    "title": "Promote dc1 to the forest corp.example.test with the DNS Server role",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w01-dc1-forest.ps1",
+    "timeout_minutes": 45,
+    "restart": true,
+    "ready_check": "deploy/compose/lab-ad/windows/steps/checks/dc-ready.ps1",
+    "secrets": {
+      "dsrm_password": "C:\\lab\\secrets\\dsrm_password",
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "03-w01-dc1-zones",
+    "step": "W1",
+    "title": "The reverse zone, aging, printer1 and the registration on dc1",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w01-dc1-zones.ps1",
+    "timeout_minutes": 20,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "04-w01-srv1-join",
+    "step": "W1",
+    "title": "Join srv1 to the domain",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w01-srv1-join.ps1",
+    "timeout_minutes": 15,
+    "restart": true,
+    "ready_check": "deploy/compose/lab-ad/windows/steps/checks/member-ready.ps1",
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "05-w01-srv1-register",
+    "step": "W1",
+    "title": "srv1 registers on dc1",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w01-srv1-register.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "06-w02-dc1-starting-state",
+    "step": "W2",
+    "title": "The starting state and the zone exports on dc1",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w02-dc1-starting-state.ps1",
+    "timeout_minutes": 30,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "07-w03-dc1-account",
+    "step": "W3",
+    "title": "The block of section 4.1 creates TENKO-DNS$",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w03-dc1-account.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password",
+      "kerberos_onetime_password": "C:\\lab\\secrets\\kerberos_onetime_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      },
+      {
+        "from": "docs/active-directory.md",
+        "to": "C:\\lab\\in\\active-directory.md"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "08-w03-ns1-adopt",
+    "step": "W3",
+    "title": "Tenko adopts TENKO-DNS$",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w03-ns1-adopt.sh",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "tenko_admin_password": "/root/lab/secrets/tenko_admin_password",
+      "kerberos_onetime_password": "/root/lab/secrets/kerberos_onetime_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "09-w03-dc1-account-check",
+    "step": "W3",
+    "title": "The key versions agree and the password was changed",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w03-dc1-account-check.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      },
+      {
+        "from": "ns1:/root/lab/08-w03-ns1-adopt/kerberos-status.json",
+        "to": "C:\\lab\\in\\kerberos-status.json"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "10-w04-dc1-sids",
+    "step": "W4",
+    "title": "The SIDs of the secure-only policy",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w04-dc1-sids.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "11-w04-ns1-import",
+    "step": "W4",
+    "title": "Import the three zones in the Windows dialect and set the secure-only policy",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w04-ns1-import.sh",
+    "timeout_minutes": 20,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      },
+      {
+        "from": "dc1:C:\\lab\\06-w02-dc1-starting-state\\corp.example.test.dns",
+        "to": "/root/lab/in/corp.example.test.dns"
+      },
+      {
+        "from": "dc1:C:\\lab\\06-w02-dc1-starting-state\\_msdcs.corp.example.test.dns",
+        "to": "/root/lab/in/_msdcs.corp.example.test.dns"
+      },
+      {
+        "from": "dc1:C:\\lab\\06-w02-dc1-starting-state\\2.0.192.in-addr.arpa.dns",
+        "to": "/root/lab/in/2.0.192.in-addr.arpa.dns"
+      },
+      {
+        "from": "dc1:C:\\lab\\10-w04-dc1-sids\\sids.json",
+        "to": "/root/lab/in/sids.json"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "12-w05-dc1-register",
+    "step": "W5",
+    "title": "dc1 registers with GSS-TSIG; capture and Netlogon.dns check",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w05-dc-register.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "13-w05-ns1-dc1",
+    "step": "W5",
+    "title": "The audit, the owners and the counters of dc1's registration",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w05-ns1-dc-registered.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "14-w11-srv1-register",
+    "step": "W11",
+    "title": "srv1 points at Tenko and registers twice (before W6)",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w11-srv1-register.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "15-w11-ns1-claimed",
+    "step": "W11",
+    "title": "srv1 claimed its imported names",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w11-ns1-claimed.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "16-w06-dc1-remove-dns",
+    "step": "W6",
+    "title": "Remove the DNS Server role from dc1",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w06-dc1-remove-dns.ps1",
+    "timeout_minutes": 20,
+    "restart": true,
+    "ready_check": "deploy/compose/lab-ad/windows/steps/checks/dc-ready.ps1",
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "17-w06-dc1-after-restart",
+    "step": "W6",
+    "title": "dc1 registers without the role; dcdiag",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w06-dc1-after-restart.ps1",
+    "timeout_minutes": 30,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "18-w07-dc2-promote",
+    "step": "W7",
+    "title": "Promote dc2 without the DNS Server role",
+    "target": "dc2",
+    "script": "deploy/compose/lab-ad/windows/steps/w07-dc2-promote.ps1",
+    "timeout_minutes": 60,
+    "restart": true,
+    "ready_check": "deploy/compose/lab-ad/windows/steps/checks/dc-ready.ps1",
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password",
+      "dsrm_password": "C:\\lab\\secrets\\dsrm_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "19-w07-dc2-register",
+    "step": "W7",
+    "title": "dc2 registers with GSS-TSIG; capture and Netlogon.dns check",
+    "target": "dc2",
+    "script": "deploy/compose/lab-ad/windows/steps/w05-dc-register.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "20-w07-ns1-dc2",
+    "step": "W7",
+    "title": "The audit, the owners and the counters of dc2's registration",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w05-ns1-dc-registered.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "21-w07-srv1-locate",
+    "step": "W7",
+    "title": "srv1 finds a controller through Tenko",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w07-srv1-locate.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "22-w07-dc1-replication",
+    "step": "W7",
+    "title": "Replication between dc1 and dc2",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w07-dc1-replication.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "23-w08-ns1-before",
+    "step": "W8",
+    "title": "The zones' serials before the hour",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w08-ns1-serials.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "24-w08-dc1-hour",
+    "step": "W8",
+    "title": "A 70-minute capture on dc1 across the hourly registration",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w08-dc1-hour.ps1",
+    "timeout_minutes": 90,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "25-w08-ns1-after",
+    "step": "W8",
+    "title": "The serials and the audit after the hour",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w08-ns1-serials.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "26-w09-dc1-policy",
+    "step": "W9",
+    "title": "The GPO Lab DNS secure only",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w09-dc1-policy.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "27-w09-ns1-hardened",
+    "step": "W9",
+    "title": "The audit export sink and the Hardened profile",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w09-ns1-hardened.sh",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "tenko_admin_password": "/root/lab/secrets/tenko_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "28-w09-dc1-apply",
+    "step": "W9",
+    "title": "The policy applies on dc1 and it registers",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w09-gpo-apply.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "29-w09-dc2-apply",
+    "step": "W9",
+    "title": "The policy applies on dc2 and it registers",
+    "target": "dc2",
+    "script": "deploy/compose/lab-ad/windows/steps/w09-gpo-apply.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "30-w09-srv1-apply",
+    "step": "W9",
+    "title": "The policy applies on srv1 and it registers",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w09-gpo-apply.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "31-w10-pc1-join",
+    "step": "W10",
+    "title": "pc1 joins the domain through Tenko, captured",
+    "target": "pc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w10-pc1-join.ps1",
+    "timeout_minutes": 15,
+    "restart": true,
+    "ready_check": "deploy/compose/lab-ad/windows/steps/checks/member-ready.ps1",
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": true,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "32-w10-pc1-register",
+    "step": "W10",
+    "title": "pc1 registers its A and PTR records, captured",
+    "target": "pc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w10-pc1-register.ps1",
+    "timeout_minutes": 15,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "33-w10-ns1-owners",
+    "step": "W10",
+    "title": "pc1's names are owned by PC1$",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w10-ns1-owners.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "34-w12-srv1-off",
+    "step": "W12",
+    "title": "srv1 leaves the network",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w12-srv1-adapter.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "35-w12-pc1-takeover",
+    "step": "W12",
+    "title": "pc1 takes 192.0.2.20 and tries to register it",
+    "target": "pc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w12-pc1-takeover.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "36-w12-ns1-refused",
+    "step": "W12",
+    "title": "The update of srv1's PTR name was refused",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w12-ns1-refused.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "37-w12-srv1-on",
+    "step": "W12",
+    "title": "srv1 comes back",
+    "target": "srv1",
+    "script": "deploy/compose/lab-ad/windows/steps/w12-srv1-adapter.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "38-w13-ns1-restart",
+    "step": "W13",
+    "title": "Restart the Tenko service",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w13-ns1-restart.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "39-w13-dc1-renegotiate",
+    "step": "W13",
+    "title": "dc1 registers after the restart, captured",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w13-capture.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "40-w13-pc1-renegotiate",
+    "step": "W13",
+    "title": "pc1 registers after the restart, captured",
+    "target": "pc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w13-capture.ps1",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "41-w13-ns1-audit",
+    "step": "W13",
+    "title": "Nothing was refused after the restart",
+    "target": "ns1",
+    "script": "deploy/compose/lab-ad/windows/steps/w13-ns1-audit.sh",
+    "timeout_minutes": 10,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {},
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.sh",
+        "to": "/root/lab/run/lab-common.sh"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "42-w14-dc1-health",
+    "step": "W14",
+    "title": "dcdiag and repadmin on dc1",
+    "target": "dc1",
+    "script": "deploy/compose/lab-ad/windows/steps/w14-dc-health.ps1",
+    "timeout_minutes": 60,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  },
+  {
+    "id": "43-w14-dc2-health",
+    "step": "W14",
+    "title": "dcdiag and repadmin on dc2",
+    "target": "dc2",
+    "script": "deploy/compose/lab-ad/windows/steps/w14-dc-health.ps1",
+    "timeout_minutes": 60,
+    "restart": false,
+    "ready_check": null,
+    "secrets": {
+      "domain_admin_password": "C:\\lab\\secrets\\domain_admin_password"
+    },
+    "needs_files": [
+      {
+        "from": "deploy/compose/lab-ad/windows/steps/lab-common.ps1",
+        "to": "C:\\lab\\run\\lab-common.ps1"
+      }
+    ],
+    "one_way": false,
+    "manual": false,
+    "manual_reason": null
+  }
+]
