@@ -80,7 +80,9 @@
 //! step. A store directory that `tenko cluster join` prepared carries the marker
 //! [`JOINING_MARKER`] until the join completed, and is never initialized as a cluster of
 //! its own. The directory remembers its node id ([`NODE_ID_FILE`]) and refuses to open
-//! under another one, so two members can never share a Raft id.
+//! under another one, so two members can never share a Raft id. A directory with that file
+//! whose Raft log is lost does not open as a member of several voters: the vote the log held
+//! is lost with it.
 //!
 //! Membership changes ([`RaftStore::add_learner`], [`RaftStore::change_membership`]) go
 //! through the leader. A follower forwards its writes to the leader over the transport's
@@ -328,6 +330,9 @@ pub struct RaftStoreConfig {
     /// Initialize a single-voter cluster on first start and wait for leadership and log
     /// replay at every start. Off for a node that joins an existing cluster as a learner.
     pub bootstrap: bool,
+    /// Elect a leader when the election timeout passes without one. Off for a copy that is
+    /// only read and snapshotted (a backup), so it never appends an entry of its own.
+    pub elect: bool,
     /// Write coalescing limits and the batch size limit.
     pub coalescer: CoalescerConfig,
     /// Change sets the journal keeps for `watch` replay (at least 1); the upper bound by
@@ -375,6 +380,7 @@ impl RaftStoreConfig {
             node_id: NodeId(1),
             address: String::new(),
             bootstrap: true,
+            elect: true,
             coalescer: ENTRY_BOUND,
             journal_retention: 100_000,
             journal_max_bytes: 32 * 1024 * 1024,
@@ -680,6 +686,7 @@ fn raft_config(config: &RaftStoreConfig) -> Result<openraft::Config, StoreError>
         heartbeat_interval: config.timings.heartbeat_ms,
         election_timeout_min: config.timings.election_min_ms,
         election_timeout_max: config.timings.election_max_ms,
+        enable_elect: config.elect,
         // Snapshots are triggered by the maintenance task (entries and log bytes).
         snapshot_policy: openraft::SnapshotPolicy::Never,
         max_in_snapshot_log_to_keep: config.snapshot.keep_entries,
@@ -753,6 +760,8 @@ impl RaftStore {
     ) -> Result<Self, StoreError> {
         let dir = config.data_dir.clone();
         fs::create_dir_all(&dir).map_err(|error| open_error("data directory", error))?;
+        // A store this node ran has its node-id file; a state copy has none.
+        let copy = !dir.join(NODE_ID_FILE).exists();
         check_node_id(&dir, config.node_id)?;
         let samples = config.fsync_probe_samples;
         let fsync = if samples == 0 {
@@ -775,22 +784,7 @@ impl RaftStore {
             .await
             .map_err(|error| open_error("state machine", error))??;
         recover_purged_gap(&log, &sm).await?;
-        // A state copy (`copy_state_to`) has no log and so no vote: it starts at the term of
-        // its last applied entry, or its first election would lead a term below its entries.
-        let mut vote_log = log.clone();
-        if let Some(applied) = sm.meta().last_applied
-            && vote_log
-                .read_vote()
-                .await
-                .map_err(|error| open_error("vote", error))?
-                .is_none()
-        {
-            let vote = Vote::new(applied.leader_id.term, applied.leader_id.node_id);
-            vote_log
-                .save_vote(&vote)
-                .await
-                .map_err(|error| open_error("vote", error))?;
-        }
+        seed_vote(&log, &sm, config.node_id, copy).await?;
         // Before Raft re-applies anything: the size the re-seed rule is judged on.
         let at_open = (
             fs::metadata(sm.file_path()).map_or(0, |metadata| metadata.len()),
@@ -1089,7 +1083,7 @@ impl RaftStore {
     pub fn set_transport(&self, transport: Arc<dyn PeerTransport>) {
         let reaches = transport.reaches_peers();
         self.inner.transport.set(transport);
-        if reaches {
+        if reaches && self.inner.config.elect {
             self.inner.raft.runtime_config().elect(true);
         }
     }
@@ -1631,6 +1625,59 @@ async fn bootstrap(
         .await
         .map_err(|error| open_error("waiting for leadership", error))?;
     Ok(())
+}
+
+/// Gives a store whose state applied entries but whose log holds no vote the vote of its last
+/// entry's term, so its first election leads the term after it (a lower one breaks openraft's
+/// leader invariant). A state copy (`copy` is true: no node-id file) has no log by design. A
+/// store this node ran has lost its log: as the only voter it goes on with a warning; as a
+/// member of a cluster it is refused, since it may have voted in a later term and could vote
+/// twice in one.
+async fn seed_vote(
+    log: &LogStore,
+    sm: &StateMachine,
+    node: NodeId,
+    copy: bool,
+) -> Result<(), StoreError> {
+    let meta = sm.meta();
+    let Some(applied) = meta.last_applied else {
+        return Ok(());
+    };
+    let mut log = log.clone();
+    if log
+        .read_vote()
+        .await
+        .map_err(|error| open_error("vote", error))?
+        .is_some()
+    {
+        return Ok(());
+    }
+    if !copy {
+        let voters: Vec<String> = meta
+            .membership
+            .membership()
+            .voter_ids()
+            .map(|voter| voter.to_string())
+            .collect();
+        if voters != [node.0.to_string()] {
+            return Err(StoreError::Storage(format!(
+                "the Raft log (log.redb) of this store is lost, and its state is that of a \
+                 cluster member (voters {}): it may have voted in a term the lost log held. \
+                 Restore this controller from a backup, or join it to the cluster again with an \
+                 empty data directory",
+                voters.join(", ")
+            )));
+        }
+        tracing::warn!(
+            term = applied.leader_id.term,
+            "the Raft log (log.redb) of this store is lost; the only voter goes on from its \
+             state at the term of its last entry"
+        );
+    }
+    let vote = Vote::new(applied.leader_id.term, applied.leader_id.node_id);
+    log.save_vote(&vote)
+        .await
+        .map_err(|error| open_error("vote", error))
 }
 
 /// If the durable state machine is behind the purged log (which the checkpoint before every

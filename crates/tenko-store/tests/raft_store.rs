@@ -4,7 +4,7 @@
 //! journal's byte limit.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -27,7 +27,8 @@ use tenko_store::{
     raft::{
         RaftStore, RaftStoreConfig, SmDurability, SnapshotPolicy,
         network::InProcessNetwork,
-        types::{BatchOutcome, Proposal, ProposedBatch, Vote},
+        openraft,
+        types::{BatchOutcome, Proposal, ProposedBatch, StoredMembership, Vote},
     },
     tables,
     testing::RecordingIndex,
@@ -191,28 +192,33 @@ async fn restart_keeps_every_commit_with_immediate_durability() {
     restart_round_trip(SmDurability::Immediate).await;
 }
 
-/// A state copy (`copy_state_to`, as a backup and an upgrade check take one) has no log and
-/// so no vote. Of a store whose entries are of a later term than the first (a restored one,
-/// a cluster after a failover), the copy's first election must lead a term after those
-/// entries: a lower one breaks the leader invariant of openraft and stops the copy's Raft
-/// core.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_state_copy_of_a_store_at_a_later_term_leads_a_term_after_its_entries() {
-    fn snapshot_term(store: &RaftStore) -> u64 {
-        let (meta, _) = store.current_snapshot().expect("a snapshot");
-        meta.last_log_id.expect("a log id").leader_id.term
-    }
-    let dir = TestDir::new("copy-term");
-    // The store at term 2 is made the way a restore makes one: another store's snapshot,
-    // installed as from the leader of term 1 that is not this node, then this node's election.
-    let source = RaftStore::open(config(&dir.node(1))).await.expect("open");
+/// The term of the store's current snapshot.
+fn snapshot_term(store: &RaftStore) -> u64 {
+    let (meta, _) = store.current_snapshot().expect("a snapshot");
+    meta.last_log_id.expect("a log id").leader_id.term
+}
+
+/// A store as a restore leaves it before its first election (`install_at` of `tenko backup
+/// restore`): the snapshot of controller 7 at term 1, installed in `dir.node(1)` under the
+/// vote of a leader that is not this node, with node 1 as the only voter. Its last applied
+/// entry is node 7's. It is open, with elections off, so it stays as the restore left it.
+async fn restored_store(dir: &TestDir) -> RaftStore {
+    let mut source_config = config(&dir.node(7));
+    source_config.node_id = NodeId(7);
+    let source = RaftStore::open(source_config).await.expect("source");
     put(&source, 1, "from the source").await;
     source.snapshot_now().await.expect("snapshot");
-    let (meta, path) = source.current_snapshot().expect("a snapshot");
-    let mut learner_config = config(&dir.node(2));
-    learner_config.bootstrap = false;
-    let learner = RaftStore::open(learner_config).await.expect("learner");
-    let mut receiver = learner.receive_snapshot().expect("receiver");
+    let (mut meta, path) = source.current_snapshot().expect("a snapshot");
+    let only_this_node = openraft::Membership::new(
+        vec![BTreeSet::from([1])],
+        BTreeMap::from([(1, openraft::BasicNode::new(""))]),
+    );
+    meta.last_membership = StoredMembership::new(meta.last_log_id, only_this_node);
+    let mut restored_config = config(&dir.node(1));
+    restored_config.bootstrap = false;
+    restored_config.elect = false;
+    let restored = RaftStore::open(restored_config).await.expect("learner");
+    let mut receiver = restored.receive_snapshot().expect("receiver");
     for chunk in std::fs::read(&path).expect("read").chunks(64 * 1024) {
         receiver.write_chunk(chunk).await.expect("chunk");
     }
@@ -220,20 +226,79 @@ async fn a_state_copy_of_a_store_at_a_later_term_leads_a_term_after_its_entries(
         .install(Vote::new_committed(1, u64::MAX), meta)
         .await
         .expect("install");
-    learner.shutdown().await.expect("shutdown");
-    drop(learner);
     source.shutdown().await.expect("shutdown");
-    drop(source);
-    let store = RaftStore::open(config(&dir.node(2))).await.expect("elect");
+    restored
+}
+
+/// Two voters, nodes 1 and 2, over an in-process network, with one row on both.
+async fn two_voters(dir: &TestDir) -> (RaftStore, RaftStore) {
+    let network = InProcessNetwork::new();
+    let first = RaftStore::open_with(node_config(dir, 1), Arc::new(network.clone()))
+        .await
+        .expect("node 1");
+    network.register(&first);
+    let second = RaftStore::open_with(node_config(dir, 2), Arc::new(network.clone()))
+        .await
+        .expect("node 2");
+    network.register(&second);
+    first
+        .add_learner(NodeId(2), "in-process-2", true)
+        .await
+        .expect("learner");
+    first
+        .change_membership([NodeId(1), NodeId(2)].into())
+        .await
+        .expect("two voters");
+    let last = put(&first, 1, "replicated").await;
+    wait_for_revision(&second, last).await;
+    (first, second)
+}
+
+/// A state copy (`copy_state_to`, as an upgrade check takes one) has no log and so no vote.
+/// Its first election must lead a term after its last entry, here one of another node: a
+/// lower or equal leader breaks the leader invariant of openraft.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_copy_of_a_restored_store_leads_a_term_after_its_last_entry() {
+    let dir = TestDir::new("copy-restored");
+    let restored = restored_store(&dir).await;
+    restored.copy_state_to(&dir.node(2)).await.expect("copy");
+    restored.shutdown().await.expect("shutdown");
+    drop(restored);
+
+    let copy = RaftStore::open(config(&dir.node(2)))
+        .await
+        .expect("the copy opens and leads");
+    put(&copy, 2, "on the copy").await;
+    copy.snapshot_now()
+        .await
+        .expect("the copy builds a snapshot");
+    assert!(
+        snapshot_term(&copy) > 1,
+        "the copy leads a term after the entry it holds"
+    );
+    copy.shutdown().await.expect("shutdown");
+}
+
+/// The same for a single voter whose entries are of its own later term: a restored store
+/// after its own election, the case of a backup taken on a restored controller.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_copy_of_a_single_voter_at_a_later_term_leads_a_term_after_its_entries() {
+    let dir = TestDir::new("copy-term");
+    restored_store(&dir)
+        .await
+        .shutdown()
+        .await
+        .expect("shutdown");
+    let store = RaftStore::open(config(&dir.node(1))).await.expect("elect");
     put(&store, 2, "at the new term").await;
     store.snapshot_now().await.expect("snapshot");
-    let source_term = snapshot_term(&store);
-    assert!(source_term > 1, "the election started a new term");
-    store.copy_state_to(&dir.node(3)).await.expect("copy");
+    let store_term = snapshot_term(&store);
+    assert!(store_term > 1, "the election started a new term");
+    store.copy_state_to(&dir.node(2)).await.expect("copy");
     store.shutdown().await.expect("shutdown");
     drop(store);
 
-    let copy = RaftStore::open(config(&dir.node(3)))
+    let copy = RaftStore::open(config(&dir.node(2)))
         .await
         .expect("the copy opens and leads");
     put(&copy, 3, "on the copy").await;
@@ -241,10 +306,172 @@ async fn a_state_copy_of_a_store_at_a_later_term_leads_a_term_after_its_entries(
         .await
         .expect("the copy builds a snapshot");
     assert!(
-        snapshot_term(&copy) > source_term,
+        snapshot_term(&copy) > store_term,
         "the copy leads a term after the entries it holds"
     );
     copy.shutdown().await.expect("shutdown");
+}
+
+/// A backup opens its copy with elections off: it never leads, and its snapshot is at the
+/// applied position of the source, without an entry of its own. A second copy with elections
+/// on and a longer election timeout shows that the first one's timeout has passed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_backup_copy_never_elects_and_snapshots_the_position_of_the_source() {
+    let dir = TestDir::new("copy-backup");
+    let source = RaftStore::open(config(&dir.node(1))).await.expect("source");
+    for n in 1..=3 {
+        put(&source, n, "on the source").await;
+    }
+    let applied = source.raft().metrics().borrow().last_applied;
+    source.copy_state_to(&dir.node(2)).await.expect("copy");
+    source.copy_state_to(&dir.node(3)).await.expect("copy");
+    source.shutdown().await.expect("shutdown");
+    drop(source);
+
+    let copy_config = |node: u64, elect: bool, election_ms: u64| {
+        let mut copy_config = config(&dir.node(node));
+        copy_config.bootstrap = false;
+        copy_config.elect = elect;
+        copy_config.timings.heartbeat_ms = 5;
+        copy_config.timings.election_min_ms = election_ms;
+        copy_config.timings.election_max_ms = election_ms + 1;
+        copy_config
+    };
+    let backup = RaftStore::open(copy_config(2, false, 10))
+        .await
+        .expect("backup copy");
+    let control = RaftStore::open(copy_config(3, true, 40))
+        .await
+        .expect("control copy");
+    wait_until_async("the control copy to lead", async || {
+        control.status().role == StoreRole::Leader
+    })
+    .await;
+    assert_ne!(backup.status().role, StoreRole::Leader);
+    backup.snapshot_now().await.expect("snapshot");
+    let (meta, _) = backup.current_snapshot().expect("a snapshot");
+    assert_eq!(
+        meta.last_log_id, applied,
+        "the snapshot is at the source's position"
+    );
+    control.shutdown().await.expect("shutdown");
+    backup.shutdown().await.expect("shutdown");
+}
+
+/// A copy of a member of several voters holds the vote of its last entry and does not
+/// campaign: without its peers an election could only raise the term.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_copy_of_a_cluster_member_does_not_elect() {
+    let dir = TestDir::new("copy-member");
+    let (first, second) = two_voters(&dir).await;
+    let applied = first
+        .raft()
+        .metrics()
+        .borrow()
+        .last_applied
+        .expect("applied");
+    first.copy_state_to(&dir.node(3)).await.expect("copy");
+    second.shutdown().await.expect("shutdown");
+    first.shutdown().await.expect("shutdown");
+
+    let copy = RaftStore::open(config(&dir.node(3)))
+        .await
+        .expect("the copy opens without a leader");
+    assert_ne!(copy.status().role, StoreRole::Leader);
+    assert_eq!(
+        copy.raft().metrics().borrow().vote,
+        Vote::new(applied.leader_id.term, applied.leader_id.node_id),
+        "the copy holds the vote of its last entry and has not campaigned"
+    );
+    copy.shutdown().await.expect("shutdown");
+}
+
+/// What a test logs, as text.
+#[derive(Clone, Default)]
+struct Logged(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for Logged {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .expect("the log buffer")
+            .extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Logged {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(&self.0.lock().expect("the log buffer")).into_owned()
+    }
+}
+
+/// A single voter whose Raft log was lost (removed, or only the state file restored) goes
+/// on from its state with a warning, and its election leads the next term.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_single_voter_whose_log_is_lost_warns_and_leads_the_next_term() {
+    let dir = TestDir::new("lost-log-single");
+    let store = RaftStore::open(config(&dir.node(1))).await.expect("open");
+    put(&store, 1, "before").await;
+    store.snapshot_now().await.expect("snapshot");
+    let before = snapshot_term(&store);
+    store.shutdown().await.expect("shutdown");
+    drop(store);
+    std::fs::remove_file(dir.node(1).join("log.redb")).expect("remove the log");
+
+    let logged = Logged::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_writer({
+            let logged = logged.clone();
+            move || logged.clone()
+        })
+        .finish();
+    let guard = tracing::subscriber::set_default(subscriber);
+    let store = RaftStore::open(config(&dir.node(1)))
+        .await
+        .expect("the only voter opens");
+    drop(guard);
+    assert!(
+        logged
+            .text()
+            .contains("the Raft log (log.redb) of this store is lost"),
+        "{}",
+        logged.text()
+    );
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(rows(view.as_ref()).len(), 1, "the state is kept");
+    drop(view);
+    put(&store, 2, "after").await;
+    store.snapshot_now().await.expect("snapshot");
+    assert!(snapshot_term(&store) > before, "it leads the next term");
+    store.shutdown().await.expect("shutdown");
+}
+
+/// A member of several voters whose Raft log was lost does not open: it may have voted in a
+/// term the lost log held, and could vote twice in it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cluster_member_whose_log_is_lost_does_not_open() {
+    let dir = TestDir::new("lost-log-member");
+    let (first, second) = two_voters(&dir).await;
+    second.shutdown().await.expect("shutdown");
+    first.shutdown().await.expect("shutdown");
+    drop((first, second));
+    std::fs::remove_file(dir.node(2).join("log.redb")).expect("remove the log");
+
+    let Err(StoreError::Storage(message)) = RaftStore::open(node_config(&dir, 2)).await else {
+        panic!("a member without its Raft log must not open");
+    };
+    assert!(
+        message.contains("the Raft log (log.redb) of this store is lost")
+            && message.contains("voters 1, 2")
+            && message.contains("join it to the cluster again"),
+        "{message}"
+    );
 }
 
 fn proposed(b: &WriteBatch) -> ProposedBatch {

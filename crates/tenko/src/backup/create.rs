@@ -359,7 +359,12 @@ async fn from_copy(
     request: Request,
     started: Instant,
 ) -> Result<Created, BackupError> {
-    let scratch = RaftStore::open(scratch_config(copy, node, false)).await?;
+    // Read and snapshotted only: no election, so the snapshot holds the source's applied
+    // position and no entry of the copy's own. A stopped store's copy holds the state up to
+    // the entry its log records as committed; entries after it are not committed here.
+    let mut config = scratch_config(copy, node, false);
+    config.elect = false;
+    let scratch = RaftStore::open(config).await?;
     let described = describe(&scratch, &work.0).await;
     let _ = scratch.shutdown().await;
     drop(scratch);
