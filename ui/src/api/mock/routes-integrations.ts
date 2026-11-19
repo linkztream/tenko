@@ -139,6 +139,7 @@ const createCode = route("post", "/api/v1/integrations/enrollments", async (ctx)
       enrollment: view,
       code: `tnki.${view.id}.${account}.${randomHex(32)}.${MOCK_CA_FINGERPRINT}`,
       server_root_sha256: MOCK_CA_FINGERPRINT,
+      listen: ["0.0.0.0:8445"],
     },
     { "Cache-Control": "no-store" },
   );

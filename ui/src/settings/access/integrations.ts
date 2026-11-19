@@ -54,6 +54,19 @@ export function lineages(records: readonly CertRecord[], now: number): Lineage[]
   return out.sort((a, b) => ORDER[a.state] - ORDER[b.state] || a.label.localeCompare(b.label));
 }
 
+/**
+ * Why hosts on the network cannot reach the integration listener of the controller that made
+ * a code: it is closed, or it listens on loopback addresses only (the API's default host
+ * when the API is kept on loopback). `undefined` when they can, or when the answer does not say.
+ */
+export function unreachableListener(listen: readonly string[] | null | undefined): "closed" | "loopback" | undefined {
+  if (!listen) return undefined;
+  if (listen.length === 0) return "closed";
+  const loopback = (address: string) =>
+    address.startsWith("127.") || address.startsWith("[::1]") || address.startsWith("[::ffff:127.");
+  return listen.every(loopback) ? "loopback" : undefined;
+}
+
 /** The codes that can still be used at `now`. */
 export function waitingCodes(codes: readonly EnrollmentCode[], now: number): EnrollmentCode[] {
   return codes.filter((code) => code.state.state === "pending" && Date.parse(code.expires_at) > now);

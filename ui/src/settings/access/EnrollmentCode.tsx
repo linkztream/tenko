@@ -14,7 +14,7 @@ import { formatDateTime, t } from "../../i18n";
 import { Field, FieldRow, SelectInput } from "../../ipam/formKit";
 import { fingerprintPairs } from "../../nodes/model";
 import { copyValue } from "../../secrets/clipboard";
-import type { CreatedCode } from "./integrations";
+import { unreachableListener, type CreatedCode } from "./integrations";
 import type { UserInfo } from "./model";
 // The dialog width and the code blocks are the node enrollment dialog's.
 import "../../nodes/nodes.css";
@@ -129,6 +129,15 @@ export function EnrollmentCodeDialog(props: { accounts: UserInfo[]; onCreated: (
               <Notice kind="warn" testid="integration-code-once">
                 {t("integrations.code.once", { expires: formatDateTime(c().enrollment.expires_at) })}
               </Notice>
+              <Show when={unreachableListener(c().listen)}>
+                {(why) => (
+                  <Notice kind="bad" testid="integration-listener-unreachable">
+                    {why() === "closed"
+                      ? t("integrations.code.listener_closed")
+                      : t("integrations.code.listener_loopback", { addresses: (c().listen ?? []).join(", ") })}
+                  </Notice>
+                )}
+              </Show>
               <div class="field">
                 <span class="label">{t("integrations.code.code")}</span>
                 <code class="enroll-token mono" data-testid="integration-code-text">

@@ -5243,6 +5243,8 @@ export type MessageKey =
   | "integrations.code.lifetime"
   | "integrations.code.lifetime_3600"
   | "integrations.code.lifetime_900"
+  | "integrations.code.listener_closed"
+  | "integrations.code.listener_loopback"
   | "integrations.code.no_accounts"
   | "integrations.code.once"
   | "integrations.code.source"
@@ -9444,6 +9446,7 @@ export interface MessageArgs {
   "import.upload.size": { kb: string | number };
   "import.upload.start": { count: number };
   "import.upload.unsupported": { names: string | number };
+  "integrations.code.listener_loopback": { addresses: string | number };
   "integrations.code.once": { expires: string | number };
   "integrations.code.withdrawn": { account: string | number };
   "integrations.codes.from": { source: string | number };
@@ -15411,6 +15414,8 @@ export const messageKeys: readonly MessageKey[] = [
   "integrations.code.lifetime",
   "integrations.code.lifetime_3600",
   "integrations.code.lifetime_900",
+  "integrations.code.listener_closed",
+  "integrations.code.listener_loopback",
   "integrations.code.no_accounts",
   "integrations.code.once",
   "integrations.code.source",

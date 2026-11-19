@@ -246,6 +246,12 @@
       <unit id="access.token.bound_unknown">
         <segment><source>a host whose certificate has ended</source><target>en värd vars certifikat har upphört</target></segment>
       </unit>
+      <unit id="integrations.code.listener_closed">
+        <segment><source>The integration listener of this controller is closed ([integrations] listen = []): hosts cannot enroll or renew until it is opened.</source><target>Integrationslyssnaren på den här styrenheten är stängd ([integrations] listen = []): värdar kan inte registrera sig eller förnya förrän den öppnas.</target></segment>
+      </unit>
+      <unit id="integrations.code.listener_loopback">
+        <segment><source>The integration listener of this controller listens on {addresses} only, so hosts on the network cannot reach it. Set [integrations] listen in tenko.toml to an address they can reach, such as 0.0.0.0:8445.</source><target>Integrationslyssnaren på den här styrenheten lyssnar bara på {addresses}, så värdar i nätverket når den inte. Ange [integrations] listen i tenko.toml till en adress de når, till exempel 0.0.0.0:8445.</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

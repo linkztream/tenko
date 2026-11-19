@@ -7,7 +7,7 @@ import { renderRoute } from "../../app/testing/render";
 import { setSessionForTest } from "../../auth/session";
 import { signInAs } from "../testkit";
 import AccessPage from "./AccessPage";
-import { lineages, waitingCodes, type CertRecord } from "./integrations";
+import { lineages, unreachableListener, waitingCodes, type CertRecord } from "./integrations";
 
 // The dialogs render in a portal outside the view; axe looks at the whole document there.
 const NO_SHELL = { disable: ["region"] } as const;
@@ -138,5 +138,17 @@ describe("the integration certificates of the access page", () => {
     await waitFor(() => expect(lineageRow("dns-sync-host").dataset.state).toBe("revoked"));
     expect(within(lineageRow("dns-sync-host")).queryByTestId("integration-revoke")).toBeNull();
     expect(screen.getByText("Certificate of dns-sync-host revoked")).toBeTruthy();
+  });
+});
+
+describe("where hosts reach the integration listener", () => {
+  it("warns when it is closed or listens on loopback only", () => {
+    expect(unreachableListener(["0.0.0.0:8445"])).toBeUndefined();
+    expect(unreachableListener(["127.0.0.1:8445", "192.0.2.5:8445"])).toBeUndefined();
+    expect(unreachableListener(["127.0.0.1:8445"])).toBe("loopback");
+    expect(unreachableListener(["127.0.0.1:8445", "[::1]:8445"])).toBe("loopback");
+    expect(unreachableListener(["[::ffff:127.0.0.1]:8445"])).toBe("loopback");
+    expect(unreachableListener([])).toBe("closed");
+    expect(unreachableListener(undefined)).toBeUndefined();
   });
 });
