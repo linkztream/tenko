@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Fixed
+
+- A `[dns] listen` address with port 0 no longer fails to start when the port the system gives its UDP socket is already taken for TCP, by another program's connection or, on Windows, by an excluded port range: the address takes another port, eight times at most, and keeps one number for UDP and TCP. A configured port that is taken still fails the start at once.
+
 ## [0.0.12-rc.5] - 2026-11-19
 
 ### Added

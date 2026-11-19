@@ -11,42 +11,24 @@ use crate::{
     transport::udp::UdpSettings,
 };
 
-/// Starts a server on loopback with a port from the system. The server takes a UDP port
-/// from the system and binds TCP on the same number, which another test running in
-/// parallel can hold already (`AddrInUse`); a failed start leaves nothing running, so the
-/// start is tried again, and any other error is final.
+/// Starts a server on loopback with a port from the system (the server takes another one
+/// when the number the system gave UDP is taken for TCP).
 async fn server() -> Server {
-    let mut attempts = 0;
-    loop {
-        let config = ServerConfig {
-            listen: vec![SocketAddr::from((Ipv4Addr::LOCALHOST, 0))],
-            udp: UdpSettings {
-                workers: 2,
-                ..UdpSettings::default()
-            },
-            ..ServerConfig::default()
-        };
-        match Server::start_authoritative(
-            config,
-            CatalogHandle::new(Catalog::default()),
-            Hooks::default(),
-        )
-        .await
-        {
-            Ok(server) => return server,
-            // Windows refuses a port of an excluded range with PermissionDenied: the TCP
-            // listener takes the number the UDP socket got, and that number can be excluded.
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::AddrInUse | std::io::ErrorKind::PermissionDenied
-                ) && attempts < 20 =>
-            {
-                attempts += 1;
-            }
-            Err(error) => panic!("server: {error}"),
-        }
-    }
+    let config = ServerConfig {
+        listen: vec![SocketAddr::from((Ipv4Addr::LOCALHOST, 0))],
+        udp: UdpSettings {
+            workers: 2,
+            ..UdpSettings::default()
+        },
+        ..ServerConfig::default()
+    };
+    Server::start_authoritative(
+        config,
+        CatalogHandle::new(Catalog::default()),
+        Hooks::default(),
+    )
+    .await
+    .expect("server")
 }
 
 #[tokio::test]

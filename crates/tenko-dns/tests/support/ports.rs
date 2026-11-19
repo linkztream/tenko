@@ -1,11 +1,11 @@
 //! Free loopback ports for the tests that start a [`Server`] on real sockets.
 //!
-//! A server asked for port 0 takes a UDP port from the system and binds TCP on the same
-//! number, which another test's outgoing connection can hold already (under a loaded gate
-//! that is `AddrInUse`). The port therefore comes from `tenko_core::testing::free_port`, a
-//! pool below the ephemeral ranges that is checked for TCP and UDP on both loopback families
-//! and never handed out twice in a process; [`start_on_free_port`] starts again on a new
-//! port when the bind still loses a race with another process.
+//! For the tests that need one port number on both loopback families, the port comes from
+//! `tenko_core::testing::free_port`, a pool below the ephemeral ranges that is checked for TCP
+//! and UDP on both loopback families and never handed out twice in a process;
+//! [`start_on_free_port`] starts again on a new port when the bind still loses a race with
+//! another process. (A server asked for port 0 per address takes a new number itself when TCP
+//! finds the one UDP got taken.)
 
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 

@@ -138,6 +138,45 @@ fn invalid(reason: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, reason.to_string())
 }
 
+/// How often a listen address with port 0 takes a new port when TCP finds the number taken.
+const PORT_ZERO_TRIES: usize = 8;
+
+/// Binds the UDP sockets of one listen address and, with TCP on, the TCP listener on the same
+/// port. For port 0 the system picks the UDP port, and another socket (an outgoing
+/// connection's local port) may hold that number for TCP, or Windows may exclude it for TCP
+/// (`PermissionDenied`): the address then takes a new port, [`PORT_ZERO_TRIES`] times at
+/// most, and the last error is returned. A configured port fails at once.
+/// `tcp_bind` is [`tcp::bind`]; a test hands in one that finds the number taken.
+fn bind_listen(
+    address: SocketAddr,
+    config: &ServerConfig,
+    tcp_bind: impl Fn(SocketAddr) -> io::Result<tokio::net::TcpListener>,
+) -> io::Result<(udp::Bound, Option<tokio::net::TcpListener>)> {
+    let mut tries = if address.port() == 0 {
+        PORT_ZERO_TRIES
+    } else {
+        1
+    };
+    loop {
+        let udp = udp::bind(address, &config.udp)?;
+        if config.tcp.is_none() {
+            return Ok((udp, None));
+        }
+        match tcp_bind(udp.local) {
+            Ok(listener) => return Ok((udp, Some(listener))),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::AddrInUse | io::ErrorKind::PermissionDenied
+                ) && tries > 1 =>
+            {
+                tries -= 1;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
 impl Server {
     /// Starts the authoritative resolver on `catalog`.
     ///
@@ -204,10 +243,8 @@ impl Server {
         let mut bound = Vec::with_capacity(config.listen.len());
         let mut listeners = Vec::new();
         for address in &config.listen {
-            let udp = udp::bind(*address, &config.udp)?;
-            if config.tcp.is_some() {
-                listeners.push(tcp::bind(udp.local)?);
-            }
+            let (udp, listener) = bind_listen(*address, &config, tcp::bind)?;
+            listeners.extend(listener);
             bound.push(udp);
         }
         let encrypted = match config.tls.clone() {
@@ -374,5 +411,85 @@ async fn rotate_cookies(cookies: CookieSecret, stop: CancellationToken) {
                 let _ = cookies.rotate();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{cell::Cell, net::Ipv4Addr};
+
+    use tenko_core::testing::free_port;
+
+    use super::*;
+
+    fn config() -> ServerConfig {
+        ServerConfig {
+            udp: UdpSettings {
+                workers: 1,
+                ..UdpSettings::default()
+            },
+            ..ServerConfig::default()
+        }
+    }
+
+    /// A TCP bind that finds the number taken for its first `taken` calls.
+    fn taken_for(
+        taken: usize,
+        calls: &Cell<usize>,
+    ) -> impl Fn(SocketAddr) -> io::Result<tokio::net::TcpListener> + '_ {
+        move |address| {
+            calls.set(calls.get() + 1);
+            if calls.get() <= taken {
+                Err(io::ErrorKind::AddrInUse.into())
+            } else {
+                tcp::bind(address)
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn port_0_takes_a_new_port_when_tcp_finds_the_number_taken() {
+        let calls = Cell::new(0);
+        let (udp, listener) = bind_listen(
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+            &config(),
+            taken_for(1, &calls),
+        )
+        .expect("bound on another port");
+        assert_eq!(calls.get(), 2);
+        let tcp = listener
+            .expect("a TCP listener")
+            .local_addr()
+            .expect("address");
+        assert_eq!(tcp.port(), udp.local.port(), "one port for UDP and TCP");
+    }
+
+    #[tokio::test]
+    async fn port_0_gives_up_after_its_tries_with_the_last_error() {
+        let calls = Cell::new(0);
+        let Err(error) = bind_listen(
+            SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
+            &config(),
+            taken_for(usize::MAX, &calls),
+        ) else {
+            panic!("every number is taken");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+        assert_eq!(calls.get(), PORT_ZERO_TRIES);
+    }
+
+    #[tokio::test]
+    async fn a_configured_port_whose_tcp_side_is_taken_fails_at_once() {
+        let calls = Cell::new(0);
+        let port = free_port().release();
+        let Err(error) = bind_listen(
+            SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+            &config(),
+            taken_for(usize::MAX, &calls),
+        ) else {
+            panic!("the configured port is taken");
+        };
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+        assert_eq!(calls.get(), 1);
     }
 }
