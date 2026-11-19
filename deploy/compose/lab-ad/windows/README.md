@@ -624,10 +624,19 @@ through the hypervisor's guest agent (as SYSTEM on the Windows machines, as root
 restart a machine, take and restore a snapshot, run a readiness check, and fetch files from
 a machine afterwards. It takes the scripts from its checkout of this repository at one
 commit, the commit under test. It reads [steps/steps.json](steps/steps.json) and runs its
-entries one at a time, in the order of the file. It snapshots every machine after each
-entry that passed, so a script need not undo anything, but it must be safe to run again on a
-machine restored to the snapshot before it. A failed entry stops the run, its step directory
-is fetched, and every machine is left as it is.
+entries one at a time, in the order of the file. It snapshots every machine at the baseline
+and before each entry marked `one_way`, with all the lab's machines shut down cleanly for the
+snapshot: a snapshot of a running Windows machine can report success and still fail when it
+is restored. So a script need not undo anything, but it must be safe to run again on a
+machine restored to a snapshot before it. A failed entry stops the run, its step directory
+is fetched, and every machine is left as it is; the run goes on from the latest snapshot at
+or before that entry, running again the entries in between.
+
+After the machines start again, for a snapshot or after a restore, an answering guest agent
+is not yet a ready machine. For each machine the job runs the `ready_check` of the latest
+entry before the point it continues from that targets that machine and has one, until it
+passes: the directory service on a promoted controller, the secure channel on a joined
+member, the API on `ns1`.
 
 **The machines as the job hands them over.** The addresses of the names table; each
 computer already has its name (`dc1`, `dc2`, `srv1`, `pc1`); every machine's DNS server is
