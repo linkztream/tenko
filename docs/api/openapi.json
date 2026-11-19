@@ -7,7 +7,7 @@
       "name": "BUSL-1.1",
       "identifier": "BUSL-1.1"
     },
-    "version": "0.0.12-rc.4"
+    "version": "0.0.12-rc.5"
   },
   "paths": {
     "/api/v1/access/directory-mappings": {
