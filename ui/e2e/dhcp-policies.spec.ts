@@ -56,16 +56,17 @@ test("a policy on a class sets a boot file, and the effective view says why a cl
   await optset.getByTestId("optset-add").selectOption("dhcp4|67");
   await withKey(optset, "optset-row", "dhcp4:67").getByTestId("optset-value").fill("ipxe.efi");
   await optset.getByTestId("optset-save").click();
-  await expect(withKey(optset, "optset-row", "dhcp4:67")).toBeVisible();
+  // The row shows before the save (it was added above): wait for the saved set instead.
+  const policies = await api.get<Schemas["Page_DhcpPolicyItem"]>("/dhcp/policies");
+  const policy = policies.items.find((p) => p.name === "uefi-boot")!;
+  await expect
+    .poll(async () => (await api.get<Schemas["OptionSetItem"]>(`/dhcp/option-sets/policy:${policy.id}`)).values.map((v) => v.code))
+    .toEqual([67]);
   await policyForm.getByTestId("form-cancel").click();
   await expect(policyForm).toHaveCount(0);
 
-  const policies = await api.get<Schemas["Page_DhcpPolicyItem"]>("/dhcp/policies");
-  const policy = policies.items.find((p) => p.name === "uefi-boot")!;
   expect(policy.condition).toEqual({ join: "and", terms: [{ class: uefi.id }] });
   expect(policy.action?.ddns?.enabled).toBe(true);
-  const set = await api.get<Schemas["OptionSetItem"]>(`/dhcp/option-sets/policy:${policy.id}`);
-  expect(set.values.map((v) => v.code)).toEqual([67]);
   await expect(gridRow(page, "dhcp-policies", "uefi-boot").getByTestId("policy-condition-words")).toHaveText("in class uefi-x64");
 
   // Why a UEFI x64 client gets option 67: the class, the policy, the level and its owner.
