@@ -370,6 +370,13 @@ sampling_ratio = 1.0
 # Seconds between two computations of the gauges read from status interfaces (5 to 3600).
 gauge_interval_secs = 30
 
+[integrations]
+# The integration listener, where integrations present the client certificates of the
+# integration CA (ADR 0035, docs/certificates.md). It speaks mutual TLS on a port of its own.
+# Controller: socket addresses. Not set: 0.0.0.0:8445, opened while an enrollment code waits
+# or an integration certificate is in use. An empty list keeps it closed.
+# listen = ["0.0.0.0:8445"]
+
 [backup]
 # An absolute directory for backup files (OPS-07). Not set: backups/ in the data directory.
 # Prefer another disk. The schedule and how many backups are kept are settings of the

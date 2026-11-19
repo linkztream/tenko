@@ -73,8 +73,9 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 26] = [
+const TOP_LEVEL_KEYS: [&str; 27] = [
     "audit_export",
+    "integrations",
     "dns",
     // WP7.5: the dhcp role.
     "dhcp",
@@ -154,6 +155,8 @@ pub struct Config {
     pub updates: UpdatesSection,
     /// The node transport between controllers and data-plane nodes (OPS-04).
     pub cluster: ClusterSection,
+    /// The integration listener of client certificates (ADR 0035).
+    pub integrations: IntegrationsSection,
     /// The scanner of the probe role (SCAN-01 to SCAN-09); read by the probe itself until
     /// the controller hands out scan configuration (WP3.1).
     pub scan: tenko_scan::config::ScanConfig,
@@ -194,6 +197,7 @@ impl Default for Config {
             modules: None,
             updates: UpdatesSection::default(),
             cluster: ClusterSection::default(),
+            integrations: IntegrationsSection::default(),
             scan: tenko_scan::config::ScanConfig::default(),
             telemetry: TelemetrySection::default(),
             metrics: MetricsSection::default(),
@@ -296,6 +300,61 @@ impl Default for ClusterSection {
     }
 }
 
+/// How a listener that opens on demand opens: `key` is the setting, `listen` its value and
+/// `default` the address it opens on when the setting is absent.
+fn listen_mode(
+    key: &str,
+    listen: Option<&[String]>,
+    default: &str,
+) -> Result<ClusterListen, ConfigError> {
+    let parse = |text: &str| {
+        text.parse::<SocketAddr>().map_err(|_| {
+            ConfigError::invalid(format!(
+                "{key}: `{text}` is not an address with a port, such as {default}"
+            ))
+        })
+    };
+    match listen {
+        None => Ok(ClusterListen::OnDemand(vec![parse(default)?])),
+        Some([]) => Ok(ClusterListen::Off),
+        Some(list) => Ok(ClusterListen::Always(
+            list.iter()
+                .map(|text| parse(text))
+                .collect::<Result<_, _>>()?,
+        )),
+    }
+}
+
+/// The default address of the integration listener on a controller.
+pub const DEFAULT_INTEGRATIONS_LISTEN: &str = "0.0.0.0:8445";
+
+/// `[integrations]`: the integration listener, where integrations present the client
+/// certificates of ADR 0035.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IntegrationsSection {
+    /// Controller: socket addresses of the integration listener. Not set: `0.0.0.0:8445`,
+    /// opened while an enrollment code waits or an integration certificate is in use. An
+    /// empty list keeps it closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen: Option<Vec<String>>,
+}
+
+impl IntegrationsSection {
+    /// The listening mode.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an address that is not an address with a port.
+    pub fn listen_mode(&self) -> Result<ClusterListen, ConfigError> {
+        listen_mode(
+            "integrations.listen",
+            self.listen.as_deref(),
+            DEFAULT_INTEGRATIONS_LISTEN,
+        )
+    }
+}
+
 /// How the cluster port of a controller opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClusterListen {
@@ -314,24 +373,11 @@ impl ClusterSection {
     ///
     /// `config.invalid` for an address that is not an address with a port.
     pub fn listen_mode(&self) -> Result<ClusterListen, ConfigError> {
-        let parse = |text: &str| {
-            text.parse::<SocketAddr>().map_err(|_| {
-                ConfigError::invalid(format!(
-                    "cluster.listen: `{text}` is not an address with a port, such as 0.0.0.0:8444"
-                ))
-            })
-        };
-        match &self.listen {
-            None => Ok(ClusterListen::OnDemand(vec![parse(
-                DEFAULT_CLUSTER_LISTEN,
-            )?])),
-            Some(list) if list.is_empty() => Ok(ClusterListen::Off),
-            Some(list) => Ok(ClusterListen::Always(
-                list.iter()
-                    .map(|text| parse(text))
-                    .collect::<Result<_, _>>()?,
-            )),
-        }
+        listen_mode(
+            "cluster.listen",
+            self.listen.as_deref(),
+            DEFAULT_CLUSTER_LISTEN,
+        )
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -3456,6 +3502,7 @@ impl Config {
         self.log.validate()?;
         self.updates.validate()?;
         self.cluster.validate()?;
+        self.integrations.listen_mode()?;
         self.telemetry.validate()?;
         self.metrics.validate()?;
         self.backup.validate()?;
@@ -4354,6 +4401,52 @@ password_hash_memory_mib = {bad}
             from_text("data_dir = \"/d\"\n[ipam.findings]\nunknown = 1\n", &[]).is_err(),
             "unknown keys are refused"
         );
+    }
+
+    #[test]
+    fn the_integration_listener_opens_on_demand_unless_told_otherwise() {
+        let default = from_text(
+            "data_dir = \"/d\"
+",
+            &[],
+        )
+        .expect("loads");
+        assert_eq!(
+            default.config.integrations.listen_mode().expect("mode"),
+            ClusterListen::OnDemand(vec!["0.0.0.0:8445".parse().expect("address")])
+        );
+        let named = from_text(
+            "data_dir = \"/d\"
+[integrations]
+listen = [\"192.0.2.5:9445\"]
+",
+            &[],
+        )
+        .expect("loads");
+        assert_eq!(
+            named.config.integrations.listen_mode().expect("mode"),
+            ClusterListen::Always(vec!["192.0.2.5:9445".parse().expect("address")])
+        );
+        let off = from_text(
+            "data_dir = \"/d\"
+",
+            &[("TENKO_INTEGRATIONS__LISTEN", "[]")],
+        )
+        .expect("loads");
+        assert_eq!(
+            off.config.integrations.listen_mode().expect("mode"),
+            ClusterListen::Off
+        );
+        let bad = from_text(
+            "data_dir = \"/d\"
+[integrations]
+listen = [\"8445\"]
+",
+            &[],
+        )
+        .expect("loads");
+        let error = bad.config.resolve().expect_err("not an address");
+        assert!(error.to_string().contains("integrations.listen"), "{error}");
     }
 
     #[test]

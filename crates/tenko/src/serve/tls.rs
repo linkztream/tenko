@@ -10,8 +10,8 @@ use tenko_auth::{
     settings::Profile,
 };
 use tenko_cluster::ca::{
-    CaPolicy, DEFAULT_WATCH_INTERVAL, InternalCa, ServerIdentity, TlsMode, TlsPolicy, TlsService,
-    TrustedProxies,
+    CaPolicy, DEFAULT_WATCH_INTERVAL, InternalCa, ServerIdentity, TlsMode, TlsPolicy, TlsResolver,
+    TlsService, TrustedProxies,
 };
 use tenko_core::{RequestCtx, principal::SystemComponent};
 use tenko_store::{ReadConsistency, ReadViewExt as _, Store, WatchFilter};
@@ -42,6 +42,9 @@ pub(super) struct TlsSetup {
     /// Mode a: the internal CA root (PEM) and its SHA-256 fingerprint, for
     /// `GET /system/ca-root` and the console.
     pub ca_root: Option<(String, String)>,
+    /// The server certificate of the integration listener: always one of the internal CA
+    /// for the same names (ADR 0035, decision 3), in mode a the listener's own.
+    pub integration: Arc<TlsResolver>,
 }
 
 /// Brings up the TLS layer.
@@ -70,8 +73,9 @@ pub(super) async fn start(
         tasks: Vec::new(),
         watchers: Vec::new(),
         ca_root: None,
+        integration: Arc::new(TlsResolver::default()),
     };
-    match &resolved.tls {
+    let setup = match &resolved.tls {
         TlsSpec::InternalCa { .. } => internal_ca(base, resolved, store, vault, stop).await,
         TlsSpec::Imported {
             cert_path,
@@ -141,7 +145,48 @@ pub(super) async fn start(
                 ..base
             })
         }
+    }?;
+    if matches!(resolved.tls, TlsSpec::InternalCa { .. }) {
+        Ok(setup)
+    } else {
+        integration_certificate(setup, resolved, store, vault, stop).await
     }
+}
+
+/// Modes b and c: the integration listener still shows a server certificate of the internal
+/// CA, issued and renewed as in mode a, beside the one the API listener uses.
+async fn integration_certificate(
+    mut setup: TlsSetup,
+    resolved: &Resolved,
+    store: &Arc<dyn Store>,
+    vault: &Arc<StoreVault>,
+    stop: &watch::Receiver<bool>,
+) -> Result<TlsSetup, StartError> {
+    let ctx = RequestCtx::system(SystemComponent::Cluster);
+    let ca = InternalCa::load_or_init(store.as_ref(), vault.as_ref(), &ctx, CaPolicy::default())
+        .await
+        .map_err(|error| StartError::coded("tls", &error))?;
+    let identity = identity(resolved, store.as_ref()).await?;
+    let material = ca
+        .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
+        .await
+        .map_err(|error| StartError::coded("tls", &error))?;
+    setup.integration.set(Some(material));
+    setup.tasks.push(tokio::spawn(renew(
+        Renewal {
+            ca,
+            store: Arc::clone(store),
+            vault: Arc::clone(vault),
+            service: None,
+            resolver: Arc::clone(&setup.integration),
+            resolved: resolved.clone(),
+            interval: Duration::from_secs(
+                resolved.config.tls.renew_check_hours.saturating_mul(3_600),
+            ),
+        },
+        stop.clone(),
+    )));
+    Ok(setup)
 }
 
 fn switch(service: &TlsService, mode: TlsMode) -> Result<(), StartError> {
@@ -189,7 +234,8 @@ async fn internal_ca(
             ca,
             store: Arc::clone(store),
             vault: Arc::clone(vault),
-            service: base.service.clone(),
+            service: Some(base.service.clone()),
+            resolver: base.service.resolver(),
             resolved: resolved.clone(),
             interval: Duration::from_secs(
                 resolved.config.tls.renew_check_hours.saturating_mul(3_600),
@@ -203,6 +249,7 @@ async fn internal_ca(
         tasks: vec![renewal],
         watchers: vec![watcher],
         ca_root: Some((root_pem, fingerprint)),
+        integration: base.service.resolver(),
         ..base
     })
 }
@@ -321,7 +368,10 @@ struct Renewal {
     ca: InternalCa,
     store: Arc<dyn Store>,
     vault: Arc<StoreVault>,
-    service: TlsService,
+    /// Mode a: the API listener's service, which serves the material through `resolver`.
+    service: Option<TlsService>,
+    /// Where the material goes; in mode a the service's own resolver.
+    resolver: Arc<TlsResolver>,
     resolved: Resolved,
     interval: Duration,
 }
@@ -385,8 +435,11 @@ async fn refresh(renewal: &Renewal) {
         .await
     {
         Ok(material) => {
-            let current = renewal
-                .service
+            let Some(service) = &renewal.service else {
+                renewal.resolver.set(Some(material));
+                return;
+            };
+            let current = service
                 .status()
                 .certificate
                 .as_ref()
@@ -397,7 +450,7 @@ async fn refresh(renewal: &Renewal) {
                     not_after = %material.info().not_after,
                     "installed a new server certificate from the internal CA"
                 );
-                renewal.service.install(material);
+                service.install(material);
             }
         }
         Err(error) => {

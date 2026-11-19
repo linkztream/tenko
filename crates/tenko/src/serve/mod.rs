@@ -1298,6 +1298,7 @@ async fn start(
             Ok((tls, summary))
         })
         .await?;
+    let integration_resolver = Arc::clone(&tls.integration);
     running.tasks.extend(tls.tasks);
     running.watchers.extend(tls.watchers);
 
@@ -1772,14 +1773,15 @@ async fn start(
     running.tasks.extend(cluster.tasks());
     // Integration client certificates (ADR 0035): the service and the task that keeps the
     // index of its certificate records current.
+    let integration_issuer = Arc::new(tenko_api::routes::integrations::CaIssuer::new(
+        Arc::clone(&store_dyn),
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+        Arc::clone(cluster.registry().ca()),
+    ));
     let client_certs = Arc::new(tenko_auth::client_cert::ClientCerts::new(
         Arc::clone(&store_dyn),
         Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
-        Arc::new(tenko_api::routes::integrations::CaIssuer::new(
-            Arc::clone(&store_dyn),
-            Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
-            Arc::clone(cluster.registry().ca()),
-        )),
+        Arc::clone(&integration_issuer) as Arc<dyn tenko_auth::client_cert::Issuer>,
     ));
     running
         .tasks
@@ -1885,6 +1887,12 @@ async fn start(
             server.header_read_timeout =
                 Duration::from_secs(config.server.header_read_timeout_secs);
             server.max_connections = config.server.max_connections;
+            server.integration = integration_listener(
+                config,
+                &client_certs,
+                &integration_issuer,
+                &integration_resolver,
+            );
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&languages));
             if let Some(change_queue) = &change_queue {
@@ -2523,6 +2531,28 @@ fn publish_setup_token(
 }
 
 /// The audit export's settings service and its exporter (WP3.3): file sinks write into
+/// The integration listener of ADR 0035, unless `[integrations] listen = []` closes it.
+fn integration_listener(
+    config: &config::Config,
+    certs: &Arc<tenko_auth::client_cert::ClientCerts>,
+    issuer: &Arc<tenko_api::routes::integrations::CaIssuer>,
+    resolver: &Arc<tenko_cluster::ca::TlsResolver>,
+) -> Option<tenko_api::server::integration::IntegrationListener> {
+    // The configuration was validated at start, so the mode is known.
+    let (listen, on_demand) = match config.integrations.listen_mode().ok()? {
+        config::ClusterListen::Off => return None,
+        config::ClusterListen::OnDemand(listen) => (listen, true),
+        config::ClusterListen::Always(listen) => (listen, false),
+    };
+    Some(tenko_api::server::integration::IntegrationListener {
+        listen,
+        on_demand,
+        certs: Arc::clone(certs),
+        issuer: Arc::clone(issuer),
+        resolver: Arc::clone(resolver) as _,
+    })
+}
+
 /// `[audit_export] file_dir`, TLS client keys come from the vault, and the syslog
 /// HOSTNAME is this controller's TLS host name (`-` when it has none).
 fn audit_export(
