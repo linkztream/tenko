@@ -11,6 +11,7 @@
 //! | [`model`] | the records of the node registry and the views and requests of its API |
 //! | [`registry`] | the node registry: tokens, enrollment, renewal, revocation, protocol state |
 //! | [`mtls`] | the mutual TLS of the cluster port: verifiers, revocation, kill switches |
+//! | [`client_tls`] | the TLS of the integration listener: its client verifier and configuration (ADR 0035) |
 //! | [`session`] | the live heartbeat sessions and connections of the cluster port |
 //! | [`server`] | the controller's cluster port: accept loop, mutual TLS, the router and the helpers the services share |
 //! | `service` (private) | the gRPC services of the cluster port, one file per service |
@@ -33,6 +34,7 @@ pub mod admin;
 pub mod buffer;
 pub mod ca;
 pub mod client;
+pub mod client_tls;
 pub mod error;
 pub mod generation;
 pub mod identity;
