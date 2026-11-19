@@ -1097,6 +1097,12 @@ impl AuthService {
             )
             .with_context("profile", next.profile.as_str());
             draft.details.changes = changes(&current, &next);
+            // TGL-47: requiring binding ends the service-account tokens that are not bound.
+            if next.integrations().require_binding && !current.integrations().require_binding {
+                let removed =
+                    super::access::stage_unbound_removal(self.view().await?.as_ref(), &mut batch)?;
+                draft = draft.with_context("unbound_tokens_removed", removed.to_string());
+            }
             batch.audit(draft);
             self.commit(batch).await?;
         }

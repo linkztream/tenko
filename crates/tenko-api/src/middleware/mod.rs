@@ -46,7 +46,7 @@ pub use idempotency::IdempotencyConfig;
 pub use rate_limit::{LimitScope, Quota, RateLimitConfig, RateLimiter, RetryAfter};
 
 use crate::{
-    extract::{AuthOutcome, ClientInfo, credentials_for, placeholder_principal},
+    extract::{AuthOutcome, ClientInfo, credentials_of, placeholder_principal},
     problem::{ApiError, codes},
     server::forwarded::{ConnInfo, UnstatedScheme, resolve},
     state::AppState,
@@ -273,7 +273,7 @@ async fn guard(layers: &Layers, request: &mut Request) -> Option<Response> {
     };
     // Only the session cookie of the request's scheme, as the extractor reads it: over HTTPS
     // a plain-named cookie selects no principal for the limits or the idempotency records.
-    let credentials = credentials_for(request.headers(), client.https);
+    let credentials = credentials_of(request.headers(), request.extensions(), client.https);
     let outcome = if credentials.is_present() {
         authenticator
             .authenticate(&credentials, client.source_ip, Timestamp::now())

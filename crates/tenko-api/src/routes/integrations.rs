@@ -615,6 +615,11 @@ pub fn spawn_expiry_alarm(
     tokio::spawn(async move {
         let mut changes = certs.index().subscribe();
         loop {
+            // A lapsed lineage's tokens are removed, never moved (ADR 0035, decision 7);
+            // another node's sweep of the same tokens ends in a conflict, harmless.
+            if let Err(error) = certs.remove_lapsed_tokens(Timestamp::now()).await {
+                tracing::debug!(%error, "lapsed bound tokens left for the next sweep");
+            }
             let expiring = certs.index().expiring(Timestamp::now());
             match expiring.first() {
                 None => state.clear_notice(EXPIRING_NOTICE),

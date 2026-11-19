@@ -29,7 +29,6 @@ use crate::{
         TokenGrant, TokenScope, USER_NAMES, USER_SCOPED_TOKENS, USERS, UserKind, UserRecord,
     },
     roles::{RoleName, default_policy, satisfies},
-    secret::new_api_token,
 };
 
 /// Most grants read for a listing or a cascade.
@@ -65,7 +64,77 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
             .map(|_| record.created_at),
         source_prefixes: record.source_prefixes.clone(),
         revoked: record.renewal.as_ref().and_then(|renewal| renewal.revoked),
+        lineage: record.lineage,
     }
+}
+
+/// Stages the removal of every live scoped token of a service account that is not bound to
+/// a certificate lineage, when TGL-47 starts to require binding (ADR 0035, decision 10);
+/// returns how many. Loosening the requirement again brings none of them back.
+///
+/// # Errors
+///
+/// A store or codec error.
+pub(super) fn stage_unbound_removal(
+    view: &dyn ReadView,
+    batch: &mut WriteBatch,
+) -> Result<usize, AuthError> {
+    let mut removed = 0;
+    for (key, record, revision) in
+        view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), usize::MAX, false)?
+    {
+        if record.lineage.is_some() || record.retired() {
+            continue;
+        }
+        let service = view
+            .get_typed(&USERS, &record.owner)?
+            .is_some_and(|(user, _)| user.is_service());
+        if !service {
+            continue;
+        }
+        batch.expect_typed(&SCOPED_TOKENS, &key, Some(revision));
+        batch.delete_typed(&SCOPED_TOKENS, &key);
+        batch.delete_typed(&USER_SCOPED_TOKENS, &(record.owner, record.id));
+        removed += 1;
+    }
+    Ok(removed)
+}
+
+/// The lineage a new scoped token of `owner` binds to (ADR 0035, IAM-23): one of the
+/// service account's own lineages with a certificate in use or waiting to be, else none;
+/// a service-account token without one is refused where TGL-47 requires binding.
+fn token_lineage(
+    view: &dyn ReadView,
+    owner: &UserRecord,
+    request: &TokenRequest,
+    settings: &crate::settings::SecuritySettings,
+) -> Result<Option<uuid::Uuid>, AuthError> {
+    use crate::client_cert::model::{CLIENT_CERTS, CertState};
+    let Some(lineage) = request.lineage else {
+        if owner.is_service() && settings.integrations().require_binding {
+            return Err(AuthError::invalid(
+                "lineage",
+                "this profile binds every service-account token to a certificate of the account (TGL-47)",
+            ));
+        }
+        return Ok(None);
+    };
+    let active = owner.is_service()
+        && view
+            .scan_typed(&CLIENT_CERTS, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .any(|(_, cert, _)| {
+                cert.lineage == lineage
+                    && cert.account == owner.id
+                    && matches!(cert.state, CertState::Current | CertState::Pending)
+            });
+    if !active {
+        return Err(AuthError::invalid(
+            "lineage",
+            "no certificate of this service account in use has this lineage",
+        ));
+    }
+    Ok(Some(lineage))
 }
 
 /// Every grant issued under `root`, directly or through delegated grants, in issue order.
@@ -747,12 +816,8 @@ impl AuthService {
         let lifetime = expires_at.map(|end| end.saturating_since(ctx.now));
         let (renewal, source_prefixes) =
             super::renewal::creation_terms(owner, request, &settings, id, lifetime)?;
-        let token = if renewal.is_some() || !source_prefixes.is_empty() {
-            crate::secret::new_constrained_token()?
-        } else {
-            new_api_token()?
-        };
-        let record = ScopedTokenRecord {
+        let lineage = token_lineage(view, owner, request, &settings)?;
+        let mut record = ScopedTokenRecord {
             id,
             owner: owner.id,
             name,
@@ -761,14 +826,17 @@ impl AuthService {
             expires_at,
             last_used_at: None,
             issued_with: strength,
-            prefix: token.expose().chars().take(12).collect(),
+            prefix: String::new(),
             grants,
             scopes,
             generation: owner.tokens_generation,
             renewal: renewal.as_ref().map(|(renewal, _)| renewal.clone()),
             source_prefixes,
             expiry_noticed_at: None,
+            lineage,
         };
+        let token = crate::secret::new_token_of(record.form())?;
+        record.prefix = token.expose().chars().take(12).collect();
         let hash = token.hash();
         let mut batch = WriteBatch::for_request(ctx);
         batch.put_typed(&SCOPED_TOKENS, &hash, &record)?;
@@ -809,6 +877,9 @@ impl AuthService {
         }
         if let Some(prefixes) = super::renewal::joined(&record.source_prefixes) {
             draft = draft.with_context("source_prefixes", prefixes);
+        }
+        if let Some(lineage) = record.lineage {
+            draft = draft.with_context("lineage", lineage.to_string());
         }
         batch.audit(draft);
         self.commit(batch).await?;

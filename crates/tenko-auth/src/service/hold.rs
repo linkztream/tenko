@@ -88,7 +88,7 @@ impl AuthService {
                 let row = (SESSIONS.name().clone(), SESSIONS.key(&hash));
                 (session.user, hash, row, view.revision())
             }
-            Credentials::Bearer(token) => {
+            Credentials::Bearer(token) | Credentials::CertifiedBearer { token, .. } => {
                 let (hash, found, view) = self.token_of(token, now).await?;
                 let (owner, row) = match found {
                     FoundToken::Personal(record, _) => {

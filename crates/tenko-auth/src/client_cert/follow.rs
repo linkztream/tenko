@@ -182,13 +182,14 @@ impl CertIndex {
             .scan_typed(&ENROLLMENT_CODES, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .any(|(_, code, _)| code.state == CodeState::Pending && now.0 < code.expires_at.0);
-        let profile = view
-            .get_typed(&SETTINGS, &())?
-            .map_or(Profile::Standard, |(settings, _)| settings.profile);
+        let policy = view.get_typed(&SETTINGS, &())?.map_or_else(
+            || IntegrationPolicy::of(Profile::Standard),
+            |(settings, _)| settings.integrations(),
+        );
         let count = certs.len();
         self.certs.store(Arc::new(certs));
         self.accounts.store(Arc::new(accounts));
-        self.policy.store(Arc::new(IntegrationPolicy::of(profile)));
+        self.policy.store(Arc::new(policy));
         self.codes_waiting.store(codes_waiting, Ordering::Release);
         self.loaded.store(true, Ordering::Release);
         self.version.send_modify(|version| *version += 1);

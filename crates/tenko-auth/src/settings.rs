@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::{
+    client_cert::model::IntegrationPolicy,
     hibp::BreachMode,
     lockout::{LockPolicy, LockoutMode},
     password::policy::PasswordPolicy,
@@ -83,6 +84,7 @@ impl Profile {
                 audit_export: Some(AuditExport::Local),
                 update_prereleases: Some(false),
                 token_self_renewal: Some(true),
+                integrations: None,
                 transfer_site: None,
             },
             Self::Standard => SecuritySettings {
@@ -104,6 +106,7 @@ impl Profile {
                 audit_export: Some(AuditExport::Optional),
                 update_prereleases: Some(false),
                 token_self_renewal: Some(true),
+                integrations: None,
                 transfer_site: None,
             },
             Self::Hardened => SecuritySettings {
@@ -125,6 +128,7 @@ impl Profile {
                 audit_export: Some(AuditExport::Required),
                 update_prereleases: Some(false),
                 token_self_renewal: Some(false),
+                integrations: None,
                 transfer_site: None,
             },
             Self::Lab => SecuritySettings {
@@ -146,6 +150,7 @@ impl Profile {
                 audit_export: Some(AuditExport::Local),
                 update_prereleases: Some(false),
                 token_self_renewal: Some(true),
+                integrations: None,
                 transfer_site: None,
             },
         }
@@ -341,6 +346,12 @@ pub struct SecuritySettings {
     /// ([`SecuritySettings::token_self_renewal`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_self_renewal: Option<bool>,
+    /// TGL-47: integration client certificates (ADR 0035): their lifetime, whether
+    /// service-account tokens must be bound to one, and whether the integration listener
+    /// accepts TLS 1.2. `None` while the profile's values apply
+    /// ([`SecuritySettings::integrations`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrations: Option<IntegrationPolicy>,
     /// TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
     /// transfer to an address outside them needs XoT; an empty list makes every transfer
     /// need it. Absent in settings stored before the setting existed, and after a change of
@@ -439,6 +450,12 @@ impl SecuritySettings {
         self.update_prereleases
             .or_else(|| self.profile.defaults().update_prereleases)
             .unwrap_or(false)
+    }
+
+    /// The effective TGL-47 values: the stored ones, else the profile's.
+    pub fn integrations(&self) -> IntegrationPolicy {
+        self.integrations
+            .unwrap_or_else(|| IntegrationPolicy::of(self.profile))
     }
 
     /// The effective TGL-46 value: the stored one, else the profile's.
@@ -568,6 +585,16 @@ impl SecuritySettings {
                 serde_json::Value::Bool(profile.token_self_renewal()),
                 false,
             ),
+            // A longer certificate lifetime than Home's, or TLS 1.2 (which shows the client
+            // certificate on the path), is weaker; not requiring binding is Home's value.
+            entry(
+                "TGL-47",
+                "integrations",
+                json(serde_json::to_value(self.integrations())),
+                json(serde_json::to_value(profile.integrations())),
+                self.integrations().lifetime_days > home.integrations().lifetime_days
+                    || self.integrations().allow_tls12,
+            ),
         ]
     }
 
@@ -593,6 +620,20 @@ impl SecuritySettings {
     /// [`crate::AuthError::Invalid`] naming the setting.
     pub fn validate(&self) -> Result<(), crate::AuthError> {
         self.password_policy.validate()?;
+        if let Some(policy) = self.integrations {
+            if !(1..=IntegrationPolicy::MAX_LIFETIME_DAYS).contains(&policy.lifetime_days) {
+                return Err(crate::AuthError::invalid(
+                    "integrations",
+                    "an integration certificate lasts 1 to 365 days",
+                ));
+            }
+            if policy.allow_tls12 && self.profile == Profile::Hardened {
+                return Err(crate::AuthError::invalid(
+                    "integrations",
+                    "the Hardened profile does not allow TLS 1.2 on the integration listener",
+                ));
+            }
+        }
         if let Some(policy) = &self.lockout_policy {
             policy.validate()?;
         }
@@ -696,6 +737,9 @@ pub struct SettingsPatch {
     /// TGL-46.
     #[serde(default)]
     pub token_self_renewal: Option<bool>,
+    /// TGL-47.
+    #[serde(default)]
+    pub integrations: Option<IntegrationPolicy>,
     /// TGL-10: the networks that count as the site, in CIDR notation; an empty list is
     /// allowed (every transfer needs XoT under Hardened).
     #[serde(default)]
@@ -762,6 +806,9 @@ impl SettingsPatch {
         }
         if let Some(on) = self.token_self_renewal {
             next.token_self_renewal = Some(on);
+        }
+        if let Some(policy) = self.integrations {
+            next.integrations = Some(policy);
         }
         if let Some(site) = &self.transfer_site {
             next.transfer_site = Some(

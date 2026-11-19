@@ -170,8 +170,8 @@ impl EnrollmentCode {
 
 /// TGL-47, the integration client certificates (SECURITY-PROFILES.md): the certificate
 /// lifetime, whether service-account tokens must be bound, and whether the integration
-/// listener accepts TLS 1.2. These are the profile's values; the stored override joins the
-/// security settings with the token binding (plan package CC5).
+/// listener accepts TLS 1.2. [`IntegrationPolicy::of`] gives a profile's values; a stored
+/// override is `SecuritySettings::integrations`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct IntegrationPolicy {
     /// The lifetime of an integration certificate, in days.
@@ -183,6 +183,9 @@ pub struct IntegrationPolicy {
 }
 
 impl IntegrationPolicy {
+    /// The longest certificate lifetime the setting takes, in days (the Lab value).
+    pub const MAX_LIFETIME_DAYS: u32 = 365;
+
     /// The values of a profile.
     pub const fn of(profile: Profile) -> Self {
         let (lifetime_days, require_binding) = match profile {

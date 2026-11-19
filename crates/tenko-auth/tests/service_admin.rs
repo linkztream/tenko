@@ -1533,7 +1533,7 @@ async fn the_settings_view_reports_each_profile_as_the_matrix_says() {
             ids,
             [
                 "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21",
-                "TGL-23", "TGL-24", "TGL-45", "TGL-46"
+                "TGL-23", "TGL-24", "TGL-45", "TGL-46", "TGL-47"
             ]
         );
         for (toggle, (id, setting, values)) in view.toggles.iter().zip(&expected) {
@@ -1550,7 +1550,7 @@ async fn the_settings_view_reports_each_profile_as_the_matrix_says() {
             .map(|toggle| toggle.id.as_str())
             .collect();
         if profile == Profile::Lab {
-            assert_eq!(weaker, ["TGL-05", "TGL-06", "TGL-07"]);
+            assert_eq!(weaker, ["TGL-05", "TGL-06", "TGL-07", "TGL-47"]);
         } else {
             assert!(weaker.is_empty(), "{profile:?}: {weaker:?}");
         }

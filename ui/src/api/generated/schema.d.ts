@@ -11572,6 +11572,23 @@ export interface components {
             /** @description The version being installed. */
             version: components["schemas"]["ReleaseVersion"];
         };
+        /**
+         * @description TGL-47, the integration client certificates (SECURITY-PROFILES.md): the certificate
+         *     lifetime, whether service-account tokens must be bound, and whether the integration
+         *     listener accepts TLS 1.2. [`IntegrationPolicy::of`] gives a profile's values; a stored
+         *     override is `SecuritySettings::integrations`.
+         */
+        IntegrationPolicy: {
+            /** @description The integration listener accepts TLS 1.2 (never under Hardened). */
+            allow_tls12: boolean;
+            /**
+             * Format: int32
+             * @description The lifetime of an integration certificate, in days.
+             */
+            lifetime_days: number;
+            /** @description Every token an administrator creates for a service account must be bound. */
+            require_binding: boolean;
+        };
         /** @description An address of intent on a node. */
         IntentAddress: {
             /** @description The network. */
@@ -18548,6 +18565,11 @@ export interface components {
                 /** @description The token id. */
                 id: components["schemas"]["ApiTokenId"];
                 last_used_at?: components["schemas"]["Timestamp"] | null;
+                /**
+                 * Format: uuid
+                 * @description IAM-23: the certificate lineage the token is bound to.
+                 */
+                lineage?: string | null;
                 /** @description The name. */
                 name: string;
                 /** @description The first characters of the token. */
@@ -22434,6 +22456,7 @@ export interface components {
             audit_export?: components["schemas"]["AuditExport"] | null;
             /** @description TGL-06: breached-password check. */
             breach_check: components["schemas"]["BreachMode"];
+            integrations?: components["schemas"]["IntegrationPolicy"] | null;
             /** @description TGL-07: lockout. */
             lockout: components["schemas"]["LockoutMode"];
             lockout_policy?: components["schemas"]["LockPolicy"] | null;
@@ -22614,6 +22637,7 @@ export interface components {
         SettingsPatch: {
             audit_export?: components["schemas"]["AuditExport"] | null;
             breach_check?: components["schemas"]["BreachMode"] | null;
+            integrations?: components["schemas"]["IntegrationPolicy"] | null;
             lockout?: components["schemas"]["LockoutMode"] | null;
             lockout_policy?: components["schemas"]["LockPolicy"] | null;
             mfa?: components["schemas"]["MfaRequirement"] | null;
@@ -24162,6 +24186,14 @@ export interface components {
              *     the whole installation or a scope inside one of the owner's grants.
              */
             grants?: components["schemas"]["TokenGrant"][] | null;
+            /**
+             * Format: uuid
+             * @description IAM-23: the certificate lineage of the service account that the token is bound to
+             *     (ADR 0035); the token is then accepted only on the integration listener over a
+             *     connection whose certificate belongs to it. Required for service-account tokens where
+             *     TGL-47 requires binding.
+             */
+            lineage?: string | null;
             /** @description A name for the token. */
             name: string;
             /**
@@ -24193,6 +24225,11 @@ export interface components {
             /** @description The token id. */
             id: components["schemas"]["ApiTokenId"];
             last_used_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: uuid
+             * @description IAM-23: the certificate lineage the token is bound to.
+             */
+            lineage?: string | null;
             /** @description The name. */
             name: string;
             /** @description The first characters of the token. */

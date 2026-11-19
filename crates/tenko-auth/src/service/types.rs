@@ -509,6 +509,12 @@ pub struct TokenRequest {
     /// [`SOURCE_PREFIXES_MAX`], a host address without a length); empty for anywhere.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_prefixes: Vec<String>,
+    /// IAM-23: the certificate lineage of the service account that the token is bound to
+    /// (ADR 0035); the token is then accepted only on the integration listener over a
+    /// connection whose certificate belongs to it. Required for service-account tokens where
+    /// TGL-47 requires binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<uuid::Uuid>,
 }
 
 /// The most source prefixes of one token (IAM-21).
@@ -575,6 +581,9 @@ pub struct TokenInfo {
     /// IAM-20: the server revoked the token's family; removing the token acknowledges it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<TokenRevocation>,
+    /// IAM-23: the certificate lineage the token is bound to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<uuid::Uuid>,
 }
 
 /// A new token: the secrets are shown once.

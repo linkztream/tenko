@@ -14,7 +14,7 @@ mod enroll;
 mod follow;
 pub mod model;
 mod renew;
-mod revoke;
+pub(crate) mod revoke;
 
 use std::{collections::BTreeMap, sync::Arc};
 
@@ -65,6 +65,8 @@ pub mod actions {
     pub const RENEW: AuditAction = AuditAction::from_static("auth.client_cert.renew");
     /// A renewed certificate was first presented and replaced its predecessor.
     pub const PRESENT: AuditAction = AuditAction::from_static("auth.client_cert.present");
+    /// The tokens bound to a lineage that lapsed were removed.
+    pub const LAPSE: AuditAction = AuditAction::from_static("auth.client_cert.lapse");
 }
 
 /// What the integration CA answers for an issued certificate.
@@ -281,10 +283,10 @@ impl ClientCerts {
 
     /// The profile's TGL-47 values; Standard when no settings are stored.
     fn policy(view: &dyn ReadView) -> Result<IntegrationPolicy, ClientCertError> {
-        let profile = view
-            .get_typed(&SETTINGS, &())?
-            .map_or(Profile::Standard, |(settings, _)| settings.profile);
-        Ok(IntegrationPolicy::of(profile))
+        Ok(view.get_typed(&SETTINGS, &())?.map_or_else(
+            || IntegrationPolicy::of(Profile::Standard),
+            |(settings, _)| settings.integrations(),
+        ))
     }
 
     async fn view(&self) -> Result<Arc<dyn ReadView>, ClientCertError> {

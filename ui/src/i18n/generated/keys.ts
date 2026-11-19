@@ -334,6 +334,7 @@ export type MessageKey =
   | "audit.action.auth.client_cert.code_create"
   | "audit.action.auth.client_cert.code_withdraw"
   | "audit.action.auth.client_cert.issue"
+  | "audit.action.auth.client_cert.lapse"
   | "audit.action.auth.client_cert.present"
   | "audit.action.auth.client_cert.renew"
   | "audit.action.auth.client_cert.revoke"
@@ -361,6 +362,7 @@ export type MessageKey =
   | "audit.action.auth.session.revoke"
   | "audit.action.auth.settings.update"
   | "audit.action.auth.setup.complete"
+  | "audit.action.auth.token.binding_refused"
   | "audit.action.auth.token.create"
   | "audit.action.auth.token.expiring"
   | "audit.action.auth.token.form_refused"
@@ -10459,6 +10461,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.client_cert.code_create",
   "audit.action.auth.client_cert.code_withdraw",
   "audit.action.auth.client_cert.issue",
+  "audit.action.auth.client_cert.lapse",
   "audit.action.auth.client_cert.present",
   "audit.action.auth.client_cert.renew",
   "audit.action.auth.client_cert.revoke",
@@ -10486,6 +10489,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.session.revoke",
   "audit.action.auth.settings.update",
   "audit.action.auth.setup.complete",
+  "audit.action.auth.token.binding_refused",
   "audit.action.auth.token.create",
   "audit.action.auth.token.expiring",
   "audit.action.auth.token.form_refused",

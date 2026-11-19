@@ -158,6 +158,10 @@
         <notes><note category="description">What the audit action auth.client_cert.issue is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Enroll an integration certificate</source><target>Registrera ett integrationscertifikat</target></segment>
       </unit>
+      <unit id="audit.action.auth.client_cert.lapse">
+        <notes><note category="description">What the audit action auth.client_cert.lapse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove the tokens of a lapsed integration certificate</source><target>Ta bort token för ett utgånget integrationscertifikat</target></segment>
+      </unit>
       <unit id="audit.action.auth.client_cert.present">
         <notes><note category="description">What the audit action auth.client_cert.present is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Put a renewed integration certificate in use</source><target>Ta ett förnyat integrationscertifikat i bruk</target></segment>
@@ -169,6 +173,10 @@
       <unit id="audit.action.auth.client_cert.revoke">
         <notes><note category="description">What the audit action auth.client_cert.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Revoke an integration certificate</source><target>Återkalla ett integrationscertifikat</target></segment>
+      </unit>
+      <unit id="audit.action.auth.token.binding_refused">
+        <notes><note category="description">What the audit action auth.token.binding_refused is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a bound API token without its certificate</source><target>Neka ett bundet API-token utan dess certifikat</target></segment>
       </unit>
       <unit id="audit.action.auth.token.create">
         <notes><note category="description">What the audit action auth.token.create is called in the audit log, on a record page and on the dashboard.</note></notes>

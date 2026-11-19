@@ -27,6 +27,15 @@ pub enum Credentials {
     Session(String),
     /// The token of an `Authorization: Bearer` header.
     Bearer(String),
+    /// The token of an `Authorization: Bearer` header on a connection of the integration
+    /// listener, whose client certificate belongs to the certificate lineage `lineage`
+    /// (ADR 0035): a token bound to that lineage is accepted only so.
+    CertifiedBearer {
+        /// The token.
+        token: String,
+        /// The lineage of the connection's certificate.
+        lineage: uuid::Uuid,
+    },
 }
 
 impl Credentials {
@@ -67,6 +76,9 @@ impl fmt::Debug for Credentials {
             Self::None => f.write_str("None"),
             Self::Session(_) => f.write_str("Session(<redacted>)"),
             Self::Bearer(_) => f.write_str("Bearer(<redacted>)"),
+            Self::CertifiedBearer { lineage, .. } => {
+                write!(f, "CertifiedBearer(<redacted>, lineage {lineage})")
+            }
         }
     }
 }

@@ -55253,6 +55253,31 @@
           }
         }
       },
+      "IntegrationPolicy": {
+        "type": "object",
+        "description": "TGL-47, the integration client certificates (SECURITY-PROFILES.md): the certificate\nlifetime, whether service-account tokens must be bound, and whether the integration\nlistener accepts TLS 1.2. [`IntegrationPolicy::of`] gives a profile's values; a stored\noverride is `SecuritySettings::integrations`.",
+        "required": [
+          "lifetime_days",
+          "require_binding",
+          "allow_tls12"
+        ],
+        "properties": {
+          "allow_tls12": {
+            "type": "boolean",
+            "description": "The integration listener accepts TLS 1.2 (never under Hardened)."
+          },
+          "lifetime_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The lifetime of an integration certificate, in days.",
+            "minimum": 0
+          },
+          "require_binding": {
+            "type": "boolean",
+            "description": "Every token an administrator creates for a service account must be bound."
+          }
+        }
+      },
       "IntentAddress": {
         "type": "object",
         "description": "An address of intent on a node.",
@@ -72801,6 +72826,14 @@
                     }
                   ]
                 },
+                "lineage": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "IAM-23: the certificate lineage the token is bound to."
+                },
                 "name": {
                   "type": "string",
                   "description": "The name."
@@ -81802,6 +81835,17 @@
             "$ref": "#/components/schemas/BreachMode",
             "description": "TGL-06: breached-password check."
           },
+          "integrations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationPolicy",
+                "description": "TGL-47: integration client certificates (ADR 0035): their lifetime, whether\nservice-account tokens must be bound to one, and whether the integration listener\naccepts TLS 1.2. `None` while the profile's values apply\n([`SecuritySettings::integrations`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lockout": {
             "$ref": "#/components/schemas/LockoutMode",
             "description": "TGL-07: lockout."
@@ -82235,6 +82279,17 @@
               {
                 "$ref": "#/components/schemas/BreachMode",
                 "description": "TGL-06."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "integrations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationPolicy",
+                "description": "TGL-47."
               },
               {
                 "type": "null"
@@ -86197,6 +86252,14 @@
             },
             "description": "The grants of a scoped token: each a role no higher than one the owner holds, over\nthe whole installation or a scope inside one of the owner's grants."
           },
+          "lineage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "IAM-23: the certificate lineage of the service account that the token is bound to\n(ADR 0035); the token is then accepted only on the integration listener over a\nconnection whose certificate belongs to it. Required for service-account tokens where\nTGL-47 requires binding."
+          },
           "name": {
             "type": "string",
             "description": "A name for the token."
@@ -86291,6 +86354,14 @@
                 "type": "null"
               }
             ]
+          },
+          "lineage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "IAM-23: the certificate lineage the token is bound to."
           },
           "name": {
             "type": "string",
