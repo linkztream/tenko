@@ -5447,7 +5447,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Change the security profile, toggles or deviations */
+        /**
+         * Change the security profile, toggles or deviations
+         * @description A change that starts to require certificate-bound service-account tokens (TGL-47, also by a switch to Hardened) removes every unbound token of a service account, audited per token as `auth.token.revoke`; the answer names them in `unbound_tokens_removed`. A dry run (`?dry_run=true`) answers the settings as they stand with the tokens the change would remove, and writes nothing. Loosening the requirement later brings none of them back.
+         */
         patch: operations["update_security_settings"];
         trace?: never;
     };
@@ -6409,6 +6412,15 @@ export interface components {
             until: components["schemas"]["Timestamp"];
             /** @description Whether only an administrator should lift it early (Hardened). */
             until_unlock: boolean;
+        };
+        /** @description The tokens one service account loses. */
+        AccountTokens: {
+            /** @description The service account. */
+            account: components["schemas"]["UserId"];
+            /** @description Its name. */
+            name: string;
+            /** @description How many of its tokens. */
+            tokens: number;
         };
         /** @description A named access list for transfers, updates, recursion and queries. */
         Acl: {
@@ -22516,6 +22528,7 @@ export interface components {
             settings: components["schemas"]["SecuritySettings"];
             /** @description Each toggle with its profile default and markers. */
             toggles: components["schemas"]["ToggleState"][];
+            unbound_tokens_removed?: components["schemas"]["UnboundTokens"] | null;
             /** @description Whether the vault holds operator secrets (the PIN coupling rule applies). */
             vault_has_operator_secrets: boolean;
         };
@@ -24761,6 +24774,16 @@ export interface components {
             from_directory: boolean;
             /** @description The development placeholder page instead of the web UI (`TENKO_UI_STUB=1`). */
             stub: boolean;
+        };
+        /**
+         * @description The service-account tokens that are not bound to a certificate, which a change of TGL-47
+         *     removes (ADR 0035): a token's family counts once.
+         */
+        UnboundTokens: {
+            /** @description The accounts that lose tokens, in the order of their ids. */
+            accounts: components["schemas"]["AccountTokens"][];
+            /** @description How many tokens. */
+            count: number;
         };
         /** @description Updates an address. */
         UpdateAddress: {
@@ -52266,7 +52289,10 @@ export interface operations {
     };
     update_security_settings: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Compute the diff without writing (API-09). */
+                dry_run?: boolean;
+            };
             header?: {
                 /** @description The revision the client read, as in the `ETag`; a stale revision is refused with 409 */
                 "If-Match"?: string | null;
@@ -52280,7 +52306,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The settings after the change */
+            /** @description The settings after the change, or as they stand after a dry run */
             200: {
                 headers: {
                     /** @description The new revision of the settings */

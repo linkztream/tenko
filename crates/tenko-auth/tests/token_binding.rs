@@ -437,11 +437,55 @@ async fn requiring_binding_removes_unbound_service_tokens_and_refuses_new_ones()
         }),
         ..SettingsPatch::default()
     };
-    fx.env
+    // A renewable unbound token and its unused successor count once.
+    let renewable = fx
+        .create(
+            fx.account.id,
+            TokenRequest {
+                name: "renewable".to_owned(),
+                scopes: vec![TokenScope::Metrics],
+                renewable: true,
+                expires_in_days: Some(30),
+                ..TokenRequest::default()
+            },
+        )
+        .await
+        .expect("unbound renewable");
+    fx.renew(&renewable, None).await.expect("renewed");
+    let preview = fx
+        .env
+        .service
+        .preview_security_settings(&fx.admin, &require(true), None)
+        .await
+        .expect("dry run");
+    let would = preview.unbound_tokens_removed.expect("named");
+    assert_eq!(would.count, 2);
+    assert_eq!(
+        would
+            .accounts
+            .iter()
+            .map(|account| (account.account, account.tokens))
+            .collect::<Vec<_>>(),
+        [(fx.account.id, 2)]
+    );
+    assert!(
+        !preview.settings.integrations().require_binding,
+        "a dry run writes nothing"
+    );
+    fx.present(&plain, None)
+        .await
+        .expect("still there after the dry run");
+    let changed = fx
+        .env
         .service
         .update_security_settings(&fx.admin, &require(true), None)
         .await
         .expect("tightened");
+    assert_eq!(changed.unbound_tokens_removed, Some(would));
+    assert_eq!(
+        fx.audited("auth.token.revoke").await,
+        [AuditOutcome::Success, AuditOutcome::Success]
+    );
     assert!(matches!(
         fx.present(&plain, None).await,
         Err(AuthError::Unauthenticated)

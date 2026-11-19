@@ -34941,6 +34941,7 @@
           "settings"
         ],
         "summary": "Change the security profile, toggles or deviations",
+        "description": "A change that starts to require certificate-bound service-account tokens (TGL-47, also by a switch to Hardened) removes every unbound token of a service account, audited per token as `auth.token.revoke`; the answer names them in `unbound_tokens_removed`. A dry run (`?dry_run=true`) answers the settings as they stand with the tokens the change would remove, and writes nothing. Loosening the requirement later brings none of them back.",
         "operationId": "update_security_settings",
         "parameters": [
           {
@@ -34953,6 +34954,15 @@
                 "string",
                 "null"
               ]
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Compute the diff without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -34968,7 +34978,7 @@
         },
         "responses": {
           "200": {
-            "description": "The settings after the change",
+            "description": "The settings after the change, or as they stand after a dry run",
             "headers": {
               "ETag": {
                 "schema": {
@@ -42340,6 +42350,30 @@
           "until_unlock": {
             "type": "boolean",
             "description": "Whether only an administrator should lift it early (Hardened)."
+          }
+        }
+      },
+      "AccountTokens": {
+        "type": "object",
+        "description": "The tokens one service account loses.",
+        "required": [
+          "account",
+          "name",
+          "tokens"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "tokens": {
+            "type": "integer",
+            "description": "How many of its tokens.",
+            "minimum": 0
           }
         }
       },
@@ -81983,6 +82017,17 @@
             },
             "description": "Each toggle with its profile default and markers."
           },
+          "unbound_tokens_removed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnboundTokens",
+                "description": "Only in the answer of a change, or of its dry run, that starts to require\ncertificate-bound service-account tokens (TGL-47): the unbound tokens it removed, or\nwould remove. Loosening the requirement later brings none of them back."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "vault_has_operator_secrets": {
             "type": "boolean",
             "description": "Whether the vault holds operator secrets (the PIN coupling rule applies)."
@@ -87665,6 +87710,28 @@
           "stub": {
             "type": "boolean",
             "description": "The development placeholder page instead of the web UI (`TENKO_UI_STUB=1`)."
+          }
+        }
+      },
+      "UnboundTokens": {
+        "type": "object",
+        "description": "The service-account tokens that are not bound to a certificate, which a change of TGL-47\nremoves (ADR 0035): a token's family counts once.",
+        "required": [
+          "count",
+          "accounts"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountTokens"
+            },
+            "description": "The accounts that lose tokens, in the order of their ids."
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many tokens.",
+            "minimum": 0
           }
         }
       },

@@ -998,6 +998,7 @@ impl AuthService {
             settings,
             vault_has_operator_secrets: self.has_operator_secrets().await?,
             revision,
+            unbound_tokens_removed: None,
         })
     }
 
@@ -1042,6 +1043,35 @@ impl AuthService {
         patch: &SettingsPatch,
         expect: Option<Revision>,
     ) -> Result<SecuritySettingsView, AuthError> {
+        self.change_security_settings(ctx, patch, expect, false)
+            .await
+    }
+
+    /// `PATCH /settings/security?dry_run=true`: decides the change exactly as
+    /// [`Self::update_security_settings`] does and writes nothing, neither the change nor an
+    /// audit record of a refusal. The answer is the settings as they stand, with the tokens
+    /// the change would remove (TGL-47).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::update_security_settings`].
+    pub async fn preview_security_settings(
+        &self,
+        ctx: &RequestCtx,
+        patch: &SettingsPatch,
+        expect: Option<Revision>,
+    ) -> Result<SecuritySettingsView, AuthError> {
+        self.change_security_settings(ctx, patch, expect, true)
+            .await
+    }
+
+    async fn change_security_settings(
+        &self,
+        ctx: &RequestCtx,
+        patch: &SettingsPatch,
+        expect: Option<Revision>,
+        dry_run: bool,
+    ) -> Result<SecuritySettingsView, AuthError> {
         self.authorize(
             ctx,
             Action::Update,
@@ -1069,8 +1099,10 @@ impl AuthService {
                 AuditExport::Required,
             )?
         {
-            self.record_refused_settings_change(ctx, &AuthError::AuditExportRequired)
-                .await;
+            if !dry_run {
+                self.record_refused_settings_change(ctx, &AuthError::AuditExportRequired)
+                    .await;
+            }
             return Err(AuthError::AuditExportRequired);
         }
         // With MFA for administrators or for everyone, the accounts that can reach the vault
@@ -1082,10 +1114,13 @@ impl AuthService {
             && (next.password_policy != current.password_policy || next.mfa != current.mfa)
             && self.has_operator_secrets().await?
         {
-            self.record_refused_settings_change(ctx, &AuthError::PinCoupling)
-                .await;
+            if !dry_run {
+                self.record_refused_settings_change(ctx, &AuthError::PinCoupling)
+                    .await;
+            }
             return Err(AuthError::PinCoupling);
         }
+        let mut removed = None;
         if next != current {
             let mut batch = WriteBatch::for_request(ctx);
             batch.expect_typed(&SETTINGS, &(), Some(revision));
@@ -1099,14 +1134,25 @@ impl AuthService {
             draft.details.changes = changes(&current, &next);
             // TGL-47: requiring binding ends the service-account tokens that are not bound.
             if next.integrations().require_binding && !current.integrations().require_binding {
-                let removed =
-                    super::access::stage_unbound_removal(self.view().await?.as_ref(), &mut batch)?;
-                draft = draft.with_context("unbound_tokens_removed", removed.to_string());
+                let unbound = super::access::stage_unbound_removal(
+                    self.view().await?.as_ref(),
+                    &mut batch,
+                    ctx,
+                )?;
+                draft = draft.with_context("unbound_tokens_removed", unbound.count.to_string());
+                removed = Some(unbound);
             }
             batch.audit(draft);
-            self.commit(batch).await?;
+            if !dry_run {
+                self.commit(batch).await?;
+                if removed.as_ref().is_some_and(|unbound| unbound.count > 0) {
+                    self.refresh_warnings_quietly(ctx.now).await;
+                }
+            }
         }
-        self.settings_view().await
+        let mut view = self.settings_view().await?;
+        view.unbound_tokens_removed = removed;
+        Ok(view)
     }
 
     /// Records a refused settings change as a failed audit record (refused guardrails are

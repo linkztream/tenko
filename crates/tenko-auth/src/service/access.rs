@@ -17,8 +17,9 @@ use super::{
     AuthService, LIST_LIMIT, actions,
     admin::{display_name, valid_roles, valid_user_name},
     types::{
-        CreatedToken, GrantCreate, GrantView, GrantsRevoked, RolePolicyUpdate, RolePolicyView,
-        SecretString, ServiceAccountCreate, SubjectSummary, TokenInfo, TokenRequest, UserInfo,
+        AccountTokens, CreatedToken, GrantCreate, GrantView, GrantsRevoked, RolePolicyUpdate,
+        RolePolicyView, SecretString, ServiceAccountCreate, SubjectSummary, TokenInfo,
+        TokenRequest, UnboundTokens, UserInfo,
     },
 };
 use crate::{
@@ -68,9 +69,11 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
     }
 }
 
-/// Stages the removal of every live scoped token of a service account that is not bound to
-/// a certificate lineage, when TGL-47 starts to require binding (ADR 0035, decision 10);
-/// returns how many. Loosening the requirement again brings none of them back.
+/// Stages the removal of every scoped token of a service account that is not bound to a
+/// certificate lineage, with its family, when TGL-47 starts to require binding (ADR 0035,
+/// decision 10), and one `auth.token.revoke` audit record per token; returns what it staged
+/// by account. A dry run calls it on a batch it throws away, so the count it shows is the
+/// count a change removes. Loosening the requirement again brings none of them back.
 ///
 /// # Errors
 ///
@@ -78,26 +81,53 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
 pub(super) fn stage_unbound_removal(
     view: &dyn ReadView,
     batch: &mut WriteBatch,
-) -> Result<usize, AuthError> {
-    let mut removed = 0;
-    for (key, record, revision) in
-        view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), usize::MAX, false)?
-    {
-        if record.lineage.is_some() || record.retired() {
+    ctx: &RequestCtx,
+) -> Result<UnboundTokens, AuthError> {
+    let mut families = BTreeSet::new();
+    let mut accounts: BTreeMap<UserId, AccountTokens> = BTreeMap::new();
+    for (key, record, _) in view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), usize::MAX, false)? {
+        // A family's retired members go with its live one; a family counts once.
+        if record.lineage.is_some()
+            || record.retired()
+            || record
+                .renewal
+                .as_ref()
+                .is_some_and(|renewal| !families.insert(renewal.family))
+        {
             continue;
         }
-        let service = view
+        let Some((owner, _)) = view
             .get_typed(&USERS, &record.owner)?
-            .is_some_and(|(user, _)| user.is_service());
-        if !service {
+            .filter(|(user, _)| user.is_service())
+        else {
             continue;
-        }
-        batch.expect_typed(&SCOPED_TOKENS, &key, Some(revision));
-        batch.delete_typed(&SCOPED_TOKENS, &key);
-        batch.delete_typed(&USER_SCOPED_TOKENS, &(record.owner, record.id));
-        removed += 1;
+        };
+        AuthService::stage_token_removal(view, batch, record.owner, record.id, key)?;
+        batch.audit(
+            AuthService::audit(
+                actions::TOKEN_REVOKE,
+                vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)],
+                ctx,
+            )
+            .with_context(
+                "reason",
+                "TGL-47 requires certificate-bound service-account tokens",
+            ),
+        );
+        accounts
+            .entry(record.owner)
+            .or_insert_with(|| AccountTokens {
+                account: owner.id,
+                name: owner.name.clone(),
+                tokens: 0,
+            })
+            .tokens += 1;
     }
-    Ok(removed)
+    let accounts: Vec<AccountTokens> = accounts.into_values().collect();
+    Ok(UnboundTokens {
+        count: accounts.iter().map(|account| account.tokens).sum(),
+        accounts,
+    })
 }
 
 /// The lineage a new scoped token of `owner` binds to (ADR 0035, IAM-23): one of the
