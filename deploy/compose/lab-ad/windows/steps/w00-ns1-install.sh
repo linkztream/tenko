@@ -87,8 +87,13 @@ api session POST "/access/service-accounts/$account/tokens" \
   py 'v["token"]' >"$SECRETS/tenko_reader_token"
 
 say "the administrator's token for the command line"
-{ head -n 1 "$(secret tenko_admin_password)"; printf '%s\n' "$(totp_code)"; } |
+# The code is ready before the login starts: a login of 0.0.12-rc.4 that waits for it longer
+# than the server keeps the idle connection (30 s) sends it over the closed connection.
+code="$(totp_code)"
+password_file="$(secret tenko_admin_password)"
+{ head -n 1 "$password_file"; printf '%s\n' "$code"; } |
   tenko login --user admin --password-stdin --token-name lab-ns1-root
+unset code
 
 say "the node"
 {
