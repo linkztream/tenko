@@ -577,6 +577,50 @@ async fn mutual_tls_between_a_server_and_a_node() {
 }
 
 #[tokio::test]
+async fn the_cluster_port_never_resumes_a_session() {
+    let env = Env::new();
+    let ctx = RequestCtx::system(SystemComponent::Cluster);
+    let ca = env.init(&ctx).await;
+    let material = env
+        .material(&ca, &ctx, &identity())
+        .await
+        .expect("material");
+    let resolver = TlsResolver::default();
+    resolver.set(Some(material));
+    let config = tenko_cluster::mtls::server_config(
+        ca.root_der(),
+        Arc::new(resolver),
+        Arc::new(tenko_cluster::mtls::RevocationSet::new()),
+    )
+    .expect("server config");
+
+    let node = ca
+        .issue_node_cert_with_key(NodeId(5), ctx.now)
+        .expect("node");
+    let mut client_config = ClientConfig::builder_with_provider(provider())
+        .with_safe_default_protocol_versions()
+        .expect("versions")
+        .with_root_certificates(roots_of(ca.root_der()))
+        .with_client_auth_cert(node.chain.clone(), pkcs8_key(node.key.expose()))
+        .expect("client auth");
+    client_config.alpn_protocols = vec![b"h2".to_vec()];
+    let client_config = Arc::new(client_config);
+
+    // One client configuration: the second connection would resume if the port offered it.
+    for _ in 0..2 {
+        let mut client: Connection =
+            ClientConnection::new(Arc::clone(&client_config), server_name(HOST))
+                .expect("client")
+                .into();
+        let mut server: Connection = ServerConnection::new(Arc::clone(&config))
+            .expect("server")
+            .into();
+        handshake(&mut client, &mut server).expect("handshake");
+        assert_eq!(server.handshake_kind(), Some(rustls::HandshakeKind::Full));
+    }
+}
+
+#[tokio::test]
 async fn server_material_issues_once_and_reuses_the_certificate() {
     let env = Env::new();
     let ctx = ctx_at(t0());

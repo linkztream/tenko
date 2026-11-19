@@ -351,6 +351,9 @@ pub fn server_config(
         .with_client_cert_verifier(verifier)
         .with_cert_resolver(resolver);
     config.alpn_protocols = vec![ALPN_H2.to_vec()];
+    // Every connection runs the client-certificate verifier: no tickets, nothing stored.
+    config.send_tls13_tickets = 0;
+    config.session_storage = Arc::new(rustls::server::NoServerSessionStorage {});
     Ok(Arc::new(config))
 }
 
