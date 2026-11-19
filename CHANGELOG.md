@@ -15,6 +15,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- A backup and the dry run of `tenko upgrade check` work on a copy of the store, which has no Raft log and so no vote. On a controller whose data was written after its first term (a restored controller, a cluster after a change of leader), the copy elected itself at a term below that of its own entries, which breaks a rule of the Raft library. When a backup took longer than an election timeout, a build with debug checks stopped the copy and `POST /system/backups` failed with `sys.store.shutting_down`, and a release build could record the backup's snapshot at the lower term. A copy now starts at the term of the last entry it holds, and its election leads the next one.
 - `tenko login` no longer fails with "cannot reach ... connection error" when the TOTP code comes more than 30 seconds after the password (the server's limit for an idle connection, `server.header_read_timeout_secs`): while the command waited for the code it did not notice that the server closed the connection of the password step, and sent the code over it. The same held for any command that asks something between two requests, such as the confirmation of `tenko import`. The command line now keeps watching its connections while it waits and opens a new one when the server has closed the old.
 
 ## [0.0.12-rc.4] - 2026-11-18

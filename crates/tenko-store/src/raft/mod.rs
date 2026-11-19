@@ -125,7 +125,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use openraft::{BasicNode, ServerState, error::Fatal};
+use openraft::{BasicNode, ServerState, error::Fatal, storage::RaftLogStorage as _};
 use tenko_core::{
     NodeId, Revision,
     audit::Digest,
@@ -775,6 +775,22 @@ impl RaftStore {
             .await
             .map_err(|error| open_error("state machine", error))??;
         recover_purged_gap(&log, &sm).await?;
+        // A state copy (`copy_state_to`) has no log and so no vote: it starts at the term of
+        // its last applied entry, or its first election would lead a term below its entries.
+        let mut vote_log = log.clone();
+        if let Some(applied) = sm.meta().last_applied
+            && vote_log
+                .read_vote()
+                .await
+                .map_err(|error| open_error("vote", error))?
+                .is_none()
+        {
+            let vote = Vote::new(applied.leader_id.term, applied.leader_id.node_id);
+            vote_log
+                .save_vote(&vote)
+                .await
+                .map_err(|error| open_error("vote", error))?;
+        }
         // Before Raft re-applies anything: the size the re-seed rule is judged on.
         let at_open = (
             fs::metadata(sm.file_path()).map_or(0, |metadata| metadata.len()),

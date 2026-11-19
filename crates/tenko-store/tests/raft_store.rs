@@ -27,7 +27,7 @@ use tenko_store::{
     raft::{
         RaftStore, RaftStoreConfig, SmDurability, SnapshotPolicy,
         network::InProcessNetwork,
-        types::{BatchOutcome, Proposal, ProposedBatch},
+        types::{BatchOutcome, Proposal, ProposedBatch, Vote},
     },
     tables,
     testing::RecordingIndex,
@@ -189,6 +189,62 @@ async fn restart_keeps_every_commit_with_deferred_durability() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn restart_keeps_every_commit_with_immediate_durability() {
     restart_round_trip(SmDurability::Immediate).await;
+}
+
+/// A state copy (`copy_state_to`, as a backup and an upgrade check take one) has no log and
+/// so no vote. Of a store whose entries are of a later term than the first (a restored one,
+/// a cluster after a failover), the copy's first election must lead a term after those
+/// entries: a lower one breaks the leader invariant of openraft and stops the copy's Raft
+/// core.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_state_copy_of_a_store_at_a_later_term_leads_a_term_after_its_entries() {
+    fn snapshot_term(store: &RaftStore) -> u64 {
+        let (meta, _) = store.current_snapshot().expect("a snapshot");
+        meta.last_log_id.expect("a log id").leader_id.term
+    }
+    let dir = TestDir::new("copy-term");
+    // The store at term 2 is made the way a restore makes one: another store's snapshot,
+    // installed as from the leader of term 1 that is not this node, then this node's election.
+    let source = RaftStore::open(config(&dir.node(1))).await.expect("open");
+    put(&source, 1, "from the source").await;
+    source.snapshot_now().await.expect("snapshot");
+    let (meta, path) = source.current_snapshot().expect("a snapshot");
+    let mut learner_config = config(&dir.node(2));
+    learner_config.bootstrap = false;
+    let learner = RaftStore::open(learner_config).await.expect("learner");
+    let mut receiver = learner.receive_snapshot().expect("receiver");
+    for chunk in std::fs::read(&path).expect("read").chunks(64 * 1024) {
+        receiver.write_chunk(chunk).await.expect("chunk");
+    }
+    receiver
+        .install(Vote::new_committed(1, u64::MAX), meta)
+        .await
+        .expect("install");
+    learner.shutdown().await.expect("shutdown");
+    drop(learner);
+    source.shutdown().await.expect("shutdown");
+    drop(source);
+    let store = RaftStore::open(config(&dir.node(2))).await.expect("elect");
+    put(&store, 2, "at the new term").await;
+    store.snapshot_now().await.expect("snapshot");
+    let source_term = snapshot_term(&store);
+    assert!(source_term > 1, "the election started a new term");
+    store.copy_state_to(&dir.node(3)).await.expect("copy");
+    store.shutdown().await.expect("shutdown");
+    drop(store);
+
+    let copy = RaftStore::open(config(&dir.node(3)))
+        .await
+        .expect("the copy opens and leads");
+    put(&copy, 3, "on the copy").await;
+    copy.snapshot_now()
+        .await
+        .expect("the copy builds a snapshot");
+    assert!(
+        snapshot_term(&copy) > source_term,
+        "the copy leads a term after the entries it holds"
+    );
+    copy.shutdown().await.expect("shutdown");
 }
 
 fn proposed(b: &WriteBatch) -> ProposedBatch {
