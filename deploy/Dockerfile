@@ -192,8 +192,12 @@ VOLUME ["/var/lib/tenko"]
 #           has cluster members or enrolled nodes; the server opens it once a node is
 #           enrolled or an enrollment token is waiting (docs/cluster.md section 7). Publish
 #           it with `-p 8444:8444` only then, and only to the node and controller networks.
+# 8445/tcp  Integration listener: mutual TLS with the client certificates of integrations
+#           (ADR 0035). The server opens it while an enrollment code waits or a certificate
+#           is in use. Publish it with `-p 8445:8445` only when integrations use
+#           certificates, and only to the automation hosts' networks.
 # Later roles will add: 53/udp and 53/tcp (DNS), 67/udp (DHCPv4), 547/udp (DHCPv6).
-EXPOSE 8443/tcp 8444/tcp
+EXPOSE 8443/tcp 8444/tcp 8445/tcp
 HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
     CMD ["/usr/local/bin/tenko", "health", "--url", "https://localhost:8443", \
          "--ca-file", "/var/lib/tenko/tls/ca-root.pem"]

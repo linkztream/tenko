@@ -136,6 +136,8 @@ readonly LOG_DIR=/var/log/tenko
 readonly DEFAULT_DATA_DIR=/var/lib/tenko
 readonly API_PORT_DEFAULT=8443
 readonly CLUSTER_PORT_DEFAULT=8444
+# The integration listener of client certificates (ADR 0035); its default address in tenko.toml.
+readonly INTEGRATION_PORT=8445
 # Every role, in the order tenko lists them; outside the Hardened profile the machine is
 # prepared for all of them and the node starts with all of them.
 readonly ALL_ROLES=controller,dns,dhcp,probe
@@ -2763,13 +2765,14 @@ present_dropins() {
 # dns_ports: the ports of the dns role's listen addresses, once each.
 dns_ports() { { dns_listen "$DNS_ADDRESS" | grep -oE ':[0-9]+"' | tr -d ':"' | sort -un; } || true; }
 
-# wanted_ports: the ports of the prepared roles as <port>/<proto>, one per line: the API and the
-# cluster port of the controller, TCP and UDP of the dns role, UDP 67 and 547 (DHCPv6) of the
-# dhcp role.
+# wanted_ports: the ports of the prepared roles as <port>/<proto>, one per line: the API, the
+# cluster port and the integration listener of the controller, TCP and UDP of the dns role,
+# UDP 67 and 547 (DHCPv6) of the dhcp role.
 wanted_ports() {
   local p
   echo "${API_PORT}/tcp"
   echo "${CLUSTER_PORT}/tcp"
+  echo "${INTEGRATION_PORT}/tcp"
   if in_set dns "$PREPARE_ROLES"; then
     for p in $(dns_ports); do printf '%s/tcp\n%s/udp\n' "$p" "$p"; done
   fi
@@ -2780,7 +2783,7 @@ wanted_ports() {
 # port_role <port/proto>: the role a port is for.
 port_role() {
   case "$1" in
-  "${API_PORT}/tcp" | "${CLUSTER_PORT}/tcp") echo controller ;;
+  "${API_PORT}/tcp" | "${CLUSTER_PORT}/tcp" | "${INTEGRATION_PORT}/tcp") echo controller ;;
   67/udp | 547/udp) echo dhcp ;;
   *) echo dns ;;
   esac

@@ -275,7 +275,8 @@ impl Machine {
     }
 
     /// What the installer prepares for `role` here: its drop-in and its ports. The
-    /// controller's ports (the API and the cluster port) are prepared at every installation.
+    /// controller's ports (the API, the cluster port and the integration listener) are
+    /// prepared at every installation.
     fn needs(&self, role: Role) -> Vec<&'static str> {
         let mut needs = match role {
             Role::Dns => vec!["53/tcp", "53/udp"],

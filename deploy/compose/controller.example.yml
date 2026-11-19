@@ -62,6 +62,11 @@ services:
       # Bridge networking is fine for it. The server opens the port once a node is enrolled
       # or an enrollment token is waiting, so it is closed (connection refused) until then.
       - "8444:8444/tcp"
+      # The integration listener (mutual TLS with integration client certificates, ADR 0035):
+      # publish it only when integrations use certificates, and allow it in the firewall from
+      # the automation hosts only. The server opens it while an enrollment code waits or a
+      # certificate is in use.
+      # - "8445:8445/tcp"
     environment:
       # The key-encryption key comes from the Docker secret below, not from the data volume.
       TENKO_KEK__PROVIDER: file

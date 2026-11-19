@@ -418,7 +418,7 @@ CFG_END
     has "$record" "roles=controller,dns,dhcp,probe" "record: every role"
     has "$record" "profile=home" "record: the profile"
     has "$record" "dropins=probe.conf,dhcp-direct.conf" "record: the drop-ins"
-    has "$record" "ports=8443/tcp,8444/tcp,53/tcp,53/udp,67/udp,547/udp" "record: the ports of every role"
+    has "$record" "ports=8443/tcp,8444/tcp,8445/tcp,53/tcp,53/udp,67/udp,547/udp" "record: the ports of every role"
     lacks "$record" "20" "record: no date, so a rerun that changes nothing leaves it"
     deps_check
     expect "after prepare: nothing is missing" "0" "${#TODO_TEXT[@]}"
@@ -463,6 +463,7 @@ CFG_END
     step_prepare >"${work}/prepare.out" 2>&1
     has "$(cat "${work}/ufw.log")" "ufw allow 53/udp comment Tenko DDI" "ufw: opens the dns port"
     has "$(cat "${work}/ufw.log")" "ufw allow 8444/tcp comment Tenko DDI" "ufw: opens the cluster port"
+    has "$(cat "${work}/ufw.log")" "ufw allow 8445/tcp comment Tenko DDI" "ufw: opens the integration listener"
     lacks "$(cat "${work}/ufw.log")" "allow 8443/tcp" "ufw: leaves the open port"
     has "$(cat "$PREP_RECORD")" "firewall=ufw" "record: the firewall"
     unset -f ufw
