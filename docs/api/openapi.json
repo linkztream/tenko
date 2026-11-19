@@ -46311,6 +46311,61 @@
           }
         }
       },
+      "CodeState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Waiting for its enrollment.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Used for the certificate with this serial.",
+            "required": [
+              "serial",
+              "state"
+            ],
+            "properties": {
+              "serial": {
+                "type": "string",
+                "description": "The certificate's serial."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "used"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Withdrawn by an administrator, or because it arrived over plain HTTP.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "withdrawn"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where an enrollment code stands."
+      },
       "CodedError": {
         "type": "object",
         "description": "A serializable snapshot of a [`Coded`] error.\n\nThis is the wire shape of every error (the API adds `type` and `instance` to make an\nRFC 9457 problem document) and the stored shape of failed job steps.",
@@ -51888,67 +51943,8 @@
             "description": "The only network it may be used from."
           },
           "state": {
-            "allOf": [
-              {
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "description": "Waiting for its enrollment.",
-                    "required": [
-                      "state"
-                    ],
-                    "properties": {
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "pending"
-                        ]
-                      }
-                    }
-                  },
-                  {
-                    "type": "object",
-                    "description": "Used for the certificate with this serial.",
-                    "required": [
-                      "serial",
-                      "state"
-                    ],
-                    "properties": {
-                      "serial": {
-                        "type": "string",
-                        "description": "The certificate's serial."
-                      },
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "used"
-                        ]
-                      }
-                    }
-                  },
-                  {
-                    "type": "object",
-                    "description": "Withdrawn by an administrator, or because it arrived over plain HTTP.",
-                    "required": [
-                      "state"
-                    ],
-                    "properties": {
-                      "state": {
-                        "type": "string",
-                        "enum": [
-                          "withdrawn"
-                        ]
-                      }
-                    }
-                  }
-                ],
-                "description": "Where an enrollment code stands."
-              },
-              {
-                "type": "object",
-                "description": "Where it stands; `expired` for a pending code past its time."
-              }
-            ]
+            "$ref": "#/components/schemas/CodeState",
+            "description": "Where it stands."
           }
         }
       },

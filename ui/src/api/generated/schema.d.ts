@@ -3423,6 +3423,126 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/integrations/ca": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The root of the integration listener */
+        get: operations["integration_server_root"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/certificate/renew": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Renew an integration certificate */
+        post: operations["renew_integration_certificate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List integration certificates */
+        get: operations["list_integration_certificates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/certificates/{serial}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke an integration certificate and its lineage */
+        delete: operations["revoke_integration_certificate"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enroll an integration with a code */
+        post: operations["enroll_integration"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/enrollments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List enrollment codes of integrations */
+        get: operations["list_integration_codes"];
+        put?: never;
+        /** Create an enrollment code for an integration */
+        post: operations["create_integration_code"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/enrollments/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Withdraw an enrollment code */
+        delete: operations["withdraw_integration_code"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/interfaces/bulk": {
         parameters: {
             query?: never;
@@ -7520,6 +7640,16 @@ export interface components {
          * @enum {string}
          */
         Capability: "inventory" | "webhook" | "network_controller" | "actuator" | "migration" | "port_bounce" | "client_kick";
+        /**
+         * @description Where a certificate stands in its lineage (ADR 0035, decisions 6 and 9).
+         * @enum {string}
+         */
+        CertState: "pending" | "current" | "replaced" | "withdrawn" | "revoked";
+        /** @description Body of `GET /integrations/certificates`. */
+        CertificateList: {
+            /** @description The certificates, by serial. */
+            items: components["schemas"]["ClientCertRecord"][];
+        };
         /** @description A certificate issued to a node, as the registry remembers it. */
         CertificateRef: {
             /** @description End of validity, or the certificate's retirement after a renewal replaced it. */
@@ -7673,6 +7803,40 @@ export interface components {
         };
         /** Format: uuid */
         ClassId: string;
+        /** @description An integration certificate. */
+        ClientCertRecord: {
+            /** @description The service account it names. */
+            account: components["schemas"]["UserId"];
+            ended_at?: components["schemas"]["Timestamp"] | null;
+            /**
+             * Format: int64
+             * @description The account's `tokens_generation` when it was issued: a certificate issued under a
+             *     lower value than the account's no longer passes.
+             */
+            generation: number;
+            /** @description When it was issued. */
+            issued_at: components["schemas"]["Timestamp"];
+            /** @description SHA-256 of its key's `SubjectPublicKeyInfo`, lower-case hex. */
+            key_sha256: string;
+            /** @description The integrator's label of the host, from the enrollment. */
+            label: string;
+            /**
+             * Format: uuid
+             * @description The lineage: the first certificate and every renewal of it share this id.
+             */
+            lineage: string;
+            /** @description End of validity. */
+            not_after: components["schemas"]["Timestamp"];
+            /** @description Start of validity. */
+            not_before: components["schemas"]["Timestamp"];
+            presented_at?: components["schemas"]["Timestamp"] | null;
+            /** @description Why it was revoked or withdrawn. */
+            reason?: string | null;
+            /** @description The serial, lower-case hex. */
+            serial: string;
+            /** @description Where it stands in its lineage. */
+            state: components["schemas"]["CertState"];
+        };
         /** @description How a DHCPv4 client is known (RFC 4361, RFC 6842). */
         ClientKey: {
             /** @description The hardware address, `hlen` octets of `chaddr`. */
@@ -7748,12 +7912,30 @@ export interface components {
              */
             term: number;
         };
+        /** @description Body of `GET /integrations/enrollments`. */
+        CodeList: {
+            /** @description Every code, newest first. */
+            items: components["schemas"]["EnrollmentCodeView"][];
+        };
         /** @description `POST /auth/login/totp` and `POST /auth/login/recovery`. */
         CodeLogin: {
             /** @description The challenge from the password step. */
             challenge_id: string;
             /** @description The TOTP code or recovery code. */
             code: components["schemas"]["SecretString"];
+        };
+        /** @description Where an enrollment code stands. */
+        CodeState: {
+            /** @enum {string} */
+            state: "pending";
+        } | {
+            /** @description The certificate's serial. */
+            serial: string;
+            /** @enum {string} */
+            state: "used";
+        } | {
+            /** @enum {string} */
+            state: "withdrawn";
         };
         /**
          * @description A serializable snapshot of a [`Coded`] error.
@@ -8061,6 +8243,18 @@ export interface components {
              *     Hardened while no controller allows them.
              */
             writes_enabled?: boolean;
+        };
+        /** @description The answer of `POST /integrations/enrollments`: the code's text, shown once. */
+        CreatedCode: {
+            /** @description `tnki.<code id>.<account id>.<secret>.<fingerprint>`, shown once. */
+            code: string;
+            /** @description The code as it is listed. */
+            enrollment: components["schemas"]["EnrollmentCodeView"];
+            /**
+             * @description SHA-256 of the internal root, which the integration listener's server certificate
+             *     chains to, lower-case hex (the code's last part).
+             */
+            server_root_sha256: string;
         };
         /** @description Answer of `POST /nodes/enrollments`: the token, shown once. */
         CreatedEnrollment: {
@@ -10023,6 +10217,28 @@ export interface components {
             majors: number[];
             /** @description The node as registered. */
             node: components["schemas"]["NodeView"];
+        };
+        /** @description An enrollment code as the API lists it: never its secret. */
+        EnrollmentCodeView: {
+            /** @description The service account it enrolls. */
+            account: components["schemas"]["UserId"];
+            /** @description When it was created. */
+            created_at: components["schemas"]["Timestamp"];
+            /** @description The administrator who created it. */
+            created_by: components["schemas"]["UserId"];
+            /** @description Whether it expired unused. */
+            expired: boolean;
+            /** @description When it expires. */
+            expires_at: components["schemas"]["Timestamp"];
+            /**
+             * Format: uuid
+             * @description The code id.
+             */
+            id: string;
+            /** @description The only network it may be used from. */
+            source?: string | null;
+            /** @description Where it stands. */
+            state: components["schemas"]["CodeState"];
         };
         /** @description Body of `GET /nodes/enrollments`. */
         EnrollmentList: {
@@ -15173,6 +15389,18 @@ export interface components {
              *     IP address), for example `/url`.
              */
             setting?: string | null;
+        };
+        /** @description `POST /integrations/enrollments`. */
+        NewCode: {
+            /** @description The service account to enroll. */
+            account: components["schemas"]["UserId"];
+            /**
+             * Format: int64
+             * @description Seconds until the code expires, 60 to 3600; one hour when absent.
+             */
+            lifetime_secs?: number | null;
+            /** @description The only network the enrollment may come from, in CIDR notation. */
+            source?: string | null;
         };
         /** @description The body of a create request. */
         NewConnector: {
@@ -20800,6 +21028,13 @@ export interface components {
          * @enum {string}
          */
         RemoteHealth: "healthy" | "degraded" | "unreachable";
+        /** @description The answer of a renewal that is not due yet. */
+        RenewalNotDue: {
+            /** @description Always `true`. */
+            not_due: boolean;
+            /** @description From when a renewal is accepted. */
+            renew_after: components["schemas"]["Timestamp"];
+        };
         /** Format: uuid */
         RequestId: string;
         /**
@@ -42548,6 +42783,425 @@ export interface operations {
             };
             /** @description Import not configured (`import.unavailable`) */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    integration_server_root: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The internal root, PEM */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-pem-file": string;
+                };
+            };
+        };
+    };
+    renew_integration_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pkcs10": number[];
+            };
+        };
+        responses: {
+            /** @description Not due yet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenewalNotDue"];
+                };
+            };
+            /** @description The new certificate (`Cache-Control: no-store`) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pem-certificate-chain": string;
+                };
+            };
+            /** @description The certificate is no longer accepted (`integration.certificate.refused`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not on the integration listener (`integration.certificate.required`), or a renewal from a replaced certificate (`integration.renew.reuse`; the lineage is revoked) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The lineage renewed within the hour (`integration.renew.too_soon`) or the key was enrolled for another lineage (`integration.key.used`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not `application/pkcs10` (`integration.request.media_type`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The request is not usable (`integration.request.invalid`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_integration_certificates: {
+        parameters: {
+            query?: {
+                /** @description Only the certificates of this service account. */
+                account?: components["schemas"]["UserId"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The certificates by serial */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CertificateList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    revoke_integration_certificate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Serial, lower-case hexadecimal */
+                serial: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such certificate (`integration.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The lineage changed meanwhile (`integration.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    enroll_integration: {
+        parameters: {
+            query: {
+                /** @description The integrator's label of the host, 1 to 64 printable characters. */
+                label: string;
+            };
+            header: {
+                /** @description The code id */
+                "tenko-enrollment-code": string;
+                /** @description HMAC-SHA-256 with the code's secret over the code id, the account id and the request's key, hexadecimal */
+                "tenko-enrollment-proof": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pkcs10": number[];
+            };
+        };
+        responses: {
+            /** @description The certificate (`Cache-Control: no-store`) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pem-certificate-chain": string;
+                };
+            };
+            /** @description The code or its proof is not valid (`integration.code.invalid`), was used (`integration.code.used`) or expired (`integration.code.expired`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; over plain HTTP the code is withdrawn), or the account cannot hold certificates (`integration.account`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The key was enrolled before (`integration.key.used`) or the account holds eight lineages (`integration.lineages`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not `application/pkcs10` (`integration.request.media_type`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The request is not usable (`integration.request.invalid`) or the label is not (`integration.label`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    list_integration_codes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every code, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CodeList"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    create_integration_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NewCode"];
+            };
+        };
+        responses: {
+            /** @description The code, shown once (`Cache-Control: no-store`) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedCode"];
+                };
+            };
+            /** @description The body is not valid JSON (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator, no sign-in in the last five minutes (`auth.step_up_required`), or the account is not an enabled service account (`integration.account`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A lifetime outside 60 to 3600 seconds (`integration.code.lifetime`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    withdraw_integration_code: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Code id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Withdrawn */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such code (`integration.not_found`) */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

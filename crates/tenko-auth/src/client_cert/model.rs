@@ -146,8 +146,7 @@ pub struct EnrollmentCodeView {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub source: Option<IpNet>,
-    /// Where it stands; `expired` for a pending code past its time.
-    #[schema(inline)]
+    /// Where it stands.
     pub state: CodeState,
     /// Whether it expired unused.
     pub expired: bool,
