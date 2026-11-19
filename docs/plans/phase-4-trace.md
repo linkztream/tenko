@@ -47,7 +47,7 @@ This file is generated. It lists every Phase 4 requirement of `docs/REQUIREMENTS
 | MIG-18 | Must | - | - | `docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/plans/identity-plan.md`<br>`docs/plans/windows-takeover-plan.md` |
 | OPS-11 | Must | `crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_a_ktpass_keytab_imports_and_works`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_adopt_takes_over_the_pre_staged_account`<br>`crates/tenko-dns/src/zone/kerberos/tests.rs::dns_28_the_recorded_samba_adopt_replays_through_the_controller` | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-dns/src/zone/kerberos.rs`<br>`docs/ARCHITECTURE.md`<br>`docs/MIGRATION.md`<br>`docs/adr/0026-kerberos-and-directory-identity.md`<br>and 1 more |
 | OPS-12 | Should | - | - | `docs/plans/phase-3-status.md` |
-| OPS-29 | Must (MQTT: Should) | - | - | `docs/ROADMAP.md`<br>`docs/adr/0035-integration-client-certificates.md`<br>`docs/plans/cluster-recovery-plan.md`<br>`docs/plans/integration-client-certificates.md`<br>`docs/plans/notifications-plan.md` |
+| OPS-29 | Must (MQTT: Should) | - | - | `crates/tenko-api/src/routes/integrations.rs`<br>`crates/tenko-auth/src/client_cert/follow.rs`<br>`docs/ROADMAP.md`<br>`docs/adr/0035-integration-client-certificates.md`<br>`docs/plans/cluster-recovery-plan.md`<br>and 2 more |
 
 ## Exit criteria
 
