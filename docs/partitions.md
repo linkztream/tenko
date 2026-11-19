@@ -35,6 +35,8 @@ warning: https://ddi.example.test:8443 is cut off from its cluster since 2026-10
 
 Sessions keep working on the isolated controller, because they are read from the local copy; signing in, which writes a session, does not.
 
+The same copy answers who is allowed to read. A controller that has lost contact with the majority authenticates against its own copy, so a token revoked, a session ended or an account disabled on the majority side after the separation still reads there until the controller is back in contact and has caught up. Only reads: writes are refused, or queued and checked again with the author's current rights when the queue drains, as sections 3 and 5 say. A controller that has been set aside, superseded by a new generation of the cluster (`docs/cluster.md`, section 12.11), keeps answering reads from its copy until an operator stops it. When a credential must stop working everywhere at once, stop the separated controller or cut it off from its clients.
+
 ## 3. Writing on an isolated controller
 
 A quorum gate in the API refuses every request that would write, after authentication and before anything is planned or recorded:
