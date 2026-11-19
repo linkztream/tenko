@@ -54,6 +54,13 @@ systemd-timesyncd accepts by default: set `RootDistanceMaxSec=30` beside `NTP=19
 - `pktmon` on the Windows machines (in the box); Wireshark on any machine where you read the
   captures (optional; the lead reads them too).
 - A folder `C:\lab` on each Windows machine for what you keep.
+- For the two machines that become plain domain members (`srv1`, `pc1`): a virtual CPU model
+  that does not offer virtualization to the guest, unless the hypervisor is known to run a
+  nested Windows hypervisor. Windows Server 2025 and Windows 11 turn Credential Guard on by
+  themselves for a domain member, at the second start after it joins, and where the nested
+  hypervisor cannot start the machine no longer boots. Without virtualization in the guest
+  Windows logs that the feature is not supported and starts as usual; the lab measures
+  nothing that depends on it. The controllers are not affected.
 
 ## W0. The Tenko node
 
