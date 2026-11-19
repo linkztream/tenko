@@ -1,6 +1,6 @@
 # Access: roles, scoped grants, service accounts and scoped tokens
 
-This page describes who may do what in Tenko DDI: the four roles, scoped grants over VRFs, sites and prefixes, delegation, service accounts, scoped API tokens, the multi-factor policy per role, and what a scoped person sees in lists, the prefix tree, search, exports, the audit log and the event stream. It is for an administrator who gives people and automation limited access, and for a developer who adds a route and has to decide how it is scoped. It describes the behavior of `tenko-auth` (`authz`, `roles`, `grants`, `service/access`), of the anchors index in `tenko-ipam` (`scope`), and of the `/access` routes and the scoped filters in `tenko-api`; where this page and the code differ, the code is right. The requirements are IAM-01, IAM-06 and IAM-10 in [REQUIREMENTS.md](REQUIREMENTS.md); the profile values are TGL-02, TGL-03 and TGL-05 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The decisions are recorded in [ADR 0015](adr/0015-scoped-authorization.md).
+This page describes who may do what in Tenko DDI: the four roles, scoped grants over VRFs, sites and prefixes, delegation, service accounts, scoped API tokens, the multi-factor policy per role, and what a scoped person sees in lists, the prefix tree, search, exports, the audit log and the event stream. It is for an administrator who gives people and automation limited access, and for a developer who adds a route and has to decide how it is scoped. It describes the behavior of `tenko-auth` (`authz`, `roles`, `grants`, `service/access`), of the anchors index in `tenko-ipam` (`scope`), and of the `/access` routes and the scoped filters in `tenko-api`; where this page and the code differ, the code is right. The requirements are IAM-01, IAM-06, IAM-10, IAM-20 and IAM-21 in [REQUIREMENTS.md](REQUIREMENTS.md); the profile values are TGL-02, TGL-03, TGL-05 and TGL-46 in [SECURITY-PROFILES.md](SECURITY-PROFILES.md). The decisions are recorded in [ADR 0015](adr/0015-scoped-authorization.md).
 
 Terms used below: a **subject** is a person or a service account. A **global role** is a role in the roles of the user record; it applies to the whole installation. A **grant** gives a subject a role over one **scope**. An **anchor** is a place where an object sits among VRFs, sites and prefixes; scopes are matched against anchors.
 
@@ -220,6 +220,106 @@ POST /api/v1/access/service-accounts/0190d1c2-0000-7000-8000-000000000002/tokens
 
 Creating a token is audited as `auth.token.create` with the grants and scopes; revoking one as `auth.token.revoke`.
 
+### 7.1 Renewal (IAM-20)
+
+A token of a service account may renew itself, so that an integration keeps working past the lifetime of TGL-05 without a person creating a new token by hand.
+
+**The right.** `"renewable": true` in the creation request gives the token the right, under the creation rules above (an administrator with a fresh sign-in). The answer then carries a **renewal secret** (`tnr_...`, 256 random bits) beside the token, shown once like the token. The right needs TGL-46 ("Service-account tokens may renew themselves": on in Home, Standard and Lab, off in Hardened). With TGL-46 off, a creation request with the right is refused with 403 `auth.token.renewal_refused` (`reason: disabled`) and no token renews, whatever its flag says; turning it on under Hardened is a recorded deviation like the other toggles. A person's own tokens never renew (400 `auth.invalid_request`); a person creates a new one.
+
+**The renewal secret** is stored only as its SHA-256 hash on the token's record, never logged and never accepted as a bearer token: it starts with `tnr_`, and every other route refuses it like an unknown token. It is sent only in the body of the renewal call.
+
+**The call.** `POST /api/v1/access/token/renew`, authenticated by the token itself (`Authorization: Bearer tnk_...`), with `{"renewal_secret": "tnr_..."}`. It answers 200 with a new token, a new renewal secret and the token's description (`expires_at` among it). The new token has the same owner, name, grants, scopes and source binding (section 7.2); its lifetime is the maximum of the profile counted from the renewal, never longer (in Lab, which has no maximum, it does not expire). A token and its successors form a **family**. The renewal is audited as `auth.token.renew` with the old and the new token.
+
+**The old token** stays valid until the new one is used for the first time, or until its own expiry, whichever comes first, so an answer lost on the way does not lock the integration out: it still holds the old token and secret. Renewing again with the old token while the new one is unused replaces the unused one, which is then refused. The first use of the new token supersedes the old one.
+
+**Reuse detection.** A use of a superseded token, as a bearer token or in the renewal call, or of a superseded renewal secret, means that two parties hold the family's secrets. It revokes the whole family at once: every token of it is refused from that commit on. The newest token stays in the token list as revoked, with the reason, and the health warning `auth.token.reuse_detected` stands until an administrator removes that entry (`DELETE` on it), which is the acknowledgment. The detection is audited as `auth.token.reuse_detected` with the token that was presented and the client address. An integration must therefore store the new token and the new secret together before it uses the new token.
+
+**A wrong renewal secret** with a valid token is refused with 403 `auth.token.renewal_refused` (`reason: wrong_secret`) and audited as a failed `auth.token.renew`. The third wrong secret within a family revokes the family as above, with the reason `renewal_failures`: the secrets carry 256 bits, so a wrong one comes from someone who holds the token without the secret, or from an integration that lost its secret; neither may go on renewing. The count is reset by a successful renewal. The rate limits of every request apply in addition.
+
+**Revoking.** `DELETE /access/service-accounts/{id}/tokens/{token}` on any token of a family removes the whole family. An account's tokens end as before: a deleted or disabled account, or an end of the account's access, removes every family.
+
+### 7.2 Source binding (IAM-21)
+
+`"source_prefixes": ["192.0.2.0/24", "2001:db8:42::/48"]` in the creation request binds a scoped token to client addresses: at most 64 IPv4 or IPv6 prefixes, a host address written without a length. A use from an address outside them is refused with 401 `auth.unauthenticated`, exactly like an unknown token, and audited as `auth.token.source_refused` with the address. The address is the client address the server already derives: the peer of the connection, or the address a trusted proxy reports (`[tls] trusted_proxies`, through the `Forwarded` header or the PROXY protocol). An IPv4 address reached as an IPv4-mapped IPv6 address counts as the IPv4 address. A bound token used where the server knows no client address is refused. Renewal keeps the list; it is changed only by creating a new token, which takes a session with a fresh sign-in.
+
+### 7.3 The token's own description
+
+`GET /api/v1/access/token` answers any scoped token of a service account with its own description: the account (`id`, `name`), the token's name, prefix, grants and scopes, its creation and expiry time, whether it may renew (with TGL-46 applied) and its source binding. It carries no secret and nothing about other tokens. A session is refused with 401 `auth.unauthenticated`: it has no token.
+
+### 7.4 Expiry warning
+
+A service-account token with fewer than 14 days left, and no successor, raises the health warning `auth.token.expiring` with the account, the token and its end, on the start page and in `GET /system/status`. The hourly sweep of the controller writes the audit record `auth.token.expiring` once per token, which reaches the `audit` event topic and the audit export. The warning clears when the token is renewed (its successor exists), replaced by removing it, or revoked.
+
+### 7.5 A worked example
+
+An administrator creates a renewable token for the service account of a DHCP reporting script, bound to its network (the session cookie of a fresh sign-in is in `cookies.txt`):
+
+```sh
+curl -sS -b cookies.txt -H 'Origin: https://tenko.example.test' \
+  -H 'Content-Type: application/json' \
+  https://tenko.example.test/api/v1/access/service-accounts/0190d1c2-0000-7000-8000-000000000002/tokens \
+  -d '{"name": "dhcp-report", "scopes": ["metrics"], "renewable": true,
+       "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"]}'
+```
+
+```json
+{
+  "token": "tnk_3q2-7wEXAMPLEaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "renewal_secret": "tnr_Zm9vEXAMPLEbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "info": {"id": "0190d1c2-0000-7000-8000-0000000000a1", "name": "dhcp-report",
+           "prefix": "tnk_3q2-7wEX", "created_at": "2026-01-05T09:00:00Z",
+           "expires_at": "2026-04-05T09:00:00Z", "scoped": true, "scopes": ["metrics"],
+           "renewable": true, "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"]}
+}
+```
+
+The script uses the token, and reads what it is:
+
+```sh
+curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
+curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/access/token
+```
+
+Some time before `expires_at` it renews, stores both new secrets, and only then uses the new token:
+
+```sh
+curl -sS -X POST -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' \
+  -H 'Content-Type: application/json' \
+  https://tenko.example.test/api/v1/access/token/renew \
+  -d '{"renewal_secret": "tnr_Zm9vEXAMPLE..."}'
+```
+
+```json
+{
+  "token": "tnk_Q1w2EXAMPLEcccccccccccccccccccccccccccccccc",
+  "renewal_secret": "tnr_R5t6EXAMPLEdddddddddddddddddddddddddddddddd",
+  "info": {"id": "0190d1c2-0000-7000-8000-0000000000a2", "name": "dhcp-report",
+           "prefix": "tnk_Q1w2EXAM", "created_at": "2026-03-20T09:00:00Z",
+           "expires_at": "2026-06-18T09:00:00Z", "renewed_at": "2026-03-20T09:00:00Z",
+           "scoped": true, "scopes": ["metrics"], "renewable": true,
+           "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"]}
+}
+```
+
+If the answer is lost, the script repeats the call with the old token and the old secret; the unused new token is replaced. Do not send an `Idempotency-Key` with this call: its answer carries secrets and is never stored, so a retry under the same key is refused with 409 `sys.idempotency_not_replayable` instead of answered again.
+
+Once the new token has been used, the old one is superseded. If someone presents it again, here from a copy of the old configuration, the family is revoked:
+
+```sh
+curl -sS -H 'Authorization: Bearer tnk_3q2-7wEXAMPLE...' https://tenko.example.test/api/v1/metrics
+```
+
+```json
+{"type": "about:blank", "title": "Unauthorized", "status": 401, "code": "auth.unauthenticated",
+ "detail": "authentication required"}
+```
+
+From then on the new token is refused the same way, the token list shows the family's newest token as revoked with the reason `reuse_detected`, the audit log holds `auth.token.reuse_detected` with the address the old token came from, and the start page shows `auth.token.reuse_detected` until an administrator has looked into it and removed the revoked token. The integration needs a new token from an administrator.
+
+### 7.6 In a cluster
+
+Token records replicate through the store like every other record, and each change above is one write of the store, ordered with every other write: the renewal, the first use of a new token (which supersedes the old one in the same write), and the revocation of a family. Each write names the revisions of the records it read, so of two writes that read the same family, the second fails and is decided again on the newer state: a renewal with the old token and the first use of the new token on two controllers cannot both win, and two controllers that detect the same reuse revoke the family once. A controller decides a use from its own copy, so it accepts the old token until it has applied the write that superseded it, as it does for any revoked token (section 1); the next use after that is detected as reuse. The hourly use time of a token, the expiry warning and the sweep are best effort: a write that loses to another is left for the next use or sweep.
+
 ## 8. Multi-factor policy per role
 
 The multi-factor requirement (IAM-06) is set per role. A policy has one of three values.
@@ -298,7 +398,7 @@ An account that must change its password (after an administrator reset it) gets 
 
 ## 12. API
 
-Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listings of grants, subjects, service accounts and role policies also accept a token (a scoped token reads grants and subjects only with a grant that reads users, else 403 `auth.forbidden`). Listing a service account's tokens administers the account, so it needs a session like the other changes.
+Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listings of grants, subjects, service accounts and role policies also accept a token, and the two routes of a token's own (`/access/token`) take nothing else (a scoped token reads grants and subjects only with a grant that reads users, else 403 `auth.forbidden`). Listing a service account's tokens administers the account, so it needs a session like the other changes.
 
 | Method | Path | Operation id | Success | Notes |
 |---|---|---|---|---|
@@ -310,7 +410,9 @@ Paths are below `/api/v1`. Bodies are JSON. The routes need a session; the listi
 | POST | `/access/service-accounts` | `create_service_account` | 201 `UserInfo`, `Location` | Administrator; no password, passkey or session |
 | GET | `/access/service-accounts/{id}/tokens` | `list_service_account_tokens` | 200 page of `TokenInfo` | Administrator, with a session; secrets are never shown again |
 | POST | `/access/service-accounts/{id}/tokens` | `create_service_account_token` | 201 `CreatedToken` | Scoped tokens only; the secret is shown once |
-| DELETE | `/access/service-accounts/{id}/tokens/{token}` | `revoke_service_account_token` | 204 | |
+| DELETE | `/access/service-accounts/{id}/tokens/{token}` | `revoke_service_account_token` | 204 | Removes the token's whole family (section 7.1) |
+| GET | `/access/token` | `describe_own_token` | 200 `OwnToken` | The calling service-account token, by itself (section 7.3) |
+| POST | `/access/token/renew` | `renew_own_token` | 200 `CreatedToken` | The calling token with its renewal secret (section 7.1); never stored for an `Idempotency-Key` |
 | GET | `/access/role-policies` | `list_role_policies` | 200 page of `RolePolicyView` | One per role |
 | PUT | `/access/role-policies/{role}` | `set_role_policy` | 200 `RolePolicyView` | |
 | DELETE | `/access/role-policies/{role}` | `clear_role_policy` | 200 `RolePolicyView` | The role follows the profile again |
@@ -381,6 +483,7 @@ PUT /api/v1/access/role-policies/viewer
 | `auth.scope.unavailable` | 503 | The server has no IP address management to resolve scopes |
 | `auth.token.lifetime_exceeded` | 422 | The lifetime exceeds the maximum of the profile (TGL-05); the problem carries `max_days` |
 | `auth.token.not_found` | 404 | No such token |
+| `auth.token.renewal_refused` | 403 | The token may not renew: `reason` is `disabled` (TGL-46 is off), `not_renewable` (created without the right) or `wrong_secret` (section 7.1) |
 | `auth.invalid_request` | 400 | A name, role or lifetime is invalid, or a scoped token has neither grants nor scopes |
 | `users.name_taken` | 409 | The service account name is taken |
 | `users.last_administrator` | 409 | The only person with the admin role cannot drop it, be disabled or be deleted while only service accounts would remain |

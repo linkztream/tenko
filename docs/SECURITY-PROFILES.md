@@ -2,7 +2,7 @@
 
 Tenko DDI ships four security profiles: Home, Standard, Hardened and Lab. The operator selects one in the first-run wizard (API-10). Each profile maps to a persona defined in [REQUIREMENTS.md](REQUIREMENTS.md): PER-01 (home user), PER-02 (business administrator), PER-03 (hardened or regulated environment) and PER-04 (lab or pentest).
 
-This document owns the toggle IDs TGL-01 to TGL-41 and TGL-45, and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document owns the toggle IDs TGL-01 to TGL-41, TGL-45 and TGL-46, and the never-off IDs NEVER-01 to NEVER-03. Requirement IDs (IAM-, DNS-, DHCP-, SCAN-, CONN-, OPS-, API-) and design constraints (CON-) are defined in REQUIREMENTS.md. Role and node structure is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Principles
 
@@ -75,6 +75,7 @@ Reading the matrix:
 | TGL-40 | DHCP trusted relay agents (`dhcp.settings.trusted_relays` unset; `docs/dhcp.md` section 9.8) | None: only clients on the node's own links until relay agents are listed, each with the links it may name | None, as Home | None, as Home; a new relay for every link (`0.0.0.0/0`, `::/0`) is refused | Every sender is trusted, with the health row `dhcp.relay.trust_any` | 3 | DHCP-04, DHCP-09 |
 | TGL-41 | DHCP limits per client and per scope (`dhcp.settings.limits` unset; `docs/dhcp.md` section 14.9) | 16 DHCPv4 bindings per MAC address, 16 DHCPv6 addresses and 8 prefixes per DUID, 100 new clients a second per scope | As Home, 200 new clients a second | 8 bindings per MAC address, 8 addresses and 4 prefixes per DUID, 100 new clients a second | Off, for the load tools of the benches | 3 | DHCP-01, DHCP-09 |
 | TGL-45 | Pre-release updates (OPS-30; `docs/upgrades.md` section 8.13). On is a deviation, never weaker than Home; `updates.prereleases = false` in `tenko.toml` locks it off | Off | Off | Off | Off | 1 | OPS-24, OPS-30 |
+| TGL-46 | Service-account tokens may renew themselves (IAM-20; `docs/access.md` section 7.1). Off: no token renews and none is created with the renewal right, whatever a token's flag says. On is a deviation under Hardened, never weaker than Home | On | On | Off | On | 3 | IAM-10, IAM-20 |
 
 Notes:
 
