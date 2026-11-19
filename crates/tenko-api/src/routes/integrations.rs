@@ -152,6 +152,28 @@ impl CaIssuer {
         }
     }
 
+    /// The integration root, when the integration CA exists; it is not created here.
+    pub async fn integration_root(
+        &self,
+        ctx: &RequestCtx,
+    ) -> Option<rustls::pki_types::CertificateDer<'static>> {
+        if let Some(ca) = self.integration.get() {
+            return Some(ca.root_der().clone());
+        }
+        match IntegrationCa::load(self.store.as_ref(), self.vault.as_ref(), ctx).await {
+            Ok(Some(ca)) => {
+                let root = ca.root_der().clone();
+                let _ = self.integration.set(ca);
+                Some(root)
+            }
+            Ok(None) => None,
+            Err(error) => {
+                tracing::warn!(%error, "the integration CA cannot be loaded");
+                None
+            }
+        }
+    }
+
     async fn ca(&self, ctx: &RequestCtx) -> Result<&IntegrationCa, ClientCertError> {
         self.integration
             .get_or_try_init(|| async {
@@ -874,6 +896,23 @@ mod tests {
             assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{name}");
             assert_eq!(reply.problem(), "integration.code.invalid", "{name}");
         }
+        // The code header carries the code's id alone; the whole code, secret included, is
+        // not an id and is refused.
+        let mut whole = enroll_request(&enrollment, PKCS10, true, false);
+        whole.headers_mut().insert(
+            CODE_HEADER,
+            HeaderValue::from_str(&format!(
+                "{CODE_PREFIX}.{}.{}.{}.{}",
+                enrollment.code,
+                env.account,
+                "ab".repeat(32),
+                "cd".repeat(32)
+            ))
+            .expect("header"),
+        );
+        let reply = send(&env.router, whole).await;
+        assert_eq!(reply.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(reply.problem(), "integration.code.invalid");
         let empty = Enrollment {
             code: enrollment.code,
             proof: enrollment.proof.clone(),

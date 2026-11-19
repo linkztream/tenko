@@ -23,6 +23,7 @@
 //! [`ServerConfig::shutdown_grace`] whatever is left is dropped.
 
 pub(crate) mod forwarded;
+pub mod integration;
 mod listener;
 pub mod proxy_protocol;
 
@@ -87,6 +88,8 @@ pub struct ServerConfig {
     /// key so every controller computes the same fingerprints; `None` draws a random key
     /// for this process.
     pub fingerprint_key: Option<idempotency::FingerprintKey>,
+    /// The integration listener of ADR 0035, when this server runs one.
+    pub integration: Option<integration::IntegrationListener>,
 }
 
 impl ServerConfig {
@@ -106,6 +109,7 @@ impl ServerConfig {
             max_connections: 20_000,
             extensions: axum::http::Extensions::new(),
             fingerprint_key: None,
+            integration: None,
         }
     }
 
@@ -618,6 +622,14 @@ async fn run(
         .spawn_tasks(Arc::clone(&state.store), tasks_rx.clone());
     spawn_housekeeping(layers, tasks_rx);
 
+    let integration = config.integration.map(|integration| {
+        tokio::spawn(integration::supervise(
+            integration,
+            router.clone(),
+            config.header_read_timeout,
+            stop.clone(),
+        ))
+    });
     let shared = Arc::new(listener::Shared {
         router,
         acceptor: TlsAcceptor::from(config.tls.server_config()),
@@ -652,6 +664,9 @@ async fn run(
     let _ = tasks_tx.send(true);
     for accept_loop in accept_loops {
         let _ = accept_loop.await;
+    }
+    if let Some(integration) = integration {
+        let _ = integration.await;
     }
     drop(shared);
     if let Ok(graceful) = Arc::try_unwrap(graceful) {

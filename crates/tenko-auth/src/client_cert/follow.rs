@@ -19,9 +19,14 @@ use tokio::{sync::watch, task::JoinHandle};
 
 use super::{
     ClientCertError, ClientCerts,
-    model::{CLIENT_CERTS, CertState, ClientCertRecord},
+    model::{
+        CLIENT_CERTS, CertState, ClientCertRecord, CodeState, ENROLLMENT_CODES, IntegrationPolicy,
+    },
 };
-use crate::model::USERS;
+use crate::{
+    model::{SETTINGS, USERS},
+    settings::Profile,
+};
 
 /// How long a replaced certificate passes for every route after its successor was first
 /// presented (ADR 0035, decision 6).
@@ -40,15 +45,56 @@ pub enum Acceptance {
 }
 
 /// The certificate records and the usable service accounts, in memory.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CertIndex {
     certs: ArcSwap<HashMap<String, ClientCertRecord>>,
     /// The `tokens_generation` of every enabled service account.
     accounts: ArcSwap<HashMap<UserId, u64>>,
+    /// The TGL-47 values of the stored profile.
+    policy: ArcSwap<IntegrationPolicy>,
+    /// Whether an enrollment code was waiting at the last load.
+    codes_waiting: AtomicBool,
     loaded: AtomicBool,
+    /// Counts the loads, so that the listener re-checks its open connections after each.
+    version: watch::Sender<u64>,
+}
+
+impl Default for CertIndex {
+    fn default() -> Self {
+        Self {
+            certs: ArcSwap::default(),
+            accounts: ArcSwap::default(),
+            policy: ArcSwap::from_pointee(IntegrationPolicy::of(Profile::Standard)),
+            codes_waiting: AtomicBool::new(false),
+            loaded: AtomicBool::new(false),
+            version: watch::channel(0).0,
+        }
+    }
 }
 
 impl CertIndex {
+    /// A receiver that changes after every load.
+    pub fn subscribe(&self) -> watch::Receiver<u64> {
+        self.version.subscribe()
+    }
+
+    /// The TGL-47 values in force.
+    pub fn policy(&self) -> IntegrationPolicy {
+        **self.policy.load()
+    }
+
+    /// Whether the integration listener is wanted when it opens on demand: an enrollment
+    /// code is waiting, or a certificate that has not ended or expired exists.
+    pub fn wanted(&self, now: Timestamp) -> bool {
+        self.codes_waiting.load(Ordering::Acquire)
+            || self.certs.load().values().any(|record| {
+                matches!(
+                    record.state,
+                    CertState::Current | CertState::Pending | CertState::Replaced
+                ) && now.0 < record.not_after.0
+            })
+    }
+
     /// Whether the first full load succeeded: the integration listener opens only then.
     pub fn is_loaded(&self) -> bool {
         self.loaded.load(Ordering::Acquire)
@@ -93,7 +139,7 @@ impl CertIndex {
         }
     }
 
-    /// Reads both tables in full and replaces what the index holds.
+    /// Reads the tables in full and replaces what the index holds.
     ///
     /// # Errors
     ///
@@ -111,10 +157,21 @@ impl CertIndex {
             .filter(|(_, user, _)| user.is_service() && !user.disabled)
             .map(|(id, user, _)| (id, user.tokens_generation))
             .collect();
+        let now = Timestamp::now();
+        let codes_waiting = view
+            .scan_typed(&ENROLLMENT_CODES, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .any(|(_, code, _)| code.state == CodeState::Pending && now.0 < code.expires_at.0);
+        let profile = view
+            .get_typed(&SETTINGS, &())?
+            .map_or(Profile::Standard, |(settings, _)| settings.profile);
         let count = certs.len();
         self.certs.store(Arc::new(certs));
         self.accounts.store(Arc::new(accounts));
+        self.policy.store(Arc::new(IntegrationPolicy::of(profile)));
+        self.codes_waiting.store(codes_waiting, Ordering::Release);
         self.loaded.store(true, Ordering::Release);
+        self.version.send_modify(|version| *version += 1);
         Ok(count)
     }
 }
@@ -126,7 +183,12 @@ impl ClientCerts {
     pub fn follow(self: &Arc<Self>, mut stop: watch::Receiver<bool>) -> JoinHandle<()> {
         let service = Arc::clone(self);
         tokio::spawn(async move {
-            let filter = WatchFilter::tables([CLIENT_CERTS.name().clone(), USERS.name().clone()]);
+            let filter = WatchFilter::tables([
+                CLIENT_CERTS.name().clone(),
+                USERS.name().clone(),
+                ENROLLMENT_CODES.name().clone(),
+                SETTINGS.name().clone(),
+            ]);
             loop {
                 match service.index.load(service.store.as_ref()).await {
                     Ok(_) => {}

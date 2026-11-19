@@ -23,6 +23,7 @@
 pub(crate) mod csrf;
 pub mod headers;
 pub mod idempotency;
+pub(crate) mod integration;
 pub(crate) mod metrics;
 pub mod quorum;
 pub mod rate_limit;
@@ -174,7 +175,8 @@ pub(crate) async fn api(
     let quorum = quorum::Quorum::read(&layers.state);
     let refusal = match guard(&layers, &mut request).await {
         Some(refusal) => Some(refusal),
-        None => quorum.check(&request),
+        None => integration::check(&request, layers.routes.is_public(route), quorum.since())
+            .or_else(|| quorum.check(&request)),
     };
     let mut response = if let Some(refusal) = refusal {
         refusal

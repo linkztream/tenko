@@ -47,6 +47,19 @@ pub(crate) struct ConnInfo {
     pub(crate) trusted: bool,
     /// The PROXY protocol header the trusted peer sent.
     pub(crate) proxy: Option<ProxyHeader>,
+    /// On the integration listener: the integration certificate the client presented in the
+    /// TLS handshake (ADR 0035). Set only from the handshake, never from a header or the
+    /// PROXY protocol: a certificate a proxy forwards is never trusted.
+    pub(crate) client: Option<Arc<IntegrationClient>>,
+}
+
+/// The integration certificate of a connection to the integration listener.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct IntegrationClient {
+    /// Its serial, lower-case hex.
+    pub(crate) serial: String,
+    /// The service account it names.
+    pub(crate) account: tenko_core::UserId,
 }
 
 impl ConnInfo {
@@ -214,6 +227,7 @@ mod tests {
             mode,
             trusted,
             proxy: None,
+            client: None,
         }
     }
 

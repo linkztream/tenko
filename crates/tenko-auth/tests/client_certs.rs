@@ -683,3 +683,49 @@ async fn revoking_ends_the_whole_lineage_once() {
         Some(ClientCertError::KeyUsed)
     );
 }
+
+#[tokio::test]
+async fn the_index_says_when_the_listener_is_wanted_and_signals_each_load() {
+    let env = Env::new();
+    let index = Arc::clone(env.certs.index());
+    let mut changes = index.subscribe();
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(changes.has_changed().expect("open"));
+    changes.mark_unchanged();
+    let now = Timestamp::now();
+    assert!(!index.wanted(now), "nothing uses it");
+    assert_eq!(index.policy(), IntegrationPolicy::of(Profile::Standard));
+
+    // The index judges codes and certificates by the clock, so this test lives at `now`.
+    let account = env.service_account().await;
+    let created = env
+        .certs
+        .create_code(
+            &ctx(now),
+            UserId::generate(),
+            &NewCode {
+                account: account.id,
+                lifetime_secs: None,
+                source: None,
+            },
+        )
+        .await
+        .expect("code");
+    let code = Code::parse(&created.code);
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(changes.has_changed().expect("open"));
+    assert!(index.wanted(now), "a code waits");
+
+    env.enroll_at(&code, &key(1), now, "host")
+        .await
+        .expect("enroll");
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(index.wanted(now), "a certificate is in use");
+    let serial = env.certs.list(None).await.expect("list")[0].serial.clone();
+    env.certs
+        .revoke(&ctx(now), &serial, "test")
+        .await
+        .expect("revoke");
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(!index.wanted(now), "nothing is in use any more");
+}

@@ -141,6 +141,7 @@ async fn connection(tcp: TcpStream, peer: SocketAddr, shared: &Shared, watcher: 
         mode: Arc::clone(&mode),
         trusted,
         proxy,
+        client: None,
     };
     if mode.terminates_tls() {
         let handshake =
@@ -185,21 +186,30 @@ async fn serve_http<IO>(
         let router = router.clone();
         async move { router.oneshot(request).await }
     });
+    let builder = http_builder(shared.header_read_timeout, keep_alive);
+    let connection = builder.serve_connection_with_upgrades(TokioIo::new(io), service);
+    if let Err(error) = watcher.watch(connection.into_owned()).await {
+        tracing::debug!(%peer, %error, "connection ended with an error");
+    }
+}
+
+/// HTTP/1.1 and HTTP/2 with the limits of the API listeners.
+pub(crate) fn http_builder(
+    header_read_timeout: Duration,
+    keep_alive: bool,
+) -> auto::Builder<TokioExecutor> {
     let mut builder = auto::Builder::new(TokioExecutor::new());
     builder
         .http1()
         .timer(TokioTimer::new())
-        .header_read_timeout(shared.header_read_timeout)
+        .header_read_timeout(header_read_timeout)
         .keep_alive(keep_alive);
     builder
         .http2()
         .timer(TokioTimer::new())
         .keep_alive_interval(Duration::from_secs(30))
         .max_concurrent_streams(256);
-    let connection = builder.serve_connection_with_upgrades(TokioIo::new(io), service);
-    if let Err(error) = watcher.watch(connection.into_owned()).await {
-        tracing::debug!(%peer, %error, "connection ended with an error");
-    }
+    builder
 }
 
 /// The router that answers every request of a refused plain HTTP connection.

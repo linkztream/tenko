@@ -45,6 +45,7 @@ pub fn client_info(
         mode: Arc::clone(&connection.mode),
         trusted: connection.trusted,
         proxy: connection.proxy.clone(),
+        client: None,
     });
     forwarded::resolve(conn.as_ref(), headers, uri)
 }
