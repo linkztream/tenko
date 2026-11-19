@@ -154,6 +154,10 @@
         <notes><note category="description">What the audit action auth.token.expiring is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Warn that an API token expires soon</source></segment>
       </unit>
+      <unit id="audit.action.auth.token.form_refused">
+        <notes><note category="description">What the audit action auth.token.form_refused is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse an API token in the wrong form</source></segment>
+      </unit>
       <unit id="audit.action.auth.token.renew">
         <notes><note category="description">What the audit action auth.token.renew is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Renew an API token</source></segment>

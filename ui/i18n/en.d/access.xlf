@@ -434,6 +434,12 @@
       <unit id="access.token.renewable_help">
         <segment><source>The token comes with a renewal secret, shown once. With both, the integration exchanges the token for a new one before it expires.</source></segment>
       </unit>
+      <unit id="access.token.error.renewable_expiry">
+        <segment><source>A renewable token needs a lifetime: choose a number of days.</source></segment>
+      </unit>
+      <unit id="errors.auth.token.limit">
+        <segment><source>This owner holds the most tokens it may ({max}). Remove tokens it no longer uses.</source></segment>
+      </unit>
       <unit id="access.token.renewable_off">
         <notes><note category="description">Why the renewal checkbox is disabled: the security toggle TGL-46 is off.</note></notes>
         <segment><source>Tokens do not renew under the security settings (TGL-46 is off).</source></segment>

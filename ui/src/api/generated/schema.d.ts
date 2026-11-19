@@ -26774,7 +26774,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The token: its secret (`tnk_...`, shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata */
+            /** @description The token: its secret (`tnk_...`, or `tnkc_...` with `renewable` or `source_prefixes`; shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata */
             201: {
                 headers: {
                     [name: string]: unknown;

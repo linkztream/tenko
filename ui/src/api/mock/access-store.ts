@@ -535,7 +535,9 @@ export function issueScopedToken(
   if (request.renewable && !tokenSelfRenewal(db.settings)) {
     problem("auth.token.renewal_refused", 403, { params: { reason: "disabled" } });
   }
-  const secret = `tnk_${randomToken(43)}`;
+  if (request.renewable && lifetime === null) invalid("expires_in_days", "a renewable token needs a lifetime");
+  // IAM-20, IAM-21: a renewable or bound token has the constrained form.
+  const secret = `${request.renewable || request.sourcePrefixes.length > 0 ? "tnkc_" : "tnk_"}${randomToken(43)}`;
   const now = Date.now();
   const info: TokenInfo = {
     id: randomId(),

@@ -31,7 +31,12 @@ export function TokenDialog(props: {
   // TGL-46 decides whether a service account's token may renew itself.
   const [renewal] = createResource(
     () => !props.personal,
-    async () => (await api.get("/api/v1/settings/security")).toggles.some((tg) => tg.id === "TGL-46" && (tg.value as unknown) === true),
+    // Unknown (null) when the settings cannot be read: the switch stays off.
+    () =>
+      api
+        .get("/api/v1/settings/security")
+        .then((view) => view.toggles.some((tg) => tg.id === "TGL-46" && (tg.value as unknown) === true))
+        .catch(() => null),
   );
   const [renewable, setRenewable] = createSignal(false);
   const [prefixes, setPrefixes] = createSignal("");
@@ -52,6 +57,9 @@ export function TokenDialog(props: {
   let nameInput!: HTMLInputElement;
 
   const nameError = () => (submitted() && !name().trim() ? t("access.token.error.name") : undefined);
+  // IAM-20: a renewable token always expires.
+  const lifetimeError = () =>
+    submitted() && renewable() && renewal() === true && lifetime() === NO_EXPIRY ? t("access.token.error.renewable_expiry") : undefined;
   const grantsError = () => {
     if (!submitted() || !scoped()) return undefined;
     const grants = rowsToGrants(rows());
@@ -67,7 +75,7 @@ export function TokenDialog(props: {
       nameInput.focus();
       return;
     }
-    if (grantsError() || busy()) return;
+    if (grantsError() || lifetimeError() || busy()) return;
     const days = lifetime() === NO_EXPIRY ? null : Number(lifetime());
     const body: TokenCreate = scoped()
       ? {
@@ -145,8 +153,9 @@ export function TokenDialog(props: {
                     </option>
                   </Show>
                 </select>
-                <span class="help" id="token-lifetime-help">
-                  {max() === null ? t("access.token.max_none") : t("access.token.max_days", { days: formatNumber(max() ?? 0) })}
+                <span class={lifetimeError() ? "help bad field-error" : "help"} id="token-lifetime-help">
+                  {lifetimeError() ??
+                    (max() === null ? t("access.token.max_none") : t("access.token.max_days", { days: formatNumber(max() ?? 0) }))}
                 </span>
               </div>
               <Show when={props.personal}>

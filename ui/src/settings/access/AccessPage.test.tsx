@@ -232,6 +232,7 @@ describe("the service accounts", () => {
     fireEvent.click(within(dialog).getByTestId("form-submit"));
 
     const shown = await screen.findByTestId("dialog-token-created");
+    expect(within(shown).getByTestId("token-secret").textContent).toMatch(/^tnkc_/);
     expect(within(shown).getByTestId("token-renewal-secret").textContent).toMatch(/^tnr_/);
     fireEvent.click(within(shown).getByTestId("token-stored"));
     fireEvent.click(within(shown).getByTestId("token-done"));

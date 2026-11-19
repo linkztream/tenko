@@ -114,12 +114,12 @@
         <segment><source>The server runs {version}, but this node is not yet set up to run one version. Run {command} once as root.</source><target>Servern kör {version}, men noden är ännu inte inrättad för att köra en enda version. Kör {command} en gång som root.</target></segment>
       </unit>
       <unit id="dashboard.finding.health.auth.token.expiring">
-        <notes><note category="description">A service-account token with fewer than 14 days left (IAM-20): the account, the token's name and its end.</note></notes>
-        <segment><source>The token {token} of {account} expires at {expires_at}. Renew or replace it.</source><target>Token {token} för {account} går ut {expires_at}. Förnya eller ersätt det.</target></segment>
+        <notes><note category="description">Service-account tokens with fewer than 14 days left (IAM-20): how many, and the first end. No names: the token list of the account shows which.</note></notes>
+        <segment><source>{count} service-account tokens expire within 14 days, the first at {expires_at}. Renew or replace them.</source><target>{count} token för tjänstekonton går ut inom 14 dagar, det första {expires_at}. Förnya eller ersätt dem.</target></segment>
       </unit>
       <unit id="dashboard.finding.health.auth.token.revoked">
-        <notes><note category="description">A token family the server revoked (IAM-20); reason is reuse_detected or renewal_failures. It stands until an administrator removes the token.</note></notes>
-        <segment><source>The token {token} of {account} was revoked with its family ({reason}). Look into it, then remove the token.</source><target>Token {token} för {account} återkallades med sin familj ({reason}). Undersök det och ta sedan bort token.</target></segment>
+        <notes><note category="description">Token families the server revoked (IAM-20): how many. It stands until an administrator removes the revoked tokens, which the token lists show with the reason.</note></notes>
+        <segment><source>The server revoked {count} token families after a reuse or wrong renewal secrets. Look into them, then remove the revoked tokens.</source><target>Servern återkallade {count} tokenfamiljer efter återanvändning eller fel förnyelsehemligheter. Undersök dem och ta sedan bort de återkallade token.</target></segment>
       </unit>
       <unit id="dashboard.finding.action.resolve">
         <segment><source>Resolve conflict</source><target>Lös konflikten</target></segment>
