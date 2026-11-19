@@ -1889,10 +1889,20 @@ async fn start(
             server.max_connections = config.server.max_connections;
             server.integration = integration_listener(
                 config,
+                &resolved.listen,
                 &client_certs,
                 &integration_issuer,
                 &integration_resolver,
             );
+            server
+                .extensions
+                .insert(tenko_api::routes::integrations::ListenAddresses(
+                    server
+                        .integration
+                        .as_ref()
+                        .map(|listener| listener.listen.clone())
+                        .unwrap_or_default(),
+                ));
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&languages));
             if let Some(change_queue) = &change_queue {
@@ -2535,16 +2545,16 @@ fn publish_setup_token(
     })
 }
 
-/// The audit export's settings service and its exporter (WP3.3): file sinks write into
 /// The integration listener of ADR 0035, unless `[integrations] listen = []` closes it.
 fn integration_listener(
     config: &config::Config,
+    api: &[std::net::SocketAddr],
     certs: &Arc<tenko_auth::client_cert::ClientCerts>,
     issuer: &Arc<tenko_api::routes::integrations::CaIssuer>,
     resolver: &Arc<tenko_cluster::ca::TlsResolver>,
 ) -> Option<tenko_api::server::integration::IntegrationListener> {
     // The configuration was validated at start, so the mode is known.
-    let (listen, on_demand) = match config.integrations.listen_mode().ok()? {
+    let (listen, on_demand) = match config.integrations.listen_mode(api).ok()? {
         config::ClusterListen::Off => return None,
         config::ClusterListen::OnDemand(listen) => (listen, true),
         config::ClusterListen::Always(listen) => (listen, false),
@@ -2558,6 +2568,7 @@ fn integration_listener(
     })
 }
 
+/// The audit export's settings service and its exporter (WP3.3): file sinks write into
 /// `[audit_export] file_dir`, TLS client keys come from the vault, and the syslog
 /// HOSTNAME is this controller's TLS host name (`-` when it has none).
 fn audit_export(

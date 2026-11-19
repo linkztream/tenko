@@ -162,16 +162,32 @@ async fn integration_certificate(
     vault: &Arc<StoreVault>,
     stop: &watch::Receiver<bool>,
 ) -> Result<TlsSetup, StartError> {
+    // Only when the listener can open at all.
+    if matches!(
+        resolved.config.integrations.listen_mode(&resolved.listen),
+        Ok(crate::config::ClusterListen::Off)
+    ) {
+        return Ok(setup);
+    }
     let ctx = RequestCtx::system(SystemComponent::Cluster);
     let ca = InternalCa::load_or_init(store.as_ref(), vault.as_ref(), &ctx, CaPolicy::default())
         .await
         .map_err(|error| StartError::coded("tls", &error))?;
-    let identity = identity(resolved, store.as_ref()).await?;
-    let material = ca
-        .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
-        .await
-        .map_err(|error| StartError::coded("tls", &error))?;
-    setup.integration.set(Some(material));
+    // Before first-run setup there may be no host name to put on it: the renewal task issues
+    // the certificate once setup stores one (no integration can enroll before that).
+    match identity(resolved, store.as_ref()).await {
+        Ok(identity) => {
+            let material = ca
+                .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
+                .await
+                .map_err(|error| StartError::coded("tls", &error))?;
+            setup.integration.set(Some(material));
+        }
+        Err(error) if error.code == "start.tls.host_name" => {
+            tracing::info!("the integration listener's certificate waits for a host name: {error}");
+        }
+        Err(error) => return Err(error),
+    }
     setup.tasks.push(tokio::spawn(renew(
         Renewal {
             ca,
@@ -309,9 +325,8 @@ async fn effective_profile(resolved: &Resolved, store: &dyn Store) -> Result<Pro
 /// The names of the server certificate: the host name from setup (or the configured one
 /// before setup), the configured host name as an extra name, and the configured extras. In
 /// modes b and c only the integration listener shows such a certificate (ADR 0035), with the
-/// names of the `[tls]` section, which those modes do not check otherwise.
+/// names of the `[tls]` section and never a default name.
 async fn identity(resolved: &Resolved, store: &dyn Store) -> Result<ServerIdentity, StartError> {
-    let tls = &resolved.config.tls;
     let configured;
     let (host_name, alt_names, addresses) = if let TlsSpec::InternalCa {
         host_name,
@@ -319,26 +334,15 @@ async fn identity(resolved: &Resolved, store: &dyn Store) -> Result<ServerIdenti
         addresses,
     } = &resolved.tls
     {
-        (host_name, alt_names, addresses)
+        (Some(host_name), alt_names, addresses)
     } else {
-        configured = (
-            tls.host_name
-                .clone()
-                .unwrap_or_else(|| "localhost".to_owned()),
-            tls.addresses
-                .iter()
-                .map(|text| {
-                    text.parse::<std::net::IpAddr>().map_err(|_| {
-                        StartError::new(
-                            "tls",
-                            "start.tls.mode",
-                            format!("tls.addresses: `{text}` is not an IP address"),
-                        )
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        );
-        (&configured.0, &tls.alt_names, &configured.1)
+        // Checked when the configuration was resolved; no default name here.
+        configured = resolved
+            .config
+            .tls
+            .certificate_names()
+            .map_err(|error| StartError::new("tls", "start.tls.names", error.to_string()))?;
+        (configured.0.as_ref(), &configured.1, &configured.2)
     };
     let view = store
         .read(ReadConsistency::Local)
@@ -348,13 +352,19 @@ async fn identity(resolved: &Resolved, store: &dyn Store) -> Result<ServerIdenti
         .get_typed(&INSTALLATION, &())
         .map_err(|error| StartError::coded("tls", &error))?
         .map(|(installation, _)| installation.host_name);
-    let primary = installed.unwrap_or_else(|| host_name.clone());
+    let Some(primary) = installed.or_else(|| host_name.cloned()) else {
+        return Err(StartError::new(
+            "tls",
+            "start.tls.host_name",
+            "no host name for the server certificate yet: first-run setup stores one, or set tls.host_name",
+        ));
+    };
     let mut identity = ServerIdentity::new(primary.clone());
-    if *host_name != primary {
-        identity = identity.with_name(host_name.clone());
+    if let Some(name) = host_name.filter(|name| **name != primary) {
+        identity = identity.with_name(name.clone());
     }
     for name in alt_names {
-        if *name != primary && *name != *host_name {
+        if *name != primary && Some(name) != host_name {
             identity = identity.with_name(name.clone());
         }
     }
