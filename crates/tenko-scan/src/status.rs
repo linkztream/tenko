@@ -8,6 +8,7 @@
 use std::{
     io::Write as _,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::{Deserialize, Serialize};
@@ -101,11 +102,15 @@ impl ScanPaths {
 ///
 /// `scan.io` when a step fails.
 pub fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), ScanError> {
+    // A temporary file of its own per write: the scanner's tasks write the same file at once,
+    // and with one shared name a write truncated another's file or renamed it half written.
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     let fail = |error: std::io::Error| ScanError::io(format!("{}: {error}", path.display()));
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(fail)?;
     }
-    let temporary = path.with_extension("tmp");
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
+    let temporary = path.with_extension(format!("{}.{write}.tmp", std::process::id()));
     {
         let mut file = std::fs::File::create(&temporary).map_err(fail)?;
         file.write_all(bytes).map_err(fail)?;
@@ -280,5 +285,28 @@ mod tests {
         assert!(paths.resume().expect("resume"));
         assert!(!paths.killed());
         assert!(paths.read_status().is_none());
+    }
+
+    /// The scanner's tasks write the status at the same moments (every method at its start):
+    /// each write leaves one whole version, never a mix of two.
+    #[test]
+    fn concurrent_writes_leave_one_whole_version() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("status.json");
+        let versions: Vec<Vec<u8>> = (1..=8)
+            .map(|n| serde_json::to_vec(&"x".repeat(n * 100)).expect("json"))
+            .collect();
+        std::thread::scope(|scope| {
+            for version in &versions {
+                let (path, versions) = (&path, &versions);
+                scope.spawn(move || {
+                    for _ in 0..50 {
+                        write_atomically(path, version).expect("write");
+                        let read = std::fs::read(path).expect("read");
+                        assert!(versions.contains(&read), "a mixed file");
+                    }
+                });
+            }
+        });
     }
 }
