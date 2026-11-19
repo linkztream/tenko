@@ -17,6 +17,8 @@
 #   https://localhost:8443 with root's copy of the node's CA root.
 
 set -Eeuo pipefail
+# A failing command inside $(...) stops the substitution, and so the step.
+shopt -s inherit_errexit
 umask 077
 
 ID="$(basename "$0" .sh)"
@@ -53,6 +55,8 @@ fail() {
 
 finish() {
   local rc=$? line
+  # errexit would end this handler at its first failing command, such as the grep below.
+  set +e
   rm -f "$SECRETS/session.cookies"
   if ((rc == 0)); then
     line="PASS $ID: $VERDICT"
