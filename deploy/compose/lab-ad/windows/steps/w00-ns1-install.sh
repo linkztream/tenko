@@ -41,11 +41,15 @@ chmod 700 "$MEDIA/tenko"
 
 say "dc1 as the time source"
 systemctl cat systemd-timesyncd >/dev/null 2>&1 || fail "systemd-timesyncd is not installed"
-mkdir -p /etc/systemd/timesyncd.conf.d
+# The helper's umask is 077 and the time service does not run as root: without 755 it cannot
+# read the directory and ignores the file.
+install -d -m 755 /etc/systemd/timesyncd.conf.d
 printf '[Time]\nNTP=192.0.2.5\nFallbackNTP=\n' >/etc/systemd/timesyncd.conf.d/lab-dc1.conf
 chmod 644 /etc/systemd/timesyncd.conf.d/lab-dc1.conf
 timedatectl set-ntp true
 systemctl restart systemd-timesyncd
+timedatectl show-timesync --property=SystemNTPServers --value | grep -qx '192.0.2.5' ||
+  fail "systemd-timesyncd did not take dc1 as its server (timedatectl show-timesync)"
 
 say "the installer"
 rc=0
