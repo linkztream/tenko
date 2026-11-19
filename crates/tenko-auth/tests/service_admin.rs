@@ -2378,7 +2378,10 @@ impl GatedStore {
 #[async_trait::async_trait]
 impl Store for GatedStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
-        if self.armed.load(Ordering::SeqCst) {
+        // Only a request's proposals: the service's own background writes (the PIN rule date
+        // at start, the sweeps) carry no request and would meet one request at the gate in
+        // place of the other.
+        if batch.request.is_some() && self.armed.load(Ordering::SeqCst) {
             match tokio::time::timeout(GATE_LIMIT, self.gate.wait()).await {
                 Ok(_) => {
                     self.met.fetch_add(1, Ordering::SeqCst);
