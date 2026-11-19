@@ -468,8 +468,9 @@ impl RateLimiter {
             + self.per_principal.as_ref().map_or(0, KeyedBuckets::len)
     }
 
-    /// The bucket key of a client address.
-    fn ip_key(&self, ip: IpAddr) -> IpAddr {
+    /// The bucket key of a client address: IPv4 as it is, an IPv4-mapped address as its IPv4 address,
+    /// IPv6 masked to the configured prefix.
+    pub(crate) fn ip_key(&self, ip: IpAddr) -> IpAddr {
         match ip {
             IpAddr::V4(_) => ip,
             IpAddr::V6(v6) => v6.to_ipv4_mapped().map_or_else(

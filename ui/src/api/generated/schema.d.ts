@@ -8263,6 +8263,12 @@ export interface components {
             /** @description The code as it is listed. */
             enrollment: components["schemas"]["EnrollmentCodeView"];
             /**
+             * @description The addresses the integration listener of the answering controller opens on; empty
+             *     when it is closed (`[integrations] listen = []`), absent when unknown. Hosts cannot
+             *     enroll through a listener on loopback addresses only.
+             */
+            listen?: string[] | null;
+            /**
              * @description SHA-256 of the internal root, which the integration listener's server certificate
              *     chains to, lower-case hex (the code's last part).
              */
@@ -43087,7 +43093,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; over plain HTTP the code is withdrawn), or the account cannot hold certificates (`integration.account`) */
+            /** @description The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; the code stays usable), or the account cannot hold certificates (`integration.account`) */
             403: {
                 headers: {
                     [name: string]: unknown;

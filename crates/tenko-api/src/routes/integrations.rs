@@ -97,6 +97,11 @@ pub const RENEW_PATH: &str = "/integrations/certificate/renew";
 
 /// The code of the status condition of lineages that do not renew (OPS-29).
 pub const EXPIRING_NOTICE: &str = "integration.certificate_expiring";
+
+/// Where the integration listener of this controller opens (empty: it is closed), for the
+/// answer of a new enrollment code; the server binary puts it into the extensions.
+#[derive(Debug, Clone, Default)]
+pub struct ListenAddresses(pub Vec<std::net::SocketAddr>);
 /// The health warning while TGL-47 lets the integration listener accept TLS 1.2, under which
 /// a host's client certificate is visible on the network path.
 pub const TLS12_NOTICE: &str = "integration.tls12_allowed";
@@ -352,6 +357,7 @@ async fn create_integration_code(
     Ctx(cx): Ctx,
     service: Service,
     auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
+    listen: Option<Extension<ListenAddresses>>,
     ApiJson(request): ApiJson<NewCode>,
 ) -> Result<Response, ApiError> {
     let service = service_or_stub(service, "POST", "/integrations/enrollments")?;
@@ -378,10 +384,12 @@ async fn create_integration_code(
     auth.require_fresh_session(&cx)
         .await
         .map_err(|error| ApiError::from_coded_error(CodedError::from_coded(&error)))?;
-    let created = service
+    let mut created = service
         .create_code(&cx, creator, &request)
         .await
         .map_err(|error| failed(&error))?;
+    created.listen = listen
+        .map(|Extension(ListenAddresses(addrs))| addrs.iter().map(ToString::to_string).collect());
     let mut response = (StatusCode::CREATED, Json(created)).into_response();
     response
         .headers_mut()
@@ -489,7 +497,7 @@ async fn integration_server_root(service: Service) -> Result<Response, ApiError>
     responses(
         (status = 201, description = "The certificate (`Cache-Control: no-store`)", body = String, content_type = "application/pem-certificate-chain"),
         (status = 401, description = "The code or its proof is not valid (`integration.code.invalid`), was used (`integration.code.used`) or expired (`integration.code.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; over plain HTTP the code is withdrawn), or the account cannot hold certificates (`integration.account`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; the code stays usable), or the account cannot hold certificates (`integration.account`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The key was enrolled before (`integration.key.used`) or the account holds eight lineages (`integration.lineages`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 415, description = "The body is not `application/pkcs10` (`integration.request.media_type`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The request is not usable (`integration.request.invalid`) or the label is not (`integration.label`)", body = ProblemDetails, content_type = "application/problem+json")
@@ -512,20 +520,12 @@ async fn enroll_integration(
     let plain = client.is_some_and(|client| client.peer.is_some() && !client.https);
     let silent = client.is_some_and(|client| client.peer.is_some()) && unstated.is_some();
     if (plain || silent) && profile(&app).await? != Profile::Lab {
-        let error = if plain {
-            service
-                .refuse_plain_http(
-                    &ctx,
-                    code,
-                    "the request came over plain HTTP; the code is withdrawn",
-                )
-                .await
+        let why = if plain {
+            "the request came over plain HTTP; send it over HTTPS"
         } else {
-            ClientCertError::Transport(
-                "the request came through a proxy that did not state the scheme",
-            )
+            "the request came through a proxy that did not state the scheme"
         };
-        return Err(failed(&error));
+        return Err(failed(&service.refuse_transport(&ctx, code, why).await));
     }
     let pem = service
         .enroll(
@@ -607,7 +607,8 @@ async fn renew_integration_certificate(
     }
 }
 
-/// One pass of the integration alarms: removes the tokens of lapsed lineages, and sets or
+/// One pass of the integration alarms: removes the tokens of lapsed lineages and the secrets
+/// of expired enrollment codes, and sets or
 /// clears the status conditions [`TLS12_NOTICE`] (while TGL-47 allows TLS 1.2) and
 /// [`EXPIRING_NOTICE`] (while a lineage is in the last sixth of its lifetime without having
 /// renewed).
@@ -617,6 +618,10 @@ pub async fn refresh_integration_notices(certs: &ClientCerts, state: &AppState) 
     if let Err(error) = certs.remove_lapsed_tokens(Timestamp::now()).await {
         tracing::debug!(%error, "lapsed bound tokens left for the next sweep");
     }
+    // The secrets of codes that expired unused leave the vault.
+    certs
+        .prune_codes(&RequestCtx::system(tenko_core::SystemComponent::Api))
+        .await;
     if certs.index().policy().allow_tls12 {
         state.set_notice(crate::dto::system::StatusWarning {
             code: TLS12_NOTICE.to_owned(),
@@ -844,7 +849,7 @@ mod tests {
             let code: Uuid = parts[1].parse().expect("id");
             let (_, csr) = generate_csr().expect("csr");
             let spki = integration_request_key(&csr).expect("key");
-            let proof = enrollment_proof(&secret, code, self.account, &spki);
+            let proof = enrollment_proof(&secret, code, self.account, "backup-host", &spki);
             Enrollment {
                 code,
                 proof: tenko_auth::encoding::hex_encode(&proof),
@@ -987,7 +992,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plain_http_is_refused_outside_lab_and_withdraws_the_code() {
+    async fn plain_http_is_refused_outside_lab_and_the_code_kept() {
         for profile in [Profile::Home, Profile::Standard, Profile::Hardened] {
             let env = env(profile).await;
             let enrollment = env.enrollment().await;
@@ -998,7 +1003,7 @@ mod tests {
             .await;
             assert_eq!(reply.status, StatusCode::FORBIDDEN, "{profile:?}");
             assert_eq!(reply.problem(), "integration.enroll.transport");
-            assert_eq!(env.code_state(enrollment.code).await, CodeState::Withdrawn);
+            assert_eq!(env.code_state(enrollment.code).await, CodeState::Pending);
         }
         let env = env(Profile::Lab).await;
         let enrollment = env.enrollment().await;

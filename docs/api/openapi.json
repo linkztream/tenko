@@ -22329,7 +22329,7 @@
             }
           },
           "403": {
-            "description": "The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; over plain HTTP the code is withdrawn), or the account cannot hold certificates (`integration.account`)",
+            "description": "The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; the code stays usable), or the account cannot hold certificates (`integration.account`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -47183,6 +47183,16 @@
           "enrollment": {
             "$ref": "#/components/schemas/EnrollmentCodeView",
             "description": "The code as it is listed."
+          },
+          "listen": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses the integration listener of the answering controller opens on; empty\nwhen it is closed (`[integrations] listen = []`), absent when unknown. Hosts cannot\nenroll through a listener on loopback addresses only."
           },
           "server_root_sha256": {
             "type": "string",

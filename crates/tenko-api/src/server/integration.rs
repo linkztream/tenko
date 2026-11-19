@@ -4,12 +4,16 @@
 //! - It opens only after the first full load of the certificate records, and on demand
 //!   (while an enrollment code waits or a certificate is in use) unless the configuration
 //!   names its addresses; it closes again when the demand ends.
-//! - At most [`MAX_CONNECTIONS`] connections, at most [`MAX_PER_SOURCE`] from one address,
-//!   counted before the handshake; the handshake must finish within
-//!   [`HANDSHAKE_TIMEOUT`].
+//! - At most [`MAX_CONNECTIONS`] connections, at most [`MAX_PER_SOURCE`] from one source and
+//!   at most [`HANDSHAKES_PER_SECOND`] new handshakes a second from one source (burst
+//!   [`HANDSHAKE_BURST`]), counted before the handshake; an IPv6 source is its /64. The
+//!   handshake must finish within [`HANDSHAKE_TIMEOUT`].
 //! - The handshake asks the certificate records ([`ClientCerts`]); after it, every request
 //!   is checked again by `middleware::integration`, and a connection whose certificate stops
-//!   passing is closed at once, also in the middle of a long answer.
+//!   passing is closed at once, also in the middle of a long answer: at a change of the
+//!   records, at the next moment its acceptance can change by time alone (its end, the end of
+//!   its overlap, the bound of unread records), and once the controller has been cut off
+//!   from its quorum for longer than the isolation limit.
 //! - It reads no PROXY protocol header, no forwarded header and no cookie: the client
 //!   address is the TCP peer.
 
@@ -31,6 +35,7 @@ use tenko_cluster::{
 };
 use tenko_core::Timestamp;
 use tenko_core::{RequestCtx, SystemComponent};
+use tenko_store::Store;
 use tokio::{
     net::{TcpListener, TcpStream},
     sync::{OwnedSemaphorePermit, Semaphore, watch},
@@ -40,12 +45,23 @@ use tokio_rustls::TlsAcceptor;
 use tower::ServiceExt as _;
 
 use super::forwarded::{ConnInfo, IntegrationClient};
-use crate::routes::integrations::CaIssuer;
+use crate::{
+    middleware::{
+        Quota, RateLimitConfig, RateLimiter, integration::ISOLATION_LIMIT, quorum::Staleness,
+    },
+    routes::integrations::CaIssuer,
+};
 
 /// The most open connections of the integration listener.
 pub const MAX_CONNECTIONS: usize = 512;
-/// The most open connections from one address, handshakes included.
+/// The most open connections from one source, handshakes included.
 pub const MAX_PER_SOURCE: usize = 16;
+/// New handshakes a source may start per second, sustained.
+pub const HANDSHAKES_PER_SECOND: u32 = 4;
+/// New handshakes a source may start at once.
+pub const HANDSHAKE_BURST: u32 = 32;
+/// How often an open connection asks whether its controller has been cut off.
+const ISOLATION_CHECK: Duration = Duration::from_secs(5);
 
 /// What the server binary hands the integration listener.
 #[derive(Clone)]
@@ -132,7 +148,10 @@ impl Drop for SourceSlot {
 /// What every connection of an open listener shares.
 struct Shared {
     router: Router,
+    store: Arc<dyn Store>,
     certs: Arc<ClientCerts>,
+    /// The handshake rate per source; its key is also the source of [`Sources`].
+    handshakes: RateLimiter,
     tls13: Arc<ServerConfig>,
     tls12: Arc<ServerConfig>,
     header_read_timeout: Duration,
@@ -144,6 +163,7 @@ struct Shared {
 pub(super) async fn supervise(
     listener: IntegrationListener,
     router: Router,
+    store: Arc<dyn Store>,
     header_read_timeout: Duration,
     mut stop: watch::Receiver<bool>,
 ) {
@@ -158,7 +178,7 @@ pub(super) async fn supervise(
             // Without an integration CA nothing could pass; the first code creates it.
             let ctx = RequestCtx::system(SystemComponent::Api);
             if let Some(root) = listener.issuer.integration_root(&ctx).await {
-                match bind(&listener, &root, &router, header_read_timeout) {
+                match bind(&listener, &root, &router, &store, header_read_timeout) {
                     Ok(opened) => open = Some(opened),
                     Err(reason) => tracing::warn!("the integration listener cannot open: {reason}"),
                 }
@@ -190,6 +210,7 @@ fn bind(
     listener: &IntegrationListener,
     root: &CertificateDer<'static>,
     router: &Router,
+    store: &Arc<dyn Store>,
     header_read_timeout: Duration,
 ) -> Result<(watch::Sender<bool>, Vec<JoinHandle<()>>), String> {
     let gate: Arc<dyn CertificateGate> = Arc::new(Gate(Arc::clone(&listener.certs)));
@@ -204,7 +225,18 @@ fn bind(
     };
     let shared = Arc::new(Shared {
         router: router.clone(),
+        store: Arc::clone(store),
         certs: Arc::clone(&listener.certs),
+        handshakes: RateLimiter::new(RateLimitConfig {
+            enabled: true,
+            per_ip: Some(Quota {
+                per_second: HANDSHAKES_PER_SECOND,
+                burst: HANDSHAKE_BURST,
+            }),
+            per_principal: None,
+            ipv6_prefix_len: 64,
+            max_keys: 4 * MAX_CONNECTIONS,
+        }),
         tls13: config(false)?,
         tls12: config(true)?,
         header_read_timeout,
@@ -236,11 +268,20 @@ async fn accept_loop(socket: TcpListener, shared: Arc<Shared>, mut closed: watch
             },
             _ = closed.changed() => return,
         };
-        // Both limits are counted before the handshake costs anything.
+        // Every limit is counted before the handshake costs anything; an IPv6 source is its
+        // /64, so one host cannot claim a share per address.
+        let source = shared.handshakes.ip_key(peer.ip());
+        if shared
+            .handshakes
+            .check_ip(source, std::time::Instant::now())
+            .is_err()
+        {
+            continue;
+        }
         let Ok(permit) = Arc::clone(&shared.connections).try_acquire_owned() else {
             continue;
         };
-        let Some(slot) = shared.sources.claim(peer.ip()) else {
+        let Some(slot) = shared.sources.claim(source) else {
             continue;
         };
         tokio::spawn(connection(
@@ -316,7 +357,30 @@ async fn connection(
     let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
     let mut connection = std::pin::pin!(connection);
     let mut changes = shared.certs.index().subscribe();
+    let mut isolation = tokio::time::interval(ISOLATION_CHECK);
+    // A connection of a replaced certificate past its overlap may only renew (where a renewal
+    // from it is reuse, which must be seen); one that began with full acceptance ends when
+    // that ends.
+    let full = matches!(
+        shared
+            .certs
+            .index()
+            .accept(&client.serial, client.account, Timestamp::now()),
+        Acceptance::Accepted(_)
+    );
     loop {
+        // Every wake-up asks again, so a boundary that passed while the loop slept, or a
+        // jump of the wall clock, ends the connection at the next tick at the latest.
+        if !stands(&shared, &client, full) {
+            return;
+        }
+        // The next moment the certificate's acceptance can change without a change of the
+        // records; a certificate that passes no longer has none and is closed below.
+        let boundary = shared
+            .certs
+            .index()
+            .next_boundary(&client.serial, Timestamp::now())
+            .map(|at| at.saturating_since(Timestamp::now()));
         tokio::select! {
             result = connection.as_mut() => {
                 if let Err(error) = result {
@@ -325,12 +389,13 @@ async fn connection(
                 return;
             }
             followed = changes.changed() => {
-                let refused = matches!(
-                    shared.certs.index().accept(&client.serial, client.account, Timestamp::now()),
-                    Acceptance::Refused(_)
-                );
-                if followed.is_err() || refused {
-                    // Dropping the connection closes it, also in the middle of an answer.
+                if followed.is_err() {
+                    return;
+                }
+            }
+            () = sleep_or_never(boundary) => {}
+            _ = isolation.tick() => {
+                if cut_off(shared.store.as_ref(), Timestamp::now()) {
                     return;
                 }
             }
@@ -343,9 +408,58 @@ async fn connection(
     }
 }
 
+/// Whether an open connection may go on; dropping it closes it, also in the middle of an
+/// answer. A certificate that no longer passes ends it. A replaced certificate past its
+/// overlap passes for the renewal route only: a connection that began with full acceptance
+/// (and may be in the middle of a long answer) ends then, one that began as a renewal goes
+/// on, so that a renewal from it is still seen as reuse.
+fn stands(shared: &Shared, client: &IntegrationClient, full: bool) -> bool {
+    match shared
+        .certs
+        .index()
+        .accept(&client.serial, client.account, Timestamp::now())
+    {
+        Acceptance::Accepted(_) => true,
+        Acceptance::RenewOnly(_) => !full,
+        Acceptance::Refused(_) => false,
+    }
+}
+
+/// Whether the controller has been cut off from its quorum for longer than the isolation
+/// limit: it can no longer know of a revocation made elsewhere.
+fn cut_off(store: &dyn Store, now: Timestamp) -> bool {
+    let status = store.status();
+    Staleness::of(&status.quorum, status.revision)
+        .is_some_and(|staleness| now.saturating_since(staleness.since) > ISOLATION_LIMIT)
+}
+
+/// Sleeps `after` (a moment just past it, so the boundary itself has gone), or forever.
+async fn sleep_or_never(after: Option<Duration>) {
+    match after {
+        Some(after) => tokio::time::sleep(after + Duration::from_millis(10)).await,
+        None => std::future::pending().await,
+    }
+}
+
+#[cfg(test)]
+#[path = "integration_tests.rs"]
+mod listener_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_ipv6_source_is_its_64_and_a_mapped_address_its_ipv4() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            ipv6_prefix_len: 64,
+            ..RateLimitConfig::default()
+        });
+        let key = |text: &str| limiter.ip_key(text.parse().expect("address"));
+        assert_eq!(key("2001:db8:1:2::10"), key("2001:db8:1:2:ffff::1"));
+        assert_ne!(key("2001:db8:1:2::10"), key("2001:db8:1:3::10"));
+        assert_eq!(key("::ffff:192.0.2.7"), key("192.0.2.7"));
+    }
 
     #[test]
     fn a_source_holds_at_most_its_share_of_connections() {

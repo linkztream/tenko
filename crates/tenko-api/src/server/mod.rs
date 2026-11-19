@@ -338,12 +338,33 @@ fn build_app(
     drop(document);
     let layers = Arc::new(Layers::new(state, http, route_table));
     let ui = ui::router(ui_source)?;
+    Ok((assemble(api, &layers, Some(ui), extensions), layers))
+}
+
+/// The router of the integration listener (ADR 0035): the API with the same middleware and
+/// limits as the API listener, and problem details for every other path. No UI and no
+/// static file is served there.
+fn integration_app(
+    state: AppState,
+    layers: &Arc<Layers>,
+    extensions: axum::http::Extensions,
+) -> Router {
+    let (api, _) = crate::api(state);
+    assemble(api, layers, None, extensions)
+}
+
+/// The API with its middleware, and `ui` (or problem details without it) for the rest.
+fn assemble(
+    api: Router,
+    layers: &Arc<Layers>,
+    ui: Option<Router>,
+    extensions: axum::http::Extensions,
+) -> Router {
     let api = api
         .method_not_allowed_fallback(method_not_allowed)
-        .route_layer(from_fn_with_state(Arc::clone(&layers), middleware::api));
-    let router = api
-        .fallback(move |request: Request| fallback(ui.clone(), request))
-        .layer(from_fn_with_state(Arc::clone(&layers), middleware::outer))
+        .route_layer(from_fn_with_state(Arc::clone(layers), middleware::api));
+    api.fallback(move |request: Request| fallback(ui.clone(), request))
+        .layer(from_fn_with_state(Arc::clone(layers), middleware::outer))
         .layer(axum::middleware::from_fn(
             move |mut request: Request, next: axum::middleware::Next| {
                 let extensions = extensions.clone();
@@ -355,22 +376,22 @@ fn build_app(
         ))
         // The request span covers everything above (OPS-05, `middleware::trace`).
         .layer(from_fn_with_state(
-            Arc::clone(&layers),
+            Arc::clone(layers),
             middleware::trace::request,
-        ));
-    Ok((router, layers))
+        ))
 }
 
-/// Unknown API paths get problem details; everything else goes to the UI.
-async fn fallback(ui: Router, request: Request) -> Response {
-    if middleware::is_api_path(request.uri().path()) {
+/// Unknown API paths get problem details, and so does every path without a UI; everything
+/// else goes to the UI.
+async fn fallback(ui: Option<Router>, request: Request) -> Response {
+    let Some(ui) = ui.filter(|_| !middleware::is_api_path(request.uri().path())) else {
         let detail = format!(
             "no API route matches {} {}",
             request.method(),
             request.uri().path()
         );
         return ApiError::new(codes::ROUTE_NOT_FOUND, 404, detail).into_response();
-    }
+    };
     match ui.oneshot(request).await {
         Ok(response) => response,
         Err(never) => match never {},
@@ -620,12 +641,13 @@ async fn run(
     state
         .events()
         .spawn_tasks(Arc::clone(&state.store), tasks_rx.clone());
-    spawn_housekeeping(layers, tasks_rx);
+    spawn_housekeeping(Arc::clone(&layers), tasks_rx);
 
     let integration = config.integration.map(|integration| {
         tokio::spawn(integration::supervise(
             integration,
-            router.clone(),
+            integration_app(state.clone(), &layers, config.extensions.clone()),
+            Arc::clone(&state.store),
             config.header_read_timeout,
             stop.clone(),
         ))

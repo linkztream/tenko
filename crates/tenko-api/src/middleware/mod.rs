@@ -173,18 +173,21 @@ pub(crate) async fn api(
         request.method(),
     );
     let quorum = quorum::Quorum::read(&layers.state);
-    let mut refusal = guard(&layers, &mut request).await;
+    let renewal = request.method() == axum::http::Method::POST
+        && layers.routes.route_of(route).strip_prefix(crate::API_BASE)
+            == Some(crate::routes::integrations::RENEW_PATH);
+    // The integration certificate first: a request it refuses touches no token.
+    let mut refusal = integration::certificate(
+        &request,
+        layers.routes.is_public(route),
+        renewal,
+        quorum.since(),
+    );
     if refusal.is_none() {
-        let renewal = request.method() == axum::http::Method::POST
-            && layers.routes.route_of(route).strip_prefix(crate::API_BASE)
-                == Some(crate::routes::integrations::RENEW_PATH);
-        refusal = integration::check(
-            &request,
-            layers.routes.is_public(route),
-            renewal,
-            quorum.since(),
-        )
-        .or_else(|| quorum.check(&request));
+        refusal = guard(&layers, &mut request).await;
+    }
+    if refusal.is_none() {
+        refusal = integration::owner(&request, renewal).or_else(|| quorum.check(&request));
         if refusal.is_none()
             && let Some((certs, serial)) = integration::first_presentation(&request)
         {

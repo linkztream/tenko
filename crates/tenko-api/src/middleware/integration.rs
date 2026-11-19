@@ -1,6 +1,8 @@
-//! The checks of a request that arrived on the integration listener (ADR 0035, decision 3),
-//! after authentication and before the handler. A request of the API listener has no
-//! integration certificate and passes untouched.
+//! The checks of a request that arrived on the integration listener (ADR 0035, decision 3).
+//! The certificate is checked before authentication ([`certificate`]), so a request it refuses
+//! never records the use of a token nor supersedes one; the token's owner after it
+//! ([`owner`]). A request of the API listener has no integration certificate and passes
+//! untouched.
 //!
 //! - The connection's certificate must still pass: its record is asked again at every
 //!   request, so a revocation, a replacement past its overlap, an expiry or an end of the
@@ -28,11 +30,12 @@ fn refuse(code: &'static str, status: u16, detail: &str) -> Response {
     ApiError::new(code, status, detail).into_response()
 }
 
-/// The refusal of a request on the integration listener, or `None`. `public` says whether
-/// the operation can be called without credentials, `renewal` whether it is the renewal of
-/// the connection's certificate (which the certificate alone authorizes, also a replaced
-/// one); `isolated_since` is when the controller lost its quorum contact, if it did.
-pub(crate) fn check(
+/// The refusal of a request on the integration listener by its certificate, or `None`; it
+/// runs before authentication. `public` says whether the operation can be called without
+/// credentials, `renewal` whether it is the renewal of the connection's certificate (which
+/// the certificate alone authorizes, also a replaced one); `isolated_since` is when the
+/// controller lost its quorum contact, if it did.
+pub(crate) fn certificate(
     request: &Request,
     public: bool,
     renewal: bool,
@@ -72,15 +75,23 @@ pub(crate) fn check(
             ));
         }
     }
-    if renewal {
-        return None;
-    }
-    if public {
+    if public && !renewal {
         return Some(refuse(
             "integration.public_route",
             404,
             "the integration listener serves no public operation; use the API listener",
         ));
+    }
+    None
+}
+
+/// The refusal of a request on the integration listener whose token is not of the account
+/// the certificate names, or `None`; it runs after authentication. The renewal route needs
+/// no token.
+pub(crate) fn owner(request: &Request, renewal: bool) -> Option<Response> {
+    let client = request.extensions().get::<ConnInfo>()?.client.clone()?;
+    if renewal {
+        return None;
     }
     let principal = request
         .extensions()
@@ -145,6 +156,16 @@ mod tests {
 
     use super::*;
     use crate::{API_BASE, middleware::metrics::RouteTable, server::forwarded::IntegrationClient};
+
+    /// Both checks in the order the middleware runs them, authentication aside.
+    fn check(
+        request: &Request,
+        public: bool,
+        renewal: bool,
+        isolated_since: Option<Timestamp>,
+    ) -> Option<Response> {
+        certificate(request, public, renewal, isolated_since).or_else(|| owner(request, renewal))
+    }
 
     /// Issues nothing: the gate only reads records.
     struct NoIssuer;
