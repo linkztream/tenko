@@ -1028,10 +1028,11 @@ jobs:
   # require a Signed-off-by trailer on every commit, with the name and email of the
   # commit's author. This job fails a pull request that has a commit without one. It is
   # a shell step over the pull request's commit range, so it needs no third-party action
-  # and no secret.
+  # and no secret. The trailer certifies a contributor's agreement with the repository's
+  # owner, so a pull request opened by the owner is not checked.
   dco:
     name: Signed-off-by on every commit
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login != github.repository_owner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

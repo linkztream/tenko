@@ -110,6 +110,8 @@ What this means for a pull request:
   field. The trailer certifies that the commit is covered by the CLA you accepted.
   Pull requests with unsigned commits are not merged, and maintainers merge in a way that
   keeps the trailers (merge commit or rebase; no squash that drops them).
+  The check does not run on a pull request opened by the repository's owner, who is the
+  other party of that agreement.
 - **Third-party code is declared, and only permissive.** Name the source and license of
   anything you did not write yourself in the pull request. Dependencies must carry a
   license on the allow list in `deny.toml`; `cargo deny check` enforces it. No code or
