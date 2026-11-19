@@ -37,7 +37,7 @@ Nothing in this page widens what an account may do: the token's grants and the o
 | Part | What it is |
 |---|---|
 | **Integration CA** | A second root, separate from the CA of the nodes and of the API certificate. It issues client certificates and nothing else ([certificates.md](certificates.md) section 8). It is created at the first enrollment code. |
-| **Integration listener** | Port 8445 of each controller. Mutual TLS, TLS 1.3, only integration certificates (section 3). |
+| **Integration listener** | Port 8445, by default on each host the API listens on (section 3.1). Mutual TLS, TLS 1.3, only integration certificates (section 3). |
 | **Enrollment code** | `tnki.<code id>.<account id>.<secret>.<fingerprint>`: single use, at most one hour, for one service account, shown once (section 4). |
 | **Certificate** | ECDSA P-256, subject `CN=tenko-integration`, one URI name `urn:tenko:service-account:<account id>`, client authentication only. It lasts 90 days in Home, 30 in Standard, 7 in Hardened and 365 in Lab (TGL-47, section 9). |
 | **Lineage** | The first certificate of a host and every renewal of it share one lineage id. A service account holds at most eight active lineages (one per host). |
@@ -53,15 +53,19 @@ A certificate is accepted only while Tenko holds a record of it: the serial must
 
 | `listen` | The listener |
 |---|---|
-| not set | `0.0.0.0:8445`, opened **on demand**: while an enrollment code waits or an integration certificate is valid, and closed again when neither is true |
-| `["0.0.0.0:8445"]` or any list of addresses | always open on those addresses (once the records have loaded and the integration CA exists) |
+| not set | port 8445 on each host of `[server] listen`, the API's own addresses (an API on `0.0.0.0:8443` gives `0.0.0.0:8445`, one on `127.0.0.1:8443` gives `127.0.0.1:8445`), opened **on demand**: while an enrollment code waits or an integration certificate is valid, and closed again when neither is true |
+| `["0.0.0.0:8445"]` or any list of addresses | always open on those addresses (once the records have loaded and the integration CA exists); an explicit list replaces the default in full |
 | `[]` | never open |
 
-The listener also opens only after the controller has loaded the certificate records in full at start, and it has nothing to serve before the first enrollment code exists, since the integration CA is created with it. An address that is not an address with a port stops `tenko config check` and the start with `config.invalid` naming `integrations.listen`. The setting is read at start. The installers open the port in the host firewall where they open 8443; in a container, publish it (`-p 8445:8445`, [deploy/README.md](../deploy/README.md)).
+The listener also opens only after the controller has loaded the certificate records in full at start, and it has nothing to serve before the first enrollment code exists, since the integration CA is created with it. An address that is not an address with a port stops `tenko config check` and the start with `config.invalid` naming `integrations.listen`. The setting is read at start.
+
+**When the default is loopback only.** An API that listens on loopback only (`127.0.0.1:8443`) gives an integration listener on loopback only, which hosts on the network cannot reach; the enrollment dialog says so. To serve the network, set the addresses yourself, for example `listen = ["0.0.0.0:8445"]`, and add `"[::]:8445"` for IPv6 (section 3.2). A reverse proxy in front of 8443 does not change this: the proxy cannot carry the certificate (section 3.6), so integrations reach 8445 directly.
+
+The installers open the port in the host firewall where they open 8443; in a container, publish it (`-p 8445:8445`, [deploy/README.md](../deploy/README.md)).
 
 ### 3.2 A host without IPv4
 
-An address in `listen` listens for its own family only. The default, `0.0.0.0:8445`, is IPv4: on a host that has no IPv4 it serves nothing, and on a host with both families it does not serve IPv6. A controller whose integrations come over IPv6 sets:
+An address in `listen` listens for its own family only. The default follows the API's addresses (section 3.1): with the API on `0.0.0.0:8443` it is `0.0.0.0:8445`, which is IPv4, so on a host that has no IPv4 it serves nothing, and on a host with both families it does not serve IPv6. A controller whose integrations come over IPv6 sets:
 
 ```toml
 [integrations]
@@ -75,29 +79,32 @@ and lists both addresses (`["0.0.0.0:8445", "[::]:8445"]`) when integrations com
 - **TLS 1.3** in every profile, ALPN (application protocol negotiation) `h2` and `http/1.1`. A client certificate of the integration CA is mandatory: a peer without one never reaches HTTP, and the certificate request names only the integration root.
 - **TLS 1.2** only while TGL-47 allows it (section 9), for automation hosts whose own TLS stack has no TLS 1.3 (Windows Server 2019 and older). Only ECDHE key exchange with AES-GCM or ChaCha20-Poly1305 is offered, the Extended Master Secret (EMS, RFC 7627) is required, so a client without it fails the handshake, and there is no renegotiation. In TLS 1.2 the client certificate travels before encryption starts: an observer on the path learns the account id, the serial, the validity and the public key of the certificate, and so which host acts as which account and when. The observer never learns the key, a token or a request.
 - **No session resumption** in either version: no tickets, no session IDs, no session cache. Every connection runs the full handshake, so the checks of the certificate record run at every connection.
-- **The server certificate** is always one of the internal root (the root of the API certificate in mode `internal_ca`, of the cluster), issued for the controller's configured names and addresses, in every TLS mode of 8443. The integrator never installs that root in a machine-wide trust store: the scripts below pass it per call (`curl --cacert`) or compare it with the fingerprint of the enrollment code, so the root vouches for this one connection only.
+- **The server certificate** is always one of the internal root (the root of the API certificate in mode `internal_ca`, of the cluster), issued for the controller's configured names and addresses, in every TLS mode of 8443. In the imported-certificate, reverse-proxy and plain modes (b and c), where 8443 does not use the internal CA, the certificate of the integration listener is still made by it, but only when the listener can open: not with `[integrations] listen = []`. Its names are the `[tls]` names (`host_name`, `alt_names`, `addresses`), which `tenko config check` and the start verify with a clear error; its host name is the installation's (from first-run setup), else `tls.host_name`, and there is never a default of `localhost`. The integrator never installs that root in a machine-wide trust store: the scripts below pass it per call (`curl --cacert`) or compare it with the fingerprint of the enrollment code, so the root vouches for this one connection only.
 
 ### 3.4 Limits
 
 | Limit | Value |
 |---|---|
 | Open connections | 512 |
-| Open connections from one address, counted before the handshake | 16 |
+| Open connections from one address, counted before the handshake (an IPv6 source counts by its /64) | 16 |
+| New handshakes from one address (an IPv6 source by its /64) | 4 a second, a burst of 32 |
 | Time for the handshake | 5 seconds |
 | Answer without quorum | 503 `integration.isolated` after 30 seconds without contact to the cluster |
 
-The limits are the listener's own, apart from the limits of 8443, so a flood on one does not starve the other. A controller that has been `isolated` or `electing` ([cluster.md](cluster.md)) for more than 30 seconds answers every request with 503: it cannot know of a revocation made on another controller. A single controller is never isolated.
+The limits are the listener's own, apart from the limits of 8443, so a flood on one does not starve the other. Hosts behind one NAT address share one source: a script that opens a new connection for every call from many such hosts can meet the handshake rate, and a refused connection is dropped without an answer, so reuse a connection (`curl` with several URLs in one call, or a keep-alive session in PowerShell) or spread the calls. A controller that has been `isolated` or `electing` ([cluster.md](cluster.md)) for more than 30 seconds answers every request with 503: it cannot know of a revocation made on another controller. A single controller is never isolated.
+
+The listener also **closes an open connection**, even in the middle of an answer, when the records change and refuse its certificate, at the moment the certificate expires or its 15-minute overlap ends, and once the controller has been cut off from its quorum for more than 30 seconds. If the records cannot be read after a change, the controller keeps answering from what it holds for at most 30 seconds, then refuses every certificate until a load succeeds.
 
 ### 3.5 What it serves
 
 - Every authenticated route of the API, as on 8443, to a bearer token **owned by the account the certificate names**. A token of another account is refused with 403 `integration.token.wrong_account`; no token is 401 `integration.token.required`.
 - The renewal route, `POST /api/v1/integrations/certificate/renew`, to the certificate alone (section 8).
-- No public route (sign-in, enrollment, the CA root, node enrollment): 404 `integration.public_route`. No session cookie is read.
-- The certificate is checked again at **every request**: a revocation, a replacement past its overlap, an expiry or the end of the account ends a long-lived HTTP/2 connection at its next request, and the controller closes the connections of a revoked certificate.
+- No public route (sign-in, enrollment, the CA root, node enrollment): 404 `integration.public_route`. Any other unknown path gets a problem-details 404, and no UI or static file is served on this port. No session cookie is read.
+- The certificate is checked again at **every request**, and **before** the bearer token is read, so a refused certificate never records the use of a token: a revocation, a replacement past its overlap, an expiry or the end of the account ends a long-lived HTTP/2 connection at its next request, and the controller closes the connections of a revoked certificate.
 
 ### 3.6 Behind a reverse proxy
 
-A client certificate that a proxy forwards is **never trusted**, in any TLS mode and any profile: no header (`X-SSL-Client-Cert`, `X-Forwarded-Client-Cert`, `ssl-client-cert` or any other) and no TLS field of the PROXY protocol is read as a certificate. People keep using 8443 through the proxy. Integrations that use certificates reach the controller's integration listener directly, or through a TCP pass-through that leaves TLS end to end (the PROXY protocol is not read on this listener, so the client address is the TCP peer). The enrollment call (section 4.5) may go through the proxy: it carries the code id and an HMAC, never the code's secret, so the proxy cannot redeem the code for a key of its own. It needs the proxy to state the scheme (`docs/certificates.md` section 7).
+A client certificate that a proxy forwards is **never trusted**, in any TLS mode and any profile: no header (`X-SSL-Client-Cert`, `X-Forwarded-Client-Cert`, `ssl-client-cert` or any other) and no TLS field of the PROXY protocol is read as a certificate. People keep using 8443 through the proxy. Integrations that use certificates reach the controller's integration listener directly, or through a TCP pass-through that leaves TLS end to end (the PROXY protocol is not read on this listener, so the client address is the TCP peer). The enrollment call (section 4.5) may go through the proxy: it carries the code id and an HMAC, never the code's secret, so the proxy cannot redeem the code for a key of its own. It needs the proxy to state the scheme (`docs/certificates.md` section 7); without that the call is refused with 403 `integration.enroll.transport`, and the code stays usable.
 
 ## 4. Enrollment
 
@@ -139,7 +146,7 @@ The answer carries `Cache-Control: no-store`. The account must be an enabled ser
 | secret | 256 bits in 64 lower-case hexadecimal digits; **never sent**, it only keys the HMAC |
 | fingerprint | The SHA-256 of the server root, 64 lower-case hexadecimal digits: the root the listener's server certificate chains to |
 
-The controller keeps the secret as a system secret in its vault while the code can be used, and deletes it when the code is used, withdrawn or expired; the code's record never holds it.
+The controller keeps the secret as a system secret in its vault while the code can be used. It deletes it when the code is used or withdrawn, and the hourly sweep deletes the secrets of expired codes; the code's record never holds it.
 
 ### 4.3 The key and the request
 
@@ -152,7 +159,10 @@ The enrollment proves that the sender holds the code's secret without sending it
 1. the text `tenko-integration-enroll-v1`, a line feed (octet 0x0a);
 2. the code id in hyphenated lower-case form, a line feed;
 3. the account id in hyphenated lower-case form, a line feed;
-4. the DER `SubjectPublicKeyInfo` (SPKI, the public key in its standard encoding) of the request's key: 91 octets for P-256.
+4. the host's label, in UTF-8 exactly as sent in `?label=`, a line feed;
+5. the DER `SubjectPublicKeyInfo` (SPKI, the public key in its standard encoding) of the request's key: 91 octets for P-256.
+
+The label is part of the proof so that nobody on the path can rename the host. The label that is sent must be the label that was proven. A label is 1 to 64 characters, with no space at either end, no control character and no Unicode format character (category Cf: the zero-width and direction marks and the like); anything else is 422 `integration.label`.
 
 The proof goes in the header `Tenko-Enrollment-Proof` as 64 lower-case hexadecimal digits.
 
@@ -163,13 +173,14 @@ The proof goes in the header `Tenko-Enrollment-Proof` as 64 lower-case hexadecim
 | Secret (32 octets, 0 to 31) | `000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f` |
 | Code id | `0190d1c2-0000-7000-8000-000000000001` |
 | Account id | `0190d1c2-0000-7000-8000-000000000002` |
+| Label | `backup-host` |
 | SPKI (the 27 octets `3059301306072a8648ce3d020106082a8648ce3d03010703420004`, then the 64 octets 1 to 64) | `3059301306072a8648ce3d020106082a8648ce3d030107034200040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40` |
-| **Proof** | `2c7001035b8298745c7f0921f454bde9ac63c1585215a6ff15913367ef2a8f6f` |
+| **Proof** | `04e334886c0b67b47232d484cb50b985829581aa8174d80b5a16ab39b6746fe8` |
 
 The key bytes of the vector are only a pattern: an HMAC covers bytes, not a curve point. The server test `the_proof_matches_the_documented_test_vector` (`crates/tenko-auth/tests/client_certs.rs`) holds the server to the same bytes. To check a shell, with the secret on the command line (see the warning in section 5.4):
 
 ```sh
-{ printf 'tenko-integration-enroll-v1\n0190d1c2-0000-7000-8000-000000000001\n0190d1c2-0000-7000-8000-000000000002\n'
+{ printf 'tenko-integration-enroll-v1\n0190d1c2-0000-7000-8000-000000000001\n0190d1c2-0000-7000-8000-000000000002\nbackup-host\n'
   printf '%s' 3059301306072a8648ce3d020106082a8648ce3d030107034200040102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f40 | xxd -r -p
 } | openssl dgst -sha256 -mac HMAC -macopt hexkey:000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f -r
 ```
@@ -185,7 +196,7 @@ The integrator first fetches the server root and compares it with the fingerprin
 | The server root | `GET /api/v1/integrations/ca` on the API listener (public, PEM) | 200. Public data: trust it only when its SHA-256 equals the code's fingerprint (`openssl x509 -fingerprint -sha256`, without colons, lower case) |
 | Enroll | `POST /api/v1/integrations/enroll?label=<host label>` with `Content-Type: application/pkcs10`, the DER request as the body, and the headers `Tenko-Enrollment-Code: <code id>` and `Tenko-Enrollment-Proof: <proof>` | 201, the certificate in PEM (`application/pem-certificate-chain`, `Cache-Control: no-store`) |
 
-The label is 1 to 64 printable characters that name the host in the list of certificates. The call needs HTTPS: plain HTTP, or a proxy that does not state the scheme, is refused with 403 `integration.enroll.transport` outside the Lab profile, and over plain HTTP the code is withdrawn. The certificate and its record are written in one batch that consumes the code, and the certificate is answered only after that write committed. The refusals are in section 10. Tenko cannot tell whether the key is in a TPM; there is no key attestation in this step.
+The label is 1 to 64 characters (rules in section 4.4) that name the host in the list of certificates. The call needs HTTPS: plain HTTP, or a proxy that does not state the scheme, is refused with 403 `integration.enroll.transport` outside the Lab profile and audited. The code is not withdrawn: its secret never travels, so the request showed nothing that could redeem it, and the code stays usable over HTTPS. The certificate and its record are written in one batch that consumes the code, and the certificate is answered only after that write committed. The refusals are in section 10. Tenko cannot tell whether the key is in a TPM; there is no key attestation in this step.
 
 ## 5. POSIX shell: enrollment, use and renewal
 
@@ -200,7 +211,8 @@ Put the code in `enroll.code` in the state directory, then run `TENKO_API=https:
 # tenko-enroll.sh: enrolls this host with a Tenko enrollment code.
 # Needs: openssl, curl (7.55 or later), python3. Run it as the integration's own account.
 #   TENKO_API    base URL of the API listener, for example https://tenko.example.test:8443
-#   TENKO_LABEL  name of this host in the certificate list (1 to 64 of A-Z a-z 0-9 . _ -)
+#   TENKO_LABEL  name of this host in the certificate list (1 to 64 of A-Z a-z 0-9 . _ -;
+#                the server accepts more, this script keeps to the safe set)
 #   TENKO_DIR    state directory (default ~/.tenko-integration); enroll.code must be in it
 #   TENKO_API_TRUST=system  when 8443 serves a certificate that the system already trusts
 set -eu
@@ -209,6 +221,7 @@ api=${TENKO_API:?set TENKO_API}
 label=${TENKO_LABEL:-$(hostname)}
 dir=${TENKO_DIR:-$HOME/.tenko-integration}
 case $label in '' | *[!A-Za-z0-9._-]*) echo "TENKO_LABEL: use letters, digits, . _ -" >&2; exit 2 ;; esac
+[ ${#label} -le 64 ] || { echo "TENKO_LABEL: at most 64 characters" >&2; exit 2; }
 mkdir -p "$dir"
 cd "$dir"
 trap 'rm -f client.key client.csr client.spki client.crt enroll.headers' EXIT
@@ -226,14 +239,15 @@ openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out client.key
 openssl req -new -key client.key -subj /CN=tenko-integration -outform DER -out client.csr
 openssl req -in client.csr -inform DER -noout -pubkey | openssl pkey -pubin -outform DER -out client.spki
 
-# HMAC-SHA-256 keyed with the code's secret. The secret reaches Python on standard input
-# (printf is built in), so it is never an argument of a process.
+# HMAC-SHA-256 keyed with the code's secret, over the label too: the label sent below is the
+# label proven here. The secret reaches Python on standard input (printf is built in), so it
+# is never an argument of a process.
 proof=$(printf '%s\n' "$secret" | python3 -c '
 import hashlib, hmac, sys
 key = bytes.fromhex(sys.stdin.readline().strip())
-head = ("tenko-integration-enroll-v1\n%s\n%s\n" % (sys.argv[1], sys.argv[2])).encode()
-print(hmac.new(key, head + open(sys.argv[3], "rb").read(), hashlib.sha256).hexdigest())
-' "$id" "$account" client.spki)
+head = ("tenko-integration-enroll-v1\n%s\n%s\n%s\n" % (sys.argv[1], sys.argv[2], sys.argv[3])).encode()
+print(hmac.new(key, head + open(sys.argv[4], "rb").read(), hashlib.sha256).hexdigest())
+' "$id" "$account" "$label" client.spki)
 
 # Headers go from a file, never as arguments.
 printf 'Content-Type: application/pkcs10\nTenko-Enrollment-Code: %s\nTenko-Enrollment-Proof: %s\n' \
@@ -251,7 +265,7 @@ rm -f enroll.code
 echo "enrolled: $dir/client.pem and $dir/tenko-ca.pem"
 ```
 
-The script leaves `client.pem` (the key and the certificate, one file) and `tenko-ca.pem` (the server root) in the state directory, deletes the code, the key's loose copy and the request, and fails with exit status 9 when the root does not match the code. The code's secret stays out of every process argument: `printf` is a shell built-in and Python reads it on standard input; the headers go to `curl` from a file.
+The script leaves `client.pem` (the key and the certificate, one file) and `tenko-ca.pem` (the server root) in the state directory, deletes the code, the key's loose copy and the request, and fails with exit status 9 when the root does not match the code. A refused enrollment leaves `enroll.code` in place: the code is still usable until it expires (a refusal for plain HTTP, for example, is fixed by using HTTPS). The code's secret stays out of every process argument: `printf` is a shell built-in and Python reads it on standard input; the headers go to `curl` from a file.
 
 ### 5.2 Use
 
@@ -329,10 +343,10 @@ Enable it with `systemctl enable --now tenko-renew.timer`. The host that renews 
 
 ### 5.4 Without Python
 
-The same HMAC with `openssl`:
+The same HMAC with `openssl` (the label is in the proof, as in section 4.4):
 
 ```sh
-{ printf 'tenko-integration-enroll-v1\n%s\n%s\n' "$id" "$account"; cat client.spki; } |
+{ printf 'tenko-integration-enroll-v1\n%s\n%s\n%s\n' "$id" "$account" "$label"; cat client.spki; } |
   openssl dgst -sha256 -mac HMAC -macopt "hexkey:$secret" -r | cut -d' ' -f1
 ```
 
@@ -340,15 +354,17 @@ The same HMAC with `openssl`:
 
 ### 5.5 A key in a TPM (Linux)
 
-With the `tpm2-openssl` provider the key is made in the TPM and used from there, with an authorization value that only the integration's account can read: `openssl genpkey -provider tpm2 -algorithm EC -pkeyopt group:P-256 -pkeyopt user-auth:…`, then `-passin file:…` wherever the key is used, and `curl` reaches it through its OpenSSL backend. A TPM key cannot be copied, so renewal may use the same key (`openssl req -provider tpm2 -provider default -key handle:… -passin file:…`); the server accepts either. These commands are proved in the project's lab with a software TPM; check them against your `tpm2-openssl` version.
+With the `tpm2-openssl` provider the key is made in the TPM and used from there, and it **must have an authorization value**: without one, anything that runs as the account can ask the chip to sign. `openssl genpkey -provider tpm2 -algorithm EC -pkeyopt group:P-256 -pkeyopt user-auth:…`, then `-passin file:…` wherever the key is used, and `curl` reaches it through its OpenSSL backend. A TPM key cannot be copied, so renewal may use the same key (`openssl req -provider tpm2 -provider default -key handle:… -passin file:…`); the server accepts either. These commands are proved in the project's lab with a software TPM; check them against your `tpm2-openssl` version.
+
+**The authorization value in an unattended job.** The timer has nobody to type it, so the job supplies it from a file that only the integration's account can read (mode 0600, in a directory of mode 0700), or from a credential that systemd decrypts for the service only: `systemd-creds encrypt` seals it to the host's TPM, and `LoadCredentialEncrypted=` in the service unit hands it to the job as a file in a private directory. Either way the value is on the host, so what the TPM adds is that a copy of the disk or of a backup carries neither the key (it is in the chip) nor, with the sealed credential, the value (it opens only on this host). Code running as the integration's account can still read the value while the job runs and so use the key there, as it could without one; only a value typed at every use would stop that, and that is not an unattended job. Revoke the lineage if the account is suspected.
 
 ## 6. PowerShell: enrollment, use and renewal
 
-Windows PowerShell 5.1 or later with .NET Framework 4.7.2 or later (for `CertificateRequest`), or PowerShell 7. The script keeps the key and the certificate in the integration account's own certificate store (`Cert:\CurrentUser\My`): the private key is created **not exportable** and the HMAC is computed in process. Run it as the account the automation runs as, with its profile loaded (a scheduled task with "Run whether the user is logged on or not" and a stored password, or a group-managed service account).
+Windows PowerShell 5.1 with .NET Framework 4.7.2 or later (for `CertificateRequest`), or PowerShell 7. The script keeps the key and the certificate in the integration account's own certificate store (`Cert:\CurrentUser\My`): the private key is created **not exportable** and the HMAC is computed in process. Run it as the account the automation runs as, with its profile loaded (a scheduled task with "Run whether the user is logged on or not" and a stored password, or a group-managed service account).
 
 ```powershell
 # tenko-integration.ps1: enrollment, use and renewal of an integration certificate.
-# Windows PowerShell 5.1 or later, .NET Framework 4.7.2 or later (CertificateRequest).
+# Windows PowerShell 5.1 (.NET Framework 4.7.2 or later) or PowerShell 7 (CertificateRequest).
 # Dot-source it, then call the functions:
 #   . .\tenko-integration.ps1
 #   Register-TenkoIntegration -Api https://tenko.example.test:8443 -CodeFile .\enroll.code -Label backup-host
@@ -364,22 +380,52 @@ catch { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]
 Add-Type -TypeDefinition @'
 using System;
 using System.Net.Security;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 public static class TenkoTrust {
     // The pinned root of the internal CA. The system's own trust is never extended.
     public static X509Certificate2 Root;
     public static readonly RemoteCertificateValidationCallback Pinned = PinnedCheck;
+    // Only for an API certificate the system already trusts (modes b and c); never the default.
+    public static readonly RemoteCertificateValidationCallback Trusted = TrustedCheck;
+    // Only for fetching the root, which is then compared with the fingerprint of the code.
     public static readonly RemoteCertificateValidationCallback Anything = delegate { return true; };
+
+    static bool TrustedCheck(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
+        return errors == SslPolicyErrors.None;
+    }
+
+    static string Digest(X509Certificate2 certificate) {
+        return BitConverter.ToString(SHA256.Create().ComputeHash(certificate.RawData));
+    }
+
+    // Accepts the server only when its name matches and its chain ends at the pinned root:
+    // whatever the system trusts is ignored, and so is a chain that ends at any other root.
     static bool PinnedCheck(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors) {
-        if (errors == SslPolicyErrors.None) return true;
-        if (Root == null || certificate == null || errors != SslPolicyErrors.RemoteCertificateChainErrors) return false;
+        if (Root == null || certificate == null) return false;
+        if ((errors & (SslPolicyErrors.RemoteCertificateNameMismatch | SslPolicyErrors.RemoteCertificateNotAvailable)) != 0) return false;
         using (X509Chain own = new X509Chain()) {
             own.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-            own.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
-            own.ChainPolicy.ExtraStore.Add(Root);
+            if (chain != null) {
+                foreach (X509ChainElement element in chain.ChainElements) own.ChainPolicy.ExtraStore.Add(element.Certificate);
+            }
+            PropertyInfo mode = typeof(X509ChainPolicy).GetProperty("TrustMode");
+            if (mode != null) {
+                // .NET 5 and later (PowerShell 7): the pinned root is the only trust anchor.
+                mode.SetValue(own.ChainPolicy, Enum.ToObject(mode.PropertyType, 1), null); // CustomRootTrust
+                X509Certificate2Collection anchors = (X509Certificate2Collection)typeof(X509ChainPolicy).GetProperty("CustomTrustStore").GetValue(own.ChainPolicy, null);
+                anchors.Add(Root);
+            } else {
+                // .NET Framework (Windows PowerShell 5.1) has no custom anchor: build with the
+                // pinned root as a helper, ignore that the system does not trust it, and check
+                // below that the chain really ends at it.
+                own.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+                own.ChainPolicy.ExtraStore.Add(Root);
+            }
             if (!own.Build(new X509Certificate2(certificate))) return false;
             X509Certificate2 top = own.ChainElements[own.ChainElements.Count - 1].Certificate;
-            return top.Thumbprint == Root.Thumbprint;
+            return Digest(top) == Digest(Root);
         }
     }
 }
@@ -392,14 +438,17 @@ function Get-TenkoStateDir([string]$StateDir) {
 }
 
 # One HTTPS request; a client certificate is optional. The answer is the status and the body.
+# -Trust Root (the default) accepts only a chain that ends at the pinned root.
 function Invoke-TenkoRequest {
     param([string]$Method, [string]$Uri, [byte[]]$Body, [string]$ContentType,
-          [hashtable]$Headers = @{}, $ClientCertificate, [switch]$TrustAnything)
+          [hashtable]$Headers = @{}, $ClientCertificate,
+          [ValidateSet('Root', 'System', 'Anything')][string]$Trust = 'Root')
     $request = [Net.HttpWebRequest]::Create($Uri)
     $request.Method = $Method
     $request.AllowAutoRedirect = $false
     $request.Timeout = 30000
-    $request.ServerCertificateValidationCallback = if ($TrustAnything) { [TenkoTrust]::Anything } else { [TenkoTrust]::Pinned }
+    $request.ServerCertificateValidationCallback = if ($Trust -eq 'Anything') { [TenkoTrust]::Anything }
+        elseif ($Trust -eq 'System') { [TenkoTrust]::Trusted } else { [TenkoTrust]::Pinned }
     foreach ($name in $Headers.Keys) { $request.Headers[$name] = $Headers[$name] }
     if ($ClientCertificate) { [void]$request.ClientCertificates.Add($ClientCertificate) }
     if ($Body) {
@@ -415,13 +464,38 @@ function Invoke-TenkoRequest {
     [pscustomobject]@{ Status = $status; Body = $memory.ToArray() }
 }
 
+# The authorization value (PIN) of a key in the TPM. ConvertFrom-SecureString without a key
+# protects the text with DPAPI for this account on this machine; the file sits in the
+# account's own state directory, so only that account can read it.
+function Save-TenkoPin([securestring]$Pin, [string]$StateDir) {
+    ConvertFrom-SecureString $Pin | Set-Content -Path (Join-Path (Get-TenkoStateDir $StateDir) 'pin.dat') -Encoding ASCII
+}
+
+function Get-TenkoPin([string]$StateDir) {
+    $file = Join-Path (Get-TenkoStateDir $StateDir) 'pin.dat'
+    if (Test-Path $file) { ConvertTo-SecureString (Get-Content $file -TotalCount 1) }
+}
+
+# The PIN as the property the TPM key provider reads (NCRYPT_PIN_PROPERTY).
+function New-TenkoPinProperty([securestring]$Pin) {
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($Pin)
+    try { $text = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+    New-Object Security.Cryptography.CngProperty('SmartCardPin',
+        [Text.Encoding]::Unicode.GetBytes($text + "`0"), [Security.Cryptography.CngPropertyOptions]::None)
+}
+
 # A P-256 key in the account's key store, not exportable. -Provider 'Microsoft Platform Crypto
-# Provider' puts it in the TPM instead.
-function New-TenkoKey([string]$Provider) {
+# Provider' puts it in the TPM instead, and then it must have an authorization value (-Pin).
+function New-TenkoKey([string]$Provider, [securestring]$Pin) {
     $parameters = New-Object Security.Cryptography.CngKeyCreationParameters
     $parameters.Provider = New-Object Security.Cryptography.CngProvider($Provider)
     $parameters.ExportPolicy = [Security.Cryptography.CngExportPolicies]::None
     $parameters.KeyUsage = [Security.Cryptography.CngKeyUsages]::Signing
+    if ($Provider -like '*Platform*') {
+        if (-not $Pin) { throw 'a key in the TPM needs an authorization value: pass -Pin, or run Save-TenkoPin first' }
+        $parameters.Parameters.Add((New-TenkoPinProperty $Pin))
+    }
     $key = [Security.Cryptography.CngKey]::Create([Security.Cryptography.CngAlgorithm]::ECDsaP256,
         ('tenko-integration-' + [guid]::NewGuid()), $parameters)
     New-Object Security.Cryptography.ECDsaCng($key)
@@ -444,8 +518,9 @@ function ConvertTo-TenkoBytes([string]$Hex) {
 }
 
 # HMAC-SHA-256 keyed with the code's secret, in process: the secret is never an argument.
-function Get-TenkoProof([string]$SecretHex, [string]$CodeId, [string]$AccountId, [byte[]]$Spki) {
-    $head = [Text.Encoding]::ASCII.GetBytes("tenko-integration-enroll-v1`n$CodeId`n$AccountId`n")
+# The label is in the proof; the label sent must be this one.
+function Get-TenkoProof([string]$SecretHex, [string]$CodeId, [string]$AccountId, [string]$Label, [byte[]]$Spki) {
+    $head = [Text.Encoding]::UTF8.GetBytes("tenko-integration-enroll-v1`n$CodeId`n$AccountId`n$Label`n")
     $hmac = New-Object Security.Cryptography.HMACSHA256(, (ConvertTo-TenkoBytes $SecretHex))
     -join ($hmac.ComputeHash([byte[]]($head + $Spki)) | ForEach-Object { $_.ToString('x2') })
 }
@@ -468,17 +543,25 @@ function Save-TenkoCertificate([byte[]]$Pem, $Key, [string]$Label, [string]$Stat
     $cert
 }
 
-function Get-TenkoClientCertificate([string]$StateDir) {
+# The current certificate with its key. A key in the TPM is opened with its PIN (see Save-TenkoPin).
+function Get-TenkoClientCertificate([string]$StateDir, [securestring]$Pin) {
     $thumbprint = (Get-Content (Join-Path (Get-TenkoStateDir $StateDir) 'current.txt') -TotalCount 1).Trim()
     $cert = Get-Item "Cert:\CurrentUser\My\$thumbprint"
     if (-not $cert.HasPrivateKey) { throw 'the certificate has no private key in this account store' }
+    $key = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::GetECDsaPrivateKey($cert)
+    if ($Pin -and $key -is [Security.Cryptography.ECDsaCng] -and $key.Key.Provider.Provider -like '*Platform*') {
+        $key.Key.SetProperty((New-TenkoPinProperty $Pin))
+        $bare = New-Object Security.Cryptography.X509Certificates.X509Certificate2(, $cert.RawData)
+        $cert = [Security.Cryptography.X509Certificates.ECDsaCertificateExtensions]::CopyWithPrivateKey($bare, $key)
+    }
     $cert
 }
 
 function Register-TenkoIntegration {
     param([Parameter(Mandatory)][string]$Api, [Parameter(Mandatory)][string]$CodeFile,
           [string]$Label = $env:COMPUTERNAME, [string]$StateDir,
-          [string]$Provider = 'Microsoft Software Key Storage Provider')
+          [string]$Provider = 'Microsoft Software Key Storage Provider', [securestring]$Pin,
+          [ValidateSet('Root', 'System')][string]$ApiTrust = 'Root')
     $StateDir = Get-TenkoStateDir $StateDir
     if ($Label -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw 'Label: use 1 to 64 of letters, digits, . _ -' }
     $parts = (Get-Content $CodeFile -TotalCount 1).Trim().Split('.')
@@ -486,7 +569,7 @@ function Register-TenkoIntegration {
     $null, $codeId, $accountId, $secret, $fingerprint = $parts
 
     # The server root is public; it is trusted only if its SHA-256 matches the code.
-    $answer = Invoke-TenkoRequest -Method GET -Uri "$Api/api/v1/integrations/ca" -TrustAnything
+    $answer = Invoke-TenkoRequest -Method GET -Uri "$Api/api/v1/integrations/ca" -Trust Anything
     if ($answer.Status -ne 200) { throw "the root could not be fetched ($($answer.Status))" }
     $pem = [Text.Encoding]::ASCII.GetString($answer.Body)
     $der = [Convert]::FromBase64String(([regex]::Match($pem, '-----BEGIN CERTIFICATE-----([^-]+)-----END').Groups[1].Value -replace '\s', ''))
@@ -496,17 +579,19 @@ function Register-TenkoIntegration {
     [TenkoTrust]::Root = $root
     Set-Content -Path (Join-Path $StateDir 'tenko-ca.pem') -Value $pem -Encoding ASCII
 
-    $key = New-TenkoKey $Provider
+    if (-not $Pin) { $Pin = Get-TenkoPin $StateDir }
+    $key = New-TenkoKey $Provider $Pin
     $made = New-TenkoRequest $key
     $headers = @{ 'Tenko-Enrollment-Code' = $codeId
-                  'Tenko-Enrollment-Proof' = (Get-TenkoProof $secret $codeId $accountId $made.Spki) }
+                  'Tenko-Enrollment-Proof' = (Get-TenkoProof $secret $codeId $accountId $Label $made.Spki) }
     $answer = Invoke-TenkoRequest -Method POST -Uri "$Api/api/v1/integrations/enroll?label=$Label" `
-        -Body $made.Csr -ContentType 'application/pkcs10' -Headers $headers
+        -Body $made.Csr -ContentType 'application/pkcs10' -Headers $headers -Trust $ApiTrust
     if ($answer.Status -ne 201) {
         $key.Key.Delete()
         throw "enrollment refused ($($answer.Status)): $([Text.Encoding]::UTF8.GetString($answer.Body))"
     }
     $cert = Save-TenkoCertificate $answer.Body $key $Label $StateDir
+    if ($Pin -and $Provider -like '*Platform*') { Save-TenkoPin $Pin $StateDir }
     Remove-Item $CodeFile
     "enrolled: certificate $($cert.Thumbprint), valid until $($cert.NotAfter.ToString('s'))"
 }
@@ -517,10 +602,11 @@ function Update-TenkoIntegrationCertificate {
     param([Parameter(Mandatory)][string]$ApiHost, [int]$Port = 8445, [string]$StateDir,
           [string]$Provider = 'Microsoft Software Key Storage Provider')
     $StateDir = Get-TenkoStateDir $StateDir
-    $old = Get-TenkoClientCertificate $StateDir
+    $pin = Get-TenkoPin $StateDir
+    $old = Get-TenkoClientCertificate $StateDir $pin
     [TenkoTrust]::Root = New-Object Security.Cryptography.X509Certificates.X509Certificate2(
         (Join-Path $StateDir 'tenko-ca.pem'))
-    $key = New-TenkoKey $Provider
+    $key = New-TenkoKey $Provider $pin
     $made = New-TenkoRequest $key
     $answer = Invoke-TenkoRequest -Method POST -Uri "https://${ApiHost}:$Port/api/v1/integrations/certificate/renew" `
         -Body $made.Csr -ContentType 'application/pkcs10' -ClientCertificate $old
@@ -556,7 +642,7 @@ function Invoke-TenkoApi {
         (Join-Path $StateDir 'tenko-ca.pem'))
     $answer = Invoke-TenkoRequest -Method GET -Uri "https://${ApiHost}:$Port$Path" `
         -Headers @{ Authorization = 'Bearer ' + (Get-Content $TokenFile -TotalCount 1).Trim() } `
-        -ClientCertificate (Get-TenkoClientCertificate $StateDir)
+        -ClientCertificate (Get-TenkoClientCertificate $StateDir (Get-TenkoPin $StateDir))
     [Text.Encoding]::UTF8.GetString($answer.Body)
 }
 ```
@@ -577,11 +663,21 @@ Register-ScheduledTask -TaskName 'Tenko certificate renewal' -Action $action -Tr
 
 Notes:
 
-- **Trust.** The script never imports the Tenko root into a trust store. Its certificate callback accepts a server certificate only when the system trusts it, or when the chain ends in the pinned root (the root whose SHA-256 the code carries) and the name matches.
+- **Trust: the pinned root, nothing else.** The script never imports the Tenko root into a trust store, and on both calls that matter, the enrollment call to 8443 and every call to the integration listener on 8445, it accepts the server only when the name matches and the chain ends at the pinned internal root: the root whose SHA-256 equals the fingerprint in the code (the script fetches the root PEM over 8443 first, which is public data, and refuses it unless the fingerprint matches). A certificate that the system trusts but that does not chain to that root is refused. Two paths do the check: on PowerShell 7 (.NET 5 and later) the callback builds the chain with the pinned root as its only trust anchor (`X509ChainPolicy.TrustMode = CustomRootTrust`); on Windows PowerShell 5.1 (.NET Framework has no custom anchor) it builds the chain, ignores that the system does not trust the root, and then compares the SHA-256 of the chain's last certificate with the pinned root and refuses on any difference. `-ApiTrust System` on `Register-TenkoIntegration` is the one exception, for an installation whose 8443 serves an imported certificate (TLS mode b or c): it accepts the 8443 call when the system trusts that certificate, and it never applies to 8445, which always chains to the internal root.
 - **TLS version.** The script asks for TLS 1.3 and 1.2. Windows Server 2019 and older have no TLS 1.3 in their own stack: the listener refuses them until TGL-47 allows TLS 1.2 (section 9).
-- **A key in the TPM** needs `-Provider 'Microsoft Platform Crypto Provider'` on `Register-TenkoIntegration` and `Update-TenkoIntegrationCertificate`; the script makes a fresh key at every renewal. This path is proved only in a Windows lab with a TPM.
+- **A key in the TPM** needs `-Provider 'Microsoft Platform Crypto Provider'` on `Register-TenkoIntegration` and `Update-TenkoIntegrationCertificate`, and it **must have an authorization value**, a PIN: without one, anything that runs as the account can use the key. The script refuses to make a TPM key without `-Pin` (a `SecureString`) or a saved PIN. Section 6.1 says how the PIN works in an unattended task. The script makes a fresh key at every renewal. This path is proved only in a Windows lab with a TPM.
 - **The switch.** The new certificate is added to the store and `current.txt` is replaced by one rename before the old certificate and its key are deleted. If the host stops in between, the old certificate stays in use and the next renewal replaces the unseen successor.
+- **The label.** The script proves the label it sends (section 4.4) and keeps to letters, digits, `.`, `_` and `-`, a subset of what the server accepts.
 - The bound token for the account is in `token.txt`, readable by that account only.
+
+### 6.1 A TPM key and an unattended task
+
+A key in the TPM never leaves the chip, but without an authorization value any process of the account can ask the chip to sign. The value (a PIN) makes the chip refuse unless the caller knows it. A scheduled task has nobody to type it, so the task must supply it, and the only place it can come from is a file or a store on the host:
+
+1. Once, as the integration's account: `Save-TenkoPin (Read-Host -AsSecureString 'PIN')`, or pass `-Pin` to `Register-TenkoIntegration`, which saves it after a successful enrollment. The PIN is written to `pin.dat` in the state directory, protected with DPAPI (the Windows Data Protection API): the file can be decrypted only by that account on that machine, and the directory is the account's own (`%LOCALAPPDATA%\TenkoIntegration`), so no other user reads it.
+2. The renewal task and `Invoke-TenkoApi` read `pin.dat` themselves and give the PIN to the key's handle before TLS uses it.
+
+What this buys and what it does not: a copy of the disk or of the profile yields neither the key (it is in the chip) nor the PIN (it needs the account's DPAPI secret, which comes from its password, and the machine), and software on the host that is not the account cannot use the key. Code running **as the account** can read `pin.dat` and so use the key while it runs there, exactly as without a PIN; the PIN does not stop that. A PIN the account has to type at every use would stop it and would stop the unattended task too. The choice is between the two; for a task that must run alone, the stored PIN is the usual one. Rotate the key (a renewal makes a fresh one) and revoke the lineage when the account is suspected.
 
 ## 7. Bound tokens
 
@@ -598,6 +694,7 @@ curl -sS -b cookies.txt -H 'Origin: https://tenko.example.test' \
 The token starts with `tnkb_`. The rules (`docs/access.md` section 7.7):
 
 - The binding is to the **lineage**, not to one certificate as RFC 8705 has it, so a renewal (a new key, a new serial) keeps every bound token working and rewrites no token. A bound token that renews itself (IAM-20) stays bound.
+- On the integration listener the certificate is checked **before** the bearer token is read, so a refused certificate never records the use of a token.
 - A bound token is accepted only on the integration listener, over a connection whose certificate belongs to its lineage. The binding is checked **first**, before the token's expiry, before reuse detection and before the counter of wrong renewal secrets.
 - Presented without the certificate (on 8443, on 8445 with no certificate of the lineage, or with another lineage's), it is refused with 401 `auth.unauthenticated`, like an unknown token, and audited as `auth.token.binding_refused` (once a minute per token). Nothing else happens: no reuse detection, no counter, no revocation. Whoever lacks the key can neither use a bound token nor revoke it.
 - A build that does not know binding refuses `tnkb_` tokens at their prefix, and a record whose binding was lost is refused, never read as unbound.
@@ -641,7 +738,7 @@ TGL-47 ([SECURITY-PROFILES.md](SECURITY-PROFILES.md)) sets three things:
 It is changed with the other toggles: `PATCH /api/v1/settings/security` with `{"integrations": {"lifetime_days": 30, "require_binding": false, "allow_tls12": false}}` (a fresh sign-in; the lifetime is 1 to 365 days) or on the security settings page.
 
 - **Lifetime.** A shorter lifetime applies at the next renewal of each lineage. A lifetime longer than Home's is a deviation the settings show.
-- **Binding required.** Every token an administrator creates for a service account must then name a lineage (400 `auth.invalid_request` naming `lineage` otherwise). **Turning it on, also by switching to Hardened, removes every unbound service-account token** at once, audited per token as `auth.token.revoke`. The change reports them in `unbound_tokens_removed` (`count` and `accounts`), and `?dry_run=true` answers the same without writing anything, so look at the count first. Loosening the requirement later revives none of them.
+- **Binding required.** Every token an administrator creates for a service account must then name a lineage (400 `auth.invalid_request` naming `lineage` otherwise). **Turning it on, also by switching to Hardened, removes every unbound service-account token** at once, audited per token as `auth.token.revoke`. The change reports them in `unbound_tokens_removed` (`count` and `accounts`), and `?dry_run=true` answers the same without writing anything, so look at the count first. Loosening the requirement later revives none of them. The requirement is also checked at **every use** of a token: while it holds, an unbound service-account token is refused with 401 and audited as `auth.token.binding_refused`, also one that was created after the removal or that a controller had not yet seen removed. Mirror tokens (scope `mirror:<id>`, ADR 0033) are outside the requirement for now.
 - **TLS 1.2.** Off in every profile and refused under Hardened. Turning it on is a deviation the settings show and the audit log records, like every toggle change; while it is on the status carries the warning `integration.tls12_allowed` (on the start page and in `GET /api/v1/system/status`). It is read per connection: turning it off again refuses the next TLS 1.2 handshake. Allow it only for hosts that cannot do TLS 1.3 (section 3.3 says what an observer on the path then sees).
 
 ## 10. Troubleshooting
@@ -650,27 +747,28 @@ A handshake that fails shows no HTTP answer; the client reports a TLS error. The
 
 | Symptom | Cause and fix |
 |---|---|
-| Connection refused on 8445 | The listener is closed: no enrollment code waits and no certificate is valid (the on-demand default), `listen = []`, a host firewall or container publish rule, or an IPv6-only host with the default IPv4 address (section 3.2) |
+| Connection refused on 8445 | The listener is closed: no enrollment code waits and no certificate is valid (the on-demand default), `listen = []`, a host firewall or container publish rule, an API on loopback only, which gives a listener on loopback only (section 3.1; set `listen = ["0.0.0.0:8445"]`), or an IPv6-only host with the default IPv4 address (section 3.2) |
 | TLS handshake fails, no HTTP answer | No client certificate sent; the certificate is of another installation, a node certificate, expired, revoked or not recorded; the server certificate does not match the name you connected to (use a name from the controller's configured names); or the client offers only TLS 1.2 (or no Extended Master Secret) while TGL-47 does not allow TLS 1.2 |
 | 401 `integration.certificate.refused` | The certificate was revoked, its account was disabled or deleted, or its lineage lapsed, on a connection that was already open. Enroll again |
 | 403 `integration.certificate.replaced` | A replaced certificate past its overlap was used for a call. Use the new certificate (check that the renewal script stored it) |
 | 403 `integration.renew.reuse` | The renewal came from a replaced certificate: the lineage is revoked. Find the second holder of the key, then enroll again with a new code |
 | 409 `integration.renew.too_soon` | The lineage renewed within the last hour |
-| 404 `integration.public_route` | A route that needs no credentials (sign-in, the CA root, enrollment) was called on 8445. Call it on 8443 |
+| 404 `integration.public_route` | A route that needs no credentials (sign-in, the CA root, enrollment) was called on 8445. Call it on 8443. Any other unknown path on 8445 is a plain problem-details 404 |
 | 401 `integration.token.required`, 403 `integration.token.wrong_account` | No token, or a token of another account than the certificate's |
 | 401 `auth.unauthenticated` for a `tnkb_` token | The token is bound and was presented without a certificate of its lineage, on the wrong port or with another lineage's certificate. The audit log holds `auth.token.binding_refused`. Nothing was revoked |
+| 401 `auth.unauthenticated` for an unbound service-account token | TGL-47 requires binding, and this token is not bound: it is refused at every use (`auth.token.binding_refused`). Create a bound token (section 7) |
 | 503 `integration.isolated` | The controller lost contact to its cluster more than 30 seconds ago. Use another controller, or wait for it to rejoin |
 | 503 `integration.unavailable` | Integration certificates are not available on this controller |
-| 401 `integration.code.invalid` | A wrong proof, an unknown or withdrawn code, or a malformed header. Check the proof against the test vector (section 4.4), that the secret is the decoded hexadecimal and that the SPKI is the canonical 91 octets |
+| 401 `integration.code.invalid` | A wrong proof, an unknown or withdrawn code, or a malformed header. Check the proof against the test vector (section 4.4), that the secret is the decoded hexadecimal, that the SPKI is the canonical 91 octets, and that the label in the proof is the label in `?label=` |
 | 401 `integration.code.used`, `integration.code.expired` | The code was used or expired. Ask for a new one |
 | 403 `integration.code.source` | The enrollment came from outside the code's network |
-| 403 `integration.enroll.transport` | The enrollment used plain HTTP (the code is withdrawn) or came through a proxy that did not state the scheme; use HTTPS and state `X-Forwarded-Proto` at the proxy |
+| 403 `integration.enroll.transport` | The enrollment used plain HTTP or came through a proxy that did not state the scheme. The call is audited and the code is **not** withdrawn: use HTTPS (and state `X-Forwarded-Proto` at the proxy) and enroll again with the same code |
 | 403 `integration.account` | The account is not an enabled service account, or its tokens ended since the code was made |
 | 409 `integration.key.used` | The key was enrolled before, or was in a revoked certificate. Make a new key |
 | 409 `integration.lineages` | The account holds eight lineages. Revoke one that is not used |
 | 415 `integration.request.media_type` | The body was not sent as `application/pkcs10` |
 | 422 `integration.request.invalid` | The body is not one PKCS#10 request over a P-256 key with a valid self-signature, or is over 16 KiB |
-| 422 `integration.label` | The label is empty, over 64 characters or has control characters |
+| 422 `integration.label` | The label is empty, over 64 characters, has a space at either end, or has a control or format character (zero-width and direction marks) |
 | 403 `auth.step_up_required` when making a code | The session signed in more than five minutes ago, or a token was used. Sign in again |
 | 422 `integration.code.lifetime` | The lifetime was outside 60 to 3600 seconds |
 | 500 `integration.issuing` | The integration CA failed; see the server log |
@@ -684,10 +782,10 @@ A handshake that fails shows no HTTP answer; the client reports a TLS error. The
 | `GET /api/v1/integrations/enrollments` | 8443 | administrator | the codes, never a secret |
 | `DELETE /api/v1/integrations/enrollments/{id}` | 8443 | administrator | 204, the code is withdrawn |
 | `GET /api/v1/integrations/ca` | 8443 | public | the server root, PEM |
-| `POST /api/v1/integrations/enroll?label=` | 8443 | public; the code id and the proof are the credential; HTTPS outside Lab | 201, the certificate, PEM |
+| `POST /api/v1/integrations/enroll?label=` | 8443 | public; the code id and the proof (which covers the label) are the credential; HTTPS outside Lab, else 403 and the code stays usable | 201, the certificate, PEM |
 | `GET /api/v1/integrations/certificates[?account=]` | 8443 | administrator | the certificates with lineage, label, serial, key digest, validity, state and first presentation |
 | `DELETE /api/v1/integrations/certificates/{serial}` | 8443 | administrator | 204, the lineage is revoked |
 | `POST /api/v1/integrations/certificate/renew` | 8445 only | the connection's certificate | 200 not due, or 201 and the certificate |
 | every authenticated route of the API | 8445 | a token of the certificate's account | as on 8443 |
 
-Audit actions: `cluster.integration_ca.create` (the integration CA was created), `auth.client_cert.code_create`, `auth.client_cert.code_withdraw`, `auth.client_cert.issue` (also refused enrollments), `auth.client_cert.renew`, `auth.client_cert.present`, `auth.client_cert.revoke`, `auth.client_cert.lapse`, `auth.token.binding_refused`. Status conditions: `integration.certificate_expiring`, `integration.tls12_allowed`. Configuration: `[integrations] listen`. Toggle: TGL-47.
+Audit actions: `cluster.integration_ca.create` (the integration CA was created), `auth.client_cert.code_create`, `auth.client_cert.code_withdraw`, `auth.client_cert.issue` (also refused enrollments), `auth.client_cert.renew`, `auth.client_cert.present`, `auth.client_cert.revoke`, `auth.client_cert.lapse`, `auth.token.binding_refused`. Status conditions: `integration.certificate_expiring`, `integration.tls12_allowed`. Configuration: `[integrations] listen` (default: port 8445 on each host of `[server] listen`). Toggle: TGL-47.
