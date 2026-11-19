@@ -19,6 +19,9 @@ use crate::{
 /// Prefix of personal API tokens, so secret scanners can recognize them.
 pub const TOKEN_PREFIX: &str = "tnk_";
 
+/// Prefix of the renewal secrets of scoped tokens (IAM-20): never a bearer token.
+pub const RENEWAL_PREFIX: &str = "tnr_";
+
 /// A secret as the client receives it. `Debug` redacts it; there is no `Display`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct BearerSecret(Zeroizing<String>);
@@ -67,9 +70,22 @@ pub fn looks_like_session_secret(value: &str) -> bool {
 ///
 /// [`AuthError::Internal`] if the random source fails.
 pub fn new_api_token() -> Result<BearerSecret, AuthError> {
+    prefixed_secret(TOKEN_PREFIX)
+}
+
+/// A new renewal secret of a scoped token (IAM-20): `tnr_` and 256 random bits, base64url.
+///
+/// # Errors
+///
+/// [`AuthError::Internal`] if the random source fails.
+pub fn new_renewal_secret() -> Result<BearerSecret, AuthError> {
+    prefixed_secret(RENEWAL_PREFIX)
+}
+
+fn prefixed_secret(prefix: &str) -> Result<BearerSecret, AuthError> {
     let bytes = Zeroizing::new(random::array::<32>()?);
     let mut text = Zeroizing::new(String::with_capacity(47));
-    text.push_str(TOKEN_PREFIX);
+    text.push_str(prefix);
     text.push_str(&base64url_encode(&*bytes));
     Ok(BearerSecret(text))
 }

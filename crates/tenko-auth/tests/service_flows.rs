@@ -794,6 +794,7 @@ async fn the_break_glass_designation_ends_every_token_and_its_release_brings_non
         expires_in_days: Some(30),
         grants,
         scopes: Vec::new(),
+        ..Default::default()
     };
     let mut tokens = Vec::new();
     for grants in [

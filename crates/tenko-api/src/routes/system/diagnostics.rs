@@ -83,6 +83,8 @@ const ERRORS: &[&str] = &[
     "audit.export.failing",
     // ADR 0028: a switch port a bounce left down cuts its client off.
     tenko_connect::host::service::PORT_STUCK,
+    // IAM-20: a token family the server revoked waits for an administrator.
+    tenko_auth::service::TOKEN_REVOKED,
     // WP13.3: the self-test findings of the Kerberos account under which secure updates
     // fail (identity plan section 3.10); clock skew above 60 s and a failed rotation stay
     // warnings, since updates still work.

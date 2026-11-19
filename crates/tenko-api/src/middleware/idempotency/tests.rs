@@ -1296,6 +1296,8 @@ fn the_document_marks_every_secret_body_of_a_post() {
         ("/auth/totp/enroll/finish", true, true),
         ("/auth/webauthn/register/finish", false, true),
         ("/access/service-accounts/{id}/tokens", false, true),
+        // IAM-20: the renewal secret goes in, a new token and renewal secret come out.
+        ("/access/token/renew", true, true),
         ("/secrets", true, false),
         ("/secrets/{id}/reveal", false, true),
         ("/system/backups", true, false),

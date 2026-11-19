@@ -363,6 +363,7 @@ fn scoped(role: RoleName, scope: ScopeRule) -> TokenRequest {
             scope: Some(scope),
         }]),
         scopes: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -372,6 +373,7 @@ fn with_scopes(scopes: &[TokenScope]) -> TokenRequest {
         expires_in_days: None,
         grants: None,
         scopes: scopes.to_vec(),
+        ..Default::default()
     }
 }
 
@@ -1278,6 +1280,7 @@ async fn a_service_account_token_acts_within_the_grants_of_its_account() {
         expires_in_days: None,
         grants: Some(Vec::new()),
         scopes: Vec::new(),
+        ..Default::default()
     };
     let result = lab
         .env
@@ -2075,6 +2078,7 @@ async fn a_scoped_token_reads_its_owners_account_only_with_a_grant_that_reads_us
                     scope: None,
                 }]),
                 scopes: Vec::new(),
+                ..Default::default()
             },
         )
         .await
@@ -2133,6 +2137,7 @@ async fn a_token_issued_below_a_raised_requirement_stops_acting() {
                     scope: None,
                 }]),
                 scopes: Vec::new(),
+                ..Default::default()
             },
         )
         .await
@@ -2206,6 +2211,7 @@ async fn a_service_account_token_needs_a_sign_in_that_meets_the_accounts_require
             scope: None,
         }]),
         scopes: Vec::new(),
+        ..Default::default()
     };
     assert_eq!(
         lab.env
@@ -2245,6 +2251,7 @@ async fn a_scoped_token_reads_grants_and_subjects_only_with_a_grant_that_reads_u
                     scope: None,
                 }]),
                 scopes: Vec::new(),
+                ..Default::default()
             },
         )
         .await

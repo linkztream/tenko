@@ -15,7 +15,10 @@ use utoipa::{
 use zeroize::Zeroizing;
 
 use crate::{
-    model::{AccountLock, GrantId, GrantRecord, RoleMfa, TokenGrant, TokenScope, UserKind},
+    model::{
+        AccountLock, GrantId, GrantRecord, RoleMfa, TokenGrant, TokenRevocation, TokenScope,
+        UserKind,
+    },
     password::{PolicyViolation, policy::PasswordPolicy},
     roles::RoleName,
     settings::{Banner, Profile, SecuritySettings, ToggleState},
@@ -483,7 +486,7 @@ pub struct TokenCreate {
 /// `scopes` the token is a scoped token (IAM-10): it acts with the intersection of its
 /// grants and the owner's, never more. Without them, `POST /auth/tokens` creates a
 /// personal token that acts with the owner's roles and grants.
-#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, ToSchema)]
 #[schema(as = TokenCreate)]
 pub struct TokenRequest {
     /// A name for the token.
@@ -498,7 +501,18 @@ pub struct TokenRequest {
     /// The special scopes of a scoped token: `metrics`, `audit:read`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<TokenScope>,
+    /// IAM-20: a service account's scoped token may renew itself under TGL-46; the answer
+    /// then carries its renewal secret.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub renewable: bool,
+    /// IAM-21: the client prefixes a scoped token is accepted from (at most
+    /// [`SOURCE_PREFIXES_MAX`], a host address without a length); empty for anywhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_prefixes: Vec<String>,
 }
+
+/// The most source prefixes of one token (IAM-21).
+pub const SOURCE_PREFIXES_MAX: usize = 64;
 
 impl TokenRequest {
     /// Whether the request asks for a scoped token.
@@ -512,8 +526,7 @@ impl From<&TokenCreate> for TokenRequest {
         Self {
             name: request.name.clone(),
             expires_in_days: request.expires_in_days,
-            grants: None,
-            scopes: Vec::new(),
+            ..Self::default()
         }
     }
 }
@@ -544,15 +557,50 @@ pub struct TokenInfo {
     /// The special scopes of a scoped token.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub scopes: Vec<TokenScope>,
+    /// IAM-20: the token may renew itself.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub renewable: bool,
+    /// IAM-20: when a renewal made the token (its creation time); absent for the first
+    /// token of a family.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewed_at: Option<Timestamp>,
+    /// IAM-21: the client prefixes the token is accepted from; absent for anywhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>)]
+    pub source_prefixes: Vec<ipnet::IpNet>,
+    /// IAM-20: the server revoked the token's family; removing the token acknowledges it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked: Option<TokenRevocation>,
 }
 
-/// A new token: the secret is shown once.
+/// A new token: the secrets are shown once.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CreatedToken {
     /// The token, for `Authorization: Bearer`.
     pub token: SecretString,
+    /// IAM-20: the renewal secret of a renewable token, for `POST /access/token/renew` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal_secret: Option<SecretString>,
     /// Its metadata.
     pub info: TokenInfo,
+}
+
+/// `POST /access/token/renew` (IAM-20).
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+pub struct TokenRenew {
+    /// The renewal secret that came with the token.
+    pub renewal_secret: SecretString,
+}
+
+/// `GET /access/token`: the calling token's own description (IAM-20).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OwnToken {
+    /// The service account the token acts for.
+    pub account: UserId,
+    /// Its name.
+    pub account_name: String,
+    /// The token, without its secrets; `renewable` with TGL-46 applied.
+    pub token: TokenInfo,
 }
 
 /// The factors of an account.

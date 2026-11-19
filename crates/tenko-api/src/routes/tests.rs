@@ -47,6 +47,8 @@ enum Requirement {
     PublicUntilSetup,
     Session,
     SessionOrToken,
+    /// The calling scoped token's own routes (IAM-20): a session has no token.
+    Token,
 }
 
 /// Every operation of the whole API, as `"METHOD /path"` relative to the API base, with its
@@ -68,6 +70,7 @@ fn operations() -> Vec<(String, Requirement, Value)> {
                 r#"[{},{"session":[]},{"token":[]}]"# => Requirement::PublicUntilSetup,
                 r#"[{"session":[]}]"# => Requirement::Session,
                 r#"[{"session":[]},{"token":[]}]"# => Requirement::SessionOrToken,
+                r#"[{"token":[]}]"# => Requirement::Token,
                 other => panic!("{key}: unexpected security requirement {other}"),
             };
             out.push((key, requirement, operation.clone()));
@@ -97,7 +100,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 450, "every operation of the document");
+    assert_eq!(all.len(), 452, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -109,6 +112,14 @@ fn every_operation_declares_its_security_requirement() {
         with(Requirement::Session).len(),
         102,
         "the session-only operations"
+    );
+    assert_eq!(
+        with(Requirement::Token),
+        BTreeSet::from([
+            "GET /access/token".to_owned(),
+            "POST /access/token/renew".to_owned()
+        ]),
+        "the token-only operations"
     );
 }
 
@@ -188,13 +199,13 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
             Requirement::PublicUntilSetup => {
                 assert!(refused_as_unauthenticated(&reply), "{label}");
             }
-            Requirement::Session | Requirement::SessionOrToken => {
+            Requirement::Session | Requirement::SessionOrToken | Requirement::Token => {
                 assert!(refused_as_unauthenticated(&reply), "{label}");
                 refused += 1;
             }
         }
     }
-    assert_eq!(refused, 450 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
+    assert_eq!(refused, 452 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
 }
 
 /// Every operation without a request body called with a personal token of the

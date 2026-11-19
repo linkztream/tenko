@@ -818,6 +818,7 @@ impl StatusSources {
 /// from.
 #[allow(
     clippy::too_many_arguments,
+    clippy::too_many_lines,
     reason = "one source per part of the status, each optional"
 )]
 pub(crate) async fn assemble(
@@ -921,27 +922,33 @@ pub(crate) async fn assemble(
     }
     // WP13.3: the findings of the Kerberos account's last self-test (identity plan section
     // 3.10), each with the values its localized text and its fix need.
-    if let Ok(view) = state.store.read(tenko_store::ReadConsistency::Local).await
-        && let Ok(Some((account, _))) =
+    if let Ok(view) = state.store.read(tenko_store::ReadConsistency::Local).await {
+        if let Ok(Some((account, _))) =
             tenko_dns::zone::kerberos::KerberosService::account(view.as_ref())
-    {
-        status
-            .warnings
-            .extend(account.findings.into_iter().map(|finding| StatusWarning {
-                code: finding.code,
-                detail: finding.detail,
-                params: finding.params,
-            }));
+        {
+            status
+                .warnings
+                .extend(account.findings.into_iter().map(|finding| StatusWarning {
+                    code: finding.code,
+                    detail: finding.detail,
+                    params: finding.params,
+                }));
+        }
+        // WP13.3: end.
+        // IAM-20: service-account tokens about to expire, and token families the server
+        // revoked.
+        if let Ok(warnings) = tenko_auth::service::token_warnings(view.as_ref(), now) {
+            status
+                .warnings
+                .extend(warnings.into_iter().map(coded_warning));
+        }
     }
-    // WP13.3: end.
     // ADR 0028: every switch port a bounce left down (`connect.port_stuck`), with the
     // connector, the device and the port, until the connector host brought it up.
     if let Some(Extension(host)) = connectors
         && let Ok(stuck) = host.stuck_ports().await
     {
-        status
-            .warnings
-            .extend(stuck.into_iter().map(stuck_port_warning));
+        status.warnings.extend(stuck.into_iter().map(coded_warning));
     }
     status
 }
@@ -976,8 +983,8 @@ pub fn gss_refusal_warning(finding: &tenko_dns::tkey::GssFinding) -> StatusWarni
 }
 // WP13.2: end.
 
-/// The warning of a switch port a bounce left down.
-pub fn stuck_port_warning(condition: CodedError) -> StatusWarning {
+/// The warning of a coded condition: a switch port a bounce left down, a token.
+pub fn coded_warning(condition: CodedError) -> StatusWarning {
     StatusWarning {
         code: condition.code.to_string(),
         detail: condition.detail,

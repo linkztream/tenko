@@ -388,17 +388,20 @@ impl AuthImage {
                 )
             })
         } else {
-            view.get_typed(&SCOPED_TOKENS, &hash)?.map(|(record, _)| {
-                (
-                    record.id,
-                    TokenAuthz::Scoped {
-                        owner: record.owner,
-                        grants: record.grants,
-                        scopes: record.scopes,
-                        issued_with: record.issued_with,
-                    },
-                )
-            })
+            // A retired token (IAM-20) never acts.
+            view.get_typed(&SCOPED_TOKENS, &hash)?
+                .filter(|(record, _)| !record.retired())
+                .map(|(record, _)| {
+                    (
+                        record.id,
+                        TokenAuthz::Scoped {
+                            owner: record.owner,
+                            grants: record.grants,
+                            scopes: record.scopes,
+                            issued_with: record.issued_with,
+                        },
+                    )
+                })
         };
         let tokens = Arc::make_mut(&mut self.tokens);
         let hashes = Arc::make_mut(&mut self.token_hashes);
@@ -435,6 +438,9 @@ impl AuthImage {
         for (hash, record, _) in
             view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), MAX_ROWS, false)?
         {
+            if record.retired() {
+                continue;
+            }
             hashes.insert(hash, record.id);
             tokens.insert(
                 record.id,

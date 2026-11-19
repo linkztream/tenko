@@ -4,6 +4,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Added
+
+- Service-account tokens that renew themselves, and source binding of scoped tokens (IAM-20, IAM-21, TGL-46; `docs/access.md` sections 7.1 to 7.6). A service account's token created with `"renewable": true` comes with a renewal secret (`tnr_...`, shown once, stored hashed, never a bearer token); `POST /api/v1/access/token/renew`, called with the token and its renewal secret, answers a new token and a new renewal secret with the same name, grants, scopes and source prefixes and the profile's lifetime counted from the renewal. The old token stays valid until the new one is first used, so a lost answer can be repeated; the answer is never stored for an `Idempotency-Key`. Using a superseded token or renewal secret, or a third wrong renewal secret, revokes the token's whole family, is audited as `auth.token.reuse_detected`, and raises the warning `auth.token.revoked` until an administrator removes the revoked token from the list. TGL-46 is on in Home, Standard and Lab and off in Hardened; off, no token renews and none is created with the right. `"source_prefixes"` binds a scoped token to IPv4 and IPv6 prefixes: from any other client address, as the server derives it behind its trusted proxies, the token is refused like an unknown one and the attempt is audited as `auth.token.source_refused`. `GET /api/v1/access/token` describes the calling token without any secret. A service-account token with fewer than 14 days left raises the warning `auth.token.expiring` and, once, the audit record of the same name. Removing a token of a service account now removes every token of its family. The token dialog of a service account offers the renewal switch (with the reason when TGL-46 is off) and the source prefixes and shows the renewal secret once beside the token; the token list shows whether a token renews, when it was renewed, its prefixes and a family the server revoked, with the reason.
+
 ## [0.0.12-rc.4] - 2026-11-18
 
 ### Added

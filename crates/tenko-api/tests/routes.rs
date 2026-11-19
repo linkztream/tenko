@@ -128,6 +128,8 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
         "/access/service-accounts/{id}/tokens/{token}",
         "revoke_service_account_token",
     ),
+    ("GET", "/access/token", "describe_own_token"),
+    ("POST", "/access/token/renew", "renew_own_token"),
     ("GET", "/access/role-policies", "list_role_policies"),
     ("PUT", "/access/role-policies/{role}", "set_role_policy"),
     (

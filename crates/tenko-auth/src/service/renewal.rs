@@ -1,0 +1,761 @@
+//! Self-renewal, reuse detection and source binding of scoped tokens (IAM-20, IAM-21);
+//! `docs/access.md` sections 7.1 to 7.6 describe the behavior.
+//!
+//! A renewable token and its successors form a family ([`TokenRenewal::family`]). A renewal
+//! leaves the presenting token live until its successor is first used; that first use moves
+//! it under [`retired_key`] in the same write. A presented token found there, or a renewal
+//! secret of such a token, revokes the family: every member is removed and the newest is
+//! kept under its retired key with the reason, so the token list and the health warning show
+//! it until an administrator removes it. Every write names the revisions it read, so two
+//! controllers that decide on the same family are ordered by the store and the second write
+//! is refused.
+
+use std::{net::IpAddr, time::Duration};
+
+use aws_lc_rs::constant_time::verify_slices_are_equal;
+use ipnet::IpNet;
+use tenko_core::{
+    ApiTokenId, CodedError, ObjectRef, Principal, RequestCtx, SystemComponent, Timestamp, UserId,
+    audit::AuditDraft, migrate::TOKEN_EXPIRING_DAYS,
+};
+use tenko_store::{KeyRange, ReadView, ReadViewExt, StoreError, WriteBatch};
+
+use super::{
+    AuthService, LIST_LIMIT,
+    access::{scoped_token_info, token_expiry},
+    actions, effective_token_expiry,
+    types::{CreatedToken, OwnToken, SOURCE_PREFIXES_MAX, SecretString, TokenRenew},
+};
+use crate::{
+    error::AuthError,
+    model::{
+        RevocationReason, SCOPED_TOKENS, SETTINGS, ScopedTokenRecord, TokenRenewal,
+        TokenRevocation, USER_SCOPED_TOKENS, USERS, retired_key,
+    },
+    secret::{BearerSecret, hash_secret, new_api_token, new_renewal_secret},
+    settings::{Profile, SecuritySettings},
+};
+
+/// The wrong renewal secrets a family takes; the last of them revokes it (IAM-20).
+pub const RENEWAL_FAILURES_MAX: u64 = 3;
+
+/// The superseded tokens a family keeps for reuse detection, the newest first.
+const RETIRED_KEPT: usize = 8;
+
+/// How long after its successor's first use a superseded token is refused without revoking
+/// the family: requests the integration sent before it switched may still arrive.
+const SUPERSEDED_GRACE: Duration = Duration::from_secs(60);
+
+/// The health warning of a service-account token about to expire.
+pub const TOKEN_EXPIRING: &str = "auth.token.expiring";
+/// The health warning of a family the server revoked, until an administrator removes it.
+pub const TOKEN_REVOKED: &str = "auth.token.revoked";
+
+/// A member of a family: its key in [`SCOPED_TOKENS`], the record and its revision.
+type Member = (Vec<u8>, ScopedTokenRecord, tenko_core::Revision);
+
+fn refused(reason: &'static str) -> AuthError {
+    AuthError::TokenRenewalRefused { reason }
+}
+
+/// The renewal state of the first token of a family, and its secret.
+fn new_renewal(id: ApiTokenId) -> Result<(TokenRenewal, BearerSecret), AuthError> {
+    let secret = new_renewal_secret()?;
+    let renewal = TokenRenewal {
+        secret: secret.hash(),
+        family: id,
+        successor: None,
+        superseded_at: None,
+        failures: 0,
+        revoked: None,
+    };
+    Ok((renewal, secret))
+}
+
+/// The renewal state and secret of a new renewable token, and its source prefixes.
+type CreationTerms = (Option<(TokenRenewal, BearerSecret)>, Vec<IpNet>);
+
+/// The renewal right and the source prefixes of a new scoped token of `owner` (IAM-20,
+/// IAM-21): the right only for a service account under TGL-46.
+pub(super) fn creation_terms(
+    owner: &crate::model::UserRecord,
+    request: &super::types::TokenRequest,
+    settings: &SecuritySettings,
+    id: ApiTokenId,
+) -> Result<CreationTerms, AuthError> {
+    let prefixes = parse_source_prefixes(&request.source_prefixes)?;
+    if !request.renewable {
+        return Ok((None, prefixes));
+    }
+    if !owner.is_service() {
+        return Err(AuthError::invalid(
+            "renewable",
+            "only a service account's token renews itself",
+        ));
+    }
+    if !settings.token_self_renewal() {
+        return Err(refused("disabled"));
+    }
+    Ok((Some(new_renewal(id)?), prefixes))
+}
+
+/// The source prefixes of a token request (IAM-21): networks or host addresses, truncated to
+/// their network, sorted and without repeats.
+fn parse_source_prefixes(entries: &[String]) -> Result<Vec<IpNet>, AuthError> {
+    if entries.len() > SOURCE_PREFIXES_MAX {
+        return Err(AuthError::invalid(
+            "source_prefixes",
+            format!("at most {SOURCE_PREFIXES_MAX} prefixes"),
+        ));
+    }
+    let mut prefixes = entries
+        .iter()
+        .map(|entry| {
+            let entry = entry.trim();
+            entry
+                .parse::<IpNet>()
+                .or_else(|_| entry.parse::<IpAddr>().map(IpNet::from))
+                .map(|prefix| prefix.trunc())
+                .map_err(|_| {
+                    AuthError::invalid(
+                        "source_prefixes",
+                        format!("{entry} is not an address or a network such as 192.0.2.0/24"),
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    Ok(prefixes)
+}
+
+/// The end of a live token that warrants the expiry warning at `now`: fewer than
+/// [`TOKEN_EXPIRING_DAYS`] days left and no successor.
+fn expiring_end(
+    record: &ScopedTokenRecord,
+    settings: &SecuritySettings,
+    now: Timestamp,
+) -> Option<Timestamp> {
+    if record.retired()
+        || record
+            .renewal
+            .as_ref()
+            .is_some_and(|r| r.successor.is_some())
+    {
+        return None;
+    }
+    let ahead = Duration::from_secs(u64::from(TOKEN_EXPIRING_DAYS) * 86_400);
+    effective_token_expiry(record.created_at, record.expires_at, settings)
+        .filter(|end| *end > now && end.saturating_since(now) < ahead)
+}
+
+fn is_service(view: &dyn ReadView, owner: UserId) -> Result<bool, AuthError> {
+    Ok(view
+        .get_typed(&USERS, &owner)?
+        .is_some_and(|(user, _)| user.is_service()))
+}
+
+/// The health warnings of scoped tokens (IAM-20): [`TOKEN_EXPIRING`] for a live
+/// service-account token with fewer than 14 days left and no successor, and
+/// [`TOKEN_REVOKED`] for a family the server revoked.
+///
+/// # Errors
+///
+/// A store error.
+pub fn token_warnings(view: &dyn ReadView, now: Timestamp) -> Result<Vec<CodedError>, AuthError> {
+    let settings = view
+        .get_typed(&SETTINGS, &())?
+        .map_or_else(|| Profile::Standard.defaults(), |(settings, _)| settings);
+    let mut warnings = Vec::new();
+    for (_, record, _) in view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), LIST_LIMIT, false)? {
+        let revoked = record.renewal.as_ref().and_then(|renewal| renewal.revoked);
+        let end = expiring_end(&record, &settings, now);
+        if revoked.is_none() && end.is_none() {
+            continue;
+        }
+        let Some((owner, _)) = view.get_typed(&USERS, &record.owner)? else {
+            continue;
+        };
+        let mut warning = match (revoked, end) {
+            (Some(revocation), _) => CodedError::new(
+                TOKEN_REVOKED,
+                409,
+                format!(
+                    "the token {} of {} was revoked with its family ({}); remove it once looked into",
+                    record.name,
+                    owner.name,
+                    reason_text(revocation.reason)
+                ),
+            )
+            .with_param("reason", reason_text(revocation.reason)),
+            (None, Some(end)) if owner.is_service() => CodedError::new(
+                TOKEN_EXPIRING,
+                409,
+                format!(
+                    "the token {} of {} expires at {}; renew or replace it",
+                    record.name,
+                    owner.name,
+                    end.to_rfc3339()
+                ),
+            )
+            .with_param("expires_at", end.to_rfc3339()),
+            _ => continue,
+        };
+        warning = warning
+            .with_param("account", owner.name.clone())
+            .with_param("token", record.name.clone());
+        warnings.push(warning);
+    }
+    Ok(warnings)
+}
+
+/// The source prefixes as one audit context value; `None` without any.
+pub(super) fn joined(prefixes: &[IpNet]) -> Option<String> {
+    (!prefixes.is_empty()).then(|| {
+        prefixes
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    })
+}
+
+fn reason_text(reason: RevocationReason) -> &'static str {
+    match reason {
+        RevocationReason::ReuseDetected => "reuse_detected",
+        RevocationReason::RenewalFailures => "renewal_failures",
+        RevocationReason::Other => "other",
+    }
+}
+
+impl AuthService {
+    /// `POST /access/token/renew` (IAM-20): the calling token with its renewal secret becomes
+    /// a new token and a new renewal secret, shown once. The calling token stays valid until
+    /// the new one is first used; an unused successor of it is replaced.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] for a principal that is no scoped token, or a token
+    /// whose family the presented secret revoked; [`AuthError::TokenRenewalRefused`] with TGL-46
+    /// off, for a token without the right and for a wrong secret; [`AuthError::Conflict`] when
+    /// another renewal or use of the family came first.
+    pub async fn renew_own_token(
+        &self,
+        ctx: &RequestCtx,
+        request: &TokenRenew,
+    ) -> Result<CreatedToken, AuthError> {
+        let view = self.view().await?;
+        let (key, record, revision) = Self::own_scoped_token(view.as_ref(), ctx)?;
+        if !self.settings().token_self_renewal() {
+            return Err(refused("disabled"));
+        }
+        let Some(renewal) = record.renewal.as_ref() else {
+            return Err(refused("not_renewable"));
+        };
+        let presented = hash_secret(request.renewal_secret.expose());
+        if verify_slices_are_equal(&presented, &renewal.secret).is_err() {
+            return self
+                .wrong_renewal_secret(ctx, view.as_ref(), &key, &record, revision, &presented)
+                .await;
+        }
+        let settings = self.settings();
+        let token = new_api_token()?;
+        let (next_renewal, secret) = new_renewal(renewal.family)?;
+        let next = ScopedTokenRecord {
+            id: ApiTokenId::generate(),
+            created_at: ctx.now,
+            expires_at: token_expiry(&settings, None, ctx.now)?,
+            last_used_at: None,
+            prefix: token.expose().chars().take(12).collect(),
+            renewal: Some(next_renewal),
+            expiry_noticed_at: None,
+            ..record.clone()
+        };
+        let mut batch = WriteBatch::for_request(ctx);
+        let members = Self::family(view.as_ref(), record.owner, renewal.family)?;
+        for (member_key, member, member_revision) in &members {
+            let replaced = Some(member.id) == renewal.successor && member.last_used_at.is_none();
+            // Superseded members are kept for reuse detection until they would have expired.
+            let ended = member.retired()
+                && member.renewal.as_ref().is_some_and(|r| r.revoked.is_none())
+                && effective_token_expiry(member.created_at, member.expires_at, &settings)
+                    .is_some_and(|end| end <= ctx.now);
+            if replaced || ended {
+                batch.expect_typed(&SCOPED_TOKENS, member_key, Some(*member_revision));
+                batch.delete_typed(&SCOPED_TOKENS, member_key);
+                batch.delete_typed(&USER_SCOPED_TOKENS, &(member.owner, member.id));
+            }
+        }
+        // The renewal is a use: it supersedes the predecessor in the same write, so that a
+        // first use whose write was lost cannot leave two live branches.
+        Self::stage_supersede(view.as_ref(), &mut batch, &record, ctx.now)?;
+        let mut current = record.clone();
+        current.last_used_at = Some(ctx.now);
+        if let Some(renewal) = current.renewal.as_mut() {
+            renewal.successor = Some(next.id);
+            renewal.failures = 0;
+        }
+        batch.expect_typed(&SCOPED_TOKENS, &key, Some(revision));
+        batch.put_typed(&SCOPED_TOKENS, &key, &current)?;
+        let hash = token.hash();
+        batch.put_typed(&SCOPED_TOKENS, &hash, &next)?;
+        batch.put_typed(&USER_SCOPED_TOKENS, &(next.owner, next.id), &hash)?;
+        let mut draft = Self::audit(
+            actions::TOKEN_RENEW,
+            vec![
+                ObjectRef::from(record.owner),
+                ObjectRef::from(record.id),
+                ObjectRef::from(next.id),
+            ],
+            ctx,
+        )
+        .with_context("name", next.name.clone())
+        .with_context("family", renewal.family.to_string());
+        if let Some(expires_at) = next.expires_at {
+            draft = draft.with_context("expires_at", expires_at.to_rfc3339());
+        }
+        batch.audit(draft);
+        self.commit(batch).await?;
+        Ok(CreatedToken {
+            token: SecretString::new(token.expose()),
+            renewal_secret: Some(SecretString::new(secret.expose())),
+            info: scoped_token_info(&next),
+        })
+    }
+
+    /// A wrong renewal secret with a valid token: a superseded member's secret revokes the
+    /// family as reuse, the last of [`RENEWAL_FAILURES_MAX`] failures as such; any other is
+    /// counted. Each is audited.
+    async fn wrong_renewal_secret(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        key: &[u8],
+        record: &ScopedTokenRecord,
+        revision: tenko_core::Revision,
+        presented: &[u8],
+    ) -> Result<CreatedToken, AuthError> {
+        let family = record.renewal.as_ref().map_or(record.id, |r| r.family);
+        let members = Self::family(view, record.owner, family)?;
+        let reused = members.iter().any(|(_, member, _)| {
+            member.retired()
+                && member
+                    .renewal
+                    .as_ref()
+                    .is_some_and(|r| verify_slices_are_equal(presented, &r.secret).is_ok())
+        });
+        let failures: u64 = members
+            .iter()
+            .filter(|(_, member, _)| !member.retired())
+            .filter_map(|(_, member, _)| member.renewal.as_ref())
+            .map(|r| r.failures)
+            .sum::<u64>()
+            + 1;
+        let error = refused("wrong_secret");
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.idempotency = None;
+        batch.audit(
+            AuditDraft::failed(
+                actions::TOKEN_RENEW,
+                vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)],
+                &error,
+            )
+            .with_source_ip(ctx.source_ip)
+            .with_context("family", family.to_string()),
+        );
+        let reason = if reused {
+            Some(RevocationReason::ReuseDetected)
+        } else {
+            (failures >= RENEWAL_FAILURES_MAX).then_some(RevocationReason::RenewalFailures)
+        };
+        if let Some(reason) = reason {
+            Self::stage_revocation(&mut batch, &members, reason, ctx.now)?;
+            batch.audit(Self::reuse_audit(record, reason, ctx));
+        } else {
+            let mut counted = record.clone();
+            if let Some(renewal) = counted.renewal.as_mut() {
+                renewal.failures = renewal.failures.saturating_add(1);
+            }
+            batch.expect_typed(&SCOPED_TOKENS, &key.to_vec(), Some(revision));
+            batch.put_typed(&SCOPED_TOKENS, &key.to_vec(), &counted)?;
+        }
+        match self.store.propose(batch).await {
+            Ok(_) | Err(StoreError::PreconditionFailed(_)) => {}
+            Err(store_error) => {
+                tracing::warn!(error = %store_error, "could not record a refused renewal");
+            }
+        }
+        Err(match reason {
+            Some(RevocationReason::ReuseDetected) => AuthError::Unauthenticated,
+            _ => error,
+        })
+    }
+
+    /// `GET /access/token` (IAM-20): the calling scoped token's own description.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] for a principal that is no scoped token.
+    pub async fn describe_own_token(&self, ctx: &RequestCtx) -> Result<OwnToken, AuthError> {
+        let view = self.view().await?;
+        let (_, record, _) = Self::own_scoped_token(view.as_ref(), ctx)?;
+        let (account, _) = view
+            .get_typed(&USERS, &record.owner)?
+            .ok_or(AuthError::Unauthenticated)?;
+        let settings = self.settings();
+        let mut token = scoped_token_info(&record);
+        token.renewable &= settings.token_self_renewal();
+        token.expires_at = effective_token_expiry(record.created_at, record.expires_at, &settings);
+        Ok(OwnToken {
+            account: account.id,
+            account_name: account.name,
+            token,
+        })
+    }
+
+    /// The live scoped token of a token principal, with its key and revision.
+    fn own_scoped_token(view: &dyn ReadView, ctx: &RequestCtx) -> Result<Member, AuthError> {
+        let Principal::Token { id, owner } = ctx.principal else {
+            return Err(AuthError::Unauthenticated);
+        };
+        let (key, _) = view
+            .get_typed(&USER_SCOPED_TOKENS, &(owner, id))?
+            .ok_or(AuthError::Unauthenticated)?;
+        let (record, revision) = view
+            .get_typed(&SCOPED_TOKENS, &key)?
+            .filter(|(record, _)| !record.retired())
+            .ok_or(AuthError::Unauthenticated)?;
+        Ok((key, record, revision))
+    }
+
+    /// The members of `family` among the scoped tokens of `owner`, live and retired.
+    pub(super) fn family(
+        view: &dyn ReadView,
+        owner: UserId,
+        family: ApiTokenId,
+    ) -> Result<Vec<Member>, AuthError> {
+        let mut members = Vec::new();
+        for (_, key, _) in view.scan_typed(
+            &USER_SCOPED_TOKENS,
+            KeyRange::prefix(tenko_core::codec::encode_key(&(owner,))),
+            LIST_LIMIT,
+            false,
+        )? {
+            if let Some((record, revision)) = view.get_typed(&SCOPED_TOKENS, &key)?
+                && record.renewal.as_ref().is_some_and(|r| r.family == family)
+            {
+                members.push((key, record, revision));
+            }
+        }
+        Ok(members)
+    }
+
+    /// Stages the removal of the scoped token `id` of `owner` stored under `key`, with every
+    /// other token of its family (IAM-20), each at the revision read: a renewal committed in
+    /// between makes the write fail instead of leaving its new token behind.
+    pub(super) fn stage_token_removal(
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        owner: UserId,
+        id: ApiTokenId,
+        key: Vec<u8>,
+    ) -> Result<(), AuthError> {
+        let found = view.get_typed(&SCOPED_TOKENS, &key)?;
+        let members = match found
+            .as_ref()
+            .and_then(|(record, _)| record.renewal.as_ref())
+        {
+            Some(renewal) => Self::family(view, owner, renewal.family)?,
+            None => found
+                .map(|(record, revision)| vec![(key, record, revision)])
+                .unwrap_or_default(),
+        };
+        if members.is_empty() {
+            batch.delete_typed(&USER_SCOPED_TOKENS, &(owner, id));
+        }
+        for (member_key, member, revision) in &members {
+            batch.expect_typed(&SCOPED_TOKENS, member_key, Some(*revision));
+            batch.delete_typed(&SCOPED_TOKENS, member_key);
+            batch.delete_typed(&USER_SCOPED_TOKENS, &(owner, member.id));
+        }
+        Ok(())
+    }
+
+    /// Stages the revocation of a family: every member is removed, and the newest is kept
+    /// under its retired key with `reason` for the token list and the health warning.
+    fn stage_revocation(
+        batch: &mut WriteBatch,
+        members: &[Member],
+        reason: RevocationReason,
+        now: Timestamp,
+    ) -> Result<(), AuthError> {
+        let Some((newest_key, newest, _)) = members
+            .iter()
+            .max_by_key(|(_, record, _)| record.created_at)
+        else {
+            return Ok(());
+        };
+        let kept = if newest.retired() {
+            newest_key.clone()
+        } else {
+            retired_key(newest_key)
+        };
+        for (key, record, revision) in members {
+            batch.expect_typed(&SCOPED_TOKENS, key, Some(*revision));
+            if *key != kept {
+                batch.delete_typed(&SCOPED_TOKENS, key);
+            }
+            if record.id != newest.id {
+                batch.delete_typed(&USER_SCOPED_TOKENS, &(record.owner, record.id));
+            }
+        }
+        let mut marker = newest.clone();
+        if let Some(renewal) = marker.renewal.as_mut() {
+            renewal.revoked = Some(TokenRevocation { at: now, reason });
+        }
+        batch.put_typed(&SCOPED_TOKENS, &kept, &marker)?;
+        batch.put_typed(&USER_SCOPED_TOKENS, &(marker.owner, marker.id), &kept)?;
+        Ok(())
+    }
+
+    fn reuse_audit(
+        presented: &ScopedTokenRecord,
+        reason: RevocationReason,
+        ctx: &RequestCtx,
+    ) -> AuditDraft {
+        AuditDraft::denied(
+            actions::TOKEN_REUSE_DETECTED,
+            vec![
+                ObjectRef::from(presented.owner),
+                ObjectRef::from(presented.id),
+            ],
+        )
+        .with_source_ip(ctx.source_ip)
+        .with_context("name", presented.name.clone())
+        .with_context("reason", reason_text(reason))
+    }
+
+    /// Stages the supersede of the predecessor of `record` at its first use (IAM-20): the
+    /// predecessor moves under its retired key in the write that records the use.
+    pub(super) fn stage_supersede(
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        record: &ScopedTokenRecord,
+        now: Timestamp,
+    ) -> Result<(), AuthError> {
+        let Some(renewal) = &record.renewal else {
+            return Ok(());
+        };
+        if record.last_used_at.is_some() || renewal.family == record.id {
+            return Ok(());
+        }
+        let members = Self::family(view, record.owner, renewal.family)?;
+        // The oldest superseded members beyond RETIRED_KEPT go: reuse of a token that old is
+        // refused like an unknown one, and a family stays a bounded scan.
+        let mut superseded: Vec<&Member> = members
+            .iter()
+            .filter(|(_, member, _)| {
+                member
+                    .renewal
+                    .as_ref()
+                    .is_some_and(|r| r.superseded_at.is_some() && r.revoked.is_none())
+            })
+            .collect();
+        superseded.sort_by_key(|(_, member, _)| std::cmp::Reverse(member.created_at));
+        for (key, member, revision) in superseded.into_iter().skip(RETIRED_KEPT - 1) {
+            batch.expect_typed(&SCOPED_TOKENS, key, Some(*revision));
+            batch.delete_typed(&SCOPED_TOKENS, key);
+            batch.delete_typed(&USER_SCOPED_TOKENS, &(member.owner, member.id));
+        }
+        for (key, mut predecessor, revision) in members {
+            if predecessor.retired()
+                || predecessor.renewal.as_ref().and_then(|r| r.successor) != Some(record.id)
+            {
+                continue;
+            }
+            if let Some(renewal) = predecessor.renewal.as_mut() {
+                renewal.superseded_at = Some(now);
+            }
+            let retired = retired_key(&key);
+            batch.expect_typed(&SCOPED_TOKENS, &key, Some(revision));
+            batch.delete_typed(&SCOPED_TOKENS, &key);
+            batch.put_typed(&SCOPED_TOKENS, &retired, &predecessor)?;
+            batch.put_typed(
+                &USER_SCOPED_TOKENS,
+                &(predecessor.owner, predecessor.id),
+                &retired,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Whether a presented scoped token is refused, and what the refusal triggers: the one
+    /// place for it. The source binding comes first (IAM-21): from outside its prefixes a
+    /// token, current or retired, is refused and audited and triggers nothing else, so an
+    /// old token text found in a log cannot revoke a working integration from anywhere. A
+    /// later binding check goes beside it, before reuse detection. Only then does a retired
+    /// token count as reuse (IAM-20).
+    pub(super) async fn presentation_refused(
+        &self,
+        view: &dyn ReadView,
+        record: &ScopedTokenRecord,
+        retired: bool,
+        source_ip: Option<IpAddr>,
+        now: Timestamp,
+    ) -> bool {
+        if !record.admits_source(source_ip) {
+            self.source_refused(record, source_ip, now).await;
+            return true;
+        }
+        if retired {
+            self.retired_token_used(view, record, source_ip, now).await;
+        }
+        retired
+    }
+
+    /// A retired token was presented from inside its prefixes: a superseded one revokes its
+    /// family as reuse (IAM-20), a revoked one is only refused.
+    async fn retired_token_used(
+        &self,
+        view: &dyn ReadView,
+        record: &ScopedTokenRecord,
+        source_ip: Option<IpAddr>,
+        now: Timestamp,
+    ) {
+        let Some(renewal) = record.renewal.as_ref().filter(|r| r.revoked.is_none()) else {
+            return;
+        };
+        if renewal
+            .superseded_at
+            .is_some_and(|at| now.saturating_since(at) < SUPERSEDED_GRACE)
+        {
+            return;
+        }
+        let ctx = RequestCtx {
+            source_ip,
+            ..RequestCtx::system(SystemComponent::Auth).at(now)
+        };
+        let result = async {
+            let members = Self::family(view, record.owner, renewal.family)?;
+            let mut batch = WriteBatch::new(ctx.principal.clone(), now);
+            Self::stage_revocation(&mut batch, &members, RevocationReason::ReuseDetected, now)?;
+            batch.audit(Self::reuse_audit(
+                record,
+                RevocationReason::ReuseDetected,
+                &ctx,
+            ));
+            self.store.propose(batch).await.map_err(AuthError::from)
+        }
+        .await;
+        tracing::warn!(token = %record.id, source = ?source_ip, "a superseded token was used");
+        if let Err(error) = result
+            && !matches!(error, AuthError::Store(StoreError::PreconditionFailed(_)))
+        {
+            tracing::warn!(%error, "could not revoke a token family");
+        }
+    }
+
+    /// A token was presented from outside its source prefixes (IAM-21): audited; the caller
+    /// refuses it like an unknown token.
+    async fn source_refused(
+        &self,
+        record: &ScopedTokenRecord,
+        source_ip: Option<IpAddr>,
+        now: Timestamp,
+    ) {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+        batch.audit(
+            AuditDraft::denied(
+                actions::TOKEN_SOURCE_REFUSED,
+                vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)],
+            )
+            .with_source_ip(source_ip)
+            .with_context("name", record.name.clone()),
+        );
+        if let Err(error) = self.store.propose(batch).await {
+            tracing::warn!(%error, "could not record a token used from outside its prefixes");
+        }
+    }
+
+    /// Writes the audit record [`actions::TOKEN_EXPIRING`] once for every live
+    /// service-account token with fewer than 14 days left and no successor, and notes it on
+    /// the record. A record changed meanwhile is left for the next sweep. Returns how many
+    /// were written.
+    ///
+    /// # Errors
+    ///
+    /// A store error reading the tokens.
+    pub async fn notice_expiring_tokens(&self, now: Timestamp) -> Result<usize, AuthError> {
+        let view = self.view().await?;
+        let settings = self.settings();
+        let mut noticed = 0;
+        for (key, record, revision) in
+            view.scan_typed(&SCOPED_TOKENS, KeyRange::all(), LIST_LIMIT, false)?
+        {
+            let Some(end) = expiring_end(&record, &settings, now) else {
+                continue;
+            };
+            if record.expiry_noticed_at.is_some() || !is_service(view.as_ref(), record.owner)? {
+                continue;
+            }
+            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+            batch.expect_typed(&SCOPED_TOKENS, &key, Some(revision));
+            batch.put_typed(
+                &SCOPED_TOKENS,
+                &key,
+                &ScopedTokenRecord {
+                    expiry_noticed_at: Some(now),
+                    ..record.clone()
+                },
+            )?;
+            batch.audit(
+                AuditDraft::success(
+                    actions::TOKEN_EXPIRING,
+                    vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)],
+                )
+                .with_context("name", record.name.clone())
+                .with_context("expires_at", end.to_rfc3339()),
+            );
+            match self.store.propose(batch).await {
+                Ok(_) => noticed += 1,
+                Err(StoreError::PreconditionFailed(_)) => {}
+                Err(error) => tracing::warn!(%error, "could not note an expiring token"),
+            }
+        }
+        Ok(noticed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_prefixes_take_networks_and_host_addresses() {
+        let parsed = parse_source_prefixes(&[
+            " 192.0.2.77/24".to_owned(),
+            "2001:db8::1".to_owned(),
+            "192.0.2.0/24".to_owned(),
+        ])
+        .expect("valid prefixes");
+        assert_eq!(
+            parsed,
+            vec![
+                "192.0.2.0/24".parse::<IpNet>().expect("a network"),
+                "2001:db8::1/128".parse::<IpNet>().expect("a host"),
+            ]
+        );
+        for refused in [
+            vec!["example.test".to_owned()],
+            vec!["192.0.2.1".to_owned(); 65],
+        ] {
+            assert!(matches!(
+                parse_source_prefixes(&refused),
+                Err(AuthError::Invalid {
+                    field: "source_prefixes",
+                    ..
+                })
+            ));
+        }
+    }
+}

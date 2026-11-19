@@ -89,6 +89,13 @@ pub enum AuthError {
         /// The maximum lifetime in days.
         max_days: u64,
     },
+    /// The token may not renew (IAM-20): `disabled` (TGL-46 is off), `not_renewable` (created
+    /// without the right) or `wrong_secret`.
+    #[error("the token may not renew ({reason})")]
+    TokenRenewalRefused {
+        /// Why.
+        reason: &'static str,
+    },
     /// An object does not exist (or is not visible to the caller).
     #[error("{kind} not found")]
     NotFound {
@@ -228,6 +235,7 @@ impl Coded for AuthError {
             Self::TotpNotEnrolled => "auth.totp.not_enrolled",
             Self::TotpCodeMismatch => "auth.totp.code_mismatch",
             Self::TokenLifetime { .. } => "auth.token.lifetime_exceeded",
+            Self::TokenRenewalRefused { .. } => "auth.token.renewal_refused",
             Self::NotFound { kind } => match *kind {
                 "user" => "users.not_found",
                 "session" => "auth.session.not_found",
@@ -276,7 +284,8 @@ impl Coded for AuthError {
             | Self::PasswordIncorrect
             | Self::BreakGlassHardwareKeyOnly
             | Self::PasswordChangeRequired
-            | Self::GrantExceedsOwn => 403,
+            | Self::GrantExceedsOwn
+            | Self::TokenRenewalRefused { .. } => 403,
             Self::Denied(denied) => denied.http_status(),
             Self::PasswordPolicy(_)
             | Self::TotpCodeMismatch
@@ -317,6 +326,9 @@ impl Coded for AuthError {
             Self::WebAuthn(error) => error.params(),
             Self::TokenLifetime { max_days } => {
                 BTreeMap::from([("max_days", max_days.to_string())])
+            }
+            Self::TokenRenewalRefused { reason } => {
+                BTreeMap::from([("reason", (*reason).to_owned())])
             }
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),

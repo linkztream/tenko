@@ -9,8 +9,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use tenko_auth::{
     encoding::hex_encode as hex,
     model::{
-        ACCESS_ENDS, KNOWN_DEVICES, KnownDeviceRecord, SCOPED_TOKENS, SESSIONS, ScopedTokenRecord,
-        SessionRecord, TOKENS, TokenGrant, TokenRecord, USERS, UserRecord,
+        ACCESS_ENDS, KNOWN_DEVICES, KnownDeviceRecord, RevocationReason, SCOPED_TOKENS, SESSIONS,
+        ScopedTokenRecord, SessionRecord, TOKENS, TokenGrant, TokenRecord, TokenRenewal,
+        TokenRevocation, USERS, UserRecord,
     },
     roles::RoleName,
 };
@@ -198,6 +199,9 @@ fn a_scoped_token_record_is_pinned() {
         }],
         scopes: Vec::new(),
         generation: 0,
+        renewal: None,
+        source_prefixes: Vec::new(),
+        expiry_noticed_at: None,
     };
     let never = "ab626964500190f2a0000070008000000000000005656f776e6572500190f2a0000070008000000000000001646e616d656a6175746f6d6174696f6e6a637265617465645f617474323032362d31312d31325431303a30303a30305a6a637265617465645f6279500190f2a00000700080000000000000016a657870697265735f617474323032362d31312d31325431303a30303a30305a6c6c6173745f757365645f6174f66b6973737565645f776974686870617373776f7264667072656669786c746e6b5f6162636465666768666772616e747381a164726f6c65667669657765726673636f70657380";
     assert!(!names_a_generation(never));
@@ -207,6 +211,51 @@ fn a_scoped_token_record_is_pinned() {
         &SCOPED_TOKENS,
         &token,
         "ac626964500190f2a0000070008000000000000005656f776e6572500190f2a0000070008000000000000001646e616d656a6175746f6d6174696f6e6a637265617465645f617474323032362d31312d31325431303a30303a30305a6a637265617465645f6279500190f2a00000700080000000000000016a657870697265735f617474323032362d31312d31325431303a30303a30305a6c6c6173745f757365645f6174f66b6973737565645f776974686870617373776f7264667072656669786c746e6b5f6162636465666768666772616e747381a164726f6c65667669657765726673636f706573806a67656e65726174696f6e01",
+    );
+}
+
+/// IAM-20, IAM-21: the renewal state and the source prefixes of a scoped token, written only
+/// when set; a revocation reason a newer build writes reads as `other`.
+#[test]
+fn a_renewable_bound_token_record_is_pinned() {
+    let id = "0190f2a0-0000-7000-8000-000000000005"
+        .parse()
+        .expect("an id");
+    let token = ScopedTokenRecord {
+        id,
+        owner: user_id(),
+        name: "automation".to_owned(),
+        created_at: at(),
+        created_by: user_id(),
+        expires_at: Some(at()),
+        last_used_at: None,
+        issued_with: AuthStrength::Password,
+        prefix: "tnk_abcdefgh".to_owned(),
+        grants: Vec::new(),
+        scopes: Vec::new(),
+        generation: 0,
+        renewal: Some(TokenRenewal {
+            secret: vec![0xab; 4],
+            family: id,
+            successor: Some(id),
+            superseded_at: Some(at()),
+            failures: 2,
+            revoked: Some(TokenRevocation {
+                at: at(),
+                reason: RevocationReason::ReuseDetected,
+            }),
+        }),
+        source_prefixes: vec!["192.0.2.0/24".parse().expect("a prefix")],
+        expiry_noticed_at: Some(at()),
+    };
+    pinned(
+        &SCOPED_TOKENS,
+        &token,
+        "ae626964500190f2a0000070008000000000000005656f776e6572500190f2a0000070008000000000000001646e616d656a6175746f6d6174696f6e6a637265617465645f617474323032362d31312d31325431303a30303a30305a6a637265617465645f6279500190f2a00000700080000000000000016a657870697265735f617474323032362d31312d31325431303a30303a30305a6c6c6173745f757365645f6174f66b6973737565645f776974686870617373776f7264667072656669786c746e6b5f6162636465666768666772616e7473806673636f706573806772656e6577616ca6667365637265748418ab18ab18ab18ab6666616d696c79500190f2a000007000800000000000000569737563636573736f72500190f2a00000700080000000000000056d737570657273656465645f617474323032362d31312d31325431303a30303a30305a686661696c7572657302677265766f6b6564a262617474323032362d31312d31325431303a30303a30305a66726561736f6e6e72657573655f64657465637465646f736f757263655f707265666978657381a16256348518c00002001818716578706972795f6e6f74696365645f617474323032362d31312d31325431303a30303a30305a",
+    );
+    assert_eq!(
+        serde_json::from_str::<RevocationReason>("\"later\"").expect("tolerant"),
+        RevocationReason::Other
     );
 }
 

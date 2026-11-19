@@ -1,6 +1,6 @@
 //! Security profiles, the authentication toggles TGL-01 to TGL-07, the in-app update
-//! toggle TGL-23, the secret reveal toggle TGL-24, the audit export toggle TGL-21 and the
-//! pre-release toggle TGL-45 (SECURITY-PROFILES.md).
+//! toggle TGL-23, the secret reveal toggle TGL-24, the audit export toggle TGL-21, the
+//! pre-release toggle TGL-45 and the token renewal toggle TGL-46 (SECURITY-PROFILES.md).
 //!
 //! A profile is a bundle of toggle values, not a code path: [`Profile::defaults`] gives the
 //! values, every toggle can then be changed on its own, and [`SecuritySettings::toggles`]
@@ -82,6 +82,7 @@ impl Profile {
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
                 update_prereleases: Some(false),
+                token_self_renewal: Some(true),
                 transfer_site: None,
             },
             Self::Standard => SecuritySettings {
@@ -102,6 +103,7 @@ impl Profile {
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Fresh, false)),
                 audit_export: Some(AuditExport::Optional),
                 update_prereleases: Some(false),
+                token_self_renewal: Some(true),
                 transfer_site: None,
             },
             Self::Hardened => SecuritySettings {
@@ -122,6 +124,7 @@ impl Profile {
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Passkey, true)),
                 audit_export: Some(AuditExport::Required),
                 update_prereleases: Some(false),
+                token_self_renewal: Some(false),
                 transfer_site: None,
             },
             Self::Lab => SecuritySettings {
@@ -142,6 +145,7 @@ impl Profile {
                 secret_reveal: Some(RevealPolicy::new(RevealStepUp::Session, false)),
                 audit_export: Some(AuditExport::Local),
                 update_prereleases: Some(false),
+                token_self_renewal: Some(true),
                 transfer_site: None,
             },
         }
@@ -332,6 +336,11 @@ pub struct SecuritySettings {
     /// existed: the profile's value applies ([`SecuritySettings::update_prereleases`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub update_prereleases: Option<bool>,
+    /// TGL-46: service-account tokens may renew themselves (IAM-20). `None` in settings
+    /// stored before the toggle existed: the profile's value applies
+    /// ([`SecuritySettings::token_self_renewal`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_self_renewal: Option<bool>,
     /// TGL-10: the networks that count as the site, in CIDR notation. Under Hardened a zone
     /// transfer to an address outside them needs XoT; an empty list makes every transfer
     /// need it. Absent in settings stored before the setting existed, and after a change of
@@ -432,8 +441,16 @@ impl SecuritySettings {
             .unwrap_or(false)
     }
 
-    /// The toggles TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 with deviation and
-    /// weakness markers.
+    /// The effective TGL-46 value: the stored one, else the profile's.
+    pub fn token_self_renewal(&self) -> bool {
+        self.token_self_renewal
+            .or_else(|| self.profile.defaults().token_self_renewal)
+            .unwrap_or(false)
+    }
+
+    /// The toggles TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46 with deviation
+    /// and weakness markers.
+    #[allow(clippy::too_many_lines, reason = "one entry per toggle")]
     pub fn toggles(&self) -> Vec<ToggleState> {
         let profile = self.profile.defaults();
         let home = Profile::Home.defaults();
@@ -540,6 +557,15 @@ impl SecuritySettings {
                 "update_prereleases",
                 serde_json::Value::Bool(self.update_prereleases()),
                 serde_json::Value::Bool(profile.update_prereleases()),
+                false,
+            ),
+            // Home lets tokens renew, so no value is weaker than Home; on is a deviation
+            // under Hardened only.
+            entry(
+                "TGL-46",
+                "token_self_renewal",
+                serde_json::Value::Bool(self.token_self_renewal()),
+                serde_json::Value::Bool(profile.token_self_renewal()),
                 false,
             ),
         ]
@@ -667,6 +693,9 @@ pub struct SettingsPatch {
     /// TGL-45.
     #[serde(default)]
     pub update_prereleases: Option<bool>,
+    /// TGL-46.
+    #[serde(default)]
+    pub token_self_renewal: Option<bool>,
     /// TGL-10: the networks that count as the site, in CIDR notation; an empty list is
     /// allowed (every transfer needs XoT under Hardened).
     #[serde(default)]
@@ -730,6 +759,9 @@ impl SettingsPatch {
         }
         if let Some(on) = self.update_prereleases {
             next.update_prereleases = Some(on);
+        }
+        if let Some(on) = self.token_self_renewal {
+            next.token_self_renewal = Some(on);
         }
         if let Some(site) = &self.transfer_site {
             next.transfer_site = Some(
@@ -1173,5 +1205,37 @@ mod tests {
         }
         .apply(&on);
         assert!(!reset.update_prereleases());
+    }
+
+    /// TGL-46: on in Home, Standard and Lab, off in Hardened, the profile's value in settings
+    /// stored before it; on under Hardened is an audited deviation, never weaker than Home.
+    #[test]
+    fn token_self_renewal_follows_the_matrix_and_is_a_deviation_under_hardened() {
+        for profile in Profile::ALL {
+            let mut stored = serde_json::to_value(profile.defaults()).expect("json");
+            stored
+                .as_object_mut()
+                .expect("an object")
+                .remove("token_self_renewal");
+            let old: SecuritySettings = serde_json::from_value(stored).expect("older settings");
+            assert_eq!(
+                old.token_self_renewal(),
+                profile != Profile::Hardened,
+                "{profile:?}"
+            );
+        }
+        let hardened = Profile::Hardened.defaults();
+        let on = SettingsPatch {
+            token_self_renewal: Some(true),
+            ..SettingsPatch::default()
+        }
+        .apply(&hardened);
+        assert!(on.token_self_renewal());
+        let banner = on.banner();
+        assert_eq!(banner.deviations, vec!["TGL-46".to_owned()]);
+        assert!(!banner.weaker_than_home);
+        let audit = changes(&hardened, &on);
+        assert_eq!(audit.len(), 1);
+        assert_eq!(audit[0].field, "TGL-46");
     }
 }

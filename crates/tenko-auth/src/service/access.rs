@@ -57,6 +57,14 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
         scoped: true,
         grants: record.grants.clone(),
         scopes: record.scopes.clone(),
+        renewable: record.renewal.is_some(),
+        renewed_at: record
+            .renewal
+            .as_ref()
+            .filter(|renewal| renewal.family != record.id)
+            .map(|_| record.created_at),
+        source_prefixes: record.source_prefixes.clone(),
+        revoked: record.renewal.as_ref().and_then(|renewal| renewal.revoked),
     }
 }
 
@@ -582,7 +590,11 @@ impl AuthService {
             LIST_LIMIT,
             false,
         )? {
-            if let Some((record, _)) = view.get_typed(&SCOPED_TOKENS, &hash)? {
+            // A superseded token is kept for reuse detection only; a revoked family shows.
+            if let Some((record, _)) = view.get_typed(&SCOPED_TOKENS, &hash)?
+                && (!record.retired()
+                    || record.renewal.as_ref().is_some_and(|r| r.revoked.is_some()))
+            {
                 tokens.push(scoped_token_info(&record));
             }
         }
@@ -610,7 +622,8 @@ impl AuthService {
             .await
     }
 
-    /// `DELETE /access/service-accounts/{id}/tokens/{token}`.
+    /// `DELETE /access/service-accounts/{id}/tokens/{token}`: the token, with every other
+    /// token of its family (IAM-20); removing a revoked family acknowledges its warning.
     ///
     /// # Errors
     ///
@@ -626,8 +639,7 @@ impl AuthService {
             .get_typed(&USER_SCOPED_TOKENS, &(id, token))?
             .ok_or(AuthError::NotFound { kind: "token" })?;
         let mut batch = WriteBatch::for_request(ctx);
-        batch.delete_typed(&SCOPED_TOKENS, &hash);
-        batch.delete_typed(&USER_SCOPED_TOKENS, &(id, token));
+        Self::stage_token_removal(view.as_ref(), &mut batch, id, token, hash)?;
         batch.audit(Self::audit(
             actions::TOKEN_REVOKE,
             vec![ObjectRef::from(id), ObjectRef::from(token)],
@@ -735,10 +747,14 @@ impl AuthService {
         }
         let name: String = name.chars().take(64).collect();
         let (grants, scopes) = self.validate_token_grants(view, owner, request)?;
-        let expires_at = token_expiry(&self.settings(), request.expires_in_days, ctx.now)?;
+        let settings = self.settings();
+        let expires_at = token_expiry(&settings, request.expires_in_days, ctx.now)?;
+        let id = ApiTokenId::generate();
+        let (renewal, source_prefixes) =
+            super::renewal::creation_terms(owner, request, &settings, id)?;
         let token = new_api_token()?;
         let record = ScopedTokenRecord {
-            id: ApiTokenId::generate(),
+            id,
             owner: owner.id,
             name,
             created_at: ctx.now,
@@ -750,6 +766,9 @@ impl AuthService {
             grants,
             scopes,
             generation: owner.tokens_generation,
+            renewal: renewal.as_ref().map(|(renewal, _)| renewal.clone()),
+            source_prefixes,
+            expiry_noticed_at: None,
         };
         let hash = token.hash();
         let mut batch = WriteBatch::for_request(ctx);
@@ -786,10 +805,17 @@ impl AuthService {
         if let Some(expires_at) = expires_at {
             draft = draft.with_context("expires_at", expires_at.to_rfc3339());
         }
+        if record.renewal.is_some() {
+            draft = draft.with_context("renewable", "true");
+        }
+        if let Some(prefixes) = super::renewal::joined(&record.source_prefixes) {
+            draft = draft.with_context("source_prefixes", prefixes);
+        }
         batch.audit(draft);
         self.commit(batch).await?;
         Ok(CreatedToken {
             token: SecretString::new(token.expose()),
+            renewal_secret: renewal.map(|(_, secret)| SecretString::new(secret.expose())),
             info: scoped_token_info(&record),
         })
     }

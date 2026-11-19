@@ -1032,7 +1032,7 @@
         },
         "responses": {
           "201": {
-            "description": "The token: its secret (`tnk_...`, shown once) and its metadata",
+            "description": "The token: its secret (`tnk_...`, shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata",
             "content": {
               "application/json": {
                 "schema": {
@@ -1042,7 +1042,7 @@
             }
           },
           "400": {
-            "description": "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)",
+            "description": "The body is malformed (`sys.invalid_request`) or the name, lifetime or source prefixes are invalid (`auth.invalid_request`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1062,7 +1062,7 @@
             }
           },
           "403": {
-            "description": "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)",
+            "description": "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), a grant goes beyond the account's (`auth.grant.exceeds_own`), or `renewable` while TGL-46 is off (`auth.token.renewal_refused`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1247,6 +1247,138 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/access/token": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Describe the calling token",
+        "operationId": "describe_own_token",
+        "responses": {
+          "200": {
+            "description": "The calling scoped token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnToken"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
+      }
+    },
+    "/api/v1/access/token/renew": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Renew the calling token, shown once",
+        "operationId": "renew_own_token",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRenew"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The new token and renewal secret (shown once) and the token's metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedToken"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token (`auth.unauthenticated`, `auth.session_expired`); an endpoint that needs an interactive session refuses a bearer token the same way",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The token may not renew (`auth.token.renewal_refused`: `reason` is `disabled`, `not_renewable` or `wrong_secret`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another renewal or use of the family came first (`auth.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "token": []
+          }
+        ]
       }
     },
     "/api/v1/addresses": {
@@ -46319,7 +46451,7 @@
       },
       "CreatedToken": {
         "type": "object",
-        "description": "A new token: the secret is shown once.",
+        "description": "A new token: the secrets are shown once.",
         "required": [
           "token",
           "info"
@@ -46328,6 +46460,17 @@
           "info": {
             "$ref": "#/components/schemas/TokenInfo",
             "description": "Its metadata."
+          },
+          "renewal_secret": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SecretString",
+                "description": "IAM-20: the renewal secret of a renewable token, for `POST /access/token/renew` only."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "token": {
             "$ref": "#/components/schemas/SecretString",
@@ -66751,6 +66894,29 @@
           }
         }
       },
+      "OwnToken": {
+        "type": "object",
+        "description": "`GET /access/token`: the calling token's own description (IAM-20).",
+        "required": [
+          "account",
+          "account_name",
+          "token"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account the token acts for."
+          },
+          "account_name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenInfo",
+            "description": "The token, without its secrets; `renewable` with TGL-46 applied."
+          }
+        }
+      },
       "OwnerSource": {
         "type": "string",
         "description": "How a name got its owner.",
@@ -71828,6 +71994,32 @@
                   "type": "string",
                   "description": "The first characters of the token."
                 },
+                "renewable": {
+                  "type": "boolean",
+                  "description": "IAM-20: the token may renew itself."
+                },
+                "renewed_at": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/Timestamp",
+                      "description": "IAM-20: when a renewal made the token (its creation time); absent for the first\ntoken of a family."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "revoked": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/TokenRevocation",
+                      "description": "IAM-20: the server revoked the token's family; removing the token acknowledges it."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
                 "scoped": {
                   "type": "boolean",
                   "description": "A scoped token (IAM-10); absent for a personal token."
@@ -71838,6 +72030,13 @@
                     "$ref": "#/components/schemas/TokenScope"
                   },
                   "description": "The special scopes of a scoped token."
+                },
+                "source_prefixes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "IAM-21: the client prefixes the token is accepted from; absent for anywhere."
                 }
               }
             },
@@ -78638,6 +78837,15 @@
         "description": "Store revision: incremented by exactly one per applied write batch, store-wide. It is\nalso the SSE event id (ADR 0008, ADR 0011).\n\n`Revision(0)` is the empty store; the first batch commits as `Revision(1)`.",
         "minimum": 0
       },
+      "RevocationReason": {
+        "type": "string",
+        "description": "Why the server revoked a token family.",
+        "enum": [
+          "reuse_detected",
+          "renewal_failures",
+          "other"
+        ]
+      },
       "RoleInfo": {
         "type": "object",
         "description": "A role in `GET /roles`.",
@@ -80816,6 +81024,13 @@
             "description": "TGL-05: API token maximum lifetime in days; `None` allows non-expiring tokens.",
             "minimum": 0
           },
+          "token_self_renewal": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TGL-46: service-account tokens may renew themselves (IAM-20). `None` in settings\nstored before the toggle existed: the profile's value applies\n([`SecuritySettings::token_self_renewal`])."
+          },
           "transfer_site": {
             "type": [
               "array",
@@ -81287,6 +81502,13 @@
                 "type": "null"
               }
             ]
+          },
+          "token_self_renewal": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "TGL-46."
           },
           "transfer_site": {
             "type": [
@@ -85146,12 +85368,23 @@
             "type": "string",
             "description": "A name for the token."
           },
+          "renewable": {
+            "type": "boolean",
+            "description": "IAM-20: a service account's scoped token may renew itself under TGL-46; the answer\nthen carries its renewal secret."
+          },
           "scopes": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/TokenScope"
             },
             "description": "The special scopes of a scoped token: `metrics`, `audit:read`."
+          },
+          "source_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IAM-21: the client prefixes a scoped token is accepted from (at most\n[`SOURCE_PREFIXES_MAX`], a host address without a length); empty for anywhere."
           }
         }
       },
@@ -85234,6 +85467,32 @@
             "type": "string",
             "description": "The first characters of the token."
           },
+          "renewable": {
+            "type": "boolean",
+            "description": "IAM-20: the token may renew itself."
+          },
+          "renewed_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "IAM-20: when a renewal made the token (its creation time); absent for the first\ntoken of a family."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TokenRevocation",
+                "description": "IAM-20: the server revoked the token's family; removing the token acknowledges it."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "scoped": {
             "type": "boolean",
             "description": "A scoped token (IAM-10); absent for a personal token."
@@ -85244,6 +85503,13 @@
               "$ref": "#/components/schemas/TokenScope"
             },
             "description": "The special scopes of a scoped token."
+          },
+          "source_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "IAM-21: the client prefixes the token is accepted from; absent for anywhere."
           }
         }
       },
@@ -85273,6 +85539,37 @@
           }
         ],
         "description": "The TGL-05 value in a patch."
+      },
+      "TokenRenew": {
+        "type": "object",
+        "description": "`POST /access/token/renew` (IAM-20).",
+        "required": [
+          "renewal_secret"
+        ],
+        "properties": {
+          "renewal_secret": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The renewal secret that came with the token."
+          }
+        }
+      },
+      "TokenRevocation": {
+        "type": "object",
+        "description": "The revocation of a token family by the server (IAM-20).",
+        "required": [
+          "at",
+          "reason"
+        ],
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When the family was revoked."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/RevocationReason",
+            "description": "Why."
+          }
+        }
       },
       "TokenScope": {
         "type": "string",

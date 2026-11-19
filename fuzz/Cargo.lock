@@ -3061,6 +3061,7 @@ dependencies = [
  "bytes",
  "ciborium",
  "futures",
+ "ipnet",
  "regex",
  "reqwest",
  "rustls",

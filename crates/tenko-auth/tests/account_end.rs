@@ -330,6 +330,7 @@ async fn tokens(env: &TestEnv, own: &RequestCtx) -> [Credentials; 2] {
         expires_in_days: Some(30),
         grants,
         scopes: Vec::new(),
+        ..Default::default()
     };
     let personal = env
         .service
@@ -552,6 +553,7 @@ async fn a_session_that_authenticated_before_an_end_acts_no_more_after_it() {
                         expires_in_days: Some(30),
                         grants: None,
                         scopes: Vec::new(),
+                        ..Default::default()
                     },
                 )
                 .await

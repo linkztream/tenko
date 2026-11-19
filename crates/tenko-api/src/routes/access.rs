@@ -1,8 +1,9 @@
 //! Scoped access: grants over VRFs, sites and prefixes, delegation, service accounts and
-//! their scoped tokens, and the MFA policy per role (IAM-01, IAM-06, IAM-10).
+//! their scoped tokens with their renewal, and the MFA policy per role (IAM-01, IAM-06,
+//! IAM-10, IAM-20, IAM-21).
 //!
 //! Area: access. Owner: WP3.2.
-//! Requirements: IAM-01, IAM-06, IAM-10.
+//! Requirements: IAM-01, IAM-06, IAM-10, IAM-20, IAM-21.
 //!
 //! Grants live in `auth.grants` and scoped tokens in `auth.scoped_tokens`, tables an older
 //! build does not read, so a rollback refuses them instead of widening them (plan section
@@ -21,7 +22,9 @@
 //! | `POST /access/service-accounts` | 201 `UserInfo` | no password, passkey or session |
 //! | `GET /access/service-accounts/{id}/tokens` | 200 page of `TokenInfo` | |
 //! | `POST /access/service-accounts/{id}/tokens` | 201 `CreatedToken` | scoped tokens only; shown once |
-//! | `DELETE /access/service-accounts/{id}/tokens/{token}` | 204 | |
+//! | `DELETE /access/service-accounts/{id}/tokens/{token}` | 204 | the token's whole family |
+//! | `GET /access/token` | 200 `OwnToken` | the calling scoped token, by itself |
+//! | `POST /access/token/renew` | 200 `CreatedToken` | the calling token with its renewal secret; shown once |
 //! | `GET /access/role-policies` | 200 page of `RolePolicyView` | |
 //! | `PUT /access/role-policies/{role}` | 200 `RolePolicyView` | |
 //! | `DELETE /access/role-policies/{role}` | 200 `RolePolicyView` | the role follows the profile again |
@@ -36,8 +39,9 @@ use tenko_auth::{
     model::GrantId,
     roles::RoleName,
     service::{
-        GrantCreate, GrantView, GrantsRevoked, RolePolicyUpdate, RolePolicyView,
-        ServiceAccountCreate, SubjectSummary, TokenInfo, TokenRequest, UserInfo,
+        CreatedToken, GrantCreate, GrantView, GrantsRevoked, OwnToken, RolePolicyUpdate,
+        RolePolicyView, ServiceAccountCreate, SubjectSummary, TokenInfo, TokenRenew, TokenRequest,
+        UserInfo,
     },
 };
 use tenko_core::{ApiTokenId, UserId};
@@ -67,6 +71,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(revoke_service_account_token))
         .routes(routes!(list_role_policies))
         .routes(routes!(set_role_policy, clear_role_policy))
+        .routes(routes!(describe_own_token))
+        .routes(routes!(renew_own_token))
         // WP13.0: the directory mappings.
         .merge(mappings::routes())
 }
@@ -290,9 +296,9 @@ async fn list_service_account_tokens(
     params(("id" = String, Path, description = "Service account identifier")),
     request_body = TokenRequest,
     responses(
-        (status = 201, description = "The token: its secret (`tnk_...`, shown once) and its metadata", body = tenko_auth::service::CreatedToken),
-        (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name or lifetime is invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), or a grant goes beyond the account's (`auth.grant.exceeds_own`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 201, description = "The token: its secret (`tnk_...`, shown once), with `renewable` its renewal secret (`tnr_...`, shown once), and its metadata", body = CreatedToken),
+        (status = 400, description = "The body is malformed (`sys.invalid_request`) or the name, lifetime or source prefixes are invalid (`auth.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The caller may not administer users (`auth.forbidden`), the session is not strong enough for the caller and the account or did not authenticate within the last five minutes (`auth.step_up_required`), a grant goes beyond the account's (`auth.grant.exceeds_own`), or `renewable` while TGL-46 is off (`auth.token.renewal_refused`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such service account (`auth.service_account.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The lifetime exceeds the maximum of the profile (`auth.token.lifetime_exceeded`), a grant names a global-only role (`auth.grant.invalid_role`) or a scope that cannot be granted (`auth.grant.invalid_scope`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unauthenticated,
@@ -314,7 +320,9 @@ async fn create_service_account_token(
     )
 }
 
-/// Revokes one token of a service account. Audited as `auth.token.revoke`.
+/// Revokes a token of a service account with every other token of its family (IAM-20);
+/// removing a family the server revoked acknowledges its health warning. Audited as
+/// `auth.token.revoke`.
 #[utoipa::path(
     delete,
     path = "/access/service-accounts/{id}/tokens/{token}",
@@ -344,6 +352,63 @@ async fn revoke_service_account_token(
     let token = token.parse::<ApiTokenId>()?;
     service.revoke_account_token(&ctx, id, token).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// The calling token's own description (IAM-20): its service account, name, grants and
+/// scopes, creation and expiry, whether it may renew (TGL-46 applied) and its source
+/// prefixes. No secret and nothing about other tokens.
+#[utoipa::path(
+    get,
+    path = "/access/token",
+    tag = "access",
+    operation_id = "describe_own_token",
+    summary = "Describe the calling token",
+    responses(
+        (status = 200, description = "The calling scoped token", body = OwnToken),
+        Unauthenticated,
+        Unavailable
+    ),
+    security(("token" = []))
+)]
+async fn describe_own_token(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+) -> Result<Json<OwnToken>, RouteError> {
+    Ok(Json(service.describe_own_token(&ctx).await?))
+}
+
+/// Renews the calling token (IAM-20): with its renewal secret it becomes a new token and a
+/// new renewal secret, shown once, with the same owner, name, grants, scopes and source
+/// prefixes and the profile's lifetime from now. The calling token stays valid until the new
+/// one is first used. A superseded token or renewal secret revokes the family. The answer is
+/// never stored for an `Idempotency-Key`. Audited as `auth.token.renew`.
+#[utoipa::path(
+    post,
+    path = "/access/token/renew",
+    tag = "access",
+    operation_id = "renew_own_token",
+    summary = "Renew the calling token, shown once",
+    request_body = TokenRenew,
+    responses(
+        (status = 200, description = "The new token and renewal secret (shown once) and the token's metadata", body = CreatedToken),
+        (status = 400, description = "The body is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The token may not renew (`auth.token.renewal_refused`: `reason` is `disabled`, `not_renewable` or `wrong_secret`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "Another renewal or use of the family came first (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unauthenticated,
+        Unavailable
+    ),
+    security(("token" = []))
+)]
+async fn renew_own_token(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    ApiJson(request): ApiJson<TokenRenew>,
+) -> Result<Response, RouteError> {
+    secret_json(
+        StatusCode::OK,
+        None,
+        &service.renew_own_token(&ctx, &request).await?,
+    )
 }
 
 /// The MFA requirement of every role (IAM-06): the requirement in force, the profile's

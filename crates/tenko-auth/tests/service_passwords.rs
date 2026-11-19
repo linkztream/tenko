@@ -1558,6 +1558,7 @@ async fn a_password_change_revokes_the_accounts_tokens() {
                     scope: None,
                 }]),
                 scopes: Vec::new(),
+                ..Default::default()
             },
         )
         .await

@@ -126,6 +126,10 @@ fn token_info(record: &TokenRecord) -> TokenInfo {
         scoped: false,
         grants: Vec::new(),
         scopes: Vec::new(),
+        renewable: false,
+        renewed_at: None,
+        source_prefixes: Vec::new(),
+        revoked: None,
     }
 }
 
@@ -1109,6 +1113,13 @@ impl AuthService {
                 )
                 .await;
         }
+        // IAM-20, IAM-21: renewal and source binding belong to scoped tokens.
+        if request.renewable || !request.source_prefixes.is_empty() {
+            return Err(AuthError::invalid(
+                "grants",
+                "renewal and source prefixes need a scoped token",
+            ));
+        }
         let required = self.required_for(&user);
         if !satisfies(session.strength, required) {
             return Err(AuthError::StepUpRequired {
@@ -1147,6 +1158,7 @@ impl AuthService {
         self.commit(batch).await?;
         Ok(CreatedToken {
             token: SecretString::new(token.expose()),
+            renewal_secret: None,
             info: token_info(&record),
         })
     }
@@ -1168,8 +1180,7 @@ impl AuthService {
         // A scoped token of the caller's own.
         if let Some(hash) = Self::scoped_token_hash(view.as_ref(), caller, id)? {
             let mut batch = WriteBatch::for_request(ctx);
-            batch.delete_typed(&crate::model::SCOPED_TOKENS, &hash);
-            batch.delete_typed(&crate::model::USER_SCOPED_TOKENS, &(caller, id));
+            Self::stage_token_removal(view.as_ref(), &mut batch, caller, id, hash)?;
             batch.audit(Self::audit(
                 actions::TOKEN_REVOKE,
                 vec![ObjectRef::from(caller), ObjectRef::from(id)],

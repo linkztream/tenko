@@ -1,6 +1,7 @@
 //! Scoped access against one real `tenko serve`, black-box through the public API:
 //! IAM-01 (object-based roles scoped per prefix, with delegation), IAM-06 (the sign-in
-//! requirement per role) and IAM-10 (service accounts and scoped API tokens), as
+//! requirement per role), IAM-10 (service accounts and scoped API tokens), IAM-20 (their
+//! self-renewal) and IAM-21 (their source binding), as
 //! `docs/access.md` and ADR 0015 describe them.
 //!
 //! Every test starts its own node and builds the same small installation: a supernet
@@ -845,6 +846,109 @@ fn iam_10_the_metrics_and_audit_scopes_read_their_own_route_only() {
         anonymous.text
     );
 
+    lab.finish();
+}
+
+/// IAM-20: a renewable service-account token reads its own description, renews itself into
+/// a new token and renewal secret, and a retry of the renewal under the same
+/// `Idempotency-Key` is refused instead of answered again; the renewal secret is never a
+/// bearer token.
+#[test]
+fn iam_20_a_token_renews_itself_and_a_retry_under_its_key_is_not_replayed() {
+    let lab = Lab::new();
+    let account = lab.service_account("renewer");
+    let created = lab
+        .service_token(
+            &account,
+            &json!({ "name": "renewer", "scopes": ["metrics"], "renewable": true }),
+        )
+        .expect(201);
+    let token = created["token"].as_str().expect("the token").to_owned();
+    let secret = created["renewal_secret"]
+        .as_str()
+        .expect("the renewal secret");
+    assert!(secret.starts_with("tnr_"), "{created}");
+    let own = lab
+        .bearer(&token, Method::GET, "/access/token", None)
+        .expect(200);
+    assert_eq!(own["token"]["renewable"], true, "{own}");
+    assert_eq!(own["account_name"], "renewer", "{own}");
+    assert!(!own.to_string().contains(&token), "no secret: {own}");
+    assert!(
+        !own.to_string().contains(secret),
+        "no renewal secret: {own}"
+    );
+
+    let renew = || {
+        lab.admin.anonymous().send(
+            Method::POST,
+            "/access/token/renew",
+            Some((
+                "application/json",
+                serde_json::to_vec(&json!({ "renewal_secret": secret })).expect("JSON"),
+            )),
+            &[
+                ("Authorization", format!("Bearer {token}")),
+                ("Idempotency-Key", "renew-once".to_owned()),
+            ],
+        )
+    };
+    let renewed = renew().expect(200);
+    let next = renewed["token"].as_str().expect("a new token");
+    let next_secret = renewed["renewal_secret"].as_str().expect("a new secret");
+    assert_ne!(next, token);
+    let retry = renew();
+    assert_refused(&retry, 409, "sys.idempotency_not_replayable");
+    assert!(
+        !retry.text.contains(next),
+        "the retry never shows the new token"
+    );
+
+    lab.bearer(next, Method::GET, "/metrics", None).expect(200);
+    assert_refused(
+        &lab.bearer(next_secret, Method::GET, "/access/token", None),
+        401,
+        "auth.unauthenticated",
+    );
+    lab.finish();
+}
+
+/// IAM-21: a token bound to source prefixes acts only for a client address inside them, as
+/// the trusted proxy in front of the server reports it, IPv4 and IPv6; outside it is
+/// refused like an unknown token.
+#[test]
+fn iam_21_a_bound_token_acts_only_from_inside_its_prefixes() {
+    let lab = Lab::new();
+    let account = lab.service_account("bound");
+    let token = lab
+        .service_token(
+            &account,
+            &json!({
+                "name": "bound",
+                "scopes": ["metrics"],
+                "source_prefixes": ["198.51.100.0/24", "2001:db8:42::/48"],
+            }),
+        )
+        .expect(201)["token"]
+        .as_str()
+        .expect("the token")
+        .to_owned();
+    let from = |client: &str| {
+        lab.admin.anonymous().send(
+            Method::GET,
+            "/access/token",
+            None,
+            &[
+                ("Authorization", format!("Bearer {token}")),
+                ("X-Forwarded-For", client.to_owned()),
+            ],
+        )
+    };
+    from("198.51.100.7").expect(200);
+    from("2001:db8:42::7").expect(200);
+    for outside in ["203.0.113.7", "2001:db8:43::7"] {
+        assert_refused(&from(outside), 401, "auth.unauthenticated");
+    }
     lab.finish();
 }
 

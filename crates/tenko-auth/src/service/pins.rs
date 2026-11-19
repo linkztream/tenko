@@ -186,6 +186,9 @@ impl AuthService {
                 if let Err(error) = service.prune_known_devices(SystemClock.now()).await {
                     tracing::debug!(%error, "ended known devices could not be removed");
                 }
+                if let Err(error) = service.notice_expiring_tokens(SystemClock.now()).await {
+                    tracing::debug!(%error, "expiring tokens could not be noted");
+                }
                 if let Err(error) = service.resume_account_ends(SystemClock.now()).await {
                     tracing::warn!(%error, "the credentials of ended accounts could not be removed");
                 }

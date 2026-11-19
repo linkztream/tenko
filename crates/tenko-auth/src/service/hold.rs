@@ -98,6 +98,7 @@ impl AuthService {
                         record.owner,
                         (SCOPED_TOKENS.name().clone(), SCOPED_TOKENS.key(&hash)),
                     ),
+                    FoundToken::Retired(_) => return Err(AuthError::Unauthenticated),
                 };
                 (owner, hash, row, view.revision())
             }

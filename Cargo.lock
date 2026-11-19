@@ -3273,6 +3273,7 @@ dependencies = [
  "bytes",
  "ciborium",
  "futures",
+ "ipnet",
  "rcgen",
  "regex",
  "reqwest",

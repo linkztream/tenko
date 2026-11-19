@@ -20,8 +20,8 @@
 //! | `auth.alarms` | alarm id (UUIDv7) | [`AlarmRecord`] |
 //! | `auth.grants` | [`GrantId`] | [`GrantRecord`] (scoped grants, IAM-01) |
 //! | `auth.role_policies` | role name | [`RolePolicy`] (MFA per role, IAM-06) |
-//! | `auth.scoped_tokens` | SHA-256 of the token | [`ScopedTokenRecord`] (IAM-10) |
-//! | `auth.user_scoped_tokens` | ([`UserId`], [`ApiTokenId`]) | SHA-256 of the token |
+//! | `auth.scoped_tokens` | SHA-256 of the token, or [`retired_key`] of it | [`ScopedTokenRecord`] (IAM-10) |
+//! | `auth.user_scoped_tokens` | ([`UserId`], [`ApiTokenId`]) | the key in `auth.scoped_tokens` |
 //! | `auth.preferences` | ([`UserId`], key) | [`StoredPreference`] (the person's saved table layouts) |
 //! | `auth.known_devices` | SHA-256 of the device mark | [`KnownDeviceRecord`] |
 //! | `auth.user_known_devices` | ([`UserId`], SHA-256 of the device mark) | [`KnownDeviceId`] |
@@ -42,6 +42,11 @@
 //! are additive fields that are left out while they are zero, so the records of an account
 //! whose access never ended keep their bytes. `auth.access_ends` is an additive table: a
 //! build before it neither reads nor writes it.
+//!
+//! A renewable token (IAM-20) that was superseded or whose family was revoked is kept under
+//! [`retired_key`] of its hash, a key no presented secret hashes to: a build that does not
+//! read [`TokenRenewal`] finds no token there and refuses it, and a build that does reads it
+//! for reuse detection. The renewal fields and the source prefixes are left out while unset.
 //!
 //! `auth.preferences` is additive in the same way: a build before it does not read the
 //! table, and a backup taken before it restores with the table empty, so every table shows
@@ -407,6 +412,91 @@ pub struct ScopedTokenRecord {
     /// The account's generation when it was issued ([`UserRecord::admits`]).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub generation: u64,
+    /// The renewal right and state (IAM-20); absent for a token that never renews.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal: Option<TokenRenewal>,
+    /// The client prefixes the token is accepted from (IAM-21); empty for anywhere.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_prefixes: Vec<ipnet::IpNet>,
+    /// When the expiry warning of the token was written to the audit log.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_noticed_at: Option<Timestamp>,
+}
+
+impl ScopedTokenRecord {
+    /// Whether the token was superseded or its family revoked: it is stored under
+    /// [`retired_key`] and never acts again.
+    pub fn retired(&self) -> bool {
+        self.renewal
+            .as_ref()
+            .is_some_and(|renewal| renewal.superseded_at.is_some() || renewal.revoked.is_some())
+    }
+
+    /// Whether a request from `source` may use the token (IAM-21): always without
+    /// prefixes, else only from a known address inside one of them.
+    pub fn admits_source(&self, source: Option<IpAddr>) -> bool {
+        self.source_prefixes.is_empty()
+            || source.is_some_and(|ip| {
+                let ip = ip.to_canonical();
+                self.source_prefixes
+                    .iter()
+                    .any(|prefix| prefix.contains(&ip))
+            })
+    }
+}
+
+/// The key a superseded or revoked token is kept under in [`SCOPED_TOKENS`]: the SHA-256
+/// of a fixed label and the token's hash, which no presented secret hashes to.
+pub fn retired_key(hash: &[u8]) -> Vec<u8> {
+    use sha2::{Digest as _, Sha256};
+    Sha256::new()
+        .chain_update(b"tenko retired token ")
+        .chain_update(hash)
+        .finalize()
+        .to_vec()
+}
+
+/// The renewal right and state of a renewable token (IAM-20).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TokenRenewal {
+    /// The SHA-256 of the current renewal secret.
+    pub secret: Vec<u8>,
+    /// The first token of the family; every renewal keeps it.
+    pub family: ApiTokenId,
+    /// The token this one was last renewed into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub successor: Option<ApiTokenId>,
+    /// When the successor was first used, which superseded this token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_at: Option<Timestamp>,
+    /// Wrong renewal secrets presented with this token since it was created.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub failures: u64,
+    /// Why and when the family was revoked; kept on its newest token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revoked: Option<TokenRevocation>,
+}
+
+/// The revocation of a token family by the server (IAM-20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TokenRevocation {
+    /// When the family was revoked.
+    pub at: Timestamp,
+    /// Why.
+    pub reason: RevocationReason,
+}
+
+/// Why the server revoked a token family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RevocationReason {
+    /// A superseded token or renewal secret of the family was used.
+    ReuseDetected,
+    /// The third wrong renewal secret was presented.
+    RenewalFailures,
+    /// A reason a newer build wrote.
+    #[serde(other)]
+    Other,
 }
 
 /// How a password was set, which decides the strength of a password login.

@@ -1266,6 +1266,7 @@ async fn adding_a_factor_or_creating_a_token_needs_a_fresh_session() {
                         scope: None,
                     }]),
                     scopes: Vec::new(),
+                    ..Default::default()
                 },
             )
             .await
@@ -1338,6 +1339,7 @@ async fn creating_a_service_account_token_needs_a_fresh_session() {
             scope: None,
         }]),
         scopes: Vec::new(),
+        ..Default::default()
     };
     env.clock.advance(Duration::from_secs(6 * 60));
     let stale = env.session_ctx(&admin_session).await.expect("ctx");

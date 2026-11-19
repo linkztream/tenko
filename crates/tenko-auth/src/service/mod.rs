@@ -35,6 +35,8 @@ mod preferences;
 pub mod reveal;
 mod setup;
 pub mod types;
+// IAM-20 and IAM-21: renewal, reuse detection and source binding of scoped tokens.
+mod renewal;
 
 pub use admin::{OfflineUnlock, unlock_offline};
 pub use devices::{
@@ -42,6 +44,7 @@ pub use devices::{
 };
 pub use guard::default_hash_memory_mib;
 pub use hold::{Follow, Hold};
+pub use renewal::{RENEWAL_FAILURES_MAX, TOKEN_EXPIRING, TOKEN_REVOKED, token_warnings};
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 
 use std::{
@@ -125,6 +128,17 @@ pub mod actions {
     pub const TOKEN_CREATE: AuditAction = AuditAction::from_static("auth.token.create");
     /// A personal token revoked.
     pub const TOKEN_REVOKE: AuditAction = AuditAction::from_static("auth.token.revoke");
+    /// A token renewed itself (IAM-20); failed for a wrong renewal secret.
+    pub const TOKEN_RENEW: AuditAction = AuditAction::from_static("auth.token.renew");
+    /// A superseded token or renewal secret was used, or a third wrong renewal secret
+    /// presented: the token's family was revoked (IAM-20).
+    pub const TOKEN_REUSE_DETECTED: AuditAction =
+        AuditAction::from_static("auth.token.reuse_detected");
+    /// A token was presented from outside its source prefixes (IAM-21).
+    pub const TOKEN_SOURCE_REFUSED: AuditAction =
+        AuditAction::from_static("auth.token.source_refused");
+    /// A service-account token has fewer than 14 days left (IAM-20).
+    pub const TOKEN_EXPIRING: AuditAction = AuditAction::from_static("auth.token.expiring");
     /// A user created.
     pub const USER_CREATE: AuditAction = AuditAction::from_static("auth.user.create");
     /// A user changed.
@@ -693,20 +707,36 @@ impl AuthService {
         })
     }
 
-    /// Resolves a session cookie or bearer token (the [`Authenticator`] contract).
+    /// Resolves a session cookie or bearer token from an unknown client address: a token
+    /// bound to source prefixes is refused (IAM-21).
     ///
     /// # Errors
     ///
-    /// [`AuthError::Unauthenticated`], [`AuthError::SessionExpired`], or a store error.
+    /// As [`AuthService::authenticate_from`].
     pub async fn authenticate_credentials(
         &self,
         credentials: &Credentials,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
+        self.authenticate_from(credentials, None, now).await
+    }
+
+    /// Resolves a session cookie or bearer token presented from `source_ip` (the
+    /// [`Authenticator`] contract).
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`], [`AuthError::SessionExpired`], or a store error.
+    pub async fn authenticate_from(
+        &self,
+        credentials: &Credentials,
+        source_ip: Option<IpAddr>,
+        now: Timestamp,
+    ) -> Result<Authenticated, AuthError> {
         match credentials {
             Credentials::None => Err(AuthError::Unauthenticated),
             Credentials::Session(secret) => self.authenticate_session(secret, now).await,
-            Credentials::Bearer(token) => self.authenticate_token(token, now).await,
+            Credentials::Bearer(token) => self.authenticate_token(token, source_ip, now).await,
         }
     }
 
@@ -778,9 +808,22 @@ impl AuthService {
     async fn authenticate_token(
         &self,
         token: &str,
+        source_ip: Option<IpAddr>,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
         let (hash, found, view) = self.token_of(token, now).await?;
+        let presented = match &found {
+            FoundToken::Retired(record) => Some((record, true)),
+            FoundToken::Scoped(record, _) => Some((record, false)),
+            FoundToken::Personal(..) => None,
+        };
+        if let Some((record, retired)) = presented
+            && self
+                .presentation_refused(view.as_ref(), record, retired, source_ip, now)
+                .await
+        {
+            return Err(AuthError::Unauthenticated);
+        }
         let settings = self.settings();
         let (user, expires_at) = Self::token_holds(view.as_ref(), &found, &settings, now)?;
         let (id, strength, roles) = match &found {
@@ -797,6 +840,7 @@ impl AuthService {
                     .filter(|role| user.roles.iter().any(|held| held.covers(*role)))
                     .collect(),
             ),
+            FoundToken::Retired(_) => return Err(AuthError::Unauthenticated),
         };
         let principal = Principal::Token { id, owner: user.id };
         let mut batch = WriteBatch::new(principal.clone(), now);
@@ -810,6 +854,7 @@ impl AuthService {
                 batch.put_typed(&TOKENS, &hash, &record)?;
             }
             FoundToken::Scoped(mut record, revision) if due(record.last_used_at) => {
+                Self::stage_supersede(view.as_ref(), &mut batch, &record, now)?;
                 record.last_used_at = Some(now);
                 batch.expect_typed(&SCOPED_TOKENS, &hash, Some(revision));
                 batch.put_typed(&SCOPED_TOKENS, &hash, &*record)?;
@@ -912,6 +957,7 @@ impl AuthService {
                 record.expires_at,
                 true,
             ),
+            FoundToken::Retired(_) => return Err(AuthError::Unauthenticated),
         };
         if token_expired(created_at, expires_at, settings, now) {
             return Err(AuthError::SessionExpired);
@@ -982,9 +1028,12 @@ impl AuthService {
         if let Some((record, revision)) = view.get_typed(&TOKENS, hash)? {
             return Ok(Some(FoundToken::Personal(record, revision)));
         }
+        if let Some((record, revision)) = view.get_typed(&SCOPED_TOKENS, hash)? {
+            return Ok(Some(FoundToken::Scoped(Box::new(record), revision)));
+        }
         Ok(view
-            .get_typed(&SCOPED_TOKENS, hash)?
-            .map(|(record, revision)| FoundToken::Scoped(Box::new(record), revision)))
+            .get_typed(&SCOPED_TOKENS, &crate::model::retired_key(hash))?
+            .map(|(record, _)| FoundToken::Retired(Box::new(record))))
     }
 
     /// Records the hourly use of a token; a concurrent request may have done it already.
@@ -1125,11 +1174,11 @@ impl Authenticator for AuthService {
     fn authenticate<'a>(
         &'a self,
         credentials: &'a Credentials,
-        _source_ip: Option<IpAddr>,
+        source_ip: Option<IpAddr>,
         now: Timestamp,
     ) -> AuthFuture<'a> {
         Box::pin(async move {
-            self.authenticate_credentials(credentials, now)
+            self.authenticate_from(credentials, source_ip, now)
                 .await
                 .map_err(|error| match error {
                     AuthError::Unauthenticated if !credentials.is_present() => AuthFailure::Missing,
@@ -1177,6 +1226,8 @@ type FoundSession = (
 enum FoundToken {
     Personal(TokenRecord, tenko_core::Revision),
     Scoped(Box<ScopedTokenRecord>, tenko_core::Revision),
+    /// A superseded token or one of a revoked family (IAM-20): it never acts.
+    Retired(Box<ScopedTokenRecord>),
 }
 
 /// The end of a token under the current TGL-05 cap: a tightened cap shortens existing
