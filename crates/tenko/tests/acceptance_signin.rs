@@ -397,6 +397,44 @@ fn e2_iam_06_totp_enrolls_and_signs_in_and_a_wrong_or_replayed_code_is_refused()
     server.stop().assert_graceful_shutdown();
 }
 
+/// IAM-06 from the command line: `tenko login` with a TOTP code that comes after the
+/// server has closed the idle connection of the password step (its HTTP/1.1 head limit,
+/// one second here, 30 by default). The code goes over a new connection and the login
+/// completes.
+#[test]
+fn a_totp_code_typed_after_the_server_closed_the_idle_connection_still_signs_in() {
+    let mut node = Node::new().with_transport(Transport::InternalCa);
+    let mut server = node.start_by(|node| {
+        node.write_config();
+        let mut command = node.serve_command();
+        command.env("TENKO_SERVER__HEADER_READ_TIMEOUT_SECS", "1");
+        Proc::spawn(command)
+    });
+    let token = wait_for_setup_token(&server);
+    let mut api = Api::new(&node);
+    api.setup(&token);
+    let mut totp = api.enroll_totp();
+
+    let mut login = serve_support::tenko();
+    login
+        .args(["login", "--user", ADMIN, "--password-stdin", "--url"])
+        .arg(node.url())
+        .arg("--ca-file")
+        .arg(node.ca_file().expect("the CA file of the HTTPS node"))
+        .env("TENKO_CREDENTIALS", node.credentials_path());
+    let mut login = Proc::spawn(login);
+    login.write_stdin(&format!("{PASSWORD}\n"));
+    // Longer than the password step plus the server's one-second limit.
+    std::thread::sleep(std::time::Duration::from_secs(6));
+    login.write_stdin(&format!("{}\n", totp.code()));
+    login.close_stdin();
+    login
+        .finish(serve_support::CLIENT_TIMEOUT)
+        .assert_code(0)
+        .assert_stdout_contains(&format!("signed in to {} as {ADMIN}", node.url()));
+    server.stop().assert_graceful_shutdown();
+}
+
 /// Registers a passkey for the signed-in administrator, signs out, signs in with the
 /// assertion and checks the session. The authenticator signs the browser's origin; the
 /// relying-party ID must be `localhost` in every mode.

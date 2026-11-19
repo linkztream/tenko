@@ -12,6 +12,10 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 - The cluster port no longer resumes TLS sessions: it sends no session tickets and keeps no session cache, so every connection between nodes and controllers presents its certificate and has it checked.
 
+### Fixed
+
+- `tenko login` no longer fails with "cannot reach ... connection error" when the TOTP code comes more than 30 seconds after the password (the server's limit for an idle connection, `server.header_read_timeout_secs`): while the command waited for the code it did not notice that the server closed the connection of the password step, and sent the code over it. The same held for any command that asks something between two requests, such as the confirmation of `tenko import`. The command line now keeps watching its connections while it waits and opens a new one when the server has closed the old.
+
 ## [0.0.12-rc.4] - 2026-11-18
 
 ### Added

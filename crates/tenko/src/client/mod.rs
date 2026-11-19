@@ -838,7 +838,10 @@ pub fn block_on(
     err: &mut impl Write,
     future: impl Future<Output = Result<Output, Failure>>,
 ) -> u8 {
-    let runtime = match tokio::runtime::Builder::new_current_thread()
+    // A prompt blocks this thread; the worker keeps reading the open connections meanwhile,
+    // so one the server closed while the user typed is not reused for the next request.
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
         .enable_all()
         .build()
     {
