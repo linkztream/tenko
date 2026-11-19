@@ -14,6 +14,7 @@ default = ["server"]
 # web UI.
 server = [
   "dep:arc-swap",
+  "dep:async-trait",
   "dep:aws-lc-rs",
   "dep:axum",
   "dep:fs4",
@@ -46,6 +47,7 @@ server = [
 client = ["dep:reqwest"]
 
 [dependencies]
+async-trait = { workspace = true, optional = true }
 bytes = { workspace = true }
 # XLIFF language packs (src/i18n); outside the server feature for the fuzz target.
 quick-xml = { workspace = true }

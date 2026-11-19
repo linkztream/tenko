@@ -84,7 +84,7 @@ where
                     outcome.clone()
                 } else {
                     let https = ClientInfo::from_parts(parts).https;
-                    let credentials = credentials_for(&parts.headers, https);
+                    let credentials = credentials_of(&parts.headers, &parts.extensions, https);
                     authenticator
                         .authenticate(&credentials, source_ip, now)
                         .await
@@ -160,6 +160,36 @@ pub(crate) fn credentials_for(headers: &HeaderMap, https: bool) -> Credentials {
         .and_then(|value| value.to_str().ok());
     let session = cookie(headers, session_cookie_name(https));
     Credentials::from_headers(session, authorization)
+}
+
+/// The credentials of a request as [`credentials_for`] reads them; on the integration
+/// listener a bearer token travels with the lineage of the connection's certificate, so that a
+/// token bound to that lineage is accepted (ADR 0035, IAM-23). The lineage comes only from the
+/// handshake, never from a header.
+pub(crate) fn credentials_of(
+    headers: &HeaderMap,
+    extensions: &axum::http::Extensions,
+    https: bool,
+) -> Credentials {
+    let credentials = credentials_for(headers, https);
+    let Credentials::Bearer(token) = credentials else {
+        return credentials;
+    };
+    let lineage = extensions
+        .get::<crate::server::forwarded::ConnInfo>()
+        .and_then(|connection| connection.client.clone())
+        .and_then(|client| {
+            extensions
+                .get::<std::sync::Arc<tenko_auth::client_cert::ClientCerts>>()?
+                .index()
+                .record(&client.serial)
+                .filter(|record| record.account == client.account)
+        })
+        .map(|record| record.lineage);
+    match lineage {
+        Some(lineage) => Credentials::CertifiedBearer { token, lineage },
+        None => Credentials::Bearer(token),
+    }
 }
 
 /// The value of a session cookie of either name, the `__Host-` one first: whether the
@@ -442,7 +472,9 @@ mod tests {
                     Credentials::Session(value) if value == self.session => AuthStrength::Passkey,
                     Credentials::Bearer(value) if value == self.token => AuthStrength::Password,
                     Credentials::None => return Err(AuthFailure::Missing),
-                    Credentials::Session(_) | Credentials::Bearer(_) => {
+                    Credentials::Session(_)
+                    | Credentials::Bearer(_)
+                    | Credentials::CertifiedBearer { .. } => {
                         return Err(AuthFailure::Invalid);
                     }
                 };

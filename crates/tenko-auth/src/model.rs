@@ -421,6 +421,11 @@ pub struct ScopedTokenRecord {
     /// When the expiry warning of the token was written to the audit log.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expiry_noticed_at: Option<Timestamp>,
+    /// The certificate lineage the token is bound to (ADR 0035, IAM-23): it is accepted
+    /// only on the integration listener, over a connection whose certificate belongs to this
+    /// lineage. Set at creation, never changed; its renewals keep it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<uuid::Uuid>,
 }
 
 impl ScopedTokenRecord {
@@ -436,6 +441,18 @@ impl ScopedTokenRecord {
     /// it is then issued and accepted in the form [`crate::secret::CONSTRAINED_PREFIX`] only.
     pub fn constrained(&self) -> bool {
         self.renewal.is_some() || !self.source_prefixes.is_empty()
+    }
+
+    /// The form its text must have: bound to a lineage (`tnkb_`, which an older build
+    /// refuses whatever else the token carries), else constrained (`tnkc_`), else plain.
+    pub fn form(&self) -> crate::secret::TokenForm {
+        if self.lineage.is_some() {
+            crate::secret::TokenForm::Bound
+        } else if self.constrained() {
+            crate::secret::TokenForm::Constrained
+        } else {
+            crate::secret::TokenForm::Plain
+        }
     }
 
     /// Whether a request from `source` may use the token (IAM-21): always without

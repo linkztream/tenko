@@ -805,6 +805,18 @@ reach the controller under another name or port than the one they enrolled throu
 published port other than 8444), set `TENKO_CLUSTER__ADVERTISE='["ddi.example.org:8444"]'`.
 See [../docs/cluster.md](../docs/cluster.md) section 7.
 
+### The integration listener (8445)
+
+Integrations that authenticate with client certificates of the integration CA (ADR 0035)
+talk mutual TLS on 8445/tcp. The server opens it while an enrollment code waits or an
+integration certificate is in use. `[integrations] listen` defaults to `0.0.0.0:8445`; an
+IPv6 address listens on IPv6 only, so list `"[::]:8445"` as well when integrations come over
+IPv6, and `TENKO_INTEGRATIONS__LISTEN='[]'` keeps it closed. Publish it (`-p 8445:8445`) only
+when integrations use certificates, and allow it from the automation hosts only. TLS must
+end at the server: a layer 4 forwarder works, a proxy that terminates TLS does not, since a
+certificate a proxy forwards is never trusted. `install.sh` opens 8445/tcp on firewalld or
+ufw beside 8443 and 8444.
+
 ### A probe in a container
 
 A probe is the same image with `--roles probe`. It keeps its identity in `/var/lib/tenko`,

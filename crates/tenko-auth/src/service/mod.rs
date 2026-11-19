@@ -140,6 +140,10 @@ pub mod actions {
     /// A token was presented in a form that does not match its record: a constrained record
     /// as a plain `tnk_` token, or a plain record as `tnkc_` (IAM-20, IAM-21).
     pub const TOKEN_FORM_REFUSED: AuditAction = AuditAction::from_static("auth.token.form_refused");
+    /// A token bound to a certificate lineage was presented without a certificate of that
+    /// lineage: on the API listener, or with another certificate (ADR 0035, IAM-23).
+    pub const TOKEN_BINDING_REFUSED: AuditAction =
+        AuditAction::from_static("auth.token.binding_refused");
     /// A service-account token has fewer than 14 days left (IAM-20).
     pub const TOKEN_EXPIRING: AuditAction = AuditAction::from_static("auth.token.expiring");
     /// A user created.
@@ -742,7 +746,13 @@ impl AuthService {
         match credentials {
             Credentials::None => Err(AuthError::Unauthenticated),
             Credentials::Session(secret) => self.authenticate_session(secret, now).await,
-            Credentials::Bearer(token) => self.authenticate_token(token, source_ip, now).await,
+            Credentials::Bearer(token) => {
+                self.authenticate_token(token, source_ip, None, now).await
+            }
+            Credentials::CertifiedBearer { token, lineage } => {
+                self.authenticate_token(token, source_ip, Some(*lineage), now)
+                    .await
+            }
         }
     }
 
@@ -815,12 +825,13 @@ impl AuthService {
         &self,
         token: &str,
         source_ip: Option<IpAddr>,
+        lineage: Option<uuid::Uuid>,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
         let (hash, found, view) = self.token_of(token, now).await?;
-        let constrained = token.starts_with(crate::secret::CONSTRAINED_PREFIX);
+        let form = crate::secret::TokenForm::of(token);
         if self
-            .presentation_refused(&view, &found, constrained, source_ip, now)
+            .presentation_refused(&view, &found, form, lineage, source_ip, now)
             .await
         {
             return Err(AuthError::Unauthenticated);

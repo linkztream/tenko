@@ -73,8 +73,9 @@ pub const ENV_SEPARATOR: &str = "__";
 pub const DEFAULT_LISTEN: &str = "0.0.0.0:8443";
 
 /// The top-level keys of the file; environment variables are matched against them.
-const TOP_LEVEL_KEYS: [&str; 26] = [
+const TOP_LEVEL_KEYS: [&str; 27] = [
     "audit_export",
+    "integrations",
     "dns",
     // WP7.5: the dhcp role.
     "dhcp",
@@ -154,6 +155,8 @@ pub struct Config {
     pub updates: UpdatesSection,
     /// The node transport between controllers and data-plane nodes (OPS-04).
     pub cluster: ClusterSection,
+    /// The integration listener of client certificates (ADR 0035).
+    pub integrations: IntegrationsSection,
     /// The scanner of the probe role (SCAN-01 to SCAN-09); read by the probe itself until
     /// the controller hands out scan configuration (WP3.1).
     pub scan: tenko_scan::config::ScanConfig,
@@ -194,6 +197,7 @@ impl Default for Config {
             modules: None,
             updates: UpdatesSection::default(),
             cluster: ClusterSection::default(),
+            integrations: IntegrationsSection::default(),
             scan: tenko_scan::config::ScanConfig::default(),
             telemetry: TelemetrySection::default(),
             metrics: MetricsSection::default(),
@@ -296,6 +300,77 @@ impl Default for ClusterSection {
     }
 }
 
+/// How a listener that opens on demand opens: `key` is the setting, `listen` its value and
+/// `default` the address it opens on when the setting is absent.
+fn listen_mode(
+    key: &str,
+    listen: Option<&[String]>,
+    default: &str,
+) -> Result<ClusterListen, ConfigError> {
+    let parse = |text: &str| {
+        text.parse::<SocketAddr>().map_err(|_| {
+            ConfigError::invalid(format!(
+                "{key}: `{text}` is not an address with a port, such as {default}"
+            ))
+        })
+    };
+    match listen {
+        None => Ok(ClusterListen::OnDemand(vec![parse(default)?])),
+        Some([]) => Ok(ClusterListen::Off),
+        Some(list) => Ok(ClusterListen::Always(
+            list.iter()
+                .map(|text| parse(text))
+                .collect::<Result<_, _>>()?,
+        )),
+    }
+}
+
+/// The names of a server certificate of the internal CA: the host name (when set), further
+/// DNS names and IP addresses ([`TlsSection::certificate_names`]).
+pub type CertificateNames = (Option<String>, Vec<String>, Vec<IpAddr>);
+
+/// The default port of the integration listener on a controller.
+pub const DEFAULT_INTEGRATIONS_PORT: u16 = 8445;
+
+/// `[integrations]`: the integration listener, where integrations present the client
+/// certificates of ADR 0035.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IntegrationsSection {
+    /// Controller: socket addresses of the integration listener. Not set: port 8445 on each
+    /// host the API listens on (`server.listen`), opened while an enrollment code waits or an
+    /// integration certificate is in use. An empty list keeps it closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub listen: Option<Vec<String>>,
+}
+
+impl IntegrationsSection {
+    /// The listening mode.
+    ///
+    /// # Errors
+    ///
+    /// `config.invalid` for an address that is not an address with a port.
+    pub fn listen_mode(&self, api: &[SocketAddr]) -> Result<ClusterListen, ConfigError> {
+        if self.listen.is_none() {
+            // The API's hosts: an installation that keeps its API on loopback or one network
+            // keeps the integration listener there too.
+            let mut hosts: Vec<SocketAddr> = Vec::new();
+            for addr in api {
+                let host = SocketAddr::new(addr.ip(), DEFAULT_INTEGRATIONS_PORT);
+                if !hosts.contains(&host) {
+                    hosts.push(host);
+                }
+            }
+            return Ok(ClusterListen::OnDemand(hosts));
+        }
+        listen_mode(
+            "integrations.listen",
+            self.listen.as_deref(),
+            "0.0.0.0:8445",
+        )
+    }
+}
+
 /// How the cluster port of a controller opens.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClusterListen {
@@ -314,24 +389,11 @@ impl ClusterSection {
     ///
     /// `config.invalid` for an address that is not an address with a port.
     pub fn listen_mode(&self) -> Result<ClusterListen, ConfigError> {
-        let parse = |text: &str| {
-            text.parse::<SocketAddr>().map_err(|_| {
-                ConfigError::invalid(format!(
-                    "cluster.listen: `{text}` is not an address with a port, such as 0.0.0.0:8444"
-                ))
-            })
-        };
-        match &self.listen {
-            None => Ok(ClusterListen::OnDemand(vec![parse(
-                DEFAULT_CLUSTER_LISTEN,
-            )?])),
-            Some(list) if list.is_empty() => Ok(ClusterListen::Off),
-            Some(list) => Ok(ClusterListen::Always(
-                list.iter()
-                    .map(|text| parse(text))
-                    .collect::<Result<_, _>>()?,
-            )),
-        }
+        listen_mode(
+            "cluster.listen",
+            self.listen.as_deref(),
+            DEFAULT_CLUSTER_LISTEN,
+        )
     }
 
     fn validate(&self) -> Result<(), ConfigError> {
@@ -3437,6 +3499,17 @@ impl Config {
         let listen = self.server.listen_addrs()?;
         self.server.validate()?;
         let tls = self.tls.resolve(self.profile.name)?;
+        // Modes b and c: the integration listener, when it can open, still shows a
+        // certificate of the internal CA, with the names of `[tls]` (ADR 0035).
+        if !matches!(tls, TlsSpec::InternalCa { .. })
+            && self.integrations.listen_mode(&listen)? != ClusterListen::Off
+        {
+            self.tls.certificate_names().map_err(|error| {
+                ConfigError::invalid(format!(
+                    "{error} (in this TLS mode the integration listener's certificate carries the [tls] names; correct them, or close the listener with [integrations] listen = [])"
+                ))
+            })?;
+        }
         let (kek, kek_options) = self.kek.resolve(&data_dir)?;
         self.rate_limit
             .to_config()
@@ -3456,6 +3529,7 @@ impl Config {
         self.log.validate()?;
         self.updates.validate()?;
         self.cluster.validate()?;
+        self.integrations.listen_mode(&[])?;
         self.telemetry.validate()?;
         self.metrics.validate()?;
         self.backup.validate()?;
@@ -3620,9 +3694,39 @@ impl TlsSection {
         Ok(())
     }
 
+    /// The names of a server certificate of the internal CA, checked: `host_name` (when
+    /// set), `alt_names` and `addresses`. Mode a puts them on the API's certificate; in modes
+    /// b and c only the integration listener shows such a certificate (ADR 0035).
+    ///
+    /// # Errors
+    ///
+    /// A name that is not a host name, or an address that is not an IP address.
+    pub fn certificate_names(&self) -> Result<CertificateNames, ConfigError> {
+        let host = |key: &str, name: &str| checked_host(&format!("tls.{key}"), name);
+        let host_name = self
+            .host_name
+            .as_deref()
+            .map(|name| host("host_name", name))
+            .transpose()?;
+        let alt_names = self
+            .alt_names
+            .iter()
+            .map(|name| host("alt_names", name))
+            .collect::<Result<_, _>>()?;
+        let addresses = self
+            .addresses
+            .iter()
+            .map(|text| {
+                text.parse::<IpAddr>().map_err(|_| {
+                    ConfigError::invalid(format!("tls.addresses: `{text}` is not an IP address"))
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok((host_name, alt_names, addresses))
+    }
+
     fn resolve(&self, profile: Profile) -> Result<TlsSpec, ConfigError> {
         self.check_profile(profile)?;
-        let host = |key: &str, name: &str| checked_host(&format!("tls.{key}"), name);
         if self.watch_interval_secs == 0 || self.renew_check_hours == 0 {
             return Err(ConfigError::invalid(
                 "tls.watch_interval_secs and tls.renew_check_hours must be at least 1",
@@ -3630,28 +3734,9 @@ impl TlsSection {
         }
         match self.mode {
             TlsModeName::InternalCa => {
-                let host_name = match &self.host_name {
-                    Some(name) => host("host_name", name)?,
-                    None => "localhost".to_owned(),
-                };
-                let alt_names = self
-                    .alt_names
-                    .iter()
-                    .map(|name| host("alt_names", name))
-                    .collect::<Result<_, _>>()?;
-                let addresses = self
-                    .addresses
-                    .iter()
-                    .map(|text| {
-                        text.parse::<IpAddr>().map_err(|_| {
-                            ConfigError::invalid(format!(
-                                "tls.addresses: `{text}` is not an IP address"
-                            ))
-                        })
-                    })
-                    .collect::<Result<_, _>>()?;
+                let (host_name, alt_names, addresses) = self.certificate_names()?;
                 Ok(TlsSpec::InternalCa {
-                    host_name,
+                    host_name: host_name.unwrap_or_else(|| "localhost".to_owned()),
                     alt_names,
                     addresses,
                 })
@@ -3671,7 +3756,7 @@ impl TlsSection {
                         "tls.mode = \"reverse_proxy\" needs tls.public_host, the name clients use",
                     )
                 })?;
-                let public_host = host("public_host", public_host)?;
+                let public_host = checked_host("tls.public_host", public_host)?;
                 if self.trusted_proxies.is_empty() {
                     return Err(ConfigError::invalid(
                         "tls.mode = \"reverse_proxy\" needs tls.trusted_proxies; without them \
@@ -4058,6 +4143,63 @@ retired = [\"tenko_kek_old\"]
     }
 
     #[test]
+    fn modes_b_and_c_check_the_names_of_the_integration_listener_only_when_it_can_open() {
+        let proxy = "data_dir = \"/d\"
+[tls]
+mode = \"reverse_proxy\"
+public_host = \"ddi.example.test\"
+trusted_proxies = [\"192.0.2.1\"]
+";
+        for (names, needle) in [
+            (
+                "host_name = \"192.0.2.9\"
+",
+                "tls.host_name",
+            ),
+            (
+                "alt_names = [\"not a name\"]
+",
+                "tls.alt_names",
+            ),
+            (
+                "addresses = [\"ddi.example.test\"]
+",
+                "tls.addresses",
+            ),
+        ] {
+            let on = from_text(&format!("{proxy}{names}"), &[]).expect("parses");
+            let error = on
+                .config
+                .resolve()
+                .expect_err("checked while the listener can open");
+            assert!(error.message.contains(needle), "{names}: {error}");
+            assert!(error.message.contains("integration listener"), "{error}");
+            let off = from_text(
+                &format!(
+                    "{proxy}{names}[integrations]
+listen = []
+"
+                ),
+                &[],
+            )
+            .expect("parses");
+            off.config
+                .resolve()
+                .expect("not used with the listener closed");
+        }
+        let good = from_text(
+            &format!(
+                "{proxy}host_name = \"ddi.example.test\"
+addresses = [\"192.0.2.5\"]
+"
+            ),
+            &[],
+        )
+        .expect("parses");
+        good.config.resolve().expect("valid names");
+    }
+
+    #[test]
     fn tls_modes_need_their_fields() {
         let base = "data_dir = \"/d\"\n";
         let cases = [
@@ -4354,6 +4496,68 @@ password_hash_memory_mib = {bad}
             from_text("data_dir = \"/d\"\n[ipam.findings]\nunknown = 1\n", &[]).is_err(),
             "unknown keys are refused"
         );
+    }
+
+    #[test]
+    fn the_integration_listener_opens_on_demand_unless_told_otherwise() {
+        let default = from_text(
+            "data_dir = \"/d\"
+",
+            &[],
+        )
+        .expect("loads");
+        let api: Vec<SocketAddr> = ["0.0.0.0:8443", "[::]:8443", "0.0.0.0:9443"]
+            .iter()
+            .map(|text| text.parse().expect("address"))
+            .collect();
+        assert_eq!(
+            default.config.integrations.listen_mode(&api).expect("mode"),
+            ClusterListen::OnDemand(vec![
+                "0.0.0.0:8445".parse().expect("address"),
+                "[::]:8445".parse().expect("address"),
+            ])
+        );
+        // An API kept on loopback keeps the integration listener there.
+        assert_eq!(
+            default
+                .config
+                .integrations
+                .listen_mode(&["127.0.0.1:8443".parse().expect("address")])
+                .expect("mode"),
+            ClusterListen::OnDemand(vec!["127.0.0.1:8445".parse().expect("address")])
+        );
+        let named = from_text(
+            "data_dir = \"/d\"
+[integrations]
+listen = [\"192.0.2.5:9445\"]
+",
+            &[],
+        )
+        .expect("loads");
+        assert_eq!(
+            named.config.integrations.listen_mode(&api).expect("mode"),
+            ClusterListen::Always(vec!["192.0.2.5:9445".parse().expect("address")])
+        );
+        let off = from_text(
+            "data_dir = \"/d\"
+",
+            &[("TENKO_INTEGRATIONS__LISTEN", "[]")],
+        )
+        .expect("loads");
+        assert_eq!(
+            off.config.integrations.listen_mode(&api).expect("mode"),
+            ClusterListen::Off
+        );
+        let bad = from_text(
+            "data_dir = \"/d\"
+[integrations]
+listen = [\"8445\"]
+",
+            &[],
+        )
+        .expect("loads");
+        let error = bad.config.resolve().expect_err("not an address");
+        assert!(error.to_string().contains("integrations.listen"), "{error}");
     }
 
     #[test]

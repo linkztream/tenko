@@ -121,6 +121,14 @@
         <notes><note category="description">Token families the server revoked (IAM-20): how many. It stands until an administrator removes the revoked tokens, which the token lists show with the reason.</note></notes>
         <segment><source>The server revoked {count} token families after a reuse or wrong renewal secrets. Look into them, then remove the revoked tokens.</source></segment>
       </unit>
+      <unit id="dashboard.finding.health.integration.certificate_expiring">
+        <notes><note category="description">Integration certificates that have not renewed and expire soon (ADR 0035): how many, the host label of the first, and its end.</note></notes>
+        <segment><source>{count} integration certificates have not renewed and expire soon, the first ({label}) at {not_after}. Check the renewal timer of the host.</source></segment>
+      </unit>
+      <unit id="dashboard.finding.health.integration.tls12_allowed">
+        <notes><note category="description">The integration listener accepts TLS 1.2 (TGL-47): host certificates are then visible on the network path.</note></notes>
+        <segment><source>The integration listener accepts TLS 1.2, under which host certificates are visible on the network path. Turn it off in the security settings once no host needs it.</source></segment>
+      </unit>
       <unit id="dashboard.finding.action.resolve">
         <segment><source>Resolve conflict</source></segment>
       </unit>

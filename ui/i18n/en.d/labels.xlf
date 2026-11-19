@@ -146,6 +146,38 @@
         <notes><note category="description">What the audit action auth.setup.complete is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Complete the first-run setup</source></segment>
       </unit>
+      <unit id="audit.action.auth.client_cert.code_create">
+        <notes><note category="description">What the audit action auth.client_cert.code_create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create an integration enrollment code</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.code_withdraw">
+        <notes><note category="description">What the audit action auth.client_cert.code_withdraw is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Withdraw an integration enrollment code</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.issue">
+        <notes><note category="description">What the audit action auth.client_cert.issue is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Enroll an integration certificate</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.lapse">
+        <notes><note category="description">What the audit action auth.client_cert.lapse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Remove the tokens of a lapsed integration certificate</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.present">
+        <notes><note category="description">What the audit action auth.client_cert.present is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Put a renewed integration certificate in use</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.renew">
+        <notes><note category="description">What the audit action auth.client_cert.renew is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Renew an integration certificate</source></segment>
+      </unit>
+      <unit id="audit.action.auth.client_cert.revoke">
+        <notes><note category="description">What the audit action auth.client_cert.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Revoke an integration certificate</source></segment>
+      </unit>
+      <unit id="audit.action.auth.token.binding_refused">
+        <notes><note category="description">What the audit action auth.token.binding_refused is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a bound API token without its certificate</source></segment>
+      </unit>
       <unit id="audit.action.auth.token.create">
         <notes><note category="description">What the audit action auth.token.create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create an API token</source></segment>
@@ -217,6 +249,10 @@
       <unit id="audit.action.cluster.ca.create">
         <notes><note category="description">What the audit action cluster.ca.create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create the cluster certificate authority</source></segment>
+      </unit>
+      <unit id="audit.action.cluster.integration_ca.create">
+        <notes><note category="description">What the audit action cluster.integration_ca.create is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Create the integration certificate authority</source></segment>
       </unit>
       <unit id="audit.action.cluster.enrollment.create">
         <notes><note category="description">What the audit action cluster.enrollment.create is called in the audit log, on a record page and on the dashboard.</note></notes>

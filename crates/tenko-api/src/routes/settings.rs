@@ -18,6 +18,7 @@
 
 use axum::{
     Json,
+    extract::Query,
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
@@ -30,6 +31,7 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use super::auth::{
     ApiJson, Forbidden, RouteError, Svc, Unauthenticated, Unavailable, if_match, with_etag,
 };
+use super::dns::DryRunParams;
 use crate::{extract::Ctx, problem::ProblemDetails, state::AppState};
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
@@ -69,17 +71,18 @@ async fn get_security_settings(Svc(service): Svc, Ctx(ctx): Ctx) -> Result<Respo
 }
 
 /// Changes the profile or single toggles. Every change is audited with the old and the new
-/// value of each changed toggle.
+/// value of each changed toggle. With `dry_run` the change is decided and nothing written.
 #[utoipa::path(
     patch,
     path = "/settings/security",
     tag = "settings",
     operation_id = "update_security_settings",
     summary = "Change the security profile, toggles or deviations",
-    params(("If-Match" = Option<String>, Header, description = "The revision the client read, as in the `ETag`; a stale revision is refused with 409")),
+    description = "A change that starts to require certificate-bound service-account tokens (TGL-47, also by a switch to Hardened) removes every unbound token of a service account, audited per token as `auth.token.revoke`; the answer names them in `unbound_tokens_removed`. A dry run (`?dry_run=true`) answers the settings as they stand with the tokens the change would remove, and writes nothing. Loosening the requirement later brings none of them back.",
+    params(("If-Match" = Option<String>, Header, description = "The revision the client read, as in the `ETag`; a stale revision is refused with 409"), DryRunParams),
     request_body = SettingsPatch,
     responses(
-        (status = 200, description = "The settings after the change", body = SecuritySettingsView,
+        (status = 200, description = "The settings after the change, or as they stand after a dry run", body = SecuritySettingsView,
             headers(("ETag" = String, description = "The new revision of the settings"))),
         (status = 400, description = "The body is malformed (`sys.invalid_request`), a value is invalid (`auth.invalid_request`) or `If-Match` is malformed (`sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "`If-Match` is stale (`auth.conflict`), a PIN would be the only factor while the vault holds operator secrets (`settings.pin_coupling`), or the change would start to require the audit export while no sink is enabled (`audit.export.required`, TGL-21)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -93,14 +96,20 @@ async fn update_security_settings(
     Svc(service): Svc,
     Ctx(ctx): Ctx,
     headers: HeaderMap,
+    Query(query): Query<DryRunParams>,
     ApiJson(patch): ApiJson<SettingsPatch>,
 ) -> Result<Response, RouteError> {
     let expect = if_match(&headers)?;
-    Ok(view_response(
+    let view = if query.dry_run.unwrap_or(false) {
+        service
+            .preview_security_settings(&ctx, &patch, expect)
+            .await?
+    } else {
         service
             .update_security_settings(&ctx, &patch, expect)
-            .await?,
-    ))
+            .await?
+    };
+    Ok(view_response(view))
 }
 
 /// Sets the default UI language of the installation (API-21): a built-in language or an
@@ -204,7 +213,7 @@ mod tests {
             ids,
             [
                 "TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21",
-                "TGL-23", "TGL-24", "TGL-45", "TGL-46"
+                "TGL-23", "TGL-24", "TGL-45", "TGL-46", "TGL-47"
             ]
         );
         for toggle in toggles {
@@ -216,6 +225,49 @@ mod tests {
         assert_eq!(reply.body["banner"]["weaker_than_home"], false);
         assert_eq!(reply.body["banner"]["deviations"], json!([]));
         assert!(reply.body["vault_has_operator_secrets"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn a_dry_run_names_what_requiring_binding_removes_and_writes_nothing() {
+        let (harness, admin) = Harness::installed().await;
+        let first = revision(&read(&harness, &admin).await.body);
+        let body = json!({ "integrations": { "lifetime_days": 90, "require_binding": true, "allow_tls12": false } });
+        let preview = harness
+            .call_with(
+                "PATCH",
+                "/settings/security?dry_run=true",
+                Cookie(&admin),
+                Some(&body),
+                &[],
+            )
+            .await;
+        preview.assert_status(200);
+        assert_eq!(
+            preview.body["unbound_tokens_removed"],
+            json!({ "count": 0, "accounts": [] })
+        );
+        assert_eq!(revision(&preview.body), first);
+        assert_eq!(settings_updates(&harness).await.len(), 0);
+        let changed = harness
+            .call_with(
+                "PATCH",
+                "/settings/security",
+                Cookie(&admin),
+                Some(&body),
+                &[],
+            )
+            .await;
+        changed.assert_status(200);
+        assert_eq!(changed.body["unbound_tokens_removed"]["count"], 0);
+        assert!(revision(&changed.body) > first);
+        // An answer that requires nothing new names nothing.
+        assert!(
+            read(&harness, &admin)
+                .await
+                .body
+                .get("unbound_tokens_removed")
+                .is_none()
+        );
     }
 
     #[tokio::test]

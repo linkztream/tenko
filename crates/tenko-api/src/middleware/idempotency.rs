@@ -503,7 +503,13 @@ where
 
 /// The ceremonies that take no part (relative to [`API_BASE`]): exact paths, then path
 /// prefixes. They are safe to run again and their bodies are never fingerprinted.
-pub(crate) const CEREMONIES: [&str; 3] = ["/setup", "/auth/password/check", "/nodes/enroll"];
+pub(crate) const CEREMONIES: [&str; 5] = [
+    "/setup",
+    "/auth/password/check",
+    "/nodes/enroll",
+    "/integrations/enroll",
+    "/integrations/certificate/renew",
+];
 const CEREMONY_PREFIXES: [&str; 2] = ["/auth/login/", "/auth/webauthn/login/"];
 
 /// Whether a request is one of the [`CEREMONIES`].
@@ -524,7 +530,7 @@ fn is_ceremony(method: &Method, path: &str) -> bool {
 /// The `POST` routes (relative to [`API_BASE`]) whose secrets are plain strings in the
 /// document, not `SecretString`: request bodies, then responses. A test over the document
 /// finds every other field that looks like a secret and is not typed as one.
-pub(crate) const PLAIN_SECRETS: ([&str; 1], [&str; 4]) = (
+pub(crate) const PLAIN_SECRETS: ([&str; 1], [&str; 5]) = (
     // `KeyCreate.secret`: a TSIG secret to import.
     ["/dns/keys"],
     [
@@ -535,6 +541,8 @@ pub(crate) const PLAIN_SECRETS: ([&str; 1], [&str; 4]) = (
         // `MirrorCreated.token`: the token of the DHCP mirror's exporter.
         "/migrate/mirrors",
         "/migrate/mirrors/{id}/token",
+        // `CreatedCode.code`: an integration's enrollment code.
+        "/integrations/enrollments",
     ],
 );
 

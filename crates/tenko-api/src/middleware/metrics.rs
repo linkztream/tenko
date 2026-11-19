@@ -147,6 +147,21 @@ impl Event {
     }
 }
 
+/// Whether the document lets anybody call `method` on `route`: its security requirement is
+/// empty or holds an empty alternative.
+fn is_public(document: &serde_json::Value, route: &str, method: &str) -> bool {
+    document["paths"][route][method.to_ascii_lowercase()]["security"]
+        .as_array()
+        .is_some_and(|requirements| {
+            requirements.is_empty()
+                || requirements.iter().any(|requirement| {
+                    requirement
+                        .as_object()
+                        .is_some_and(serde_json::Map::is_empty)
+                })
+        })
+}
+
 /// The row of a request in `tenko_http_requests_total`: its route and method.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RouteRow(u16);
@@ -170,6 +185,10 @@ pub(crate) struct RouteTable {
     /// What the bodies of each row carry, for the idempotency middleware (only `POST` rows
     /// can carry anything).
     secrets: Vec<super::idempotency::SecretBodies>,
+    /// Whether each row's operation can be called without credentials (its security
+    /// requirement is empty or allows none), for the integration listener, which serves no
+    /// public operation.
+    public: Vec<bool>,
 }
 
 impl RouteTable {
@@ -245,9 +264,8 @@ impl RouteTable {
         };
         let ui = fixed_rows(UI_ROUTE);
         let other = fixed_rows(OTHER_ROUTE);
-        let secret_bodies = serde_json::to_value(document)
-            .map(|document| super::idempotency::secret_bodies(&document))
-            .unwrap_or_default();
+        let json = serde_json::to_value(document).unwrap_or_default();
+        let secret_bodies = super::idempotency::secret_bodies(&json);
         // A `POST` the document does not list (`other`) is taken as carrying secrets both
         // ways: nothing tells otherwise.
         let secrets = rows
@@ -289,7 +307,19 @@ impl RouteTable {
             ui,
             other,
             secrets,
+            public: rows
+                .iter()
+                .map(|(route, method)| is_public(&json, route, method))
+                .collect(),
         }
+    }
+
+    /// Whether a row's operation can be called without credentials.
+    pub(crate) fn is_public(&self, row: RouteRow) -> bool {
+        self.public
+            .get(usize::from(row.0))
+            .copied()
+            .unwrap_or(false)
     }
 
     /// What the bodies of a row's operation carry.

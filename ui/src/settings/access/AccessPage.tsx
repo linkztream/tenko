@@ -8,6 +8,7 @@ import { SettingsNav } from "../SettingsNav";
 import { createScopeCatalog } from "./data";
 import { GrantsSection } from "./Grants";
 import { RolesSection } from "./RolePolicies";
+import { IntegrationCertificatesSection } from "./Certificates";
 import { ServiceAccountsSection } from "./ServiceAccounts";
 import "../settings.css";
 import "./access.css";
@@ -23,6 +24,7 @@ export default function AccessPage() {
         <RolesSection />
         <GrantsSection catalog={latest(catalog)} headingId="access-grants-title" />
         <ServiceAccountsSection catalog={latest(catalog)} />
+        <IntegrationCertificatesSection />
       </div>
     </div>
   );

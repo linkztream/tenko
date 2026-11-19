@@ -130,6 +130,7 @@ fn token_info(record: &TokenRecord) -> TokenInfo {
         renewed_at: None,
         source_prefixes: Vec::new(),
         revoked: None,
+        lineage: None,
     }
 }
 

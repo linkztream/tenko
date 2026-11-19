@@ -88,7 +88,7 @@ impl AuthService {
                 let row = (SESSIONS.name().clone(), SESSIONS.key(&hash));
                 (session.user, hash, row, view.revision())
             }
-            Credentials::Bearer(token) => {
+            Credentials::Bearer(token) | Credentials::CertifiedBearer { token, .. } => {
                 let (hash, found, view) = self.token_of(token, now).await?;
                 let (owner, row) = match found {
                     FoundToken::Personal(record, _) => {
@@ -146,6 +146,14 @@ impl AuthService {
             Self::find_token(view.as_ref(), &hold.hash)?.ok_or(AuthError::Unauthenticated)?;
         let (user, until) = Self::token_holds(view.as_ref(), &found, &settings, now)?;
         if user.id != hold.owner {
+            return Err(AuthError::Unauthenticated);
+        }
+        // TGL-47 at every use: a stream held by an unbound token ends once binding is
+        // required of it (ADR 0035, decision 10).
+        if let FoundToken::Scoped(record, _) = &found
+            && record.lineage.is_none()
+            && super::access::binding_required(&user, &record.scopes, &settings)
+        {
             return Err(AuthError::Unauthenticated);
         }
         Ok(until)

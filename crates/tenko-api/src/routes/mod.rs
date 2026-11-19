@@ -97,6 +97,7 @@ pub mod host_lifecycle;
 pub mod hosts;
 pub mod i18n;
 pub mod import;
+pub mod integrations;
 pub mod jobs;
 pub mod kek;
 pub mod metrics;
@@ -258,7 +259,8 @@ pub fn router_for(modules: ModuleSet) -> OpenApiRouter<AppState> {
         .merge(audit_export::routes())
         .merge(kek::routes())
         .merge(backup::routes())
-        .merge(i18n::routes());
+        .merge(i18n::routes())
+        .merge(integrations::routes());
     if modules.contains(Module::Ipam) {
         router = router
             .merge(tenancy::routes())

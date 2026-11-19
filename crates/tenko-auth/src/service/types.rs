@@ -509,6 +509,12 @@ pub struct TokenRequest {
     /// [`SOURCE_PREFIXES_MAX`], a host address without a length); empty for anywhere.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub source_prefixes: Vec<String>,
+    /// IAM-23: the certificate lineage of the service account that the token is bound to
+    /// (ADR 0035); the token is then accepted only on the integration listener over a
+    /// connection whose certificate belongs to it. Required for service-account tokens where
+    /// TGL-47 requires binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<uuid::Uuid>,
 }
 
 /// The most source prefixes of one token (IAM-21).
@@ -575,6 +581,9 @@ pub struct TokenInfo {
     /// IAM-20: the server revoked the token's family; removing the token acknowledges it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<TokenRevocation>,
+    /// IAM-23: the certificate lineage the token is bound to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lineage: Option<uuid::Uuid>,
 }
 
 /// A new token: the secrets are shown once.
@@ -741,6 +750,32 @@ pub struct SecuritySettingsView {
     /// The revision for `If-Match`; absent before setup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<Revision>,
+    /// Only in the answer of a change, or of its dry run, that starts to require
+    /// certificate-bound service-account tokens (TGL-47): the unbound tokens it removed, or
+    /// would remove. Loosening the requirement later brings none of them back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unbound_tokens_removed: Option<UnboundTokens>,
+}
+
+/// The service-account tokens that are not bound to a certificate, which a change of TGL-47
+/// removes (ADR 0035): a token's family counts once.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct UnboundTokens {
+    /// How many tokens.
+    pub count: usize,
+    /// The accounts that lose tokens, in the order of their ids.
+    pub accounts: Vec<AccountTokens>,
+}
+
+/// The tokens one service account loses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct AccountTokens {
+    /// The service account.
+    pub account: UserId,
+    /// Its name.
+    pub name: String,
+    /// How many of its tokens.
+    pub tokens: usize,
 }
 
 /// `PUT /settings/default-language` and its answer (API-21).

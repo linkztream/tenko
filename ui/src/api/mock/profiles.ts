@@ -1,4 +1,4 @@
-// The toggle matrix TGL-01 to TGL-07, TGL-21, TGL-45 and TGL-46 of the four security profiles
+// The toggle matrix TGL-01 to TGL-07, TGL-21 and TGL-45 to TGL-47 of the four security profiles
 // (docs/SECURITY-PROFILES.md) and the rules that turn a set of settings into toggle states and a
 // banner. They mirror crates/tenko-auth/src/settings.rs. TGL-23 and TGL-24 are added by the
 // update and reveal routes (routes-updates.ts, routes-reveal-policy.ts).
@@ -48,6 +48,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: "local",
     update_prereleases: false,
     token_self_renewal: true,
+    integrations: { lifetime_days: 90, require_binding: false, allow_tls12: false },
   },
   standard: {
     profile: "standard",
@@ -63,6 +64,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: "optional",
     update_prereleases: false,
     token_self_renewal: true,
+    integrations: { lifetime_days: 30, require_binding: false, allow_tls12: false },
   },
   hardened: {
     profile: "hardened",
@@ -78,6 +80,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: "required",
     update_prereleases: false,
     token_self_renewal: false,
+    integrations: { lifetime_days: 7, require_binding: true, allow_tls12: false },
   },
   lab: {
     profile: "lab",
@@ -93,6 +96,7 @@ export const PROFILE_MATRIX: Readonly<Record<Profile, SecuritySettings>> = {
     audit_export: "local",
     update_prereleases: false,
     token_self_renewal: true,
+    integrations: { lifetime_days: 365, require_binding: false, allow_tls12: false },
   },
 };
 
@@ -126,6 +130,7 @@ export const TOGGLE_IDS = {
   audit_export: "TGL-21",
   update_prereleases: "TGL-45",
   token_self_renewal: "TGL-46",
+  integrations: "TGL-47",
 } as const;
 
 type ToggleSetting = keyof typeof TOGGLE_IDS;
@@ -202,6 +207,11 @@ export function isWeakerThanHome(setting: ToggleSetting, settings: SecuritySetti
     case "token_self_renewal":
       // Home lets tokens renew: no value is weaker than Home.
       return false;
+    case "integrations": {
+      // A longer certificate lifetime than Home's, or TLS 1.2, is weaker.
+      const value = integrationsOf(settings);
+      return value.lifetime_days > integrationsOf(HOME).lifetime_days || value.allow_tls12;
+    }
   }
 }
 
@@ -222,8 +232,14 @@ function toggleValue(setting: ToggleSetting, settings: SecuritySettings): unknow
   if (setting === "audit_export") return auditExportOf(settings);
   if (setting === "update_prereleases") return settings.update_prereleases ?? false;
   if (setting === "token_self_renewal") return tokenSelfRenewal(settings);
+  if (setting === "integrations") return integrationsOf(settings);
   if (setting === "lockout") return { mode: settings.lockout, ...lockPolicyOf(settings) };
   return setting === "token_max_days" ? (settings.token_max_days ?? null) : structuredClone(settings[setting]);
+}
+
+/** The effective TGL-47: the stored value, else the profile's. */
+export function integrationsOf(settings: SecuritySettings): NonNullable<SecuritySettings["integrations"]> {
+  return structuredClone(settings.integrations ?? PROFILE_MATRIX[settings.profile].integrations ?? { lifetime_days: 30, require_binding: false, allow_tls12: false });
 }
 
 /** The effective TGL-46: the stored value, else the profile's. */
@@ -231,7 +247,7 @@ export function tokenSelfRenewal(settings: SecuritySettings): boolean {
   return settings.token_self_renewal ?? PROFILE_MATRIX[settings.profile].token_self_renewal ?? false;
 }
 
-/** TGL-01 to TGL-07, TGL-21, TGL-45 and TGL-46 with their profile defaults, deviation and weakness markers. */
+/** TGL-01 to TGL-07, TGL-21 and TGL-45 to TGL-47 with their profile defaults, deviation and weakness markers. */
 export function toggleStates(settings: SecuritySettings): ToggleState[] {
   const profile = PROFILE_MATRIX[settings.profile];
   return (Object.keys(TOGGLE_IDS) as ToggleSetting[]).map((setting) => {

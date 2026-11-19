@@ -1,4 +1,4 @@
-// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46, docs/SECURITY-PROFILES.md): their
+// The security toggles of the UI (TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 to TGL-47, docs/SECURITY-PROFILES.md): their
 // names, how a value reads in the UI, and whether a value is weaker than the Home profile.
 // Shared by the first-run wizard (profile preview) and the security settings page.
 import type {
@@ -25,7 +25,8 @@ export type ToggleSetting =
   | "updates"
   | "secret_reveal"
   | "update_prereleases"
-  | "token_self_renewal";
+  | "token_self_renewal"
+  | "integrations";
 
 export interface ToggleDef {
   id: string;
@@ -46,10 +47,11 @@ export const TOGGLES: readonly ToggleDef[] = [
   { id: "TGL-24", setting: "secret_reveal", name: "toggles.secret_reveal.name" },
   { id: "TGL-45", setting: "update_prereleases", name: "toggles.update_prereleases.name" },
   { id: "TGL-46", setting: "token_self_renewal", name: "toggles.token_self_renewal.name" },
+  { id: "TGL-47", setting: "integrations", name: "toggles.integrations.name" },
 ];
 
 /** The number of toggles in the profile matrix (the TGL rows of docs/SECURITY-PROFILES.md); later ones arrive with their features. */
-export const TOGGLE_TOTAL = 43;
+export const TOGGLE_TOTAL = 44;
 
 export function toggleById(id: string): ToggleDef | undefined {
   return TOGGLES.find((x) => x.id === id);
@@ -71,6 +73,40 @@ export const AUDIT_EXPORT_DEFAULT: Readonly<Record<Profile, AuditExport>> = {
   hardened: "required",
   lab: "local",
 };
+
+/** TGL-47 (ADR 0035): integration certificate lifetime, required binding, TLS 1.2. */
+export type IntegrationPolicy = NonNullable<SecuritySettings["integrations"]>;
+
+/** The longest integration certificate lifetime the server takes, in days. */
+export const INTEGRATION_LIFETIME_MAX_DAYS = 365;
+
+/** The value of TGL-47 in each profile (docs/SECURITY-PROFILES.md); TLS 1.2 is off in all of them. */
+export const INTEGRATIONS_DEFAULT: Readonly<Record<Profile, IntegrationPolicy>> = {
+  home: { lifetime_days: 90, require_binding: false, allow_tls12: false },
+  standard: { lifetime_days: 30, require_binding: false, allow_tls12: false },
+  hardened: { lifetime_days: 7, require_binding: true, allow_tls12: false },
+  lab: { lifetime_days: 365, require_binding: false, allow_tls12: false },
+};
+
+/** TGL-47 of a settings object; settings without it follow their profile. */
+export function integrationsOf(settings: SecuritySettings): IntegrationPolicy {
+  return settings.integrations ?? INTEGRATIONS_DEFAULT[settings.profile];
+}
+
+/** Whether a change of TGL-47 starts to require bound tokens, which removes the unbound ones. */
+export function startsRequiringBinding(from: unknown, to: unknown): boolean {
+  return Boolean((to as IntegrationPolicy | undefined)?.require_binding) && !(from as IntegrationPolicy | undefined)?.require_binding;
+}
+
+/** How TGL-47 reads, for example "90 days · bound tokens optional · TLS 1.3 only". */
+export function formatIntegrations(value: unknown): string {
+  const v = value as IntegrationPolicy;
+  return t("toggles.integrations.value", {
+    days: v.lifetime_days,
+    binding: t(v.require_binding ? "toggles.integrations.binding_required" : "toggles.integrations.binding_optional"),
+    tls: t(v.allow_tls12 ? "toggles.integrations.tls12" : "toggles.integrations.tls13"),
+  });
+}
 
 /** TGL-46 (IAM-20): whether service-account tokens may renew themselves, per profile. */
 export const TOKEN_SELF_RENEWAL_DEFAULT: Readonly<Record<Profile, boolean>> = {
@@ -258,6 +294,8 @@ export function formatToggle(setting: string, value: unknown): string {
       return formatUpdates(value);
     case "secret_reveal":
       return formatReveal(value);
+    case "integrations":
+      return formatIntegrations(value);
     default:
       return typeof value === "string" ? value : JSON.stringify(value);
   }
@@ -314,6 +352,11 @@ export function weakerThan(setting: string, value: unknown, home: unknown): bool
     case "secret_reveal":
       // Home asks for the least that TGL-24 allows (a signed-in session), so no value is weaker.
       return false;
+    case "integrations": {
+      // A longer certificate lifetime, or TLS 1.2 on the integration listener, is weaker.
+      const v = value as IntegrationPolicy;
+      return v.lifetime_days > (home as IntegrationPolicy).lifetime_days || v.allow_tls12;
+    }
     default:
       return false;
   }
@@ -326,5 +369,6 @@ export function settingValue(settings: SecuritySettings, setting: ToggleSetting)
   if (setting === "lockout") return lockoutOf(settings);
   if (setting === "update_prereleases") return settings.update_prereleases ?? false;
   if (setting === "token_self_renewal") return settings.token_self_renewal ?? TOKEN_SELF_RENEWAL_DEFAULT[settings.profile];
+  if (setting === "integrations") return integrationsOf(settings);
   return setting === "secret_reveal" ? revealOf(settings) : settings[setting];
 }

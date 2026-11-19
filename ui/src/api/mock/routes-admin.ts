@@ -15,7 +15,7 @@ import type {
 } from "../types";
 import { parseCidr } from "../../ipam/ip";
 import { PROFILES } from "../types";
-import { forgetUser, isServiceAccount, problem, userInfoOf } from "./access-store";
+import { forgetUser, isServiceAccount, problem, unboundServiceTokens, userInfoOf } from "./access-store";
 import { clearThrottle, forgetKnownDevices, requireAdmin, requireSession, revokeUserSessions } from "./auth";
 import {
   commit,
@@ -31,7 +31,7 @@ import {
 } from "./db";
 import { ROLE_DESCRIPTIONS } from "./fixtures";
 import { checkPassword, isPinLike, normalizePassword } from "./policy";
-import { AUDIT_EXPORT_VALUES, profileSettings } from "./profiles";
+import { AUDIT_EXPORT_VALUES, integrationsOf, profileSettings } from "./profiles";
 import { created, fail, noContent, ok } from "./reply";
 import { paginate, route, wholePage } from "./route";
 import { iso, randomId, uuidHandle } from "./util";
@@ -454,6 +454,21 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   if (prereleases !== undefined) next.update_prereleases = prereleases;
   const renewal = optBool(body, "token_self_renewal");
   if (renewal !== undefined) next.token_self_renewal = renewal;
+  // TGL-47; null means "no change".
+  if (body.integrations !== undefined && body.integrations !== null) {
+    const v = body.integrations as Record<string, unknown>;
+    const days = v.lifetime_days;
+    if (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > 365) {
+      invalid("integrations", "the certificate lifetime is a whole number of days from 1 to 365");
+    }
+    if (typeof v.require_binding !== "boolean" || typeof v.allow_tls12 !== "boolean") {
+      invalid("integrations", "require_binding and allow_tls12 are true or false");
+    }
+    next.integrations = { lifetime_days: days as number, require_binding: v.require_binding as boolean, allow_tls12: v.allow_tls12 as boolean };
+  }
+  if (next.profile === "hardened" && integrationsOf(next).allow_tls12) {
+    invalid("integrations", "the Hardened profile does not allow TLS 1.2 on the integration listener");
+  }
 
   // The server's rule (`update_security_settings` in crates/tenko-auth/src/service/admin.rs, IAM-07): a change is
   // refused when the vault holds an operator secret, the result lets a PIN stand alone (a policy that admits a
@@ -462,10 +477,16 @@ const updateSecuritySettings = route("patch", "/api/v1/settings/security", async
   const touchesIt = !samePolicy(next.password_policy, db.settings.password_policy) || next.mfa !== db.settings.mfa;
   if (db.vaultHasOperatorSecrets && pinStandsAlone && touchesIt) return fail("settings.pin_coupling");
 
+  // TGL-47: starting to require bound tokens removes the unbound ones of service accounts; a dry
+  // run names them and writes nothing.
+  const dryRun = ctx.url.searchParams.get("dry_run") === "true";
+  const removes = integrationsOf(next).require_binding && !integrationsOf(db.settings).require_binding;
+  const removed = removes ? unboundServiceTokens(!dryRun) : undefined;
+  if (dryRun) return ok(wire({ ...settingsView(), unbound_tokens_removed: removed }), etag(db.settingsRevision));
   db.settings = next;
-  commit("admin", { tables: ["auth.settings"] });
+  commit("admin", { tables: removed && removed.count > 0 ? ["auth.settings", "auth.scoped_tokens"] : ["auth.settings"] });
   db.settingsRevision = db.revision;
-  return ok(wire(settingsView()), etag(db.settingsRevision));
+  return ok(wire({ ...settingsView(), unbound_tokens_removed: removed }), etag(db.settingsRevision));
 });
 
 export const adminRoutes: HttpHandler[] = [

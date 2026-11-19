@@ -9,6 +9,7 @@ use tenko_core::{
     NodeId, RequestCtx, RoleSet, Timestamp,
     audit::{AuditAction, AuditDraft},
     secret::{SecretClass, SecretRef},
+    table::TableDef,
 };
 use tenko_store::{ReadConsistency, ReadViewExt, Store, StoreError, WriteBatch};
 use tenko_vault::{SecretBytes, SecretPurpose, SecretSpec, Vault, VaultError};
@@ -28,6 +29,8 @@ pub mod tables {
     pub const CA: TableDef<(), CaRecord> = TableDef::new("cluster.ca");
     /// The server certificate of TLS mode a (singleton).
     pub const SERVER_CERT: TableDef<(), ServerCertRecord> = TableDef::new("cluster.server_cert");
+    /// The integration CA record (singleton, ADR 0035).
+    pub const INTEGRATION_CA: TableDef<(), CaRecord> = TableDef::new("cluster.integration_ca");
 }
 
 /// Vault purpose of the CA root key.
@@ -185,6 +188,146 @@ impl NodeCert {
     }
 }
 
+/// Where a root lives and how its creation is named: the roots of the internal CA and of the
+/// integration CA are created and loaded the same way from different slots.
+pub(crate) struct RootSlot {
+    /// The singleton table of its record.
+    pub(crate) table: TableDef<(), CaRecord>,
+    /// The vault purpose of its key.
+    pub(crate) purpose: SecretPurpose,
+    /// The audit action of its creation.
+    pub(crate) created: AuditAction,
+    /// The start of its common name; three random octets in hexadecimal follow.
+    pub(crate) name: &'static str,
+}
+
+/// The internal CA's root.
+const INTERNAL_ROOT: RootSlot = RootSlot {
+    table: tables::CA,
+    purpose: CA_KEY_PURPOSE,
+    created: CA_CREATE,
+    name: "Tenko DDI local CA",
+};
+
+/// A root read from its slot, with the signer of its key.
+pub(crate) struct LoadedRoot {
+    pub(crate) record: CaRecord,
+    pub(crate) root: CertificateDer<'static>,
+    pub(crate) root_info: CertInfo,
+    pub(crate) signer: Signer,
+}
+
+impl RootSlot {
+    /// Creates the root and stores it: the certificate in the slot's table, the key in the
+    /// vault, atomically, with the slot's audit record.
+    pub(crate) async fn init(
+        &self,
+        store: &dyn Store,
+        vault: &dyn Vault,
+        ctx: &RequestCtx,
+        validity_days: u32,
+    ) -> Result<LoadedRoot, CaError> {
+        let view = store.read(ReadConsistency::Local).await?;
+        if view.get_typed(&self.table, &())?.is_some() {
+            return Err(CaError::AlreadyInitialized);
+        }
+        let mut tag = [0u8; 3];
+        aws_lc_rs::rand::fill(&mut tag).map_err(|_| CaError::Generation {
+            reason: "random number generator failed".to_owned(),
+        })?;
+        let common_name = format!("{} {}", self.name, super::tls::hex(&tag));
+        let root = certs::generate_root(&common_name, ctx.now.0, validity_days)?;
+        let signer = Signer::new(&root.cert_der, &root.key_pkcs8)?;
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.expect_typed(&self.table, &(), None);
+        let key = vault.stage_put(
+            &mut batch,
+            ctx,
+            SecretClass::System,
+            SecretSpec::new(self.purpose.clone()).labeled(common_name.clone()),
+            &root.key_pkcs8,
+        )?;
+        let record = CaRecord {
+            cert_pem: pem("CERTIFICATE", &root.cert_der),
+            key,
+            created_at: ctx.now,
+        };
+        batch.put_typed(&self.table, &(), &record)?;
+        let root_info = CertInfo::from_der(&root.cert_der)?;
+        batch.audit(
+            AuditDraft::success(self.created.clone(), Vec::new())
+                .with_source_ip(ctx.source_ip)
+                .with_context("subject", root_info.subject.clone())
+                .with_context("sha256", root_info.sha256.clone()),
+        );
+        match store.propose(batch).await {
+            Ok(_) => {}
+            Err(StoreError::PreconditionFailed(_)) => return Err(CaError::AlreadyInitialized),
+            Err(error) => return Err(error.into()),
+        }
+        tracing::info!(subject = %root_info.subject, sha256 = %root_info.sha256, "certificate authority created");
+        Ok(LoadedRoot {
+            record,
+            root: root.cert_der,
+            root_info,
+            signer,
+        })
+    }
+
+    /// Loads the root, or `None` before [`init`](RootSlot::init).
+    pub(crate) async fn load(
+        &self,
+        store: &dyn Store,
+        vault: &dyn Vault,
+        ctx: &RequestCtx,
+    ) -> Result<Option<LoadedRoot>, CaError> {
+        let view = store.read(ReadConsistency::Local).await?;
+        let Some((record, _)) = view.get_typed(&self.table, &())? else {
+            return Ok(None);
+        };
+        let root = CertificateDer::from_pem_slice(record.cert_pem.as_bytes()).map_err(|e| {
+            CaError::Corrupt {
+                reason: format!("root certificate: {e}"),
+            }
+        })?;
+        let key = vault.get_system(ctx, record.key).await?;
+        let signer = Signer::new(&root, &key).map_err(|e| match e {
+            CaError::Corrupt { .. } => e,
+            other => CaError::Corrupt {
+                reason: other.to_string(),
+            },
+        })?;
+        let root_info = CertInfo::from_der(&root)?;
+        Ok(Some(LoadedRoot {
+            record,
+            root,
+            root_info,
+            signer,
+        }))
+    }
+
+    /// Loads the root, creating it on first use; two controllers that create it at the same
+    /// moment end with one root.
+    pub(crate) async fn load_or_init(
+        &self,
+        store: &dyn Store,
+        vault: &dyn Vault,
+        ctx: &RequestCtx,
+        validity_days: u32,
+    ) -> Result<LoadedRoot, CaError> {
+        if let Some(root) = self.load(store, vault, ctx).await? {
+            return Ok(root);
+        }
+        match self.init(store, vault, ctx, validity_days).await {
+            Err(CaError::AlreadyInitialized) => self
+                .load(store, vault, ctx)
+                .await?
+                .ok_or(CaError::NotInitialized),
+            other => other,
+        }
+    }
+}
+
 /// The internal certificate authority: an ECDSA P-256 root whose key is a system secret in
 /// the vault.
 pub struct InternalCa {
@@ -218,52 +361,10 @@ impl InternalCa {
         ctx: &RequestCtx,
         policy: CaPolicy,
     ) -> Result<Self, CaError> {
-        let view = store.read(ReadConsistency::Local).await?;
-        if view.get_typed(&tables::CA, &())?.is_some() {
-            return Err(CaError::AlreadyInitialized);
-        }
-        let mut tag = [0u8; 3];
-        aws_lc_rs::rand::fill(&mut tag).map_err(|_| CaError::Generation {
-            reason: "random number generator failed".to_owned(),
-        })?;
-        let common_name = format!("Tenko DDI local CA {}", super::tls::hex(&tag));
-        let root = certs::generate_root(&common_name, ctx.now.0, policy.root_validity_days)?;
-        let signer = Signer::new(&root.cert_der, &root.key_pkcs8)?;
-        let mut batch = WriteBatch::for_request(ctx);
-        batch.expect_typed(&tables::CA, &(), None);
-        let key = vault.stage_put(
-            &mut batch,
-            ctx,
-            SecretClass::System,
-            SecretSpec::new(CA_KEY_PURPOSE).labeled(common_name.clone()),
-            &root.key_pkcs8,
-        )?;
-        let record = CaRecord {
-            cert_pem: pem("CERTIFICATE", &root.cert_der),
-            key,
-            created_at: ctx.now,
-        };
-        batch.put_typed(&tables::CA, &(), &record)?;
-        let root_info = CertInfo::from_der(&root.cert_der)?;
-        batch.audit(
-            AuditDraft::success(CA_CREATE, Vec::new())
-                .with_source_ip(ctx.source_ip)
-                .with_context("subject", root_info.subject.clone())
-                .with_context("sha256", root_info.sha256.clone()),
-        );
-        match store.propose(batch).await {
-            Ok(_) => {}
-            Err(StoreError::PreconditionFailed(_)) => return Err(CaError::AlreadyInitialized),
-            Err(error) => return Err(error.into()),
-        }
-        tracing::info!(subject = %root_info.subject, sha256 = %root_info.sha256, "internal CA created");
-        Ok(Self {
-            record,
-            root: root.cert_der,
-            root_info,
-            signer,
-            policy,
-        })
+        let root = INTERNAL_ROOT
+            .init(store, vault, ctx, policy.root_validity_days)
+            .await?;
+        Ok(Self::from_root(root, policy))
     }
 
     /// Loads the CA, or `None` before [`init`](InternalCa::init).
@@ -278,30 +379,10 @@ impl InternalCa {
         ctx: &RequestCtx,
         policy: CaPolicy,
     ) -> Result<Option<Self>, CaError> {
-        let view = store.read(ReadConsistency::Local).await?;
-        let Some((record, _)) = view.get_typed(&tables::CA, &())? else {
-            return Ok(None);
-        };
-        let root = CertificateDer::from_pem_slice(record.cert_pem.as_bytes()).map_err(|e| {
-            CaError::Corrupt {
-                reason: format!("root certificate: {e}"),
-            }
-        })?;
-        let key = vault.get_system(ctx, record.key).await?;
-        let signer = Signer::new(&root, &key).map_err(|e| match e {
-            CaError::Corrupt { .. } => e,
-            other => CaError::Corrupt {
-                reason: other.to_string(),
-            },
-        })?;
-        let root_info = CertInfo::from_der(&root)?;
-        Ok(Some(Self {
-            record,
-            root,
-            root_info,
-            signer,
-            policy,
-        }))
+        Ok(INTERNAL_ROOT
+            .load(store, vault, ctx)
+            .await?
+            .map(|root| Self::from_root(root, policy)))
     }
 
     /// Loads the CA, creating it on first use.
@@ -315,14 +396,25 @@ impl InternalCa {
         ctx: &RequestCtx,
         policy: CaPolicy,
     ) -> Result<Self, CaError> {
-        if let Some(ca) = Self::load(store, vault, ctx, policy).await? {
-            return Ok(ca);
-        }
-        match Self::init(store, vault, ctx, policy).await {
-            Err(CaError::AlreadyInitialized) => Self::load(store, vault, ctx, policy)
-                .await?
-                .ok_or(CaError::NotInitialized),
-            other => other,
+        let root = INTERNAL_ROOT
+            .load_or_init(store, vault, ctx, policy.root_validity_days)
+            .await?;
+        Ok(Self::from_root(root, policy))
+    }
+
+    fn from_root(root: LoadedRoot, policy: CaPolicy) -> Self {
+        let LoadedRoot {
+            record,
+            root,
+            root_info,
+            signer,
+        } = root;
+        Self {
+            record,
+            root,
+            root_info,
+            signer,
+            policy,
         }
     }
 

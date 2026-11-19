@@ -24,9 +24,42 @@ pub const TOKEN_PREFIX: &str = "tnk_";
 /// such a token before it reads, or writes back, its record.
 pub const CONSTRAINED_PREFIX: &str = "tnkc_";
 
-/// Whether a presented bearer secret has the form of an API token, plain or constrained.
+/// Prefix of a scoped token bound to a certificate lineage (ADR 0035, IAM-23). A build that
+/// does not know binding accepts `tnk_` and `tnkc_` only, so it refuses such a token before it
+/// reads, or writes back, its record.
+pub const BOUND_PREFIX: &str = "tnkb_";
+
+/// The form of an API token's text, which must match its record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenForm {
+    /// `tnk_`: no constraint an older build does not know.
+    Plain,
+    /// `tnkc_`: renewable or bound to source prefixes (IAM-20, IAM-21).
+    Constrained,
+    /// `tnkb_`: bound to a certificate lineage (IAM-23).
+    Bound,
+}
+
+impl TokenForm {
+    /// The form of a presented text.
+    pub fn of(text: &str) -> Self {
+        if text.starts_with(BOUND_PREFIX) {
+            Self::Bound
+        } else if text.starts_with(CONSTRAINED_PREFIX) {
+            Self::Constrained
+        } else {
+            Self::Plain
+        }
+    }
+}
+
+/// Whether a presented bearer secret has the form of an API token: plain, constrained or
+/// bound.
 pub fn looks_like_api_token(text: &str) -> bool {
-    (text.starts_with(TOKEN_PREFIX) || text.starts_with(CONSTRAINED_PREFIX)) && text.len() <= 128
+    [TOKEN_PREFIX, CONSTRAINED_PREFIX, BOUND_PREFIX]
+        .iter()
+        .any(|prefix| text.starts_with(prefix))
+        && text.len() <= 128
 }
 
 /// Prefix of the renewal secrets of scoped tokens (IAM-20): never a bearer token.
@@ -90,6 +123,19 @@ pub fn new_api_token() -> Result<BearerSecret, AuthError> {
 /// [`AuthError::Internal`] if the random source fails.
 pub fn new_constrained_token() -> Result<BearerSecret, AuthError> {
     prefixed_secret(CONSTRAINED_PREFIX)
+}
+
+/// A new token of `form`: `tnk_`, `tnkc_` or `tnkb_` and 256 random bits, base64url.
+///
+/// # Errors
+///
+/// [`AuthError::Internal`] if the random source fails.
+pub fn new_token_of(form: TokenForm) -> Result<BearerSecret, AuthError> {
+    prefixed_secret(match form {
+        TokenForm::Plain => TOKEN_PREFIX,
+        TokenForm::Constrained => CONSTRAINED_PREFIX,
+        TokenForm::Bound => BOUND_PREFIX,
+    })
 }
 
 /// A new renewal secret of a scoped token (IAM-20): `tnr_` and 256 random bits, base64url.

@@ -11,7 +11,8 @@ import { toast } from "../components/toast";
 import { formatList, t } from "../i18n";
 import { ReloadedNote } from "./fields";
 import { pinCoupled, planProfileChange, PROFILE_DEFAULTS, weakerSettings } from "./profileMatrix";
-import { formatToggle } from "./toggles";
+import { formatToggle, integrationsOf, startsRequiringBinding } from "./toggles";
+import { UnboundRemoval } from "./UnboundRemoval";
 
 export function ProfileDialog(props: {
   view: SecuritySettingsView;
@@ -36,6 +37,13 @@ export function ProfileDialog(props: {
     return pinCoupled(props.view, { password_policy, mfa });
   };
   const nothing = () => same() && changes().length === 0;
+  // TGL-47: a profile that requires bound tokens removes the unbound ones; the dry run of the
+  // same switch names them, and the switch waits until it has.
+  const removalPatch = (): SettingsPatch | undefined =>
+    startsRequiringBinding(integrationsOf(props.view.settings), PROFILE_DEFAULTS[target()].integrations) ? { profile: target() } : undefined;
+  const [removing, setRemoving] = createSignal<number | undefined>();
+  const removalPending = () => removalPatch() !== undefined && removing() === undefined;
+  const removes = () => removalPatch() !== undefined && (removing() ?? 0) > 0;
   const name = () => t(`profile.${target()}.name`);
 
   const confirmLabel = () =>
@@ -49,7 +57,7 @@ export function ProfileDialog(props: {
 
   const submit = async (e: Event) => {
     e.preventDefault();
-    if (busy() || nothing() || pinRefused() || (needsAck() && !acknowledged())) return;
+    if (busy() || nothing() || pinRefused() || removalPending() || (needsAck() && !acknowledged())) return;
     setBusy(true);
     setError(null);
     const wasSame = same();
@@ -157,6 +165,7 @@ export function ProfileDialog(props: {
             <Show when={pinRefused()}>
               <Notice kind="bad" testid="profile-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
+            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} />
             <Show when={lab() && !same()}>
               <Notice kind="bad" title={t("settings.security.profile.lab_title")}>
                 {t("settings.security.profile.lab_warning")}
@@ -188,10 +197,10 @@ export function ProfileDialog(props: {
           <button
             type="submit"
             data-testid="form-submit"
-            class={lab() && !same() ? "btn danger" : "btn primary"}
-            disabled={busy() || nothing() || pinRefused() || (needsAck() && !acknowledged())}
+            class={(lab() && !same()) || removes() ? "btn danger" : "btn primary"}
+            disabled={busy() || nothing() || pinRefused() || removalPending() || (needsAck() && !acknowledged())}
           >
-            {confirmLabel()}
+            {removes() ? t("settings.security.unbound.switch_remove", { profile: name(), count: removing() ?? 0 }) : confirmLabel()}
           </button>
         </div>
       </form>

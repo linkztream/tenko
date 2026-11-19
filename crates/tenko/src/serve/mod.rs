@@ -1298,6 +1298,7 @@ async fn start(
             Ok((tls, summary))
         })
         .await?;
+    let integration_resolver = Arc::clone(&tls.integration);
     running.tasks.extend(tls.tasks);
     running.watchers.extend(tls.watchers);
 
@@ -1770,6 +1771,21 @@ async fn start(
         )
         .await?;
     running.tasks.extend(cluster.tasks());
+    // Integration client certificates (ADR 0035): the service and the task that keeps the
+    // index of its certificate records current.
+    let integration_issuer = Arc::new(tenko_api::routes::integrations::CaIssuer::new(
+        Arc::clone(&store_dyn),
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+        Arc::clone(cluster.registry().ca()),
+    ));
+    let client_certs = Arc::new(tenko_auth::client_cert::ClientCerts::new(
+        Arc::clone(&store_dyn),
+        Arc::clone(&vault) as Arc<dyn tenko_vault::Vault>,
+        Arc::clone(&integration_issuer) as Arc<dyn tenko_auth::client_cert::Issuer>,
+    ));
+    running
+        .tasks
+        .push(client_certs.follow(running.stop.subscribe()));
     leaders.extend(cluster.leader_services());
     let mut scans = steps
         .run(
@@ -1871,6 +1887,22 @@ async fn start(
             server.header_read_timeout =
                 Duration::from_secs(config.server.header_read_timeout_secs);
             server.max_connections = config.server.max_connections;
+            server.integration = integration_listener(
+                config,
+                &resolved.listen,
+                &client_certs,
+                &integration_issuer,
+                &integration_resolver,
+            );
+            server
+                .extensions
+                .insert(tenko_api::routes::integrations::ListenAddresses(
+                    server
+                        .integration
+                        .as_ref()
+                        .map(|listener| listener.listen.clone())
+                        .unwrap_or_default(),
+                ));
             server.extensions.insert(Arc::clone(&auth));
             server.extensions.insert(Arc::clone(&languages));
             if let Some(change_queue) = &change_queue {
@@ -1980,6 +2012,7 @@ async fn start(
             connectors.register(&mut server);
             connectors.publish_health(&state);
             cluster.register(&mut server, &state);
+            server.extensions.insert(Arc::clone(&client_certs));
             scans.register(&mut server);
             if let Some(reconciler) = &reconciler {
                 server.extensions.insert(Arc::clone(reconciler));
@@ -2063,6 +2096,11 @@ async fn start(
             .await
             .map_err(|error| StartError::new("api", "start.metrics.bind", error.to_string()))?;
             metrics_tasks.push(findings_task);
+            metrics_tasks.push(tenko_api::routes::integrations::spawn_expiry_alarm(
+                Arc::clone(&client_certs),
+                state.clone(),
+                metrics_stop.clone(),
+            ));
             let events = state.events().clone();
             let warnings_state = state.clone();
             let running = tenko_api::start(server, state).await.map_err(|error| {
@@ -2504,6 +2542,29 @@ fn publish_setup_token(
                 path.display()
             ),
         )
+    })
+}
+
+/// The integration listener of ADR 0035, unless `[integrations] listen = []` closes it.
+fn integration_listener(
+    config: &config::Config,
+    api: &[std::net::SocketAddr],
+    certs: &Arc<tenko_auth::client_cert::ClientCerts>,
+    issuer: &Arc<tenko_api::routes::integrations::CaIssuer>,
+    resolver: &Arc<tenko_cluster::ca::TlsResolver>,
+) -> Option<tenko_api::server::integration::IntegrationListener> {
+    // The configuration was validated at start, so the mode is known.
+    let (listen, on_demand) = match config.integrations.listen_mode(api).ok()? {
+        config::ClusterListen::Off => return None,
+        config::ClusterListen::OnDemand(listen) => (listen, true),
+        config::ClusterListen::Always(listen) => (listen, false),
+    };
+    Some(tenko_api::server::integration::IntegrationListener {
+        listen,
+        on_demand,
+        certs: Arc::clone(certs),
+        issuer: Arc::clone(issuer),
+        resolver: Arc::clone(resolver) as _,
     })
 }
 

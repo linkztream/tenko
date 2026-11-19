@@ -35,7 +35,7 @@ use crate::{
         RevocationReason, SCOPED_TOKENS, ScopedTokenRecord, TokenRenewal, TokenRevocation,
         USER_SCOPED_TOKENS, USERS, retired_key,
     },
-    secret::{BearerSecret, hash_secret, new_constrained_token, new_renewal_secret},
+    secret::{BearerSecret, hash_secret, new_renewal_secret, new_token_of},
     settings::SecuritySettings,
 };
 
@@ -327,7 +327,8 @@ impl AuthService {
         let settings = self.settings();
         let expires_at = renewed_expiry(&record, renewal, &settings, ctx.now)?;
         let grants = self.grants_still_held(view.as_ref(), &record)?;
-        let token = new_constrained_token()?;
+        // A bound family stays bound: its successors keep the lineage and the form.
+        let token = new_token_of(record.form())?;
         let (next_renewal, secret) = new_renewal(renewal.family, renewal.lifetime_secs)?;
         let next = ScopedTokenRecord {
             id: ApiTokenId::generate(),
@@ -474,6 +475,9 @@ impl AuthService {
             if let Some(reason) = reason {
                 Self::stage_revocation(&mut batch, &members, reason, ctx.now)?;
                 batch.audit(Self::reuse_audit(&record, reason, ctx));
+                if reason == RevocationReason::ReuseDetected {
+                    Self::stage_lineage_reuse(view, &mut batch, &record, ctx)?;
+                }
             } else {
                 let mut counted = record.clone();
                 if let Some(renewal) = counted.renewal.as_mut() {
@@ -820,24 +824,76 @@ impl AuthService {
         Ok(())
     }
 
+    /// The reuse of a family bound to a certificate lineage: it was presented with a key of
+    /// the lineage, so someone else holds that key, and the lineage is revoked in the same
+    /// write (ADR 0035, decision 9). Nothing for an unbound family.
+    fn stage_lineage_reuse(
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        record: &ScopedTokenRecord,
+        ctx: &RequestCtx,
+    ) -> Result<(), AuthError> {
+        let Some(lineage) = record.lineage else {
+            return Ok(());
+        };
+        let serials = crate::client_cert::revoke::stage_lineage_revocation(
+            view,
+            batch,
+            lineage,
+            "reuse of a token family bound to it",
+            ctx.now,
+        )?;
+        if !serials.is_empty() {
+            batch.audit(
+                AuditDraft::success(
+                    crate::client_cert::actions::REVOKE,
+                    vec![ObjectRef::from(record.owner)],
+                )
+                .with_source_ip(ctx.source_ip)
+                .with_context("lineage", lineage.to_string())
+                .with_context("serials", serials.join(","))
+                .with_context("reason", "reuse of a token family bound to it"),
+            );
+        }
+        Ok(())
+    }
+
+    /// Whether the settings require `record` to be bound ([`super::access::binding_required`]);
+    /// a token whose owner cannot be read counts as required, so a store error refuses.
+    fn binding_missing(&self, view: &dyn ReadView, record: &ScopedTokenRecord) -> bool {
+        let settings = self.settings();
+        if !settings.integrations().require_binding {
+            return false;
+        }
+        match view.get_typed(&USERS, &record.owner) {
+            Ok(Some((owner, _))) => {
+                super::access::binding_required(&owner, &record.scopes, &settings)
+            }
+            Ok(None) | Err(_) => true,
+        }
+    }
+
     /// Whether a presented token is refused, and what the refusal triggers: the one place
     /// for it. The bindings come first and trigger nothing but their refusal and its audit:
-    /// the form of the token text must match its record (`constrained`: presented as
-    /// `tnkc_`), and a scoped token must come from inside its source prefixes (IAM-21), so an
-    /// old token text found in a log cannot revoke a working integration from anywhere. A
-    /// later binding check goes beside them, before reuse detection. Only then does a retired
-    /// token count as reuse (IAM-20).
+    /// the form of the token text must match its record (`tnk_`, `tnkc_` or `tnkb_`), a
+    /// token bound to a certificate lineage must arrive over a connection whose certificate
+    /// belongs to that lineage (`lineage`, ADR 0035), and a scoped token must come from inside
+    /// its source prefixes (IAM-21), so an old token text found in a log cannot revoke a
+    /// working integration from anywhere, and a bound token presented without its key revokes
+    /// nothing. Only then does a retired token count as reuse (IAM-20).
     pub(super) async fn presentation_refused(
         &self,
         view: &Arc<dyn ReadView>,
         found: &super::FoundToken,
-        constrained: bool,
+        form: crate::secret::TokenForm,
+        lineage: Option<uuid::Uuid>,
         source_ip: Option<IpAddr>,
         now: Timestamp,
     ) -> bool {
         let (record, retired) = match found {
             super::FoundToken::Personal(record, _) => {
-                if constrained {
+                let refused = form != crate::secret::TokenForm::Plain;
+                if refused {
                     let objects = vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)];
                     self.refusal_audit(
                         actions::TOKEN_FORM_REFUSED,
@@ -849,15 +905,32 @@ impl AuthService {
                     )
                     .await;
                 }
-                return constrained;
+                return refused;
             }
             super::FoundToken::Scoped(record, _) => (record, false),
             super::FoundToken::Retired(record) => (record, true),
         };
         let objects = || vec![ObjectRef::from(record.owner), ObjectRef::from(record.id)];
-        if record.constrained() != constrained {
+        if record.form() != form {
             self.refusal_audit(
                 actions::TOKEN_FORM_REFUSED,
+                record.id,
+                objects(),
+                &record.name,
+                source_ip,
+                now,
+            )
+            .await;
+            return true;
+        }
+        // TGL-47: the binding a token carries, and the binding the settings require of it
+        // now, also of a token created before the requirement or on a controller that had
+        // not seen it yet (ADR 0035, decision 10).
+        if (record.lineage.is_some() && record.lineage != lineage)
+            || (record.lineage.is_none() && self.binding_missing(view.as_ref(), record))
+        {
+            self.refusal_audit(
+                actions::TOKEN_BINDING_REFUSED,
                 record.id,
                 objects(),
                 &record.name,
@@ -934,6 +1007,7 @@ impl AuthService {
                 return Ok((batch, ()));
             }
             Self::stage_revocation(&mut batch, &members, RevocationReason::ReuseDetected, now)?;
+            Self::stage_lineage_reuse(view, &mut batch, record, &ctx)?;
             Ok((batch, ()))
         };
         if let Err(error) = self.propose_decided(view, decide, audit_only()).await {

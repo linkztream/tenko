@@ -3,7 +3,7 @@
 // dialog that creates one, and the tokens of one account (`ServiceAccountTokens`, also on the
 // account's user page) with their renewal (IAM-20) and client networks (IAM-21).
 import { A } from "@solidjs/router";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, Show } from "solid-js";
 import { createStore, reconcile } from "solid-js/store";
 import { api } from "../../api/client";
 import { createLiveQuery, latest } from "../../api/live";
@@ -19,6 +19,7 @@ import { RunDialog } from "../UserDialogs";
 import { rolesText } from "../userModel";
 import { catalogNames, type ScopeCatalog } from "./data";
 import { roleName, ROLES, tokenReach, validAccountName, type RoleName, type TokenInfo, type UserInfo } from "./model";
+import { lineages, type CertRecord } from "./integrations";
 import { TokenDialog } from "./TokenDialog";
 
 export function ServiceAccountsSection(props: { catalog: ScopeCatalog | undefined }) {
@@ -124,6 +125,17 @@ export function ServiceAccountTokens(props: { account: UserInfo; catalog: ScopeC
       return { value: all.items, revision: all.revision };
     },
   });
+  // IAM-23: the account's enrolled hosts, to bind a new token to and to name a binding.
+  const [hosts] = createResource(
+    () => props.account.id,
+    (account) =>
+      api
+        .get("/api/v1/integrations/certificates", { query: { account } })
+        .then((page) => lineages(page.items as CertRecord[], Date.now()))
+        .catch(() => []),
+  );
+  const bindable = () => (hosts() ?? []).filter((host) => host.state === "active" || host.state === "expiring");
+  const hostOf = (lineage: string) => (hosts() ?? []).find((host) => host.id === lineage)?.label;
   const [creating, setCreating] = createSignal(false);
   const [revoking, setRevoking] = createSignal<TokenInfo | null>(null);
   const names = () => catalogNames(props.catalog);
@@ -192,6 +204,13 @@ export function ServiceAccountTokens(props: { account: UserInfo; catalog: ScopeC
                             <Show when={(token.source_prefixes ?? []).length > 0}>
                               <li class="mono">{t("access.token.from", { prefixes: (token.source_prefixes ?? []).join(", ") })}</li>
                             </Show>
+                            <Show when={token.lineage}>
+                              {(lineage) => (
+                                <li data-testid="access-sa-token-bound">
+                                  {t("access.token.bound_to", { host: hostOf(lineage()) ?? t("access.token.bound_unknown") })}
+                                </li>
+                              )}
+                            </Show>
                           </ul>
                         </td>
                         <td class="num">
@@ -235,6 +254,7 @@ export function ServiceAccountTokens(props: { account: UserInfo; catalog: ScopeC
       <Show when={creating()}>
         <TokenDialog
           catalog={props.catalog}
+          hosts={bindable()}
           create={(body) => api.post("/api/v1/access/service-accounts/{id}/tokens", { path: { id: props.account.id }, body })}
           onCreated={() => tokens.refetch()}
           onClose={() => setCreating(false)}

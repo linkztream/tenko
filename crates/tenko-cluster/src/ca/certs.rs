@@ -14,7 +14,7 @@ use rcgen::{
     SignatureAlgorithm, SigningKey, SubjectPublicKeyInfo, string::Ia5String,
 };
 use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
-use tenko_core::{NodeId, Role, RoleSet};
+use tenko_core::{NodeId, Role, RoleSet, UserId};
 use tenko_vault::SecretBytes;
 use time::{Duration, OffsetDateTime, UtcOffset};
 use x509_parser::{
@@ -235,6 +235,40 @@ pub(crate) fn issue_node_with_roles(
     Ok((cert, pkcs8_of(&key)))
 }
 
+/// Issues an integration certificate for the public key of a CSR (ADR 0035, decision 2):
+/// the subject `CN=tenko-integration`, one URI subject alternative name
+/// `urn:tenko:service-account:<id>`, client authentication only. The request is checked as in
+/// [`issue_node_from_csr`], its key must be in the form [`integration_request_key`] takes,
+/// and nothing but that key is used.
+pub(crate) fn issue_integration_from_csr(
+    signer: &Signer,
+    account: UserId,
+    csr_der: &[u8],
+    now: OffsetDateTime,
+    validity_days: u32,
+) -> Result<CertificateDer<'static>, CaError> {
+    let public_key = SubjectPublicKeyInfo::from_der(&integration_request_key(csr_der)?)?;
+    let mut params = leaf_params(now, validity_days)?;
+    params.distinguished_name = distinguished_name(INTEGRATION_COMMON_NAME, None);
+    params.subject_alt_names = vec![SanType::URI(Ia5String::try_from(service_account_uri(
+        account,
+    ))?)];
+    params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ClientAuth];
+    sign_leaf(signer, &params, &public_key)
+}
+
+/// The common name of every integration certificate; the account is in the URI.
+pub const INTEGRATION_COMMON_NAME: &str = "tenko-integration";
+
+/// The start of the URI subject alternative name of an integration certificate.
+pub const SERVICE_ACCOUNT_URI_PREFIX: &str = "urn:tenko:service-account:";
+
+/// The URI subject alternative name of an integration certificate:
+/// `urn:tenko:service-account:<id>`.
+pub fn service_account_uri(account: UserId) -> String {
+    format!("{SERVICE_ACCOUNT_URI_PREFIX}{account}")
+}
+
 /// A fresh ECDSA P-256 key and a PKCS#10 request over it, DER, for enrollment and renewal
 /// on the node. The request names nothing: the CA takes only the key.
 ///
@@ -393,6 +427,38 @@ fn sign_leaf(
 /// takes nothing from the request but the key, so the request is read with `x509-parser`
 /// directly and its extensions are left alone.
 pub(crate) fn csr_public_key(csr_der: &[u8]) -> Result<SubjectPublicKeyInfo, CaError> {
+    csr_key(csr_der).map(|(key, _)| key)
+}
+
+/// The DER of an ECDSA P-256 `SubjectPublicKeyInfo` up to its point, with the point
+/// uncompressed (`04`): 27 octets, then the two 32-octet coordinates.
+const P256_SPKI_PREFIX: [u8; 27] = [
+    0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08, 0x2a,
+    0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00, 0x04,
+];
+
+/// The `SubjectPublicKeyInfo` of an integration's request, DER, after the checks of
+/// [`csr_public_key`], in its one canonical form (named curve, uncompressed point): the
+/// bytes the enrollment proof covers and whose SHA-256 is the key digest, so that the same
+/// key never has two digests (ADR 0035, decisions 5 and 9).
+///
+/// # Errors
+///
+/// [`CaError::InvalidCsr`], also for a P-256 key in another encoding.
+pub fn integration_request_key(csr_der: &[u8]) -> Result<Vec<u8>, CaError> {
+    let (_, raw) = csr_key(csr_der)?;
+    if raw.len() != P256_SPKI_PREFIX.len() + 64 || !raw.starts_with(&P256_SPKI_PREFIX) {
+        return Err(CaError::InvalidCsr {
+            reason: "the public key is not a named-curve P-256 key with an uncompressed point"
+                .to_owned(),
+        });
+    }
+    Ok(raw)
+}
+
+/// The key of a request whose self-signature verifies, with the DER of its
+/// `SubjectPublicKeyInfo` as the request carries it.
+fn csr_key(csr_der: &[u8]) -> Result<(SubjectPublicKeyInfo, Vec<u8>), CaError> {
     let invalid = |reason: String| CaError::InvalidCsr { reason };
     let (rest, csr) = X509CertificationRequest::from_der(csr_der)
         .map_err(|e| invalid(format!("it cannot be parsed: {e}")))?;
@@ -408,7 +474,7 @@ pub(crate) fn csr_public_key(csr_der: &[u8]) -> Result<SubjectPublicKeyInfo, CaE
             "the public key is not an ECDSA P-256 key".to_owned(),
         ));
     }
-    Ok(key)
+    Ok((key, csr.certification_request_info.subject_pki.raw.to_vec()))
 }
 
 /// Validates the names of a server identity and returns them as subject alternative names:

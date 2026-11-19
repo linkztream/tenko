@@ -850,6 +850,12 @@ async fn a_switch_to_hardened_stops_renewal() {
             &SettingsPatch {
                 profile: Some(Profile::Hardened),
                 audit_export: Some(tenko_auth::settings::AuditExport::Optional),
+                // Hardened requires certificate-bound tokens and would remove this one
+                // (TGL-47); the deviation keeps it, so that TGL-46 is what refuses.
+                integrations: Some(tenko_auth::client_cert::model::IntegrationPolicy {
+                    require_binding: false,
+                    ..tenko_auth::client_cert::model::IntegrationPolicy::of(Profile::Hardened)
+                }),
                 ..SettingsPatch::default()
             },
             None,

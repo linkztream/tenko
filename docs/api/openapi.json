@@ -22019,6 +22019,530 @@
         }
       }
     },
+    "/api/v1/integrations/ca": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "The root of the integration listener",
+        "operationId": "integration_server_root",
+        "responses": {
+          "200": {
+            "description": "The internal root, PEM",
+            "content": {
+              "application/x-pem-file": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/integrations/certificate/renew": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Renew an integration certificate",
+        "operationId": "renew_integration_certificate",
+        "requestBody": {
+          "content": {
+            "application/pkcs10": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Not due yet",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenewalNotDue"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The new certificate (`Cache-Control: no-store`)",
+            "content": {
+              "application/pem-certificate-chain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The certificate is no longer accepted (`integration.certificate.refused`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not on the integration listener (`integration.certificate.required`), or a renewal from a replaced certificate (`integration.renew.reuse`; the lineage is revoked)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The lineage renewed within the hour (`integration.renew.too_soon`) or the key was enrolled for another lineage (`integration.key.used`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/pkcs10` (`integration.request.media_type`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is not usable (`integration.request.invalid`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/integrations/certificates": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List integration certificates",
+        "operationId": "list_integration_certificates",
+        "parameters": [
+          {
+            "name": "account",
+            "in": "query",
+            "description": "Only the certificates of this service account.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/UserId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The certificates by serial",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/certificates/{serial}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Revoke an integration certificate and its lineage",
+        "operationId": "revoke_integration_certificate",
+        "parameters": [
+          {
+            "name": "serial",
+            "in": "path",
+            "description": "Serial, lower-case hexadecimal",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked"
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such certificate (`integration.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The lineage changed meanwhile (`integration.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/integrations/enroll": {
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Enroll an integration with a code",
+        "operationId": "enroll_integration",
+        "parameters": [
+          {
+            "name": "label",
+            "in": "query",
+            "description": "The integrator's label of the host, 1 to 64 printable characters.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tenko-enrollment-code",
+            "in": "header",
+            "description": "The code id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "tenko-enrollment-proof",
+            "in": "header",
+            "description": "HMAC-SHA-256 with the code's secret over the code id, the account id and the request's key, hexadecimal",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/pkcs10": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "format": "int32",
+                  "minimum": 0
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The certificate (`Cache-Control: no-store`)",
+            "content": {
+              "application/pem-certificate-chain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The code or its proof is not valid (`integration.code.invalid`), was used (`integration.code.used`) or expired (`integration.code.expired`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The code may not be used from this address (`integration.code.source`), the request came over plain HTTP or through a proxy that did not state the scheme outside the Lab profile (`integration.enroll.transport`; the code stays usable), or the account cannot hold certificates (`integration.account`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The key was enrolled before (`integration.key.used`) or the account holds eight lineages (`integration.lineages`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not `application/pkcs10` (`integration.request.media_type`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request is not usable (`integration.request.invalid`) or the label is not (`integration.label`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/integrations/enrollments": {
+      "get": {
+        "tags": [
+          "access"
+        ],
+        "summary": "List enrollment codes of integrations",
+        "operationId": "list_integration_codes",
+        "responses": {
+          "200": {
+            "description": "Every code, newest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CodeList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Create an enrollment code for an integration",
+        "operationId": "create_integration_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewCode"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The code, shown once (`Cache-Control: no-store`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedCode"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not valid JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator, no sign-in in the last five minutes (`auth.step_up_required`), or the account is not an enabled service account (`integration.account`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A lifetime outside 60 to 3600 seconds (`integration.code.lifetime`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/integrations/enrollments/{id}": {
+      "delete": {
+        "tags": [
+          "access"
+        ],
+        "summary": "Withdraw an enrollment code",
+        "operationId": "withdraw_integration_code",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Code id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Withdrawn"
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such code (`integration.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/interfaces/bulk": {
       "post": {
         "tags": [
@@ -34417,6 +34941,7 @@
           "settings"
         ],
         "summary": "Change the security profile, toggles or deviations",
+        "description": "A change that starts to require certificate-bound service-account tokens (TGL-47, also by a switch to Hardened) removes every unbound token of a service account, audited per token as `auth.token.revoke`; the answer names them in `unbound_tokens_removed`. A dry run (`?dry_run=true`) answers the settings as they stand with the tokens the change would remove, and writes nothing. Loosening the requirement later brings none of them back.",
         "operationId": "update_security_settings",
         "parameters": [
           {
@@ -34429,6 +34954,15 @@
                 "string",
                 "null"
               ]
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "description": "Compute the diff without writing (API-09).",
+            "required": false,
+            "schema": {
+              "type": "boolean"
             }
           }
         ],
@@ -34444,7 +34978,7 @@
         },
         "responses": {
           "200": {
-            "description": "The settings after the change",
+            "description": "The settings after the change, or as they stand after a dry run",
             "headers": {
               "ETag": {
                 "schema": {
@@ -41819,6 +42353,30 @@
           }
         }
       },
+      "AccountTokens": {
+        "type": "object",
+        "description": "The tokens one service account loses.",
+        "required": [
+          "account",
+          "name",
+          "tokens"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          },
+          "tokens": {
+            "type": "integer",
+            "description": "How many of its tokens.",
+            "minimum": 0
+          }
+        }
+      },
       "Acl": {
         "type": "object",
         "description": "A named access list for transfers, updates, recursion and queries.",
@@ -45099,6 +45657,33 @@
           "client_kick"
         ]
       },
+      "CertState": {
+        "type": "string",
+        "description": "Where a certificate stands in its lineage (ADR 0035, decisions 6 and 9).",
+        "enum": [
+          "pending",
+          "current",
+          "replaced",
+          "withdrawn",
+          "revoked"
+        ]
+      },
+      "CertificateList": {
+        "type": "object",
+        "description": "Body of `GET /integrations/certificates`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ClientCertRecord"
+            },
+            "description": "The certificates, by serial."
+          }
+        }
+      },
       "CertificateRef": {
         "type": "object",
         "description": "A certificate issued to a node, as the registry remembers it.",
@@ -45477,6 +46062,96 @@
         "type": "string",
         "format": "uuid"
       },
+      "ClientCertRecord": {
+        "type": "object",
+        "description": "An integration certificate.",
+        "required": [
+          "serial",
+          "account",
+          "generation",
+          "lineage",
+          "label",
+          "key_sha256",
+          "not_before",
+          "not_after",
+          "issued_at",
+          "state"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account it names."
+          },
+          "ended_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it left the state `current` or `pending`: replaced, withdrawn or revoked."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "generation": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The account's `tokens_generation` when it was issued: a certificate issued under a\nlower value than the account's no longer passes.",
+            "minimum": 0
+          },
+          "issued_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was issued."
+          },
+          "key_sha256": {
+            "type": "string",
+            "description": "SHA-256 of its key's `SubjectPublicKeyInfo`, lower-case hex."
+          },
+          "label": {
+            "type": "string",
+            "description": "The integrator's label of the host, from the enrollment."
+          },
+          "lineage": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The lineage: the first certificate and every renewal of it share this id."
+          },
+          "not_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "End of validity."
+          },
+          "not_before": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Start of validity."
+          },
+          "presented_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When it was first presented on the integration listener."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was revoked or withdrawn."
+          },
+          "serial": {
+            "type": "string",
+            "description": "The serial, lower-case hex."
+          },
+          "state": {
+            "$ref": "#/components/schemas/CertState",
+            "description": "Where it stands in its lineage."
+          }
+        }
+      },
       "ClientKey": {
         "type": "object",
         "description": "How a DHCPv4 client is known (RFC 4361, RFC 6842).",
@@ -45636,6 +46311,22 @@
           }
         }
       },
+      "CodeList": {
+        "type": "object",
+        "description": "Body of `GET /integrations/enrollments`.",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EnrollmentCodeView"
+            },
+            "description": "Every code, newest first."
+          }
+        }
+      },
       "CodeLogin": {
         "type": "object",
         "description": "`POST /auth/login/totp` and `POST /auth/login/recovery`.",
@@ -45653,6 +46344,61 @@
             "description": "The TOTP code or recovery code."
           }
         }
+      },
+      "CodeState": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Waiting for its enrollment.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Used for the certificate with this serial.",
+            "required": [
+              "serial",
+              "state"
+            ],
+            "properties": {
+              "serial": {
+                "type": "string",
+                "description": "The certificate's serial."
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "used"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Withdrawn by an administrator, or because it arrived over plain HTTP.",
+            "required": [
+              "state"
+            ],
+            "properties": {
+              "state": {
+                "type": "string",
+                "enum": [
+                  "withdrawn"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "Where an enrollment code stands."
       },
       "CodedError": {
         "type": "object",
@@ -46418,6 +47164,39 @@
           "writes_enabled": {
             "type": "boolean",
             "description": "Whether writes through it are allowed (TGL-20); the map offers no write action under\nHardened while no controller allows them."
+          }
+        }
+      },
+      "CreatedCode": {
+        "type": "object",
+        "description": "The answer of `POST /integrations/enrollments`: the code's text, shown once.",
+        "required": [
+          "enrollment",
+          "code",
+          "server_root_sha256"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "`tnki.<code id>.<account id>.<secret>.<fingerprint>`, shown once."
+          },
+          "enrollment": {
+            "$ref": "#/components/schemas/EnrollmentCodeView",
+            "description": "The code as it is listed."
+          },
+          "listen": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses the integration listener of the answering controller opens on; empty\nwhen it is closed (`[integrations] listen = []`), absent when unknown. Hosts cannot\nenroll through a listener on loopback addresses only."
+          },
+          "server_root_sha256": {
+            "type": "string",
+            "description": "SHA-256 of the internal root, which the integration listener's server certificate\nchains to, lower-case hex (the code's last part)."
           }
         }
       },
@@ -51162,6 +51941,57 @@
           }
         }
       },
+      "EnrollmentCodeView": {
+        "type": "object",
+        "description": "An enrollment code as the API lists it: never its secret.",
+        "required": [
+          "id",
+          "account",
+          "created_by",
+          "created_at",
+          "expires_at",
+          "state",
+          "expired"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account it enrolls."
+          },
+          "created_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it was created."
+          },
+          "created_by": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The administrator who created it."
+          },
+          "expired": {
+            "type": "boolean",
+            "description": "Whether it expired unused."
+          },
+          "expires_at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "When it expires."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The code id."
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The only network it may be used from."
+          },
+          "state": {
+            "$ref": "#/components/schemas/CodeState",
+            "description": "Where it stands."
+          }
+        }
+      },
       "EnrollmentList": {
         "type": "object",
         "description": "Body of `GET /nodes/enrollments`.",
@@ -54464,6 +55294,31 @@
           "version": {
             "$ref": "#/components/schemas/ReleaseVersion",
             "description": "The version being installed."
+          }
+        }
+      },
+      "IntegrationPolicy": {
+        "type": "object",
+        "description": "TGL-47, the integration client certificates (SECURITY-PROFILES.md): the certificate\nlifetime, whether service-account tokens must be bound, and whether the integration\nlistener accepts TLS 1.2. [`IntegrationPolicy::of`] gives a profile's values; a stored\noverride is `SecuritySettings::integrations`.",
+        "required": [
+          "lifetime_days",
+          "require_binding",
+          "allow_tls12"
+        ],
+        "properties": {
+          "allow_tls12": {
+            "type": "boolean",
+            "description": "The integration listener accepts TLS 1.2 (never under Hardened)."
+          },
+          "lifetime_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "The lifetime of an integration certificate, in days.",
+            "minimum": 0
+          },
+          "require_binding": {
+            "type": "boolean",
+            "description": "Every token an administrator creates for a service account must be bound."
           }
         }
       },
@@ -63899,6 +64754,35 @@
         },
         "additionalProperties": false
       },
+      "NewCode": {
+        "type": "object",
+        "description": "`POST /integrations/enrollments`.",
+        "required": [
+          "account"
+        ],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/UserId",
+            "description": "The service account to enroll."
+          },
+          "lifetime_secs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Seconds until the code expires, 60 to 3600; one hour when absent.",
+            "minimum": 0
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The only network the enrollment may come from, in CIDR notation."
+          }
+        }
+      },
       "NewConnector": {
         "type": "object",
         "description": "The body of a create request.",
@@ -71986,6 +72870,14 @@
                     }
                   ]
                 },
+                "lineage": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "uuid",
+                  "description": "IAM-23: the certificate lineage the token is bound to."
+                },
                 "name": {
                   "type": "string",
                   "description": "The name."
@@ -78275,6 +79167,24 @@
           "unreachable"
         ]
       },
+      "RenewalNotDue": {
+        "type": "object",
+        "description": "The answer of a renewal that is not due yet.",
+        "required": [
+          "not_due",
+          "renew_after"
+        ],
+        "properties": {
+          "not_due": {
+            "type": "boolean",
+            "description": "Always `true`."
+          },
+          "renew_after": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "From when a renewal is accepted."
+          }
+        }
+      },
       "RequestId": {
         "type": "string",
         "format": "uuid"
@@ -80969,6 +81879,17 @@
             "$ref": "#/components/schemas/BreachMode",
             "description": "TGL-06: breached-password check."
           },
+          "integrations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationPolicy",
+                "description": "TGL-47: integration client certificates (ADR 0035): their lifetime, whether\nservice-account tokens must be bound to one, and whether the integration listener\naccepts TLS 1.2. `None` while the profile's values apply\n([`SecuritySettings::integrations`])."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "lockout": {
             "$ref": "#/components/schemas/LockoutMode",
             "description": "TGL-07: lockout."
@@ -81105,6 +82026,17 @@
               "$ref": "#/components/schemas/ToggleState"
             },
             "description": "Each toggle with its profile default and markers."
+          },
+          "unbound_tokens_removed": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/UnboundTokens",
+                "description": "Only in the answer of a change, or of its dry run, that starts to require\ncertificate-bound service-account tokens (TGL-47): the unbound tokens it removed, or\nwould remove. Loosening the requirement later brings none of them back."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "vault_has_operator_secrets": {
             "type": "boolean",
@@ -81402,6 +82334,17 @@
               {
                 "$ref": "#/components/schemas/BreachMode",
                 "description": "TGL-06."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "integrations": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/IntegrationPolicy",
+                "description": "TGL-47."
               },
               {
                 "type": "null"
@@ -85364,6 +86307,14 @@
             },
             "description": "The grants of a scoped token: each a role no higher than one the owner holds, over\nthe whole installation or a scope inside one of the owner's grants."
           },
+          "lineage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "IAM-23: the certificate lineage of the service account that the token is bound to\n(ADR 0035); the token is then accepted only on the integration listener over a\nconnection whose certificate belongs to it. Required for service-account tokens where\nTGL-47 requires binding."
+          },
           "name": {
             "type": "string",
             "description": "A name for the token."
@@ -85458,6 +86409,14 @@
                 "type": "null"
               }
             ]
+          },
+          "lineage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "IAM-23: the certificate lineage the token is bound to."
           },
           "name": {
             "type": "string",
@@ -86761,6 +87720,28 @@
           "stub": {
             "type": "boolean",
             "description": "The development placeholder page instead of the web UI (`TENKO_UI_STUB=1`)."
+          }
+        }
+      },
+      "UnboundTokens": {
+        "type": "object",
+        "description": "The service-account tokens that are not bound to a certificate, which a change of TGL-47\nremoves (ADR 0035): a token's family counts once.",
+        "required": [
+          "count",
+          "accounts"
+        ],
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccountTokens"
+            },
+            "description": "The accounts that lose tokens, in the order of their ids."
+          },
+          "count": {
+            "type": "integer",
+            "description": "How many tokens.",
+            "minimum": 0
           }
         }
       },

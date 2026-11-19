@@ -45,6 +45,7 @@ pub fn client_info(
         mode: Arc::clone(&connection.mode),
         trusted: connection.trusted,
         proxy: connection.proxy.clone(),
+        client: None,
     });
     forwarded::resolve(conn.as_ref(), headers, uri)
 }
@@ -97,4 +98,35 @@ pub fn idempotency_key(headers: &HeaderMap) -> Result<Option<String>, String> {
     extract::idempotency_key(&parts)
         .map(|key| key.map(|key| key.as_str().to_owned()))
         .map_err(|error| error.to_string())
+}
+
+/// What `POST /integrations/enroll` reads from a client that holds no certificate yet: the
+/// code id and proof headers and the body, then the canonical key of the request. The input
+/// is header lines `name: value`, an octet `0xff`, and the body. A request that passes names
+/// a code, carries a 32-octet proof and a body of at most 16 KiB.
+pub fn integration_enroll(data: &[u8]) {
+    let (head, body) = match data.iter().position(|octet| *octet == 0xff) {
+        Some(at) => (&data[..at], &data[at + 1..]),
+        None => (data, &[][..]),
+    };
+    let mut headers = HeaderMap::new();
+    for line in head.split(|octet| *octet == b'\n') {
+        let Some(colon) = line.iter().position(|octet| *octet == b':') else {
+            continue;
+        };
+        let (Ok(name), Ok(value)) = (
+            axum::http::HeaderName::from_bytes(&line[..colon]),
+            axum::http::HeaderValue::from_bytes(line[colon + 1..].trim_ascii()),
+        ) else {
+            continue;
+        };
+        headers.append(name, value);
+    }
+    if let Ok((_, proof)) = crate::routes::integrations::read_enroll_request(&headers, body) {
+        assert_eq!(proof.len(), 32);
+        assert!(!body.is_empty() && body.len() <= crate::routes::integrations::MAX_REQUEST);
+        if let Ok(key) = tenko_cluster::ca::integration_request_key(body) {
+            assert_eq!(key.len(), 91);
+        }
+    }
 }

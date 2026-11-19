@@ -8,6 +8,9 @@
 //!   enrollment.
 //! - [`TlsMode`]: (a) internal CA, (b) imported certificate and key with hot reload, (c)
 //!   termination in a reverse proxy with [`TrustedProxies`].
+//! - [`IntegrationCa`]: the integration CA of ADR 0035, a second root that signs integration
+//!   certificates (`urn:tenko:service-account:<id>`, client authentication only) and nothing
+//!   else; [`IntegrationIdentity`] reads one.
 //! - [`TlsMaterial`]: a chain and key loaded for rustls, with [`CertInfo`] and
 //!   [`Expiry`] for the health view; [`TlsService`] serves it through a swapping resolver
 //!   and publishes [`TlsStatus`] changes on a watch channel.
@@ -18,6 +21,7 @@
 
 mod authority;
 mod certs;
+mod client;
 mod error;
 mod proxy;
 mod reload;
@@ -29,7 +33,15 @@ pub use authority::{
     SERVER_CERT_ISSUE, ServerCertRecord, ServerIdentity, TLS_KEY_PURPOSE, tables,
 };
 pub(crate) use certs::csr_public_key;
+pub use certs::{
+    INTEGRATION_COMMON_NAME, SERVICE_ACCOUNT_URI_PREFIX, integration_request_key,
+    service_account_uri,
+};
 pub use certs::{generate_csr, node_id_of, node_uri, role_uri, roles_in, roles_of};
+pub use client::{
+    INTEGRATION_CA_CREATE, INTEGRATION_CA_KEY_PURPOSE, IntegrationCa, IntegrationCert,
+    IntegrationIdentity, MAX_INTEGRATION_VALIDITY_DAYS, fuzzing,
+};
 pub use error::{CaError, TlsError};
 pub use proxy::TrustedProxies;
 pub use reload::{DEFAULT_WATCH_INTERVAL, TlsService};

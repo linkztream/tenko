@@ -109,6 +109,8 @@ export type MessageKey =
   | "access.subject.service"
   | "access.title"
   | "access.token.add_grant"
+  | "access.token.bound_to"
+  | "access.token.bound_unknown"
   | "access.token.col.expires"
   | "access.token.col.last_used"
   | "access.token.col.name"
@@ -119,6 +121,7 @@ export type MessageKey =
   | "access.token.created_title"
   | "access.token.days"
   | "access.token.error.empty"
+  | "access.token.error.lineage"
   | "access.token.error.name"
   | "access.token.error.renewable_expiry"
   | "access.token.error.scope"
@@ -132,6 +135,12 @@ export type MessageKey =
   | "access.token.kind_scoped"
   | "access.token.kind_scoped_help"
   | "access.token.lifetime"
+  | "access.token.lineage"
+  | "access.token.lineage_choose"
+  | "access.token.lineage_help"
+  | "access.token.lineage_no_hosts"
+  | "access.token.lineage_none"
+  | "access.token.lineage_required"
   | "access.token.max_days"
   | "access.token.max_none"
   | "access.token.name"
@@ -331,6 +340,13 @@ export type MessageKey =
   | "account.totp.verify"
   | "audit.action.auth.access.denied"
   | "audit.action.auth.break_glass.set"
+  | "audit.action.auth.client_cert.code_create"
+  | "audit.action.auth.client_cert.code_withdraw"
+  | "audit.action.auth.client_cert.issue"
+  | "audit.action.auth.client_cert.lapse"
+  | "audit.action.auth.client_cert.present"
+  | "audit.action.auth.client_cert.renew"
+  | "audit.action.auth.client_cert.revoke"
   | "audit.action.auth.directory.revoke"
   | "audit.action.auth.grant.create"
   | "audit.action.auth.grant.revoke"
@@ -355,6 +371,7 @@ export type MessageKey =
   | "audit.action.auth.session.revoke"
   | "audit.action.auth.settings.update"
   | "audit.action.auth.setup.complete"
+  | "audit.action.auth.token.binding_refused"
   | "audit.action.auth.token.create"
   | "audit.action.auth.token.expiring"
   | "audit.action.auth.token.form_refused"
@@ -375,6 +392,7 @@ export type MessageKey =
   | "audit.action.cluster.ca.create"
   | "audit.action.cluster.enrollment.create"
   | "audit.action.cluster.enrollment.delete"
+  | "audit.action.cluster.integration_ca.create"
   | "audit.action.cluster.member.announce"
   | "audit.action.cluster.member.join"
   | "audit.action.cluster.member.promote"
@@ -1561,6 +1579,8 @@ export type MessageKey =
   | "dashboard.finding.evidence.utilization_bare"
   | "dashboard.finding.health.auth.token.expiring"
   | "dashboard.finding.health.auth.token.revoked"
+  | "dashboard.finding.health.integration.certificate_expiring"
+  | "dashboard.finding.health.integration.tls12_allowed"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -5209,6 +5229,59 @@ export type MessageKey =
   | "import.upload.title"
   | "import.upload.too_large"
   | "import.upload.unsupported"
+  | "integrations.code.account"
+  | "integrations.code.code"
+  | "integrations.code.copied"
+  | "integrations.code.copy"
+  | "integrations.code.copy_blocked"
+  | "integrations.code.create"
+  | "integrations.code.created_title"
+  | "integrations.code.done"
+  | "integrations.code.fingerprint"
+  | "integrations.code.fingerprint_help"
+  | "integrations.code.intro"
+  | "integrations.code.lifetime"
+  | "integrations.code.lifetime_3600"
+  | "integrations.code.lifetime_900"
+  | "integrations.code.listener_closed"
+  | "integrations.code.listener_loopback"
+  | "integrations.code.no_accounts"
+  | "integrations.code.once"
+  | "integrations.code.source"
+  | "integrations.code.source_help"
+  | "integrations.code.source_rule"
+  | "integrations.code.step_list"
+  | "integrations.code.step_run"
+  | "integrations.code.step_save"
+  | "integrations.code.title"
+  | "integrations.code.withdrawn"
+  | "integrations.codes.from"
+  | "integrations.codes.heading"
+  | "integrations.codes.waiting"
+  | "integrations.codes.withdraw"
+  | "integrations.col.host"
+  | "integrations.col.key"
+  | "integrations.col.state"
+  | "integrations.col.until"
+  | "integrations.enroll"
+  | "integrations.heading"
+  | "integrations.help.active"
+  | "integrations.help.expiring"
+  | "integrations.help.lapsed"
+  | "integrations.help.renewed"
+  | "integrations.help.revoked"
+  | "integrations.lede"
+  | "integrations.none"
+  | "integrations.of_account"
+  | "integrations.revoke_after"
+  | "integrations.revoke_body"
+  | "integrations.revoke_named"
+  | "integrations.revoke_title"
+  | "integrations.revoked"
+  | "integrations.state.active"
+  | "integrations.state.expiring"
+  | "integrations.state.lapsed"
+  | "integrations.state.revoked"
   | "ipam.action.create"
   | "ipam.action.delete"
   | "ipam.action.lock"
@@ -7273,6 +7346,13 @@ export type MessageKey =
   | "settings.security.transfer_site.label"
   | "settings.security.transfer_site.saved"
   | "settings.security.transfer_site.use_default"
+  | "settings.security.unbound.account"
+  | "settings.security.unbound.body"
+  | "settings.security.unbound.none"
+  | "settings.security.unbound.permanent"
+  | "settings.security.unbound.save_remove"
+  | "settings.security.unbound.switch_remove"
+  | "settings.security.unbound.title"
   | "settings.security.unit.days"
   | "settings.security.unit.hours"
   | "settings.security.unit.label"
@@ -8030,6 +8110,20 @@ export type MessageKey =
   | "toggles.breach_check.offline"
   | "toggles.breach_check.offline_preferred"
   | "toggles.breach_check.online"
+  | "toggles.integrations.binding"
+  | "toggles.integrations.binding_hint"
+  | "toggles.integrations.binding_optional"
+  | "toggles.integrations.binding_required"
+  | "toggles.integrations.lifetime"
+  | "toggles.integrations.lifetime_error"
+  | "toggles.integrations.lifetime_help"
+  | "toggles.integrations.name"
+  | "toggles.integrations.tls12"
+  | "toggles.integrations.tls12_hardened"
+  | "toggles.integrations.tls12_hint"
+  | "toggles.integrations.tls12_name"
+  | "toggles.integrations.tls13"
+  | "toggles.integrations.value"
   | "toggles.lockout.delay_then_temporary_lock"
   | "toggles.lockout.lock_until_unlock"
   | "toggles.lockout.name"
@@ -8440,6 +8534,7 @@ export interface MessageArgs {
   "access.scope.vrf": { name: string | number };
   "access.subject.option": { label: string | number; name: string | number };
   "access.subject.service": { name: string | number };
+  "access.token.bound_to": { host: string | number };
   "access.token.created_body": { name: string | number };
   "access.token.days": { count: number };
   "access.token.from": { prefixes: string | number };
@@ -8653,6 +8748,7 @@ export interface MessageArgs {
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
   "dashboard.finding.health.auth.token.expiring": { count: string | number; expires_at: string | number };
   "dashboard.finding.health.auth.token.revoked": { count: string | number };
+  "dashboard.finding.health.integration.certificate_expiring": { count: string | number; label: string | number; not_after: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -9350,6 +9446,18 @@ export interface MessageArgs {
   "import.upload.size": { kb: string | number };
   "import.upload.start": { count: number };
   "import.upload.unsupported": { names: string | number };
+  "integrations.code.listener_loopback": { addresses: string | number };
+  "integrations.code.once": { expires: string | number };
+  "integrations.code.withdrawn": { account: string | number };
+  "integrations.codes.from": { source: string | number };
+  "integrations.codes.waiting": { account: string | number; expires: string | number };
+  "integrations.help.active": { renewed: string | number };
+  "integrations.help.revoked": { reason: string | number };
+  "integrations.of_account": { account: string | number };
+  "integrations.revoke_body": { account: string | number; label: string | number };
+  "integrations.revoke_named": { label: string | number };
+  "integrations.revoke_title": { label: string | number };
+  "integrations.revoked": { label: string | number };
   "ipam.action.create": { count: number };
   "ipam.action.delete": { count: number };
   "ipam.action.lock": { count: number };
@@ -9848,6 +9956,11 @@ export interface MessageArgs {
   "settings.security.reset_row": { name: string | number };
   "settings.security.saved": { name: string | number };
   "settings.security.transfer_site.error": { line: string | number };
+  "settings.security.unbound.account": { count: string | number; name: string | number };
+  "settings.security.unbound.body": { accounts: string | number; count: number };
+  "settings.security.unbound.save_remove": { count: number };
+  "settings.security.unbound.switch_remove": { count: number; profile: string | number };
+  "settings.security.unbound.title": { count: number };
   "settings.security.unit.label": { field: string | number };
   "settings.users.action.delete_help": { name: string | number };
   "settings.users.action.disable_help": { name: string | number };
@@ -9974,6 +10087,8 @@ export interface MessageArgs {
   "shell.top.node_title": { lag: number; revision: string | number };
   "shell.top.profile": { profile: string | number };
   "shell.top.profile_title": { profile: string | number };
+  "toggles.integrations.lifetime_error": { max: string | number };
+  "toggles.integrations.value": { binding: string | number; days: string | number; tls: string | number };
   "toggles.lockout.value_delay": { attempts: number; longest: string | number; mode: string | number };
   "toggles.lockout.value_lock": { attempts: number; lock: string | number; longest: string | number; mode: string | number };
   "toggles.password_policy.custom": { min: string | number };
@@ -10165,6 +10280,8 @@ export const messageKeys: readonly MessageKey[] = [
   "access.subject.service",
   "access.title",
   "access.token.add_grant",
+  "access.token.bound_to",
+  "access.token.bound_unknown",
   "access.token.col.expires",
   "access.token.col.last_used",
   "access.token.col.name",
@@ -10175,6 +10292,7 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.created_title",
   "access.token.days",
   "access.token.error.empty",
+  "access.token.error.lineage",
   "access.token.error.name",
   "access.token.error.renewable_expiry",
   "access.token.error.scope",
@@ -10188,6 +10306,12 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.kind_scoped",
   "access.token.kind_scoped_help",
   "access.token.lifetime",
+  "access.token.lineage",
+  "access.token.lineage_choose",
+  "access.token.lineage_help",
+  "access.token.lineage_no_hosts",
+  "access.token.lineage_none",
+  "access.token.lineage_required",
   "access.token.max_days",
   "access.token.max_none",
   "access.token.name",
@@ -10387,6 +10511,13 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.verify",
   "audit.action.auth.access.denied",
   "audit.action.auth.break_glass.set",
+  "audit.action.auth.client_cert.code_create",
+  "audit.action.auth.client_cert.code_withdraw",
+  "audit.action.auth.client_cert.issue",
+  "audit.action.auth.client_cert.lapse",
+  "audit.action.auth.client_cert.present",
+  "audit.action.auth.client_cert.renew",
+  "audit.action.auth.client_cert.revoke",
   "audit.action.auth.directory.revoke",
   "audit.action.auth.grant.create",
   "audit.action.auth.grant.revoke",
@@ -10411,6 +10542,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.session.revoke",
   "audit.action.auth.settings.update",
   "audit.action.auth.setup.complete",
+  "audit.action.auth.token.binding_refused",
   "audit.action.auth.token.create",
   "audit.action.auth.token.expiring",
   "audit.action.auth.token.form_refused",
@@ -10431,6 +10563,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.cluster.ca.create",
   "audit.action.cluster.enrollment.create",
   "audit.action.cluster.enrollment.delete",
+  "audit.action.cluster.integration_ca.create",
   "audit.action.cluster.member.announce",
   "audit.action.cluster.member.join",
   "audit.action.cluster.member.promote",
@@ -11617,6 +11750,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.evidence.utilization_bare",
   "dashboard.finding.health.auth.token.expiring",
   "dashboard.finding.health.auth.token.revoked",
+  "dashboard.finding.health.integration.certificate_expiring",
+  "dashboard.finding.health.integration.tls12_allowed",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
@@ -15265,6 +15400,59 @@ export const messageKeys: readonly MessageKey[] = [
   "import.upload.title",
   "import.upload.too_large",
   "import.upload.unsupported",
+  "integrations.code.account",
+  "integrations.code.code",
+  "integrations.code.copied",
+  "integrations.code.copy",
+  "integrations.code.copy_blocked",
+  "integrations.code.create",
+  "integrations.code.created_title",
+  "integrations.code.done",
+  "integrations.code.fingerprint",
+  "integrations.code.fingerprint_help",
+  "integrations.code.intro",
+  "integrations.code.lifetime",
+  "integrations.code.lifetime_3600",
+  "integrations.code.lifetime_900",
+  "integrations.code.listener_closed",
+  "integrations.code.listener_loopback",
+  "integrations.code.no_accounts",
+  "integrations.code.once",
+  "integrations.code.source",
+  "integrations.code.source_help",
+  "integrations.code.source_rule",
+  "integrations.code.step_list",
+  "integrations.code.step_run",
+  "integrations.code.step_save",
+  "integrations.code.title",
+  "integrations.code.withdrawn",
+  "integrations.codes.from",
+  "integrations.codes.heading",
+  "integrations.codes.waiting",
+  "integrations.codes.withdraw",
+  "integrations.col.host",
+  "integrations.col.key",
+  "integrations.col.state",
+  "integrations.col.until",
+  "integrations.enroll",
+  "integrations.heading",
+  "integrations.help.active",
+  "integrations.help.expiring",
+  "integrations.help.lapsed",
+  "integrations.help.renewed",
+  "integrations.help.revoked",
+  "integrations.lede",
+  "integrations.none",
+  "integrations.of_account",
+  "integrations.revoke_after",
+  "integrations.revoke_body",
+  "integrations.revoke_named",
+  "integrations.revoke_title",
+  "integrations.revoked",
+  "integrations.state.active",
+  "integrations.state.expiring",
+  "integrations.state.lapsed",
+  "integrations.state.revoked",
   "ipam.action.create",
   "ipam.action.delete",
   "ipam.action.lock",
@@ -17329,6 +17517,13 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.transfer_site.label",
   "settings.security.transfer_site.saved",
   "settings.security.transfer_site.use_default",
+  "settings.security.unbound.account",
+  "settings.security.unbound.body",
+  "settings.security.unbound.none",
+  "settings.security.unbound.permanent",
+  "settings.security.unbound.save_remove",
+  "settings.security.unbound.switch_remove",
+  "settings.security.unbound.title",
   "settings.security.unit.days",
   "settings.security.unit.hours",
   "settings.security.unit.label",
@@ -18086,6 +18281,20 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.breach_check.offline",
   "toggles.breach_check.offline_preferred",
   "toggles.breach_check.online",
+  "toggles.integrations.binding",
+  "toggles.integrations.binding_hint",
+  "toggles.integrations.binding_optional",
+  "toggles.integrations.binding_required",
+  "toggles.integrations.lifetime",
+  "toggles.integrations.lifetime_error",
+  "toggles.integrations.lifetime_help",
+  "toggles.integrations.name",
+  "toggles.integrations.tls12",
+  "toggles.integrations.tls12_hardened",
+  "toggles.integrations.tls12_hint",
+  "toggles.integrations.tls12_name",
+  "toggles.integrations.tls13",
+  "toggles.integrations.value",
   "toggles.lockout.delay_then_temporary_lock",
   "toggles.lockout.lock_until_unlock",
   "toggles.lockout.name",

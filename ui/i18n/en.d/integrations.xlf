@@ -1,0 +1,257 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en">
+  <file id="tenko-ui">
+    <group id="integrations">
+      <unit id="integrations.heading">
+        <segment><source>Integration certificates</source></segment>
+      </unit>
+      <unit id="integrations.lede">
+        <segment><source>Hosts that run integrations prove themselves with a key that never leaves them, through a certificate of the integration CA, on the integration listener (port 8445). Each host renews its certificate itself before it expires.</source></segment>
+      </unit>
+      <unit id="integrations.enroll">
+        <segment><source>Enroll a host</source></segment>
+      </unit>
+      <unit id="integrations.none">
+        <segment><source>No host is enrolled yet.</source></segment>
+      </unit>
+      <unit id="integrations.col.host">
+        <segment><source>Host</source></segment>
+      </unit>
+      <unit id="integrations.col.state">
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="integrations.col.until">
+        <segment><source>Valid until</source></segment>
+      </unit>
+      <unit id="integrations.col.key">
+        <segment><source>Key</source></segment>
+      </unit>
+      <unit id="integrations.of_account">
+        <segment><source>for {account}</source></segment>
+      </unit>
+      <unit id="integrations.state.active">
+        <segment><source>Active</source></segment>
+      </unit>
+      <unit id="integrations.state.expiring">
+        <segment><source>Expiring</source></segment>
+      </unit>
+      <unit id="integrations.state.lapsed">
+        <segment><source>Lapsed</source></segment>
+      </unit>
+      <unit id="integrations.state.revoked">
+        <segment><source>Revoked</source></segment>
+      </unit>
+      <unit id="integrations.help.active">
+        <segment><source>Last certificate issued {renewed}.</source></segment>
+      </unit>
+      <unit id="integrations.help.renewed">
+        <segment><source>Renewed; the host switches to the new certificate at its next request.</source></segment>
+      </unit>
+      <unit id="integrations.help.expiring">
+        <segment><source>It has not renewed. Check the renewal timer on the host.</source></segment>
+      </unit>
+      <unit id="integrations.help.lapsed">
+        <segment><source>Expired without renewal. Enroll the host again with a new code and a new key.</source></segment>
+      </unit>
+      <unit id="integrations.help.revoked">
+        <segment><source>Reason: {reason}</source></segment>
+      </unit>
+      <unit id="integrations.revoke_named">
+        <segment><source>Revoke the certificate of {label}</source></segment>
+      </unit>
+      <unit id="integrations.revoke_title">
+        <segment><source>Revoke the certificate of {label}?</source></segment>
+      </unit>
+      <unit id="integrations.revoke_body">
+        <segment><source>{label} loses its access as {account} at once, on every controller, and its open connections close.</source></segment>
+      </unit>
+      <unit id="integrations.revoke_after">
+        <segment><source>Its key can never enroll again. To bring the host back, enroll it with a new code and a new key. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="integrations.revoked">
+        <segment><source>Certificate of {label} revoked</source></segment>
+      </unit>
+      <unit id="integrations.codes.heading">
+        <segment><source>Waiting enrollment codes</source></segment>
+      </unit>
+      <unit id="integrations.codes.waiting">
+        <segment><source>For {account}, until {expires}</source></segment>
+      </unit>
+      <unit id="integrations.codes.from">
+        <segment><source>from {source} only</source></segment>
+      </unit>
+      <unit id="integrations.codes.withdraw">
+        <segment><source>Withdraw</source></segment>
+      </unit>
+      <unit id="integrations.code.withdrawn">
+        <segment><source>Enrollment code for {account} withdrawn</source></segment>
+      </unit>
+      <unit id="integrations.code.title">
+        <segment><source>Enroll a host</source></segment>
+      </unit>
+      <unit id="integrations.code.intro">
+        <segment><source>Makes a single-use code for one service account. The host uses it once, with openssl and curl, to get its certificate; the key is made on the host and never leaves it.</source></segment>
+      </unit>
+      <unit id="integrations.code.no_accounts">
+        <segment><source>There is no enabled service account. Create one under Service accounts first.</source></segment>
+      </unit>
+      <unit id="integrations.code.account">
+        <segment><source>Service account</source></segment>
+      </unit>
+      <unit id="integrations.code.lifetime">
+        <segment><source>Valid for</source></segment>
+      </unit>
+      <unit id="integrations.code.lifetime_900">
+        <segment><source>15 minutes</source></segment>
+      </unit>
+      <unit id="integrations.code.lifetime_3600">
+        <segment><source>1 hour</source></segment>
+      </unit>
+      <unit id="integrations.code.source">
+        <segment><source>Only from network</source></segment>
+      </unit>
+      <unit id="integrations.code.source_help">
+        <segment><source>Optional: the network the host enrolls from, such as 192.0.2.0/24.</source></segment>
+      </unit>
+      <unit id="integrations.code.source_rule">
+        <segment><source>Write a network as an address and a prefix length, such as 192.0.2.0/24.</source></segment>
+      </unit>
+      <unit id="integrations.code.create">
+        <segment><source>Create code</source></segment>
+      </unit>
+      <unit id="integrations.code.created_title">
+        <segment><source>Enrollment code</source></segment>
+      </unit>
+      <unit id="integrations.code.once">
+        <segment><source>This code is shown only now and works once, until {expires}. Copy it before you close this window.</source></segment>
+      </unit>
+      <unit id="integrations.code.code">
+        <segment><source>Code</source></segment>
+      </unit>
+      <unit id="integrations.code.copy">
+        <segment><source>Copy code</source></segment>
+      </unit>
+      <unit id="integrations.code.copied">
+        <segment><source>Code copied</source></segment>
+      </unit>
+      <unit id="integrations.code.copy_blocked">
+        <segment><source>The browser did not allow copying; select the code and copy it by hand.</source></segment>
+      </unit>
+      <unit id="integrations.code.fingerprint">
+        <segment><source>Fingerprint of the server root</source></segment>
+      </unit>
+      <unit id="integrations.code.fingerprint_help">
+        <segment><source>The code ends with it; the enrollment script compares it with the root the server sends before it trusts it.</source></segment>
+      </unit>
+      <unit id="integrations.code.step_save">
+        <segment><source>On the automation host, save the code to the file enroll.code, readable only by the integration's account.</source></segment>
+      </unit>
+      <unit id="integrations.code.step_run">
+        <segment><source>Run the enrollment script of the integrations guide there. Only a proof made with the code travels, never the code itself.</source></segment>
+      </unit>
+      <unit id="integrations.code.step_list">
+        <segment><source>The host then appears in the list as active. Its renewal timer keeps the certificate current.</source></segment>
+      </unit>
+      <unit id="integrations.code.done">
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="toggles.integrations.name">
+        <notes><note category="description">TGL-47: integration client certificates (ADR 0035), in the security settings.</note></notes>
+        <segment><source>Integration certificates</source></segment>
+      </unit>
+      <unit id="toggles.integrations.value">
+        <segment><source>{days} days · {binding} · {tls}</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_required">
+        <segment><source>bound tokens required</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_optional">
+        <segment><source>bound tokens optional</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12">
+        <segment><source>TLS 1.2 allowed</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls13">
+        <segment><source>TLS 1.3 only</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime">
+        <segment><source>Certificate lifetime in days</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime_help">
+        <segment><source>A host renews its certificate itself in the last third of this time.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime_error">
+        <segment><source>A whole number of days from 1 to {max}.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding">
+        <segment><source>Service-account tokens must be bound to a certificate</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_hint">
+        <segment><source>Every new token of a service account names an integration certificate and works only with it. Turning this on removes the unbound tokens of service accounts; turning it off later brings none of them back.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_name">
+        <segment><source>Allow TLS 1.2 on the integration listener</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_hint">
+        <segment><source>For Windows Server 2019 and older. Under TLS 1.2 the host's certificate is visible on the network path. Raises a health warning while on.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_hardened">
+        <segment><source>The Hardened profile does not allow TLS 1.2.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.none">
+        <segment><source>No service account has an unbound token, so nothing is removed.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.title">
+        <segment><source>{count, plural, one {# token will be removed} other {# tokens will be removed}}</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.body">
+        <segment><source>This change requires every service-account token to be bound to an integration certificate. It removes {count, plural, one {the unbound token} other {the # unbound tokens}} of {accounts} at once; the integrations that use them stop working until they get bound tokens.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.account">
+        <segment><source>{name} ({count})</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.permanent">
+        <segment><source>Turning the requirement off later brings none of them back.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.save_remove">
+        <segment><source>{count, plural, one {Save and remove # token} other {Save and remove # tokens}}</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.switch_remove">
+        <segment><source>{count, plural, one {Switch to {profile} and remove # token} other {Switch to {profile} and remove # tokens}}</source></segment>
+      </unit>
+      <unit id="access.token.lineage">
+        <segment><source>Bound to host</source></segment>
+      </unit>
+      <unit id="access.token.lineage_none">
+        <segment><source>Not bound</source></segment>
+      </unit>
+      <unit id="access.token.lineage_choose">
+        <segment><source>Choose a host</source></segment>
+      </unit>
+      <unit id="access.token.lineage_help">
+        <segment><source>A bound token works only on the integration listener, with the certificate of this host; a copy of it is useless elsewhere.</source></segment>
+      </unit>
+      <unit id="access.token.lineage_required">
+        <segment><source>This profile binds every service-account token to a host's certificate (TGL-47).</source></segment>
+      </unit>
+      <unit id="access.token.lineage_no_hosts">
+        <segment><source>No host of this account is enrolled; enroll one under Integration certificates to bind tokens to it.</source></segment>
+      </unit>
+      <unit id="access.token.error.lineage">
+        <segment><source>Choose the host whose certificate the token is bound to.</source></segment>
+      </unit>
+      <unit id="access.token.bound_to">
+        <segment><source>Only with the certificate of {host}</source></segment>
+      </unit>
+      <unit id="access.token.bound_unknown">
+        <segment><source>a host whose certificate has ended</source></segment>
+      </unit>
+      <unit id="integrations.code.listener_closed">
+        <segment><source>The integration listener of this controller is closed ([integrations] listen = []): hosts cannot enroll or renew until it is opened.</source></segment>
+      </unit>
+      <unit id="integrations.code.listener_loopback">
+        <segment><source>The integration listener of this controller listens on {addresses} only, so hosts on the network cannot reach it. Set [integrations] listen in tenko.toml to an address they can reach, such as 0.0.0.0:8445.</source></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

@@ -1,8 +1,8 @@
 # Certificates
 
-Every node serves its API and web UI over TLS (OPS-22, TGL-08). This page covers the four ways a node gets its certificate, where to see what it serves, when it warns about expiry, how a renewed certificate gets from an ACME client such as the one in OPNsense to the node without manual work, and how admin computers come to trust the internal CA.
+Every node serves its API and web UI over TLS (OPS-22, TGL-08). This page covers the four ways a node gets its certificate, where to see what it serves, when it warns about expiry, how a renewed certificate gets from an ACME client such as the one in OPNsense to the node without manual work, how admin computers come to trust the internal CA, and the separate CA that issues client certificates to integrations.
 
-Related: [SECURITY-PROFILES.md](SECURITY-PROFILES.md) (TGL-08), [QUICKSTART.md](QUICKSTART.md), [`deploy/tenko.example.toml`](../deploy/tenko.example.toml) (the `[tls]` section), [cluster.md](cluster.md) (the certificates of the cluster port, which are not these).
+Related: [SECURITY-PROFILES.md](SECURITY-PROFILES.md) (TGL-08), [QUICKSTART.md](QUICKSTART.md), [`deploy/tenko.example.toml`](../deploy/tenko.example.toml) (the `[tls]` section), [cluster.md](cluster.md) (the certificates of the cluster port, which are not these), [integrations.md](integrations.md) (client certificates for automation hosts).
 
 ## 1. The four modes
 
@@ -238,7 +238,18 @@ Without a stated scheme Tenko assumes HTTPS for its security headers and the CSR
 | nginx | `proxy_set_header X-Forwarded-Proto $scheme;`, `proxy_set_header X-Forwarded-Host $host;`, `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` |
 | Caddy, Traefik | Nothing: both set `X-Forwarded-Proto` and `X-Forwarded-For` |
 
-## 8. Reference
+## 8. The integration CA
+
+Integrations (automation hosts that act as a service account) can prove themselves with a client certificate instead of, or together with, a token that is bound to it ([integrations.md](integrations.md), ADR 0035). Those certificates come from a CA of their own, not from the internal CA of section 6.
+
+- **A separate root.** The integration CA is a second ECDSA P-256 root. The controllers create it, once, at the first enrollment code (audit `cluster.integration_ca.create`); its key is a system secret in the vault, like the key of the internal CA, and it replicates the same way. The internal root keeps signing server and node certificates and never signs an integration certificate; the integration root signs client certificates and nothing else. It lasts ten years like the internal root; its rotation is not built yet.
+- **What an integration certificate says.** Subject `CN=tenko-integration`; exactly one URI name, `urn:tenko:service-account:<account id>` (the id in its hyphenated form, so a deleted account recreated under the same name is another account); extended key usage client authentication only; key usage digital signature; not a CA; a random 126-bit serial; no DNS name, address, `urn:tenko:node:` or `urn:tenko:role:` name. It is valid from one hour before issue (clock skew) for the lifetime of TGL-47: 90 days in Home, 30 in Standard, 7 in Hardened, 365 in Lab. Whatever the certificate request asks for, none of this changes.
+- **Where it is accepted.** Only on the integration listener (`[integrations] listen`; by default port 8445 on each host the API listens on, so an API on loopback gives a listener on loopback), which trusts only the integration root. It is never accepted on the API and UI listener, which asks for no client certificate (a browser never sees a certificate request), or on the cluster port, which trusts only the internal root and so refuses an integration certificate before any Tenko code reads it. No node verifier accepts one, and a node certificate fails the handshake on the integration listener the same way. After the chain check, the listener's identity reader still refuses a certificate with any name but the one service-account URI, any other key usage or a CA flag, so the separation holds even if the trust anchors were ever mixed up.
+- **A valid signature is not enough.** Every integration certificate has a record, and the listener accepts a certificate only while its record allows it, at the handshake and at every request ([integrations.md](integrations.md) section 2). A certificate signed with a copy of the integration CA key (from a controller that left the cluster, say) has no record and is refused.
+- **The server certificate** of the integration listener is always one of the internal root, for the controller's configured names, in every TLS mode of section 1. In the imported, reverse-proxy and plain modes it is made only when the listener can open (not with `[integrations] listen = []`), from the `[tls]` names (`host_name`, `alt_names`, `addresses`), which the start verifies; its host name is the installation's from first-run setup, else `tls.host_name`, never a default of `localhost`. Integrators do not install that root as a trusted root of their machines (section 6 is for people who administer); the documented scripts compare its SHA-256 with the fingerprint in the enrollment code, and accept the integration listener only when its chain ends at that pinned root.
+- **Never from a proxy.** A client certificate that a reverse proxy forwards, as a header (`X-SSL-Client-Cert`, `X-Forwarded-Client-Cert`, `ssl-client-cert` or any other) or in the PROXY protocol, is never trusted, in any TLS mode and any profile (section 7). Integrations that use certificates reach the controller's integration listener directly, or through a TCP pass-through that leaves TLS end to end. The enrollment call may go through the proxy but needs it to state the scheme: otherwise it is refused with 403 `integration.enroll.transport` and the enrollment code stays usable ([integrations.md](integrations.md) section 4.5).
+
+## 9. Reference
 
 | What | Where |
 |---|---|
@@ -251,3 +262,4 @@ Without a stated scheme Tenko assumes HTTPS for its security headers and the CSR
 | `sys.tls.no_certificate` | TLS is on and no certificate is installed |
 | `sys.tls.plain_http` | plain HTTP from every source (Lab) |
 | `[tls] accept_external_replacement` | section 4 |
+| Integration CA, certificates and the listener | section 8 and [integrations.md](integrations.md) |

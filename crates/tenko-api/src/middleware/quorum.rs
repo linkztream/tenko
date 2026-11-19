@@ -137,6 +137,11 @@ impl Quorum {
         }
     }
 
+    /// When this controller lost its quorum contact, if it did.
+    pub(crate) fn since(&self) -> Option<Timestamp> {
+        self.staleness.map(|staleness| staleness.since)
+    }
+
     /// The refusal of `request`, or `None` to let it through.
     pub(crate) fn check(&self, request: &Request) -> Option<Response> {
         let staleness = self.staleness?;
