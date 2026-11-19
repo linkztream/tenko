@@ -131,15 +131,16 @@ function Test-NetlogonRecords {
         if ($fields.Count -lt 5 -or $fields[2] -ne 'IN') { continue }
         $name, $type = $fields[0].TrimEnd('.'), $fields[3]
         $want = ($fields[4..($fields.Count - 1)] -join ' ').TrimEnd('.')
-        $got = Resolve-DnsName -Name $name -Type $type -Server $Tenko -DnsOnly -NoHostsFile -ErrorAction SilentlyContinue
+        # Only the answers of the asked type: a server also sends the targets' addresses along,
+        # and those records do not have the properties of an answer.
+        $got = @(Resolve-DnsName -Name $name -Type $type -Server $Tenko -DnsOnly -NoHostsFile -ErrorAction SilentlyContinue |
+                Where-Object { $_.Section -eq 'Answer' -and "$($_.Type)" -eq $type })
         $text = ($got | ForEach-Object {
-                switch ($_.Type) {
-                    'SRV' { "$($_.Priority) $($_.Weight) $($_.Port) $($_.NameTarget)" }
-                    'A' { $_.IPAddress }
-                    'AAAA' { $_.IPAddress }
-                    'CNAME' { $_.NameHost }
-                    default { $_.ToString() }
-                } }) -join '|'
+                if ($type -eq 'SRV') { "$($_.Priority) $($_.Weight) $($_.Port) $($_.NameTarget)" }
+                elseif ($type -eq 'CNAME') { $_.NameHost }
+                elseif ($type -in 'A', 'AAAA') { $_.IPAddress }
+                else { $_.ToString() }
+            }) -join '|'
         if (-not ($text -split '\|' | Where-Object { $_.TrimEnd('.') -eq $want })) { $missing += "$name $type $want" }
     }
     @("records not in Tenko: $($missing.Count)") + $missing | Save-Output 'netlogon-check.txt'
