@@ -39,7 +39,9 @@ Do not run any step against a real domain, and never commit a capture of one.
 One isolated virtual network, `192.0.2.0/24`, with no route to any other network except, if
 you need it for updates, through a NAT of the hypervisor. The gateway is `192.0.2.1`. Every
 machine's clock follows the first controller (Kerberos allows five minutes of skew): the
-domain members do by default; give the Tenko node `dc1` as its NTP server.
+domain members do by default; give the Tenko node `dc1` as its NTP server. A controller that keeps
+time from its own clock reports a root dispersion of about ten seconds, more than
+systemd-timesyncd accepts by default: set `RootDistanceMaxSec=30` beside `NTP=192.0.2.5`.
 
 ## What you need
 

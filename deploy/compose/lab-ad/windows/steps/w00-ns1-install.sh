@@ -44,7 +44,10 @@ systemctl cat systemd-timesyncd >/dev/null 2>&1 || fail "systemd-timesyncd is no
 # The helper's umask is 077 and the time service does not run as root: without 755 it cannot
 # read the directory and ignores the file.
 install -d -m 755 /etc/systemd/timesyncd.conf.d
-printf '[Time]\nNTP=192.0.2.5\nFallbackNTP=\n' >/etc/systemd/timesyncd.conf.d/lab-dc1.conf
+# dc1 keeps time from its own clock and says so with a root dispersion of about ten seconds,
+# above the service's default limit of five; and it serves time only from W1 on, so the first
+# tries fail and the service must not back off for half an hour.
+printf '[Time]\nNTP=192.0.2.5\nFallbackNTP=\nRootDistanceMaxSec=30\nPollIntervalMaxSec=64\n' >/etc/systemd/timesyncd.conf.d/lab-dc1.conf
 chmod 644 /etc/systemd/timesyncd.conf.d/lab-dc1.conf
 timedatectl set-ntp true
 systemctl restart systemd-timesyncd

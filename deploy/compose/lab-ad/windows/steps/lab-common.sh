@@ -221,6 +221,8 @@ EOF
 # Kerberos allows five minutes, so a node that is not synchronized to dc1 stops the step.
 assert_clock() {
   local i
+  # A try made before dc1 served time may be waiting out its backoff: ask again now.
+  [[ "$(timedatectl show -p NTPSynchronized --value)" == yes ]] || systemctl restart systemd-timesyncd
   for ((i = 0; i < 24; i++)); do
     if [[ "$(timedatectl show -p NTPSynchronized --value)" == yes &&
       "$(timedatectl show-timesync -p ServerAddress --value 2>/dev/null)" == 192.0.2.5 ]]; then
@@ -229,5 +231,6 @@ assert_clock() {
     sleep 5
   done
   timedatectl timesync-status >"$STEP_DIR/timesync.txt" 2>&1 || true
+  journalctl -u systemd-timesyncd -b --no-pager -n 40 >>"$STEP_DIR/timesync.txt" 2>&1 || true
   fail "ns1 is not synchronized to dc1 (192.0.2.5) after two minutes; timesync.txt has the state"
 }
