@@ -307,19 +307,38 @@ async fn effective_profile(resolved: &Resolved, store: &dyn Store) -> Result<Pro
 }
 
 /// The names of the server certificate: the host name from setup (or the configured one
-/// before setup), the configured host name as an extra name, and the configured extras.
+/// before setup), the configured host name as an extra name, and the configured extras. In
+/// modes b and c only the integration listener shows such a certificate (ADR 0035), with the
+/// names of the `[tls]` section, which those modes do not check otherwise.
 async fn identity(resolved: &Resolved, store: &dyn Store) -> Result<ServerIdentity, StartError> {
-    let TlsSpec::InternalCa {
+    let tls = &resolved.config.tls;
+    let configured;
+    let (host_name, alt_names, addresses) = if let TlsSpec::InternalCa {
         host_name,
         alt_names,
         addresses,
     } = &resolved.tls
-    else {
-        return Err(StartError::new(
-            "tls",
-            "start.tls.mode",
-            "the internal CA serves mode a only",
-        ));
+    {
+        (host_name, alt_names, addresses)
+    } else {
+        configured = (
+            tls.host_name
+                .clone()
+                .unwrap_or_else(|| "localhost".to_owned()),
+            tls.addresses
+                .iter()
+                .map(|text| {
+                    text.parse::<std::net::IpAddr>().map_err(|_| {
+                        StartError::new(
+                            "tls",
+                            "start.tls.mode",
+                            format!("tls.addresses: `{text}` is not an IP address"),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+        (&configured.0, &tls.alt_names, &configured.1)
     };
     let view = store
         .read(ReadConsistency::Local)
