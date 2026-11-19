@@ -3,7 +3,7 @@
 //! whatever the request asks for, the identity reader's refusals, and the separation from the
 //! internal CA: neither root's verifier accepts the other root's certificates.
 
-use std::{sync::Arc, time::Duration as StdDuration};
+use std::{fmt::Write as _, sync::Arc, time::Duration as StdDuration};
 
 use rcgen::{
     BasicConstraints, CertificateParams, ExtendedKeyUsagePurpose, IsCa, KeyPair, SanType,
@@ -19,7 +19,7 @@ use tenko_cluster::{
     ca::{
         CaError, CaPolicy, CertInfo, INTEGRATION_CA_CREATE, INTEGRATION_CA_KEY_PURPOSE,
         IntegrationCa, IntegrationIdentity, InternalCa, MAX_INTEGRATION_VALIDITY_DAYS,
-        ServerIdentity, node_uri, role_uri, service_account_uri, tables,
+        ServerIdentity, integration_request_key, node_uri, role_uri, service_account_uri, tables,
     },
     mtls::verify_controller,
 };
@@ -417,4 +417,42 @@ async fn neither_root_accepts_the_other_roots_certificates() {
         .verify_client_cert(&node.chain[0], &[], now)
         .expect_err("the integration listener refuses a node");
     assert!(is_unknown_issuer(&error), "{error:?}");
+}
+
+/// A P-256 request made by `openssl` over a key with a compressed point.
+const COMPRESSED_POINT_CSR: &str = "3081a6304e020100300c310a300806035504030c01783039301306072a8648ce3d020106082a8648ce3d030107032200029688c09615d251eaf1831c2f4b96d0bc86d751314b2d4d692a14cd893e35edd1a000300a06082a8648ce3d0403020348003045022100c0a9d7c9f4d756914b5095d6cc18f8f1791d1aea444bdf2e5c4a4dfe33dff66c02201339de25e1561e356637a019d1de85a51dde88c13bfd710e3b19e398fb39f823";
+
+#[tokio::test]
+async fn the_request_key_has_one_form_and_is_the_certificates_key() {
+    let env = Env::new();
+    let ca = env.integration().await;
+    let request = plain_csr();
+    let spki = integration_request_key(&request).expect("canonical key");
+    assert_eq!(spki.len(), 91);
+    let issued = ca
+        .issue(UserId::generate(), &request, t0(), 30)
+        .expect("issue");
+    let digest = aws_lc_rs::digest::digest(&aws_lc_rs::digest::SHA256, &spki);
+    let hex = digest
+        .as_ref()
+        .iter()
+        .fold(String::new(), |mut text, octet| {
+            let _ = write!(text, "{octet:02x}");
+            text
+        });
+    assert_eq!(issued.identity.key_sha256, hex);
+
+    // The same key with a compressed point is a second spelling: refused.
+    let compressed: Vec<u8> = (0..COMPRESSED_POINT_CSR.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&COMPRESSED_POINT_CSR[i..i + 2], 16).expect("hex"))
+        .collect();
+    assert!(matches!(
+        integration_request_key(&compressed),
+        Err(CaError::InvalidCsr { .. })
+    ));
+    assert!(matches!(
+        ca.issue(UserId::generate(), &compressed, t0(), 30),
+        Err(CaError::InvalidCsr { .. })
+    ));
 }

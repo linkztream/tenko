@@ -33,7 +33,10 @@ pub use authority::{
     SERVER_CERT_ISSUE, ServerCertRecord, ServerIdentity, TLS_KEY_PURPOSE, tables,
 };
 pub(crate) use certs::csr_public_key;
-pub use certs::{INTEGRATION_COMMON_NAME, SERVICE_ACCOUNT_URI_PREFIX, service_account_uri};
+pub use certs::{
+    INTEGRATION_COMMON_NAME, SERVICE_ACCOUNT_URI_PREFIX, integration_request_key,
+    service_account_uri,
+};
 pub use certs::{generate_csr, node_id_of, node_uri, role_uri, roles_in, roles_of};
 pub use client::{
     INTEGRATION_CA_CREATE, INTEGRATION_CA_KEY_PURPOSE, IntegrationCa, IntegrationCert,
