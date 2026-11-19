@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="integrations">
+      <unit id="integrations.heading">
+        <segment><source>Integration certificates</source><target>Integrationscertifikat</target></segment>
+      </unit>
+      <unit id="integrations.lede">
+        <segment><source>Hosts that run integrations prove themselves with a key that never leaves them, through a certificate of the integration CA, on the integration listener (port 8445). Each host renews its certificate itself before it expires.</source><target>Värdar som kör integrationer styrker sin identitet med en nyckel som aldrig lämnar dem, via ett certifikat från integrationernas certifikatutfärdare, på integrationslyssnaren (port 8445). Varje värd förnyar sitt certifikat själv innan det går ut.</target></segment>
+      </unit>
+      <unit id="integrations.enroll">
+        <segment><source>Enroll a host</source><target>Registrera en värd</target></segment>
+      </unit>
+      <unit id="integrations.none">
+        <segment><source>No host is enrolled yet.</source><target>Ingen värd är registrerad ännu.</target></segment>
+      </unit>
+      <unit id="integrations.col.host">
+        <segment><source>Host</source><target>Värd</target></segment>
+      </unit>
+      <unit id="integrations.col.state">
+        <segment><source>State</source><target>Tillstånd</target></segment>
+      </unit>
+      <unit id="integrations.col.until">
+        <segment><source>Valid until</source><target>Giltigt till</target></segment>
+      </unit>
+      <unit id="integrations.col.key">
+        <segment><source>Key</source><target>Nyckel</target></segment>
+      </unit>
+      <unit id="integrations.of_account">
+        <segment><source>for {account}</source><target>för {account}</target></segment>
+      </unit>
+      <unit id="integrations.state.active">
+        <segment><source>Active</source><target>Aktiv</target></segment>
+      </unit>
+      <unit id="integrations.state.expiring">
+        <segment><source>Expiring</source><target>Går snart ut</target></segment>
+      </unit>
+      <unit id="integrations.state.lapsed">
+        <segment><source>Lapsed</source><target>Utgången</target></segment>
+      </unit>
+      <unit id="integrations.state.revoked">
+        <segment><source>Revoked</source><target>Återkallad</target></segment>
+      </unit>
+      <unit id="integrations.help.active">
+        <segment><source>Last certificate issued {renewed}.</source><target>Senaste certifikatet utfärdades {renewed}.</target></segment>
+      </unit>
+      <unit id="integrations.help.renewed">
+        <segment><source>Renewed; the host switches to the new certificate at its next request.</source><target>Förnyad; värden går över till det nya certifikatet vid nästa anrop.</target></segment>
+      </unit>
+      <unit id="integrations.help.expiring">
+        <segment><source>It has not renewed. Check the renewal timer on the host.</source><target>Den har inte förnyats. Kontrollera förnyelsetimern på värden.</target></segment>
+      </unit>
+      <unit id="integrations.help.lapsed">
+        <segment><source>Expired without renewal. Enroll the host again with a new code and a new key.</source><target>Gick ut utan förnyelse. Registrera värden igen med en ny kod och en ny nyckel.</target></segment>
+      </unit>
+      <unit id="integrations.help.revoked">
+        <segment><source>Reason: {reason}</source><target>Orsak: {reason}</target></segment>
+      </unit>
+      <unit id="integrations.revoke_named">
+        <segment><source>Revoke the certificate of {label}</source><target>Återkalla certifikatet för {label}</target></segment>
+      </unit>
+      <unit id="integrations.revoke_title">
+        <segment><source>Revoke the certificate of {label}?</source><target>Återkalla certifikatet för {label}?</target></segment>
+      </unit>
+      <unit id="integrations.revoke_body">
+        <segment><source>{label} loses its access as {account} at once, on every controller, and its open connections close.</source><target>{label} förlorar sin åtkomst som {account} direkt, på alla kontrollanter, och dess öppna anslutningar stängs.</target></segment>
+      </unit>
+      <unit id="integrations.revoke_after">
+        <segment><source>Its key can never enroll again. To bring the host back, enroll it with a new code and a new key. This cannot be undone.</source><target>Dess nyckel kan aldrig registreras igen. För att ta tillbaka värden, registrera den med en ny kod och en ny nyckel. Det går inte att ångra.</target></segment>
+      </unit>
+      <unit id="integrations.revoked">
+        <segment><source>Certificate of {label} revoked</source><target>Certifikatet för {label} återkallat</target></segment>
+      </unit>
+      <unit id="integrations.codes.heading">
+        <segment><source>Waiting enrollment codes</source><target>Väntande registreringskoder</target></segment>
+      </unit>
+      <unit id="integrations.codes.waiting">
+        <segment><source>For {account}, until {expires}</source><target>För {account}, till {expires}</target></segment>
+      </unit>
+      <unit id="integrations.codes.from">
+        <segment><source>from {source} only</source><target>endast från {source}</target></segment>
+      </unit>
+      <unit id="integrations.codes.withdraw">
+        <segment><source>Withdraw</source><target>Dra tillbaka</target></segment>
+      </unit>
+      <unit id="integrations.code.withdrawn">
+        <segment><source>Enrollment code for {account} withdrawn</source><target>Registreringskoden för {account} dragen tillbaka</target></segment>
+      </unit>
+      <unit id="integrations.code.title">
+        <segment><source>Enroll a host</source><target>Registrera en värd</target></segment>
+      </unit>
+      <unit id="integrations.code.intro">
+        <segment><source>Makes a single-use code for one service account. The host uses it once, with openssl and curl, to get its certificate; the key is made on the host and never leaves it.</source><target>Skapar en engångskod för ett tjänstekonto. Värden använder den en gång, med openssl och curl, för att få sitt certifikat; nyckeln skapas på värden och lämnar den aldrig.</target></segment>
+      </unit>
+      <unit id="integrations.code.no_accounts">
+        <segment><source>There is no enabled service account. Create one under Service accounts first.</source><target>Det finns inget aktiverat tjänstekonto. Skapa ett under Tjänstekonton först.</target></segment>
+      </unit>
+      <unit id="integrations.code.account">
+        <segment><source>Service account</source><target>Tjänstekonto</target></segment>
+      </unit>
+      <unit id="integrations.code.lifetime">
+        <segment><source>Valid for</source><target>Giltig i</target></segment>
+      </unit>
+      <unit id="integrations.code.lifetime_900">
+        <segment><source>15 minutes</source><target>15 minuter</target></segment>
+      </unit>
+      <unit id="integrations.code.lifetime_3600">
+        <segment><source>1 hour</source><target>1 timme</target></segment>
+      </unit>
+      <unit id="integrations.code.source">
+        <segment><source>Only from network</source><target>Endast från nätverk</target></segment>
+      </unit>
+      <unit id="integrations.code.source_help">
+        <segment><source>Optional: the network the host enrolls from, such as 192.0.2.0/24.</source><target>Valfritt: nätverket värden registrerar sig från, till exempel 192.0.2.0/24.</target></segment>
+      </unit>
+      <unit id="integrations.code.source_rule">
+        <segment><source>Write a network as an address and a prefix length, such as 192.0.2.0/24.</source><target>Skriv ett nätverk som en adress och en prefixlängd, till exempel 192.0.2.0/24.</target></segment>
+      </unit>
+      <unit id="integrations.code.create">
+        <segment><source>Create code</source><target>Skapa kod</target></segment>
+      </unit>
+      <unit id="integrations.code.created_title">
+        <segment><source>Enrollment code</source><target>Registreringskod</target></segment>
+      </unit>
+      <unit id="integrations.code.once">
+        <segment><source>This code is shown only now and works once, until {expires}. Copy it before you close this window.</source><target>Koden visas bara nu och fungerar en gång, till {expires}. Kopiera den innan du stänger fönstret.</target></segment>
+      </unit>
+      <unit id="integrations.code.code">
+        <segment><source>Code</source><target>Kod</target></segment>
+      </unit>
+      <unit id="integrations.code.copy">
+        <segment><source>Copy code</source><target>Kopiera koden</target></segment>
+      </unit>
+      <unit id="integrations.code.copied">
+        <segment><source>Code copied</source><target>Koden kopierad</target></segment>
+      </unit>
+      <unit id="integrations.code.copy_blocked">
+        <segment><source>The browser did not allow copying; select the code and copy it by hand.</source><target>Webbläsaren tillät inte kopiering; markera koden och kopiera den för hand.</target></segment>
+      </unit>
+      <unit id="integrations.code.fingerprint">
+        <segment><source>Fingerprint of the server root</source><target>Fingeravtryck för serverns rotcertifikat</target></segment>
+      </unit>
+      <unit id="integrations.code.fingerprint_help">
+        <segment><source>The code ends with it; the enrollment script compares it with the root the server sends before it trusts it.</source><target>Koden slutar med det; registreringsskriptet jämför det med rotcertifikatet som servern skickar innan det litar på det.</target></segment>
+      </unit>
+      <unit id="integrations.code.step_save">
+        <segment><source>On the automation host, save the code to the file enroll.code, readable only by the integration's account.</source><target>På automationsvärden, spara koden i filen enroll.code, läsbar bara för integrationens konto.</target></segment>
+      </unit>
+      <unit id="integrations.code.step_run">
+        <segment><source>Run the enrollment script of the integrations guide there. Only a proof made with the code travels, never the code itself.</source><target>Kör registreringsskriptet från integrationsguiden där. Bara ett bevis som gjorts med koden skickas, aldrig själva koden.</target></segment>
+      </unit>
+      <unit id="integrations.code.step_list">
+        <segment><source>The host then appears in the list as active. Its renewal timer keeps the certificate current.</source><target>Värden visas sedan i listan som aktiv. Dess förnyelsetimer håller certifikatet aktuellt.</target></segment>
+      </unit>
+      <unit id="integrations.code.done">
+        <segment><source>Done</source><target>Klar</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

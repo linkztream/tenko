@@ -331,6 +331,12 @@ export type MessageKey =
   | "account.totp.verify"
   | "audit.action.auth.access.denied"
   | "audit.action.auth.break_glass.set"
+  | "audit.action.auth.client_cert.code_create"
+  | "audit.action.auth.client_cert.code_withdraw"
+  | "audit.action.auth.client_cert.issue"
+  | "audit.action.auth.client_cert.present"
+  | "audit.action.auth.client_cert.renew"
+  | "audit.action.auth.client_cert.revoke"
   | "audit.action.auth.directory.revoke"
   | "audit.action.auth.grant.create"
   | "audit.action.auth.grant.revoke"
@@ -375,6 +381,7 @@ export type MessageKey =
   | "audit.action.cluster.ca.create"
   | "audit.action.cluster.enrollment.create"
   | "audit.action.cluster.enrollment.delete"
+  | "audit.action.cluster.integration_ca.create"
   | "audit.action.cluster.member.announce"
   | "audit.action.cluster.member.join"
   | "audit.action.cluster.member.promote"
@@ -5209,6 +5216,57 @@ export type MessageKey =
   | "import.upload.title"
   | "import.upload.too_large"
   | "import.upload.unsupported"
+  | "integrations.code.account"
+  | "integrations.code.code"
+  | "integrations.code.copied"
+  | "integrations.code.copy"
+  | "integrations.code.copy_blocked"
+  | "integrations.code.create"
+  | "integrations.code.created_title"
+  | "integrations.code.done"
+  | "integrations.code.fingerprint"
+  | "integrations.code.fingerprint_help"
+  | "integrations.code.intro"
+  | "integrations.code.lifetime"
+  | "integrations.code.lifetime_3600"
+  | "integrations.code.lifetime_900"
+  | "integrations.code.no_accounts"
+  | "integrations.code.once"
+  | "integrations.code.source"
+  | "integrations.code.source_help"
+  | "integrations.code.source_rule"
+  | "integrations.code.step_list"
+  | "integrations.code.step_run"
+  | "integrations.code.step_save"
+  | "integrations.code.title"
+  | "integrations.code.withdrawn"
+  | "integrations.codes.from"
+  | "integrations.codes.heading"
+  | "integrations.codes.waiting"
+  | "integrations.codes.withdraw"
+  | "integrations.col.host"
+  | "integrations.col.key"
+  | "integrations.col.state"
+  | "integrations.col.until"
+  | "integrations.enroll"
+  | "integrations.heading"
+  | "integrations.help.active"
+  | "integrations.help.expiring"
+  | "integrations.help.lapsed"
+  | "integrations.help.renewed"
+  | "integrations.help.revoked"
+  | "integrations.lede"
+  | "integrations.none"
+  | "integrations.of_account"
+  | "integrations.revoke_after"
+  | "integrations.revoke_body"
+  | "integrations.revoke_named"
+  | "integrations.revoke_title"
+  | "integrations.revoked"
+  | "integrations.state.active"
+  | "integrations.state.expiring"
+  | "integrations.state.lapsed"
+  | "integrations.state.revoked"
   | "ipam.action.create"
   | "ipam.action.delete"
   | "ipam.action.lock"
@@ -9350,6 +9408,17 @@ export interface MessageArgs {
   "import.upload.size": { kb: string | number };
   "import.upload.start": { count: number };
   "import.upload.unsupported": { names: string | number };
+  "integrations.code.once": { expires: string | number };
+  "integrations.code.withdrawn": { account: string | number };
+  "integrations.codes.from": { source: string | number };
+  "integrations.codes.waiting": { account: string | number; expires: string | number };
+  "integrations.help.active": { renewed: string | number };
+  "integrations.help.revoked": { reason: string | number };
+  "integrations.of_account": { account: string | number };
+  "integrations.revoke_body": { account: string | number; label: string | number };
+  "integrations.revoke_named": { label: string | number };
+  "integrations.revoke_title": { label: string | number };
+  "integrations.revoked": { label: string | number };
   "ipam.action.create": { count: number };
   "ipam.action.delete": { count: number };
   "ipam.action.lock": { count: number };
@@ -10387,6 +10456,12 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.verify",
   "audit.action.auth.access.denied",
   "audit.action.auth.break_glass.set",
+  "audit.action.auth.client_cert.code_create",
+  "audit.action.auth.client_cert.code_withdraw",
+  "audit.action.auth.client_cert.issue",
+  "audit.action.auth.client_cert.present",
+  "audit.action.auth.client_cert.renew",
+  "audit.action.auth.client_cert.revoke",
   "audit.action.auth.directory.revoke",
   "audit.action.auth.grant.create",
   "audit.action.auth.grant.revoke",
@@ -10431,6 +10506,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.cluster.ca.create",
   "audit.action.cluster.enrollment.create",
   "audit.action.cluster.enrollment.delete",
+  "audit.action.cluster.integration_ca.create",
   "audit.action.cluster.member.announce",
   "audit.action.cluster.member.join",
   "audit.action.cluster.member.promote",
@@ -15265,6 +15341,57 @@ export const messageKeys: readonly MessageKey[] = [
   "import.upload.title",
   "import.upload.too_large",
   "import.upload.unsupported",
+  "integrations.code.account",
+  "integrations.code.code",
+  "integrations.code.copied",
+  "integrations.code.copy",
+  "integrations.code.copy_blocked",
+  "integrations.code.create",
+  "integrations.code.created_title",
+  "integrations.code.done",
+  "integrations.code.fingerprint",
+  "integrations.code.fingerprint_help",
+  "integrations.code.intro",
+  "integrations.code.lifetime",
+  "integrations.code.lifetime_3600",
+  "integrations.code.lifetime_900",
+  "integrations.code.no_accounts",
+  "integrations.code.once",
+  "integrations.code.source",
+  "integrations.code.source_help",
+  "integrations.code.source_rule",
+  "integrations.code.step_list",
+  "integrations.code.step_run",
+  "integrations.code.step_save",
+  "integrations.code.title",
+  "integrations.code.withdrawn",
+  "integrations.codes.from",
+  "integrations.codes.heading",
+  "integrations.codes.waiting",
+  "integrations.codes.withdraw",
+  "integrations.col.host",
+  "integrations.col.key",
+  "integrations.col.state",
+  "integrations.col.until",
+  "integrations.enroll",
+  "integrations.heading",
+  "integrations.help.active",
+  "integrations.help.expiring",
+  "integrations.help.lapsed",
+  "integrations.help.renewed",
+  "integrations.help.revoked",
+  "integrations.lede",
+  "integrations.none",
+  "integrations.of_account",
+  "integrations.revoke_after",
+  "integrations.revoke_body",
+  "integrations.revoke_named",
+  "integrations.revoke_title",
+  "integrations.revoked",
+  "integrations.state.active",
+  "integrations.state.expiring",
+  "integrations.state.lapsed",
+  "integrations.state.revoked",
   "ipam.action.create",
   "ipam.action.delete",
   "ipam.action.lock",

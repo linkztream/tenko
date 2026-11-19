@@ -17,6 +17,7 @@ import { reconcilerRoutes } from "./routes-reconciler";
 import { clusterRoutes, quorumGate } from "./routes-cluster";
 import { i18nRoutes } from "./routes-i18n";
 import { importRoutes } from "./routes-import";
+import { integrationsRoutes } from "./routes-integrations";
 import { jobRoutes } from "./routes-jobs";
 import { kekRoutes } from "./routes-kek";
 import { moveRoutes } from "./routes-move";
@@ -83,6 +84,8 @@ export const happyPaths: HttpHandler[] = [
   ...clusterRoutes,
   ...scansRoutes,
   ...accessRoutes,
+  // ADR 0035: the integration certificates and enrollment codes of service accounts.
+  ...integrationsRoutes,
   ...auditExportRoutes,
   ...kekRoutes,
   ...backupRoutes,
