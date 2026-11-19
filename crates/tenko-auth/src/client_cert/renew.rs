@@ -108,6 +108,10 @@ impl ClientCerts {
         }
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(&CLIENT_CERTS, &record.serial, Some(revision));
+        // Written unchanged so that its revision moves: a revocation, a presentation or a
+        // second renewal that read the lineage before this commit conflicts with it instead
+        // of missing the new successor, and a lineage never holds two pending certificates.
+        batch.put_typed(&CLIENT_CERTS, &record.serial, &record)?;
         batch.expect_typed(&crate::model::USERS, &account, Some(user_revision));
         batch.expect_typed(&CLIENT_CERTS, &issued.serial, None);
         let mut withdrawn = Vec::new();

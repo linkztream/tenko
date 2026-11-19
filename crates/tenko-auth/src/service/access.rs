@@ -69,11 +69,29 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
     }
 }
 
-/// Stages the removal of every scoped token of a service account that is not bound to a
-/// certificate lineage, with its family, when TGL-47 starts to require binding (ADR 0035,
-/// decision 10), and one `auth.token.revoke` audit record per token; returns what it staged
-/// by account. A dry run calls it on a batch it throws away, so the count it shows is the
-/// count a change removes. Loosening the requirement again brings none of them back.
+/// Whether `settings` require a token of `owner` with `scopes` to be bound to a certificate
+/// lineage (TGL-47, ADR 0035 decision 10): every token of a service account while the
+/// requirement is on, except mirror tokens (ADR 0033). A mirror pusher cannot present an
+/// integration certificate yet; once it can, its tokens are bound from the start and this
+/// exception goes. The one place of the rule: the creation of a token, the removal when the
+/// requirement is turned on and every presentation of a token ask it.
+pub(super) fn binding_required(
+    owner: &UserRecord,
+    scopes: &[TokenScope],
+    settings: &crate::settings::SecuritySettings,
+) -> bool {
+    settings.integrations().require_binding
+        && owner.is_service()
+        && !scopes.iter().any(|scope| scope.mirror().is_some())
+}
+
+/// Stages the removal of every scoped token that `settings` require to be bound
+/// ([`binding_required`]) and is not, with its family, when TGL-47 starts to require
+/// binding, and one `auth.token.revoke` audit record per token; returns what it staged by
+/// account. A dry run calls it on a batch it throws away, so the count it shows is the count
+/// a change removes. Loosening the requirement again brings none of them back. A token that
+/// escapes the scan (created on a controller that had not seen the change yet) is refused at
+/// its next use all the same.
 ///
 /// # Errors
 ///
@@ -82,6 +100,7 @@ pub(super) fn stage_unbound_removal(
     view: &dyn ReadView,
     batch: &mut WriteBatch,
     ctx: &RequestCtx,
+    settings: &crate::settings::SecuritySettings,
 ) -> Result<UnboundTokens, AuthError> {
     let mut families = BTreeSet::new();
     let mut accounts: BTreeMap<UserId, AccountTokens> = BTreeMap::new();
@@ -98,7 +117,7 @@ pub(super) fn stage_unbound_removal(
         }
         let Some((owner, _)) = view
             .get_typed(&USERS, &record.owner)?
-            .filter(|(user, _)| user.is_service())
+            .filter(|(user, _)| binding_required(user, &record.scopes, settings))
         else {
             continue;
         };
@@ -141,7 +160,7 @@ fn token_lineage(
 ) -> Result<Option<uuid::Uuid>, AuthError> {
     use crate::client_cert::model::{CLIENT_CERTS, CertState};
     let Some(lineage) = request.lineage else {
-        if owner.is_service() && settings.integrations().require_binding {
+        if binding_required(owner, &request.scopes, settings) {
             return Err(AuthError::invalid(
                 "lineage",
                 "this profile binds every service-account token to a certificate of the account (TGL-47)",
@@ -1122,6 +1141,29 @@ mod tests {
 
     use super::*;
     use crate::{model::RoleMfa, settings::Profile};
+
+    #[test]
+    fn binding_is_required_of_service_tokens_except_mirror_tokens() {
+        let now = Timestamp::now();
+        let mut service = UserRecord::new("svc".to_owned(), "svc".to_owned(), Vec::new(), now);
+        service.kind = UserKind::Service;
+        let person = UserRecord::new("ann".to_owned(), "Ann".to_owned(), Vec::new(), now);
+        let hardened = Profile::Hardened.defaults();
+        let home = Profile::Home.defaults();
+        let metrics = [TokenScope::Metrics];
+        let mirror = [TokenScope::Mirror(tenko_core::MirrorId::generate())];
+        assert!(binding_required(&service, &metrics, &hardened));
+        assert!(binding_required(&service, &[], &hardened));
+        assert!(!binding_required(&service, &metrics, &home), "not required");
+        assert!(
+            !binding_required(&person, &metrics, &hardened),
+            "a person's token"
+        );
+        assert!(
+            !binding_required(&service, &mirror, &hardened),
+            "a mirror pusher cannot present a certificate yet"
+        );
+    }
 
     fn grant(id: u128, parent: Option<u128>) -> GrantRecord {
         GrantRecord {

@@ -26,8 +26,8 @@ use tenko_core::{
 use tenko_store::{ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError, WriteBatch};
 use tenko_vault::{SecretPurpose, Vault, VaultError};
 
-pub use enroll::{CreatedCode, EnrollInput, NewCode, enrollment_proof};
-pub use follow::{Acceptance, CertIndex, OVERLAP};
+pub use enroll::{CreatedCode, EnrollInput, NewCode, enrollment_proof, valid_label};
+pub use follow::{Acceptance, CertIndex, OVERLAP, STALE_LIMIT};
 pub use renew::{RENEW_INTERVAL, Renewal, alarm_after, renew_after};
 
 use crate::{model::SETTINGS, settings::Profile};
@@ -53,8 +53,7 @@ pub mod actions {
 
     /// An enrollment code was created.
     pub const CODE_CREATE: AuditAction = AuditAction::from_static("auth.client_cert.code_create");
-    /// An enrollment code was withdrawn, by an administrator or because it came over plain
-    /// HTTP.
+    /// An enrollment code was withdrawn by an administrator.
     pub const CODE_WITHDRAW: AuditAction =
         AuditAction::from_static("auth.client_cert.code_withdraw");
     /// A certificate was issued at enrollment, or an enrollment was refused.

@@ -56,6 +56,11 @@ pub struct CreatedCode {
     /// SHA-256 of the internal root, which the integration listener's server certificate
     /// chains to, lower-case hex (the code's last part).
     pub server_root_sha256: String,
+    /// The addresses the integration listener of the answering controller opens on; empty
+    /// when it is closed (`[integrations] listen = []`), absent when unknown. Hosts cannot
+    /// enroll through a listener on loopback addresses only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen: Option<Vec<String>>,
 }
 
 /// What an enrollment request carries.
@@ -74,19 +79,65 @@ pub struct EnrollInput {
 }
 
 /// The HMAC-SHA-256 an integrator sends to enroll: keyed with the code's secret, over
-/// `tenko-integration-enroll-v1\n<code id>\n<account id>\n` and the canonical DER of the
-/// request's `SubjectPublicKeyInfo`. The ids are in their hyphenated lower-case form.
-pub fn enrollment_proof(secret: &[u8], code: Uuid, account: UserId, spki: &[u8]) -> Vec<u8> {
+/// `tenko-integration-enroll-v1\n<code id>\n<account id>\n<label>\n` and the canonical DER
+/// of the request's `SubjectPublicKeyInfo`. The ids are in their hyphenated lower-case form,
+/// the label in UTF-8 exactly as sent, so nobody on the path can relabel the host.
+pub fn enrollment_proof(
+    secret: &[u8],
+    code: Uuid,
+    account: UserId,
+    label: &str,
+    spki: &[u8],
+) -> Vec<u8> {
     let key = hmac::Key::new(hmac::HMAC_SHA256, secret);
-    hmac::sign(&key, &proof_message(code, account, spki))
+    hmac::sign(&key, &proof_message(code, account, label, spki))
         .as_ref()
         .to_vec()
 }
 
-fn proof_message(code: Uuid, account: UserId, spki: &[u8]) -> Vec<u8> {
-    let mut message = format!("{PROOF_LABEL}\n{code}\n{account}\n").into_bytes();
+fn proof_message(code: Uuid, account: UserId, label: &str, spki: &[u8]) -> Vec<u8> {
+    let mut message = format!("{PROOF_LABEL}\n{code}\n{account}\n{label}\n").into_bytes();
     message.extend_from_slice(spki);
     message
+}
+
+/// Whether `label` may name a host: 1 to [`MAX_LABEL`] characters, no space at either end,
+/// no control character and no format character (Unicode category Cf: the invisible marks
+/// and direction overrides that make one label look like another).
+pub fn valid_label(label: &str) -> bool {
+    !label.is_empty()
+        && label.trim() == label
+        && label.chars().count() <= MAX_LABEL
+        && !label.chars().any(|c| c.is_control() || is_format(c))
+}
+
+/// Unicode category Cf (Unicode 15.1).
+fn is_format(c: char) -> bool {
+    const FORMAT: &[(u32, u32)] = &[
+        (0x00AD, 0x00AD),
+        (0x0600, 0x0605),
+        (0x061C, 0x061C),
+        (0x06DD, 0x06DD),
+        (0x070F, 0x070F),
+        (0x0890, 0x0891),
+        (0x08E2, 0x08E2),
+        (0x180E, 0x180E),
+        (0x200B, 0x200F),
+        (0x202A, 0x202E),
+        (0x2060, 0x2064),
+        (0x2066, 0x206F),
+        (0xFEFF, 0xFEFF),
+        (0xFFF9, 0xFFFB),
+        (0x110BD, 0x110BD),
+        (0x110CD, 0x110CD),
+        (0x13430, 0x1343F),
+        (0x1BCA0, 0x1BCA3),
+        (0x1D173, 0x1D17A),
+        (0xE0001, 0xE0001),
+        (0xE0020, 0xE007F),
+    ];
+    let c = u32::from(c);
+    FORMAT.iter().any(|(from, to)| (*from..=*to).contains(&c))
 }
 
 /// An enabled service account, with the revision of its record.
@@ -166,6 +217,7 @@ impl ClientCerts {
                 hex_encode(secret.expose())
             ),
             server_root_sha256,
+            listen: None,
         })
     }
 
@@ -195,21 +247,22 @@ impl ClientCerts {
         self.end_code(ctx, id, "withdrawn").await
     }
 
-    /// Withdraws a code that arrived over plain HTTP, as node enrollment does with its token
-    /// (ADR 0035, decision 5), and answers the refusal. Nothing happens to an unknown code.
-    ///
-    /// The refusal is [`ClientCertError::Transport`] with `why`, or the store error that kept
-    /// the code from being withdrawn.
-    pub async fn refuse_plain_http(
+    /// Refuses an enrollment that arrived over plain HTTP, or through a proxy that did not
+    /// state the scheme, and audits the refusal (ADR 0035, decision 5). The code stays
+    /// usable: its secret never travels, so the request showed nothing that could redeem it,
+    /// and withdrawing it would let anyone who knows a code id burn the code.
+    pub async fn refuse_transport(
         &self,
         ctx: &RequestCtx,
         id: Uuid,
         why: &'static str,
     ) -> ClientCertError {
-        match self.end_code(ctx, id, "plain_http").await {
-            Ok(()) | Err(ClientCertError::NotFound(_)) => ClientCertError::Transport(why),
-            Err(error) => error,
-        }
+        let error = ClientCertError::Transport(why);
+        let draft = AuditDraft::denied(actions::ISSUE, Vec::<ObjectRef>::new())
+            .with_context("code", id.to_string())
+            .with_context("reason", tenko_core::Coded::code(&error).to_owned());
+        self.audit_refusal(ctx, draft).await;
+        error
     }
 
     async fn end_code(
@@ -240,8 +293,9 @@ impl ClientCerts {
     }
 
     /// Deletes the secrets of expired codes and the records of codes past
-    /// [`CODE_KEPT_SECS`]; best effort, after a code is created.
-    async fn prune_codes(&self, ctx: &RequestCtx) {
+    /// [`CODE_KEPT_SECS`]; best effort, after a code is created and from the hourly sweep of
+    /// the integration alarms.
+    pub async fn prune_codes(&self, ctx: &RequestCtx) {
         let Ok(view) = self.view().await else { return };
         let Ok(codes) = view.scan_typed(&ENROLLMENT_CODES, KeyRange::all(), usize::MAX, false)
         else {
@@ -340,7 +394,7 @@ impl ClientCerts {
         let key = hmac::Key::new(hmac::HMAC_SHA256, secret.expose());
         hmac::verify(
             &key,
-            &proof_message(code.id, code.account, &spki),
+            &proof_message(code.id, code.account, &input.label, &spki),
             &input.proof,
         )
         .map_err(|_| ClientCertError::CodeInvalid)?;
@@ -359,11 +413,8 @@ impl ClientCerts {
         ctx: &RequestCtx,
         input: &EnrollInput,
     ) -> Result<String, ClientCertError> {
-        let label = input.label.trim();
-        if label.is_empty()
-            || label.chars().count() > MAX_LABEL
-            || label.chars().any(char::is_control)
-        {
+        let label = input.label.as_str();
+        if !valid_label(label) {
             return Err(ClientCertError::Label);
         }
         let (view, mut code, code_revision, spki) = self.proven_code(ctx, input).await?;

@@ -1138,6 +1138,7 @@ impl AuthService {
                     self.view().await?.as_ref(),
                     &mut batch,
                     ctx,
+                    &next,
                 )?;
                 draft = draft.with_context("unbound_tokens_removed", unbound.count.to_string());
                 removed = Some(unbound);

@@ -858,6 +858,21 @@ impl AuthService {
         Ok(())
     }
 
+    /// Whether the settings require `record` to be bound ([`super::access::binding_required`]);
+    /// a token whose owner cannot be read counts as required, so a store error refuses.
+    fn binding_missing(&self, view: &dyn ReadView, record: &ScopedTokenRecord) -> bool {
+        let settings = self.settings();
+        if !settings.integrations().require_binding {
+            return false;
+        }
+        match view.get_typed(&USERS, &record.owner) {
+            Ok(Some((owner, _))) => {
+                super::access::binding_required(&owner, &record.scopes, &settings)
+            }
+            Ok(None) | Err(_) => true,
+        }
+    }
+
     /// Whether a presented token is refused, and what the refusal triggers: the one place
     /// for it. The bindings come first and trigger nothing but their refusal and its audit:
     /// the form of the token text must match its record (`tnk_`, `tnkc_` or `tnkb_`), a
@@ -908,7 +923,12 @@ impl AuthService {
             .await;
             return true;
         }
-        if record.lineage.is_some() && record.lineage != lineage {
+        // TGL-47: the binding a token carries, and the binding the settings require of it
+        // now, also of a token created before the requirement or on a controller that had
+        // not seen it yet (ADR 0035, decision 10).
+        if (record.lineage.is_some() && record.lineage != lineage)
+            || (record.lineage.is_none() && self.binding_missing(view.as_ref(), record))
+        {
             self.refusal_audit(
                 actions::TOKEN_BINDING_REFUSED,
                 record.id,

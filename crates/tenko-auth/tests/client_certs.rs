@@ -177,7 +177,7 @@ impl Env {
                 &ctx(at),
                 EnrollInput {
                     code: code.id,
-                    proof: code.proof(key),
+                    proof: code.proof(label, key),
                     csr: key.to_vec(),
                     label: label.to_owned(),
                     source: Some(CLIENT.parse().expect("address")),
@@ -228,8 +228,8 @@ impl Code {
         }
     }
 
-    fn proof(&self, key: &[u8]) -> Vec<u8> {
-        enrollment_proof(&self.secret, self.id, self.account, key)
+    fn proof(&self, label: &str, key: &[u8]) -> Vec<u8> {
+        enrollment_proof(&self.secret, self.id, self.account, label, key)
     }
 }
 
@@ -253,15 +253,21 @@ fn key(seed: u8) -> Vec<u8> {
 
 #[test]
 fn the_proof_matches_the_documented_test_vector() {
-    // The vector of the plan, section 3.1: Python's hmac, openssl dgst and PowerShell's
-    // HMACSHA256 give the same bytes.
+    // The vector of docs/integrations.md section 4: Python's hmac, openssl dgst and
+    // PowerShell's HMACSHA256 give the same bytes.
     let secret: Vec<u8> = (0..32).collect();
     let code: Uuid = "0190d1c2-0000-7000-8000-000000000001".parse().expect("id");
     let account: UserId = "0190d1c2-0000-7000-8000-000000000002".parse().expect("id");
     let spki = key(1);
     assert_eq!(
-        hex_encode(&enrollment_proof(&secret, code, account, &spki)),
-        "2c7001035b8298745c7f0921f454bde9ac63c1585215a6ff15913367ef2a8f6f"
+        hex_encode(&enrollment_proof(
+            &secret,
+            code,
+            account,
+            "backup-host",
+            &spki
+        )),
+        "04e334886c0b67b47232d484cb50b985829581aa8174d80b5a16ab39b6746fe8"
     );
 }
 
@@ -406,30 +412,38 @@ async fn every_refusal_leaves_the_code_and_is_audited() {
     for input in [
         EnrollInput {
             code: code.id,
-            proof: wrong.proof(&key(1)),
+            proof: wrong.proof("h", &key(1)),
             csr: key(1),
             label: "h".to_owned(),
             source: None,
         },
         EnrollInput {
             code: code.id,
-            proof: code.proof(&key(2)),
+            proof: code.proof("h", &key(2)),
             csr: key(1),
             label: "h".to_owned(),
             source: None,
         },
         EnrollInput {
             code: code.id,
-            proof: enrollment_proof(&code.secret, code.id, UserId::generate(), &key(1)),
+            proof: enrollment_proof(&code.secret, code.id, UserId::generate(), "h", &key(1)),
             csr: key(1),
             label: "h".to_owned(),
             source: None,
         },
         EnrollInput {
             code: Uuid::now_v7(),
-            proof: code.proof(&key(1)),
+            proof: code.proof("h", &key(1)),
             csr: key(1),
             label: "h".to_owned(),
+            source: None,
+        },
+        // The label is part of the proof: a proxy cannot relabel the host.
+        EnrollInput {
+            code: code.id,
+            proof: code.proof("h", &key(1)),
+            csr: key(1),
+            label: "other".to_owned(),
             source: None,
         },
     ] {
@@ -439,7 +453,17 @@ async fn every_refusal_leaves_the_code_and_is_audited() {
         );
     }
 
-    for label in ["", "   ", &"x".repeat(65), "line\nbreak"] {
+    for label in [
+        "",
+        "   ",
+        " padded",
+        &"x".repeat(65),
+        "line\nbreak",
+        "zero\u{200b}width",
+        "right\u{202e}to-left",
+        "soft\u{ad}hyphen",
+        "tag\u{e0041}",
+    ] {
         assert_eq!(
             env.enroll_at(&code, &key(1), t0(), label).await.err(),
             Some(ClientCertError::Label),
@@ -451,7 +475,7 @@ async fn every_refusal_leaves_the_code_and_is_audited() {
         Err(ClientCertError::InvalidRequest { .. })
     ));
     assert_eq!(env.code_state(code.id).await, (CodeState::Pending, true));
-    assert_eq!(env.audit_outcomes("auth.client_cert.issue").await.len(), 9);
+    assert_eq!(env.audit_outcomes("auth.client_cert.issue").await.len(), 15);
     assert!(
         env.audit_outcomes("auth.client_cert.issue")
             .await
@@ -537,24 +561,24 @@ async fn an_account_holds_at_most_eight_lineages() {
 }
 
 #[tokio::test]
-async fn plain_http_withdraws_the_code() {
+async fn plain_http_is_refused_and_audited_and_the_code_stays_usable() {
     let env = Env::new();
     let account = env.service_account().await;
     let code = env.code(account.id).await;
     let refused = env
         .certs
-        .refuse_plain_http(&ctx(t0()), code.id, "plain HTTP")
+        .refuse_transport(&ctx(t0()), code.id, "plain HTTP")
         .await;
     assert_eq!(refused, ClientCertError::Transport("plain HTTP"));
-    assert_eq!(env.code_state(code.id).await, (CodeState::Withdrawn, false));
-    assert_eq!(
-        env.enroll(&code, &key(1)).await.err(),
-        Some(ClientCertError::CodeInvalid)
-    );
-    // An unknown code answers the same refusal and changes nothing.
+    assert_eq!(env.code_state(code.id).await.0, CodeState::Pending);
+    // Whoever knows only a code id cannot burn the code: it still enrolls over HTTPS.
+    env.enroll(&code, &key(1))
+        .await
+        .expect("enrolled after the refusal");
+    // An unknown code answers the same refusal.
     assert_eq!(
         env.certs
-            .refuse_plain_http(&ctx(t0()), Uuid::now_v7(), "plain HTTP")
+            .refuse_transport(&ctx(t0()), Uuid::now_v7(), "plain HTTP")
             .await,
         ClientCertError::Transport("plain HTTP")
     );
@@ -948,4 +972,235 @@ async fn a_renewal_needs_a_certificate_that_still_passes() {
         Err(ClientCertError::Certificate),
         "the account's tokens ended"
     );
+}
+
+/// A store whose next write waits at a gate until the test opens it, so that another
+/// operation can commit between this one's read and its write.
+struct Gated {
+    inner: Arc<MemStore>,
+    gate: std::sync::Mutex<Option<Gate>>,
+}
+
+type Gate = (
+    tokio::sync::oneshot::Sender<()>,
+    tokio::sync::oneshot::Receiver<()>,
+);
+
+impl Gated {
+    /// Holds the next write: the first receiver hears when it reached the gate, the sender
+    /// opens it.
+    fn hold(
+        &self,
+    ) -> (
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (reached, reached_rx) = tokio::sync::oneshot::channel();
+        let (open, open_rx) = tokio::sync::oneshot::channel();
+        *self.gate.lock().expect("gate") = Some((reached, open_rx));
+        (reached_rx, open)
+    }
+}
+
+#[async_trait]
+impl Store for Gated {
+    async fn propose(
+        &self,
+        batch: WriteBatch,
+    ) -> Result<tenko_store::Committed, tenko_store::StoreError> {
+        let held = self.gate.lock().expect("gate").take();
+        if let Some((reached, open)) = held {
+            let _ = reached.send(());
+            let _ = open.await;
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(
+        &self,
+        consistency: ReadConsistency,
+    ) -> Result<Arc<dyn tenko_store::ReadView>, tenko_store::StoreError> {
+        self.inner.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<tenko_core::Revision>,
+        filter: tenko_store::WatchFilter,
+    ) -> Result<tenko_store::ChangeStream, tenko_store::StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(
+        &self,
+        index: Arc<dyn tenko_store::DerivedIndex>,
+    ) -> Result<(), tenko_store::StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> tenko_store::StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
+}
+
+/// A second service over the same store whose next write the test holds at a gate.
+fn racing(env: &Env) -> (Arc<ClientCerts>, Arc<Gated>) {
+    let gated = Arc::new(Gated {
+        inner: Arc::clone(&env.store),
+        gate: std::sync::Mutex::new(None),
+    });
+    let vault: Arc<dyn Vault> = Arc::new(MemVault::with_store(env.store.clone()));
+    let certs = Arc::new(ClientCerts::new(
+        gated.clone() as Arc<dyn Store>,
+        vault,
+        env.issuer.clone() as Arc<dyn Issuer>,
+    ));
+    (certs, gated)
+}
+
+/// The pending certificates of a lineage.
+async fn pending(env: &Env, lineage: Uuid) -> Vec<String> {
+    env.certs
+        .list(None)
+        .await
+        .expect("list")
+        .into_iter()
+        .filter(|record| record.lineage == lineage && record.state == CertState::Pending)
+        .map(|record| record.serial)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_revocation_that_read_the_lineage_before_a_renewal_also_ends_its_successor() {
+    let env = Env::new();
+    let (_, current) = enrolled(&env).await;
+    let (other, gated) = racing(&env);
+    let (reached, open) = gated.hold();
+    let serial = current.serial.clone();
+    let revocation = tokio::spawn(async move {
+        other
+            .revoke(&ctx(at(21, 0)), &serial, "an administrator ended it")
+            .await
+    });
+    reached.await.expect("the revocation read the lineage");
+    let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    open.send(()).expect("open");
+    revocation.await.expect("task").expect("revoked");
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Revoked);
+    assert_eq!(state_of(&env, &successor).await, CertState::Revoked);
+}
+
+#[tokio::test]
+async fn of_two_renewals_at_once_one_commits_and_the_lineage_keeps_one_pending() {
+    let env = Env::new();
+    let (_, current) = enrolled(&env).await;
+    let (other, gated) = racing(&env);
+    let (reached, open) = gated.hold();
+    let (serial, account) = (current.serial.clone(), current.account);
+    let first = tokio::spawn(async move {
+        other
+            .renew(&ctx(at(21, 0)), &serial, account, &key(2))
+            .await
+    });
+    reached.await.expect("the first renewal read the lineage");
+    let second = renewed(renew_at(&env, at(21, 0), &current, &key(3)).await);
+    open.send(()).expect("open");
+    assert_eq!(first.await.expect("task"), Err(ClientCertError::Conflict));
+    assert_eq!(pending(&env, current.lineage).await, [second]);
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Current);
+}
+
+#[tokio::test]
+async fn a_presentation_that_read_the_lineage_before_a_renewal_does_not_promote_a_withdrawn_successor()
+ {
+    let env = Env::new();
+    let (_, current) = enrolled(&env).await;
+    let unseen = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    let (other, gated) = racing(&env);
+    let (reached, open) = gated.hold();
+    let serial = unseen.clone();
+    let presentation =
+        tokio::spawn(async move { other.note_presented(&ctx(at(22, 0)), &serial).await });
+    reached.await.expect("the presentation read the lineage");
+    // The answer of the first renewal was lost: the host renews again and withdraws it.
+    let replacement = renewed(renew_at(&env, at(22, 0), &current, &key(3)).await);
+    open.send(()).expect("open");
+    assert_eq!(
+        presentation.await.expect("task"),
+        Err(ClientCertError::Conflict)
+    );
+    assert_eq!(state_of(&env, &unseen).await, CertState::Withdrawn);
+    assert_eq!(state_of(&env, &replacement).await, CertState::Pending);
+    assert_eq!(state_of(&env, &current.serial).await, CertState::Current);
+}
+
+#[tokio::test]
+async fn an_index_that_cannot_read_a_change_refuses_after_the_bound_and_names_its_boundaries() {
+    let env = Env::new();
+    let index = Arc::clone(env.certs.index());
+    let (account, current) = enrolled(&env).await;
+    index.load(env.store.as_ref()).await.expect("load");
+    let now = at(1, 0);
+    assert_eq!(
+        index.next_boundary(&current.serial, now),
+        Some(current.not_after),
+        "a current certificate changes at its end"
+    );
+    let changes = index.subscribe();
+    index.mark_stale(now);
+    assert!(
+        changes.has_changed().expect("open"),
+        "connections hear of it"
+    );
+    let bound = Timestamp(now.0 + tenko_auth::client_cert::STALE_LIMIT);
+    assert_eq!(index.next_boundary(&current.serial, now), Some(bound));
+    assert!(matches!(
+        index.accept(
+            &current.serial,
+            account.id,
+            Timestamp(bound.0 - Duration::seconds(1))
+        ),
+        Acceptance::Accepted(_)
+    ));
+    assert_eq!(
+        index.accept(&current.serial, account.id, bound),
+        Acceptance::Refused("the records could not be read for too long")
+    );
+    // A load that succeeds ends it.
+    index.load(env.store.as_ref()).await.expect("load");
+    assert!(matches!(
+        index.accept(&current.serial, account.id, bound),
+        Acceptance::Accepted(_)
+    ));
+
+    // A replaced certificate changes at the end of its overlap.
+    let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    env.certs
+        .note_presented(&ctx(at(21, 0)), &successor)
+        .await
+        .expect("presented");
+    index.load(env.store.as_ref()).await.expect("load");
+    assert_eq!(
+        index.next_boundary(&current.serial, at(21, 0)),
+        Some(Timestamp(at(21, 0).0 + OVERLAP))
+    );
+}
+
+#[tokio::test]
+async fn expired_codes_lose_their_secret_at_the_sweep() {
+    let env = Env::new();
+    let account = env.service_account().await;
+    let code = env.code_with(account.id, Some(60), None).await;
+    assert!(
+        env.code_state(code.id).await.1,
+        "the secret is kept while it can be used"
+    );
+    env.certs
+        .prune_codes(&ctx(Timestamp(t0().0 + Duration::minutes(2))))
+        .await;
+    assert_eq!(env.code_state(code.id).await, (CodeState::Pending, false));
 }

@@ -540,3 +540,69 @@ async fn hardened_refuses_tls_1_2_on_the_integration_listener() {
         .expect("TGL-47");
     assert!(toggle.weaker_than_home, "TLS 1.2 is weaker than Home");
 }
+
+#[tokio::test]
+async fn an_unbound_token_that_escaped_the_removal_is_refused_at_its_use() {
+    let fx = fixture().await;
+    let escaped = fx
+        .create(
+            fx.account.id,
+            TokenRequest {
+                name: "escaped".to_owned(),
+                scopes: vec![TokenScope::Metrics],
+                renewable: true,
+                expires_in_days: Some(30),
+                ..TokenRequest::default()
+            },
+        )
+        .await
+        .expect("unbound");
+    // A stream it holds open (the event stream) asks again at every change.
+    let held = fx
+        .env
+        .service
+        .hold(
+            &Credentials::Bearer(escaped.token.expose().to_owned()),
+            fx.env.now(),
+        )
+        .await
+        .expect("held");
+    // The requirement arrives as another controller wrote it, after this token was made and
+    // without this controller's removal: the token is still stored.
+    let mut settings = fx.env.service.settings();
+    settings.integrations = Some(IntegrationPolicy {
+        require_binding: true,
+        ..IntegrationPolicy::of(Profile::Home)
+    });
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), fx.env.now());
+    batch
+        .put_typed(&tenko_auth::model::SETTINGS, &(), &settings)
+        .expect("encodes");
+    fx.env.store.propose(batch).await.expect("written");
+    assert_eq!(fx.token_count(fx.account.id).await, 1, "nothing removed it");
+    let at = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view")
+        .revision();
+    assert!(matches!(
+        fx.env.service.standing(&held, at, fx.env.now()).await,
+        Err(AuthError::Unauthenticated)
+    ));
+
+    assert!(matches!(
+        fx.present(&escaped, None).await,
+        Err(AuthError::Unauthenticated)
+    ));
+    assert_eq!(
+        fx.audited("auth.token.binding_refused").await,
+        [AuditOutcome::Denied]
+    );
+    // A bound token of the same account passes.
+    let bound = fx.bound(false).await;
+    fx.present(&bound, Some(fx.lineage))
+        .await
+        .expect("a bound token passes");
+}

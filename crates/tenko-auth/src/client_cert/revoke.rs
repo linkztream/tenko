@@ -16,6 +16,9 @@ use crate::model::{SCOPED_TOKENS, USER_SCOPED_TOKENS, USERS};
 /// record says.
 const ACCESS_ENDED: &str = "the access of its service account ended";
 
+/// How often a revocation is decided again after a write of the lineage got in between.
+const REVOKE_TRIES: u32 = 3;
+
 /// Stages the revocation of every certificate of `lineage` that has not ended, with
 /// `reason`; returns their serials.
 ///
@@ -122,6 +125,23 @@ impl ClientCerts {
     /// [`ClientCertError::NotFound`], [`ClientCertError::Conflict`] when the lineage changed
     /// meanwhile, or a store error.
     pub async fn revoke(
+        &self,
+        ctx: &RequestCtx,
+        serial: &str,
+        reason: &str,
+    ) -> Result<(), ClientCertError> {
+        // A renewal or presentation committed in between moves a record of the lineage; the
+        // revocation is decided again on the newer state, so no new successor escapes it.
+        for attempt in 1..=REVOKE_TRIES {
+            match self.try_revoke(ctx, serial, reason).await {
+                Err(ClientCertError::Conflict) if attempt < REVOKE_TRIES => {}
+                result => return result,
+            }
+        }
+        Err(ClientCertError::Conflict)
+    }
+
+    async fn try_revoke(
         &self,
         ctx: &RequestCtx,
         serial: &str,

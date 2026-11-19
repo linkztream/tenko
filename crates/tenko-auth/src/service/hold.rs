@@ -148,6 +148,14 @@ impl AuthService {
         if user.id != hold.owner {
             return Err(AuthError::Unauthenticated);
         }
+        // TGL-47 at every use: a stream held by an unbound token ends once binding is
+        // required of it (ADR 0035, decision 10).
+        if let FoundToken::Scoped(record, _) = &found
+            && record.lineage.is_none()
+            && super::access::binding_required(&user, &record.scopes, &settings)
+        {
+            return Err(AuthError::Unauthenticated);
+        }
         Ok(until)
     }
 }
