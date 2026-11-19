@@ -29,13 +29,14 @@ An integrator enrolls an automation host with `openssl` and `curl` alone, the ho
 | # | Exit check | Package |
 |---|---|---|
 | IC-E1 | A host with nothing but `openssl` and `curl` enrolls with a code, calls an API route on the integration listener with a bound token, and renews its certificate twice from a timer without a person; the same with a key in a software TPM (`swtpm` with the `tpm2-openssl` provider) | CC8 |
-| IC-E2 | A bound token is refused on 8443 directly, through a trusted proxy with every forwarded certificate header of section 9.2, and through a PROXY protocol header with TLS fields; it is refused on 8445 with another account's certificate | CC8 |
+| IC-E2 | A bound token is refused on 8443 directly, through a trusted proxy with every forwarded certificate header of section 9.2, and through a PROXY protocol header with TLS fields; it is refused on 8445 with another account's certificate and with another lineage's; none of these refusals revokes anything | CC8 |
 | IC-E3 | An integration certificate fails the handshake on the cluster port and as a server certificate toward a node; a node certificate fails the handshake on the integration listener | CC8 |
 | IC-E4 | A revocation made on one controller ends requests of that certificate on another controller of a three-controller lab at its next request, and an open HTTP/2 connection is closed | CC8 |
 | IC-E5 | Deleting the service account ends its certificates and bound tokens at once on every controller | CC8 |
 | IC-E6 | A rollback to the previous release refuses bound tokens (prefix check) and never opens the integration listener | CC8 |
 | IC-E7 | The fuzz targets of section 9.3 run in the fuzz job; the penetration rows of section 9.2 are recorded in the security report | CC9 |
-| IC-E8 | With TLS 1.2 allowed by TGL-47, a client offering only TLS 1.2 enrolls and renews, and an observer's capture shows the certificate and nothing of the requests; with it off (the default), the same client fails the handshake; under Hardened the setting is refused | CC8 |
+| IC-E8 | With TLS 1.2 allowed by TGL-47, a client offering only TLS 1.2 enrolls and renews, an observer's capture shows the certificate and nothing of the requests, and no session ID or ticket is issued; with it off (the default), the same client fails the handshake; under Hardened the setting is refused | CC8 |
+| IC-E9 | A certificate signed with a copy of the integration CA key but never recorded is refused at the handshake on every controller; a controller cut off from its quorum answers 503 on 8445 after 30 seconds | CC8 |
 
 ## 2. Starting point in the code
 
@@ -45,43 +46,67 @@ Verified for this plan; the build checks again before relying on it.
 - **The cluster port.** `crates/tenko-cluster/src/mtls.rs`: `NodeClientVerifier` wraps `WebPkiClientVerifier` with the one root, then requires a node URI (`PeerIdentity::from_der`) and an unrevoked serial; `RevocationSet` is an `ArcSwap<HashSet<String>>`. The revocation table `cluster.revocations` (`crates/tenko-cluster/src/model.rs`, record `Revocation { node, revoked_at, not_after, controller }`) is followed on every controller by a store watch (`follow_revocations` in the node registry), so a revocation applies within a moment of replication; open connections close about 0.3 s later.
 - **The API listener.** `crates/tenko-cluster/src/ca/tls.rs` `server_config` uses `with_no_client_auth`; `crates/tenko-api/src/server/listener.rs` runs the handshake and inserts `ConnInfo` (`server/forwarded.rs`: `peer`, `tls`, `mode`, `trusted`, `proxy`) into every request; the PROXY protocol reader (`server/proxy_protocol.rs`) interprets only the client bit of the SSL TLV. In `reverse_proxy` mode only trusted proxies are served.
 - **Who runs the API.** Only controllers (`crates/tenko/src/serve/mod.rs` sends a node without the controller role to `node::agent`, which runs the cluster client alone). DNS and DHCP run in a controller's process until Phase 5.
-- **Tokens.** `crates/tenko-auth/src/model.rs` `ScopedTokenRecord` (no `deny_unknown_fields`), stored under the SHA-256 of the text in the replicated `auth.scoped_tokens`; prefix `tnk_` checked first (`secret.rs`, `service/mod.rs` `token_of`); `holder` refuses a disabled owner or an older generation (`UserRecord::admits`); minting for a service account needs a fresh session (`require_fresh_session`, five minutes, `service/account.rs`). Deleting an account raises its generation and removes its credential rows in pages (`service/end.rs`).
-- **Fuzzing.** `fuzz/Cargo.toml` has `api_proxy_protocol` and `webauthn_certificate`, and no target for the PKCS#10 parser of `POST /api/v1/nodes/enroll`, a public route. Package CC1 adds one that covers both enrollments.
+- **Tokens.** `crates/tenko-auth/src/model.rs` `ScopedTokenRecord` (no `deny_unknown_fields`), stored under the SHA-256 of the text in the replicated `auth.scoped_tokens`; prefix `tnk_` checked first (`secret.rs`, `service/mod.rs` `token_of`); `holder` refuses a disabled owner or a token issued under an older `tokens_generation` (`UserRecord::admits`); minting for a service account needs a fresh session (`require_fresh_session`, five minutes, `service/account.rs`). Deleting an account raises its `sessions_generation` and `tokens_generation` and removes its credential rows in pages (`service/end.rs`).
+- **Node enrollment over plain HTTP** is refused outside the Lab profile and withdraws the token (`crates/tenko-api/src/routes/nodes.rs`, `refuse_plain_http`); the integration enrollment does the same.
+- **The API server's limits.** One connection semaphore and one handshake timeout for every listener of the API server (`crates/tenko-api/src/server/mod.rs`, `listener.rs`), and no limit per source before the handshake; the integration listener gets its own.
+- **Fuzzing.** The PKCS#10 parser `csr_public_key` is fuzzed through the cluster port's renewal request (`cluster_messages`, `crates/tenko-cluster/src/server.rs`); what the node enrollment route reads around it (the PEM in its JSON body) is not. The integration enrollment reads a DER body and two headers instead, and gets its own target (section 9.3).
 
 ## 3. The integrator's view
 
 ### 3.1 Enrollment
 
-An administrator opens the service account, chooses "Enroll a certificate", and gets the code once, with the commands below filled in. On the automation host (POSIX shell; `example.test` stands for the controller's name):
+An administrator opens the service account, chooses "Enroll a certificate", and gets the code once, with the commands below filled in. On the automation host, as the integration's own account (POSIX shell; `example.test` stands for the controller's name):
 
 ```sh
-code='tnki.<id>.<secret>.<fingerprint>'      # from the administrator, used once
+umask 077
+code='tnki.<code id>.<account id>.<secret>.<fingerprint>'   # from the administrator, used once
 api=https://tenko.example.test:8443
-curl -fsS -k "$api/api/v1/integrations/ca" -o tenko-ca.pem   # public, checked on the next line
-[ "$(openssl x509 -in tenko-ca.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d : | tr A-F a-f)" = "${code##*.}" ] || exit 9
+IFS=. read -r _ id account secret fingerprint <<EOF
+$code
+EOF
+curl -fsS -k "$api/api/v1/integrations/ca" -o tenko-ca.pem   # public data, checked on the next line
+[ "$(openssl x509 -in tenko-ca.pem -noout -fingerprint -sha256 | cut -d= -f2 | tr -d : | tr A-F a-f)" = "$fingerprint" ] || exit 9
 openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out client.key
 openssl req -new -key client.key -subj /CN=tenko-integration -outform DER -out client.csr
-curl -fsS -H "Authorization: Bearer $code" -H 'Content-Type: application/pkcs10' \
-  --data-binary @client.csr "$api/api/v1/integrations/enroll?label=backup-host" -o client.pem
+proof=$({ printf 'tenko-integration-enroll-v1\n%s\n%s\n' "$id" "$account"
+          openssl req -in client.csr -inform DER -noout -pubkey | openssl pkey -pubin -outform DER
+        } | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$secret" -binary | openssl base64 -A)
+printf 'Content-Type: application/pkcs10\nTenko-Enrollment-Code: %s\nTenko-Enrollment-Proof: %s\n' "$id" "$proof" > enroll.headers
+curl -fsS -H @enroll.headers --data-binary @client.csr \
+  "$api/api/v1/integrations/enroll?label=backup-host" -o client.crt
+cat client.key client.crt > client.pem && rm client.key client.crt client.csr enroll.headers
 ```
 
-When 8443 uses the internal CA, the `curl` of the enrollment adds `--cacert tenko-ca.pem`; with an imported certificate or a proxy the system roots verify 8443. The integration listener is always verified with `tenko-ca.pem`.
-
-With a TPM on Linux the key is made and used through the `tpm2-openssl` provider (`openssl genpkey -provider tpm2 …`, `openssl req -provider tpm2 -provider default -key handle:0x81000001 …`), and `curl` reaches it through its OpenSSL backend; on Windows the key is made by `certreq -new` with the Microsoft Platform Crypto Provider and used from the certificate store (`curl.exe` with Schannel, or PowerShell's `-CertificateThumbprint`). Lab package CC8 proves the Linux path; the Windows path is proved in the owner's Windows lab (section 11).
+- The code's secret never leaves the host: the request carries the code id and the HMAC. The only place it appears is the `openssl dgst` arguments while that command runs, which other local users can read on a host where process arguments are visible; `docs/integrations.md` says to run the enrollment on a host where they are not (Linux `/proc` mounted with `hidepid`), or from PowerShell, which computes the HMAC in process.
+- Headers go to `curl` from a file (`-H @file`), never as arguments.
+- When 8443 uses the internal CA, the `curl` of the enrollment adds `--cacert tenko-ca.pem`; with an imported certificate or a proxy the system roots verify 8443. The integration listener is always verified with `tenko-ca.pem`, passed per call. The root is never imported into a machine-wide trust store.
+- With a TPM on Linux the key is made and used through the `tpm2-openssl` provider, with an authorization value that only the integration's account can read (`openssl genpkey -provider tpm2 -algorithm EC -pkeyopt group:P-256 -pkeyopt user-auth:…`, then `-passin file:…` where the key is used), and `curl` reaches it through its OpenSSL backend. On Windows the key is made non-exportable by `certreq -new` with the Microsoft Platform Crypto Provider in the integration account's own key store and used from there (`curl.exe` with Schannel, or PowerShell with a validation callback that compares the root's fingerprint). Lab package CC8 proves the Linux path; the Windows path is proved in the owner's Windows lab (section 11).
 
 ### 3.2 Use and renewal
 
 ```sh
-curl -fsS --cacert tenko-ca.pem --cert client.pem --key client.key \
-  -H "Authorization: Bearer $token" https://tenko.example.test:8445/api/v1/system/status
-openssl req -new -key client.key -subj /CN=tenko-integration -outform DER |
-  curl -fsS --cacert tenko-ca.pem --cert client.pem --key client.key \
-    -H 'Content-Type: application/pkcs10' --data-binary @- \
-    https://tenko.example.test:8445/api/v1/integrations/certificate/renew -o client.pem.new &&
-  mv client.pem.new client.pem
+printf 'Authorization: Bearer %s\n' "$token" > call.headers   # the token from a file only the account reads
+curl -fsS --cacert tenko-ca.pem --cert client.pem -H @call.headers \
+  https://tenko.example.test:8445/api/v1/system/status
 ```
 
-The renewal runs from a timer (a systemd timer or a scheduled task) daily; before the last third of the lifetime it answers `integration.renew.not_due` (exit status of `curl -f` 22), which the script treats as nothing to do. `docs/integrations.md` ships the two scripts (POSIX shell and PowerShell) in full (IC-Q11).
+The renewal runs daily from a timer (a systemd timer or a scheduled task). With a key in a file it makes a fresh key every time:
+
+```sh
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out next.key
+openssl req -new -key next.key -subj /CN=tenko-integration -outform DER -out next.csr
+status=$(curl -sS --cacert tenko-ca.pem --cert client.pem -H 'Content-Type: application/pkcs10' \
+  --data-binary @next.csr -o next.crt -w '%{http_code}' \
+  https://tenko.example.test:8445/api/v1/integrations/certificate/renew)
+case $status in
+  201) cat next.key next.crt > next.pem && mv next.pem client.pem ;;   # one atomic switch of key and certificate
+  200) ;;                                                              # not due yet: the body says until when
+  *) echo "renewal refused ($status): $(cat next.crt)" >&2; rm -f next.key next.csr next.crt; exit 1 ;;
+esac
+rm -f next.key next.csr next.crt
+```
+
+A key in a TPM is renewed with the same key (`openssl req -provider tpm2 -provider default -key handle:… -passin file:…`). `docs/integrations.md` ships both scripts (POSIX shell and PowerShell) in full (IC-Q11), and a failed renewal makes the timer's unit fail, which the host's own monitoring sees; Tenko's expiry alarm (OPS-29) is the second net.
 
 ### 3.3 Routes
 
@@ -90,10 +115,13 @@ The renewal runs from a timer (a systemd timer or a scheduled task) daily; befor
 | `POST /api/v1/integrations/enrollments` | 8443 | administrator, interactive session signed in within five minutes | the code once (`Cache-Control: no-store`), its record |
 | `GET /api/v1/integrations/enrollments`, `DELETE …/{id}` | 8443 | administrator | list (never the code), withdraw |
 | `GET /api/v1/integrations/ca` | 8443 | public | the internal root in PEM, in every TLS mode |
-| `POST /api/v1/integrations/enroll` | 8443 | public; the code is the credential | the certificate in PEM |
-| `GET /api/v1/integrations/certificates` | 8443, 8445 | administrator | per account: lineage, label, serial, key digest, validity, state, last seen |
-| `DELETE /api/v1/integrations/certificates/{serial}` | 8443, 8445 | administrator | revokes the lineage |
-| `POST /api/v1/integrations/certificate/renew` | 8445 only | the connection's certificate | the new certificate in PEM |
+| `POST /api/v1/integrations/enroll` | 8443 | public; the code id and the HMAC are the credential; HTTPS only outside Lab | 201 and the certificate in PEM |
+| `GET /api/v1/integrations/certificates` | 8443 | administrator | per account: lineage, label, serial, key digest, validity, state, first presented |
+| `DELETE /api/v1/integrations/certificates/{serial}` | 8443 | administrator | revokes the lineage |
+| `POST /api/v1/integrations/certificate/renew` | 8445 only | the connection's certificate | 201 and the new certificate in PEM, or 200 with `{"not_due": true, "renew_after": …}` |
+| every authenticated route of the API | 8445 | a bearer token owned by the certificate's account | as on 8443 |
+
+8445 serves no public route, reads no session cookie, and refuses a token of any other account.
 
 ## 4. Threat model
 
@@ -101,15 +129,17 @@ The design column assumes decision IC-Q1 (bound tokens) under Standard. "The acc
 
 | Attacker | Today | With the renewal package alone | With this design |
 |---|---|---|---|
-| **Stolen token alone** (a log, a paste, a memory dump of a client) | Acts as the account from any address that reaches 8443 (or the proxy) until the token expires (90 days) or is revoked | Until the token's short expiry; cannot renew without the renewal secret; with source binding (TGL-46) only from the bound address | Nothing: 8443 refuses a bound token, and 8445 needs the key in the handshake |
-| **Stolen token and renewal secret** | As above (no renewal secret exists) | Renews without end until the legitimate client renews, whose reuse detection revokes the family; source binding limits where from | Nothing: a bound token renews only over 8445 with the key |
-| **A copy of the integration host's disk** (backup, snapshot, a stolen disk) | The token: as the first row | Token and renewal secret: as the second row | Key in a TPM: nothing, the key blob loads only in that TPM. Key in a file: everything until the next legitimate renewal of the token or the certificate reveals the copy (both reuse detections revoke lineage and tokens) or the certificate lapses (at most 30 days) |
-| **Live compromise of the integration host** | Everything the account may do, and the token keeps working after the attacker is evicted | The same; token and secret keep working after eviction until reuse detection | Everything the account may do while the attacker is there, through the TPM if there is one. With a TPM, access ends with eviction: the key cannot be copied and the bound token is useless elsewhere. With a key in a file, as the row above after eviction |
-| **Compromised `tenko` service account on a controller** | It is the authority: it reads the store and the vault (token digests, never tokens), holds the CA key and can act as any principal | The same | The same, and no wider: it can issue integration certificates, but it could already act as any account; it never sees an integration's private key, so it cannot impersonate an integration toward anything else; the cluster port of other controllers does not trust the integration root |
-| **Hostile reverse proxy** | Sees every token and session cookie that passes and can replay them; asserts client addresses | Also sees the renewal secret at renewal (as the second row); source binding sees only the proxy's address | Sees no certificate integration: they reach 8445 directly with TLS end to end, and a certificate the proxy forwards is never read; people's sessions as today |
-| **Hostile client on the network that reaches a listener** | 8443: the TLS handshake, HTTP parsing and the public routes (sign-in, node enrollment) | The same, plus the renewal route, which needs a token and its renewal secret | 8445 adds only the handshake up to the client certificate check: rustls' web PKI verifies the chain to the integration root before Tenko reads a byte of the certificate, and no HTTP is served before a valid one. 8443 adds two public routes: the CA root (public data) and enrollment, which needs a code and whose PKCS#10 parser is fuzzed |
-| **Stolen enrollment code** | Not applicable | Not applicable | One enrollment within the hour, for that account only, from the code's source prefix if one was set. The legitimate enrollment then fails, the list shows the thief's key digest and label, and the administrator revokes |
-| **Stolen certificate and key file without a token** | Not applicable | Not applicable | Can renew the certificate and nothing else; the legitimate renewal after the thief's (or before it) is reuse and revokes the lineage |
+| **Stolen token alone** (a log, a paste, a memory dump of a client) | Acts as the account from any address that reaches 8443 (or the proxy) until the token expires (90 days) or is revoked | Until the token's short expiry; cannot renew without the renewal secret; with source binding (TGL-46) only from the bound address | Nothing: a bound token is refused without the key, on 8443 and on 8445, and that refusal triggers no reuse detection, so the thief cannot revoke it either |
+| **Stolen token and renewal secret** | As above (no renewal secret exists) | Renews without end until the legitimate client renews, whose reuse detection revokes the family; source binding limits where from | Nothing, as the row above: the binding is checked before the renewal secret |
+| **A copy of the integration host's disk** (backup, snapshot, a stolen disk) | The token: as the first row | Token and renewal secret: as the second row | Key in a TPM: nothing; the key blob loads only in that TPM, behind its authorization value. Key in a file: everything the account may do, until the next legitimate renewal replaces the key; the copied certificate stops 15 minutes after the new one is first presented, and a renewal from it after that is reuse and revokes the lineage. A thief who never renews is cut off, not revealed: at the latest one lifetime (30 days) after the copy |
+| **Live compromise of the integration host** | Everything the account may do, and the token keeps working after the attacker is evicted | The same; token and secret keep working after eviction until reuse detection | Everything the account may do while the attacker is there, through the TPM if there is one. With a TPM, access ends with eviction. With a key in a file, as the row above after eviction |
+| **Compromised `tenko` service account on a controller** | It is the authority: it reads the store and the vault (token digests, never tokens), holds the CA key and can act as any principal | The same | The same, and no wider: it can record and issue integration certificates, but it could already act as any account; it never sees an integration's private key, so it cannot impersonate an integration toward anything else; the cluster port of other controllers does not trust the integration root |
+| **A controller removed from the cluster that kept its data** | Its copy of the vault holds the internal CA key; node certificates it signs fail at other controllers only through their node records | The same | Integration certificates it signs have no record on the remaining controllers and are refused; it cannot write a record there |
+| **Hostile reverse proxy** | Sees every token and session cookie that passes and can replay them; asserts client addresses | Also sees the renewal secret at renewal (as the second row); source binding sees only the proxy's address | Sees no certificate integration: they reach 8445 directly with TLS end to end, and a certificate the proxy forwards is never read. An enrollment through the proxy shows it the code id and an HMAC, not the code's secret, so it cannot redeem the code for its own key. People's sessions as today |
+| **Hostile client on the network that reaches a listener** | 8443: the TLS handshake, HTTP parsing and the public routes (sign-in, node enrollment) | The same, plus the renewal route, which needs a token and its renewal secret | 8445 adds only the handshake up to the client certificate check, behind its own connection cap, a cap per source before the handshake and a 5-second handshake timeout: rustls verifies the chain to the integration root before Tenko reads a byte of the certificate, and no HTTP is served before a recorded one. 8443 adds two public routes: the CA root (public data) and enrollment, which needs a code id and its HMAC |
+| **Stolen enrollment code** (read from the process arguments of the host, or from where it was handed over) | Not applicable | Not applicable | One enrollment within the hour, for that account only, from the code's source prefix if one was set. The legitimate enrollment then fails, the list shows the thief's key digest and label, and the administrator revokes. No token is bound to the thief's lineage unless an administrator binds one |
+| **Stolen certificate and key file without a token** | Not applicable | Not applicable | Can keep the lineage's certificate renewed and nothing else; once the legitimate host has presented a successor, a renewal from the thief's copy is reuse and revokes the lineage |
+| **A controller cut off from its quorum** | Keeps answering from its local copy | The same | 8445 answers 503 after 30 seconds without quorum contact, so a revocation made elsewhere cannot be outrun for longer than that |
 
 ## 5. Requirements and toggle, drafted
 
@@ -117,22 +147,24 @@ These rows go into `docs/REQUIREMENTS.md` and `docs/SECURITY-PROFILES.md` in pac
 
 | ID | Requirement | Phase | Priority |
 |---|---|---|---|
-| IAM-22 | Client certificates for integrations: an administrator signed in within five minutes creates a single-use enrollment code (at most one hour, optionally limited to a source prefix) for one service account; the integrator enrolls a PKCS#10 request for an ECDSA P-256 key it generated, in a file or a TPM, with `openssl` and `curl` alone, and receives a certificate of a separate integration CA that names only that service account (`urn:tenko:service-account:<id>`, client authentication only). The key never leaves the host. Integration certificates are accepted only on the integration listener (mutual TLS 1.3, TLS 1.2 only by TGL-47, its own port), never on the API and UI listener or the cluster port, and no verifier of a node accepts one. | 4 | Must |
-| IAM-23 | Certificate-bound service-account tokens in the manner of RFC 8705, bound to the key: a bound token is accepted only on the integration listener over a connection whose client certificate is valid, unrevoked, names the token's owner and carries the bound key; everywhere else it is refused. A build that does not know binding refuses a bound token. | 4 | Must |
-| IAM-24 | Renewal of an integration certificate over the integration listener with the certificate alone, in the last third of its lifetime, with a new or the same key; renewal from a certificate that its lineage already replaced revokes the lineage and its bound tokens. The lifetime follows TGL-47; a lineage that does not renew raises the certificate expiry alarm (OPS-29). | 4 | Must |
-| IAM-25 | Revocation of integration certificates by an administrator, by deleting or disabling the service account, by reuse of a lineage and by reuse detection of a bound token family (IAM-21); effective on every controller within the store's replication, also on open connections; a revoked key never enrolls again. A client certificate forwarded by a reverse proxy, as a header or in the PROXY protocol, is never trusted. | 4 | Must |
+| IAM-22 | Client certificates for integrations: an administrator signed in within five minutes creates a single-use enrollment code (at most one hour, optionally limited to a source prefix) for one service account; the integrator enrolls a PKCS#10 request for an ECDSA P-256 key it generated, in a file or a TPM, with `openssl` and `curl` alone, proving the code with an HMAC so that its secret never travels, over HTTPS only (outside Lab), and receives a certificate of a separate integration CA that names only that service account (`urn:tenko:service-account:<id>`, client authentication only). The key never leaves the host. Integration certificates are accepted only on the integration listener (its own port, TLS 1.3, TLS 1.2 only where TGL-47 allows it, with the Extended Master Secret and no session resumption), never on the API and UI listener or the cluster port, and no verifier of a node accepts one. The integration listener serves only the authenticated API routes and the renewal route, to tokens of the certificate's account, with its own connection limits. | 4 | Must |
+| IAM-23 | Certificate-bound service-account tokens in the manner of RFC 8705: a token is bound at creation to a named certificate lineage of its owner and is accepted only on the integration listener over a connection whose certificate belongs to that lineage and is accepted under IAM-25. The binding is checked before anything else of the token; a bound token presented without the key is refused and audited and triggers no reuse detection. A build that does not know binding refuses a bound token, and a record whose binding was lost is refused, never read as unbound. | 4 | Must |
+| IAM-24 | Renewal of an integration certificate over the integration listener with the certificate alone, in the last third of its lifetime (answered "not due" with a success and a body before that); a renewal from the current certificate while its successor is unseen replaces the successor; once the successor has been presented, a renewal from its predecessor revokes the lineage and its bound tokens. The lifetime follows TGL-47; a lineage that does not renew raises the certificate expiry alarm (OPS-29), and an expired lineage's tokens are revoked. | 4 | Must |
+| IAM-25 | Only recorded integration certificates are accepted: at the handshake and at every request the serial must have a record in an accepting state for the same account, whose `tokens_generation` it does not trail; an unknown serial is refused. Revocation by an administrator, by deleting or disabling the service account, by reuse of a lineage and by reuse detection of a bound token family (IAM-21), effective on every controller within the store's replication, also on open connections; a controller cut off from its quorum for more than 30 seconds stops answering on the integration listener; a revoked key never enrolls again. A client certificate forwarded by a reverse proxy, as a header or in the PROXY protocol, is never trusted. | 4 | Must |
 
 | ID | Toggle | Home | Standard | Hardened | Lab | Phase | Related |
 |---|---|---|---|---|---|---|---|
 | TGL-47 | Integration client certificates: certificate lifetime / certificate-bound tokens required for service accounts / TLS 1.2 on the integration listener (for Windows Server 2019 and older; the client certificate is then visible on the path) | 90 days / no / off | 30 days / no / off | 7 days / yes, every token an administrator creates for a service account, mirror tokens once the pusher presents a certificate / off, and turning it on is refused | 365 days / no / off | 4 | IAM-22, IAM-23, IAM-24 |
 
-A lifetime longer than the profile's, binding switched off under Hardened, or TLS 1.2 allowed is a deviation that the UI shows. TLS 1.2 is built as the other parts of the toggle are: a field of the same settings type with the profile's default, changed through the same route and audited the same way; the listener reads it per connection, so turning it off refuses the next TLS 1.2 handshake. A tightened lifetime applies at the next renewal; a tightened requirement refuses unbound service-account tokens at their next use, so the administrator sees the affected tokens in the settings page before saving.
+A lifetime longer than the profile's, binding switched off under Hardened, or TLS 1.2 allowed is a deviation that the UI shows; TLS 1.2 allowed also shows a warning row in the health view. TLS 1.2 is built as the other parts of the toggle are: a field of the same settings type with the profile's default, changed through the same route and audited the same way; the listener reads it per connection, so turning it off refuses the next TLS 1.2 handshake. A tightened lifetime applies at the next renewal. Tightening the binding requirement revokes the unbound tokens of service accounts in the same change, after the settings page has listed them; loosening it again revives nothing.
 
 ## 6. Cluster
 
 - **Issuance.** The integration root and its key replicate like the existing root: the record in the store, the key in the vault, which every controller opens. Any controller issues; the root is created once with a create-if-absent precondition, so two controllers that receive the first enrollment code at the same moment end with one root.
 - **Single use.** An enrollment code is consumed in the same write that records the certificate, with a precondition on the code's record, so two controllers cannot both accept it.
-- **Revocation and binding** live in replicated tables (`auth.client_certs`, the token records) and every controller follows them with a watch, as for nodes: within a moment of replication, and the per-request check is the authority even before the connection is closed. An account's generation is checked at every request, so deleting or disabling the account needs no row change to take effect.
+- **Records, revocation and binding** live in replicated tables (`auth.client_certs`, the token records). Every controller loads the certificate records in full before its listener opens and follows them with a watch, as for nodes: a change applies within a moment of replication, and the per-request check is the authority even before the connection is closed. The account's `tokens_generation` and its disabled flag are checked at every request, so deleting or disabling the account needs no row change to take effect.
+- **A controller that left the cluster** keeps whatever its data directory held, the integration CA key included. A certificate it signs has no record on the remaining controllers and is refused there (ADR 0035, decision 9).
+- **Cut off from the quorum.** A controller whose quorum state has been `isolated` or `electing` for more than 30 seconds answers 503 `integration.isolated` on 8445 until it hears the cluster again; enrollment and renewal need a write and fail there anyway.
 - **Nodes that are not controllers** run no API and no integration listener, never trust the integration root, and never see an integration certificate. That holds in Phase 5 for DNS-only and DHCP-only nodes as long as they run no API; a node that serves the API later is a controller in this sense and follows the tables.
 - **Endpoints.** Each controller opens its own integration listener with a server certificate of the internal root for its configured host names and addresses. An integrator that should survive the loss of a controller uses a name that resolves to several controllers, and that name must be among each controller's configured names; how the enrollment answer lists the endpoints is an open point (section 11).
 - **Mixed versions.** A controller of an older build has no integration listener and refuses `tnkb_` tokens; during a rolling upgrade bound tokens work on upgraded controllers only, which the upgrade notes say.
@@ -143,11 +175,11 @@ One owner per file at a time; a file named by two packages passes from the first
 
 | Package | What | Owns | Depends on | Before | Size |
 |---|---|---|---|---|---|
-| CC1 | The integration CA and issuance | `crates/tenko-cluster/src/ca/client.rs` (new), `ca/authority.rs`, `ca/certs.rs`, `ca/mod.rs` (appended lines), `fuzz/fuzz_targets/ca_csr.rs` (new), `fuzz/fuzz_targets/integration_identity.rs` (new), `fuzz/Cargo.toml` (appended targets) | none | yes | S |
-| CC2 | The integration listener and the verified client identity | `crates/tenko-cluster/src/client_tls.rs` (new), `crates/tenko-cluster/src/lib.rs` (appended line), `crates/tenko-api/src/server/listener.rs`, `server/forwarded.rs`, `server/mod.rs`, `crates/tenko/src/serve/tls.rs`, the configuration type that holds `[cluster] listen` | CC1 | yes | M |
-| CC3 | Certificate records, enrollment codes, enrollment, revocation, the watch | `crates/tenko-auth/src/client_cert/` (new: `mod.rs`, `model.rs`, `enroll.rs`, `revoke.rs`, `follow.rs`), `crates/tenko-auth/src/lib.rs` (appended line), `crates/tenko-api/src/routes/integrations.rs` (new), `crates/tenko-api/src/routes/mod.rs` (appended line) | CC1, CC2 | yes | M |
-| CC4 | Certificate renewal, lineage reuse, the expiry alarm | `crates/tenko-auth/src/client_cert/renew.rs` (new), `routes/integrations.rs` (from CC3), the alarm's registration beside the existing certificate expiry alarms | CC3 | yes | S |
-| CC5 | Certificate-bound tokens and TGL-47 | `crates/tenko-auth/src/model.rs`, `secret.rs` (`tnkb_`), `service/mod.rs`, `service/access.rs`, `service/end.rs`, `client_cert/mod.rs` (from CC4), `crates/tenko-api/src/routes/access.rs`, `crates/tenko-api/src/extract.rs`, `crates/tenko-core/src/auth.rs` (`Credentials` carries the connection's key digest; a `tenko-core` change, merged first), the settings type that holds `token_max_days` | CC4 and the renewal package on `main` | no | M |
+| CC1 | The integration CA and issuance (built) | `crates/tenko-cluster/src/ca/client.rs` (new), `ca/authority.rs`, `ca/certs.rs`, `ca/error.rs`, `ca/mod.rs`, `crates/tenko-cluster/tests/integration_ca.rs` (new), `fuzz/fuzz_targets/integration_identity.rs` (new), its seed, `fuzz/Cargo.toml`, `fuzz/limits.txt`, `fuzz/README.md` | none | yes | S |
+| CC2 | The integration listener: TLS and its limits, the verified client identity, the route and account filter, the quorum refusal | `crates/tenko-cluster/src/client_tls.rs` (new), `crates/tenko-cluster/src/lib.rs` (appended line), `crates/tenko-api/src/server/listener.rs`, `server/forwarded.rs`, `server/mod.rs`, `crates/tenko/src/serve/tls.rs`, the configuration type that holds `[cluster] listen` | CC1, CC3 (the record index it asks) | yes | M |
+| CC3 | Certificate records and their in-memory index, enrollment codes, enrollment with the HMAC proof, revocation, the watch | `crates/tenko-auth/src/client_cert/` (new: `mod.rs`, `model.rs`, `enroll.rs`, `revoke.rs`, `follow.rs`), `crates/tenko-auth/src/lib.rs` (appended line), `crates/tenko-api/src/routes/integrations.rs` (new), `crates/tenko-api/src/routes/mod.rs` (appended line), `fuzz/fuzz_targets/integration_enroll.rs` (new) with its lines in `fuzz/Cargo.toml`, `fuzz/limits.txt` and `fuzz/README.md` | CC1 | yes | M |
+| CC4 | Certificate renewal (current, pending, replaced), lineage reuse, the expiry alarm | `crates/tenko-auth/src/client_cert/renew.rs` (new), `routes/integrations.rs` (from CC3), the alarm's registration beside the existing certificate expiry alarms | CC2, CC3 | yes | S |
+| CC5 | Certificate-bound tokens and TGL-47 | `crates/tenko-auth/src/model.rs`, `secret.rs` (`tnkb_`), `service/mod.rs`, `service/access.rs`, `service/end.rs`, `client_cert/mod.rs` (from CC4), `crates/tenko-api/src/routes/access.rs`, `crates/tenko-api/src/extract.rs`, `crates/tenko-core/src/auth.rs` (`Credentials` carries the connection's certificate serial; a `tenko-core` change, merged first), the settings type that holds `token_max_days` | CC4 and the renewal package on `main` | no | M |
 | CC6a | UI: certificates of a service account, the enrollment code dialog with the filled-in commands, revoke | `ui/src/settings/access/Certificates.tsx` (new), `EnrollmentCode.tsx` (new), their tests, `ui/src/api/mock/routes-integrations.ts` (new), appended lines in the mock registry and the `sv` and `en` catalogs | CC3, CC4 | yes | S |
 | CC6b | UI: binding in the token dialog, the TGL-47 setting | the token dialog's files (owned by the renewal package until it is on `main`), the security profile settings page | CC5 | no | S |
 | CC7 | Documents and rows | `docs/REQUIREMENTS.md`, `docs/SECURITY-PROFILES.md`, `docs/certificates.md`, `docs/access.md`, `docs/integrations.md` (new, with both scripts), `docs/CONFORMANCE.md`, `docs/adr/README.md` | CC5 | no | S |
@@ -156,21 +188,21 @@ One owner per file at a time; a file named by two packages passes from the first
 
 What each package proves, beyond its unit tests:
 
-- **CC1.** An integration certificate carries exactly the fields of ADR 0035 decision 2 whatever the request asked for; a node certificate cannot be issued by the integration root nor an integration certificate by the existing root (`Signer` per root, no shared constructor); the identity reader refuses every certificate of section 9.1's list. The PKCS#10 parser gets its fuzz target here (it is also the node enrollment's).
-- **CC2.** Mandatory client authentication, TLS 1.3 by default and TLS 1.2 only by the third part of TGL-47 (built like the other toggles, read per connection), no tickets, the certificate request names only the integration root, no PROXY or forwarded header read, on-demand opening and closing, the per-request re-check, the kill switch per serial. `ConnInfo` gains `client: Option<Arc<ClientIdentity>>`, set only from the handshake; a comment there states that it is never set from a header.
-- **CC3.** Codes (digest only, single use across controllers, source prefix, at most one hour), the enrollment checks of ADR 0035 decision 5 with one refusal code each, at most eight active lineages, the key-digest deny of revoked keys, revocation by an administrator and the watch.
-- **CC4.** The renewal window and rate, the overlap of 15 minutes after the new certificate is first seen, lineage reuse, the alarm at the last sixth.
-- **CC5.** Binding at creation and at a renewal over 8445, the move of bound tokens on a same-lineage renewal and on a `replaces` enrollment, the refusal on 8443 (`auth.token.certificate_required`), Hardened's refusal of unbound service-account tokens, account end revoking certificates in the same pages as tokens, reuse detection of a bound family revoking the lineage.
+- **CC1.** An integration certificate carries exactly the fields of ADR 0035 decision 2 whatever the request asked for; a node certificate cannot be issued by the integration root nor an integration certificate by the existing root (one issuing type per root over a shared creation and loading of the root); the identity reader refuses every certificate of section 9.1's list and has its fuzz target.
+- **CC2.** Mandatory client authentication, TLS 1.3 by default and TLS 1.2 only by the third part of TGL-47 (built like the other toggles, read per connection, with the Extended Master Secret required and its health row), no tickets and no session IDs, the certificate request names only the integration root, the handshake's acceptance asked of the record index (an unknown serial refused), its own connection cap, the cap per source before the handshake and the 5-second handshake timeout, no PROXY or forwarded header and no cookie read, no public route served, every token of another account refused, the 503 after 30 seconds without quorum, on-demand opening only after the first full load, the per-request re-check, the kill switch per serial. `ConnInfo` gains `client: Option<Arc<ClientIdentity>>`, set only from the handshake; a comment there states that it is never set from a header.
+- **CC3.** Records with their states and the in-memory index that answers "is this serial accepted, for which account and lineage" (loaded in full, then followed); codes (digest only, single use across controllers, source prefix, at most one hour); the HMAC proof over the label, code id, account id and public key, the secret never received; plain HTTP refused and the code withdrawn outside Lab; the enrollment checks of ADR 0035 decision 5 with one refusal code each; the certificate answered only after the recording write; at most eight active lineages; the key-digest deny of revoked keys; revocation by an administrator.
+- **CC4.** The renewal window and rate with 200 "not due" and 201 "renewed"; a lost answer (a renewal from the current certificate replaces an unseen successor); the first presentation of a successor; the overlap of 15 minutes; a replaced certificate reaching the renewal route only, and reuse counted only after the successor was presented; the alarm at the last sixth.
+- **CC5.** Binding at creation to a named lineage, held as the lineage id; the binding checked before expiry, reuse detection and the wrong-secret counter, and a refusal without the key that only refuses and audits; prefix and record agreeing (`tnkb_` with a lineage, `tnk_` without); the refusal on 8443 (`auth.token.certificate_required`); tightening TGL-47 revoking unbound service-account tokens; an expired or revoked lineage revoking its tokens; account end revoking certificates in the same pages as tokens; reuse detection of a bound family revoking the lineage.
 
 ## 8. Order and the renewal package
 
 ```
-CC1 → CC2 → CC3 → CC4 ─┬─→ CC5 → CC6b → CC7 → CC9
+CC1 → CC3 → CC2 → CC4 ─┬─→ CC5 → CC6b → CC7 → CC9
                        └─→ CC6a           ↑
 CC8 skeleton after CC2 ······ CC8 in full after CC5
 ```
 
-- CC1 to CC4, CC6a and the skeleton of CC8 touch no file of the renewal package and can be built now, on the step's branch. Until CC5 they deliver enrollment, renewal and revocation of certificates that protect nothing yet, so the branch does not merge to `main` before CC5.
+- CC1 to CC4, CC6a and the skeleton of CC8 touch no file of the renewal package and can be built now, on the step's branch. CC3 comes before CC2 because the listener's handshake asks the record index. Until CC5 they deliver enrollment, renewal and revocation of certificates that protect nothing yet, so the branch does not merge to `main` before CC5.
 - CC5, CC6b and CC7 start when the renewal package is on `main` and the step's branch is updated from it; CC5 adapts to the token format and route names that package settled.
 - The step reaches `main` as one pull request after CC9, through the gate.
 
@@ -178,12 +210,12 @@ CC8 skeleton after CC2 ······ CC8 in full after CC5
 
 ### 9.1 Tests in the packages
 
-- **Issuance (CC1):** a request asking for a CA, a node URI, a role URI, server authentication, DNS names or addresses gets none; RSA, P-384 and Ed25519 keys, a broken self-signature, trailing data and an oversized request are refused with their codes; issuance by the wrong root is impossible by construction.
-- **Identity reader (CC1, CC2):** refuses a certificate with no or two service-account URIs, with a node or role URI, with server authentication, with basic constraints CA, from the existing root; accepts exactly the issued form.
-- **Listener (CC2):** no client certificate, a node certificate, an expired one, a revoked one, one from another installation's integration root: handshake refused, no HTTP; TLS 1.2 offered: refused while TGL-47 does not allow it, and accepted when it does, with a TLS 1.2 suite list of ECDHE and AEAD only and the Extended Master Secret required (a client without it is refused); a revoked serial on an open HTTP/2 connection: the next request refused and the connection closed; a session ticket is never issued; a PROXY header and `X-Forwarded-For` on 8445 change nothing.
-- **Enrollment (CC3):** every refusal of ADR 0035 decision 5 by its code; two controllers accepting the same code in parallel: exactly one certificate; a token-authenticated or stale session creating a code: refused.
-- **Renewal (CC4):** before the window, twice within an hour, from a replaced certificate (lineage revoked, bound tokens revoked), with a revoked key, with the same key (accepted, binding kept).
-- **Binding (CC5):** every row of exit checks IC-E2, IC-E5 and IC-E6; a bound token with the right account but another lineage's key; a renewal of a bound token over 8443; a rollback build refusing `tnkb_`.
+- **Issuance (CC1, built):** a request asking for a CA, a node URI, a role URI, server authentication or a DNS name gets none; P-384 and Ed25519 keys, a broken self-signature, trailing data and a non-request are refused with their codes; a lifetime outside 1 to 365 days is refused; issuance by the wrong root is impossible by construction.
+- **Identity reader (CC1, built):** refuses a certificate with no or two service-account URIs, a node or role URI or a DNS name beside the account, an account id that is no identifier or not in canonical form, server authentication, any purpose, no extended key usage, basic constraints CA, trailing data, node and server certificates and the root; accepts exactly the issued form.
+- **Listener (CC2):** no client certificate, a node certificate, an expired one, a revoked one, an unrecorded one signed by the integration root, one from another installation's integration root: handshake refused, no HTTP; TLS 1.2 offered: refused while TGL-47 does not allow it (the default) and accepted when it does, with ECDHE and AEAD suites only and the Extended Master Secret required (a client without it is refused); no session ID and no ticket issued in either version; a revoked serial on an open HTTP/2 connection: the next request refused and the connection closed; a PROXY header, `X-Forwarded-For` and a session cookie on 8445 change nothing; a public route and a token of another account refused; the connection caps and the handshake timeout hold; 503 after 30 seconds without quorum; the listener stays closed until the first full load.
+- **Enrollment (CC3):** every refusal of ADR 0035 decision 5 by its code; a wrong HMAC, an HMAC over another key or another account; plain HTTP and an unstated scheme outside Lab (refused, code withdrawn); two controllers accepting the same code in parallel: exactly one certificate; a token-authenticated or stale session creating a code: refused; the scripts of section 3 run against the lab with the secret absent from every request.
+- **Renewal (CC4):** before the window (200, not due), twice within an hour, a lost answer (renewing again from the current certificate replaces the unseen successor, no reuse), from a replaced certificate inside the overlap (accepted for every route) and after it (renewal route only; a renewal is reuse: lineage revoked, bound tokens revoked), with a revoked key, with the same key (accepted, binding kept).
+- **Binding (CC5):** every row of exit checks IC-E2, IC-E5 and IC-E6; a bound token with the right account but another lineage; an old bound token presented on 8443 and three wrong renewal secrets without the key (refused and audited, the family and the lineage untouched); a `tnkb_` token whose record lost its lineage and a `tnk_` token whose record has one (both refused); tightening the requirement (unbound service-account tokens revoked, not revived by loosening); a rollback build refusing `tnkb_`.
 - **Lab (CC8):** IC-E1 to IC-E6 end to end, with the timing checks waiting on state, never on time (`docs/testing/rules.md`).
 
 ### 9.2 Rows for the penetration round (CC9)
@@ -200,18 +232,25 @@ CC8 skeleton after CC2 ······ CC8 in full after CC5
 | PT-IC8 | Resuming a TLS session after revocation; keeping an HTTP/2 connection open across revocation and across expiry | Refused at the next request |
 | PT-IC9 | Re-enrolling a revoked key; renewing from a replaced certificate | Refused; lineage revoked |
 | PT-IC10 | A browser that holds an integration certificate opens the UI on 8443 | No certificate prompt (no certificate request on 8443) |
-| PT-IC11 | Slow handshakes and connection floods on 8445 without a certificate | Handshake timeout and connection cap hold; 8443 unaffected |
+| PT-IC11 | Slow handshakes and connection floods on 8445 without a certificate, from one source and from many | The handshake timeout, the cap per source and the listener's cap hold; 8443 unaffected |
 | PT-IC12 | Deleting the service account while a bound token streams events on 8445 | The stream ends; nothing after the deletion is answered |
 | PT-IC13 | A `tnkb_` token against the previous release | Refused |
-| PT-IC14 | TLS 1.2 with TGL-47 off; with it on, a CBC or RSA key exchange suite, renegotiation, a client without Extended Master Secret; turning it on under Hardened | Refused each time; with it on, only ECDHE and AEAD with Extended Master Secret complete |
+| PT-IC14 | TLS 1.2 with TGL-47 off; with it on, a CBC or RSA key exchange suite, renegotiation, a client without Extended Master Secret, a resumption by session ID; turning it on under Hardened | Refused each time; with it on, only full ECDHE and AEAD handshakes with Extended Master Secret complete |
+| PT-IC15 | A certificate signed with a copy of the integration CA key and never recorded | Handshake refused |
+| PT-IC16 | Requests on 8445 to a controller cut off from its quorum, before and after a revocation made on the majority | 503 after 30 seconds; the revocation holds once it rejoins |
+| PT-IC17 | An old bound token on 8443, and three wrong renewal secrets for a bound token without the key | Refused and audited; nothing revoked |
+| PT-IC18 | Public routes (sign-in, enrollment, node enrollment, the CA root), a session cookie, and a token of another account on 8445 | Refused or not found; no cookie read |
+| PT-IC19 | Capturing an enrollment at a hostile proxy and redeeming the code for another key; enrolling over plain HTTP outside Lab | Refused; the plain request withdraws the code |
+| PT-IC20 | A renewal whose answer is dropped, then a renewal again from the current certificate | Accepted; the unseen successor withdrawn; nothing revoked |
 
 ### 9.3 Fuzzing
 
 Every parser of network input in this step gets a target in `fuzz/` before it merges (CONTRIBUTING rule 3):
 
-- `ca_csr`: the PKCS#10 parser and checks (`csr_public_key` and the integration checks), which also covers the node enrollment's request.
-- `integration_identity`: the identity reader over arbitrary DER, and over certificates signed by a test integration root with arbitrary extensions.
-- The enrollment code's text form (`tnki.…`) and the `tnkb_` prefix check join the existing token parsing target if one exists, else `ca_csr` grows a second input.
+- The PKCS#10 parser itself is already fuzzed through `cluster_messages` (the cluster port's renewal request); the integration CA calls the same `csr_public_key`, so no second target is added for it.
+- `integration_identity` (CC1, built): the identity reader over arbitrary DER.
+- `integration_enroll` (CC3): what the enrollment route reads from a client that holds no certificate yet: the code id and proof headers and the DER body, up to the HMAC check and the request parser.
+- The `tnkb_` prefix check joins `api_request_headers`, the target of what the API reads before it authenticates anyone (CC5).
 
 ### 9.4 Privilege review
 
@@ -223,19 +262,19 @@ The owner decided every question as recommended, except IC-Q4. The options that 
 
 | Question | Decided | Not taken |
 |---|---|---|
-| IC-Q1. What the certificate protects | Every use of a service-account token: tokens bound to the certificate's key (RFC 8705 manner) | Only the renewal call; the certificate replacing the token (later, on top) |
+| IC-Q1. What the certificate protects | Every use of a service-account token: tokens bound to a certificate lineage (RFC 8705 manner) | Only the renewal call; the certificate replacing the token (later, on top) |
 | IC-Q2. Where the certificate is presented | A dedicated integration listener, default port 8445, client certificate required, opened on demand | Optional client authentication on 8443; a route on the cluster port |
 | IC-Q3. One root or two | A separate integration root that the cluster port and nodes never trust | The existing root, told apart by URI |
 | IC-Q4. TLS versions on the integration listener | TLS 1.3 by default in every profile, with the third part of TGL-47 allowing TLS 1.2 for Windows Server 2019 and older: off in every profile, a recorded deviation when on, refused under Hardened, limited to ECDHE with AEAD suites and the Extended Master Secret. In TLS 1.2 an observer on the path sees the client certificate (account id, serial, validity, public key), never the key, a token or a request | TLS 1.3 only with no setting; TLS 1.2 on by default outside Hardened |
 | IC-Q5. The server certificate on 8445 | Always from the internal root, pinned by the code's fingerprint | Following 8443's mode |
 | IC-Q6. TGL-47 values and Hardened | Lifetimes 90 / 30 / 7 / 365 days (Home, Standard, Hardened, Lab); Hardened requires binding for every token an administrator creates for a service account, mirror tokens (ADR 0033) once the mirror pusher presents a certificate; plugin process tokens (ADR 0032) outside | Mirror tokens bound from the start; binding never required |
-| IC-Q7. A lapsed certificate | No grace period; a new code with `replaces` moves the bound tokens | A grace period after expiry |
+| IC-Q7. A lapsed certificate | No grace period. Recovery is a new enrollment and new tokens; the lapsed lineage's tokens are revoked and never move (a detail changed after the owner's decision, which named `replaces` moving them: whoever redeemed such a code would take over existing tokens without the old key; the owner confirms the change) | A grace period after expiry; `replaces` moving tokens, or moving them after an administrator confirms the new key's digest |
 | IC-Q8. What reuse detection revokes | Token family reuse also revokes the lineage, and lineage reuse also revokes its bound tokens | Each revokes its own kind only |
 | IC-Q9. Key types | ECDSA P-256 only | RSA 2048 and 3072 as well |
 | IC-Q10. The host firewall | The installer opens 8445 where it opens 8443 | Only with an installer option |
 | IC-Q11. Tooling for integrators | Documented POSIX shell and PowerShell scripts in `docs/integrations.md` | A `tenko integration` client command |
 
-The phase was decided with them: Phase 4, after release 0.1.0.
+The phase was decided with them: Phase 4, after release 0.1.0. The design's security review then changed details within these decisions (ADR 0035 decisions 3, 5 to 10); IC-Q7 is the one where a detail the owner named changed.
 
 ## 11. What the code could not settle
 
@@ -244,8 +283,9 @@ The phase was decided with them: Phase 4, after release 0.1.0.
 - **Endpoints in a cluster.** Whether the enrollment answer lists every controller's integration endpoint (which needs an address per member that the member records do not hold today) or the integrator uses one name that resolves to several controllers. Recommended: the name, documented; the list later if integrators ask.
 - **TPM paths outside the lab.** `swtpm` with `tpm2-openssl` proves the Linux path in CC8; Windows with the Platform Crypto Provider and `curl.exe` or PowerShell needs the owner's Windows lab.
 - **The installer's firewall step** for 8445 (IC-Q10) and whether it moves the unit-hardening gates; the installer change belongs to CC2 or a small package of its own once decided.
-- **An existing gap:** the node enrollment's PKCS#10 parser has no fuzz target today; `ca_csr` in CC1 closes it, and it could be split out to land earlier.
+- **The HMAC on a POSIX host.** `openssl` takes an HMAC key only as an argument, so the code's secret is in the process arguments while that one command runs. The plan accepts this with the instruction of section 3.1; a host where that is not acceptable enrolls from PowerShell.
+- **The bounds chosen here** (512 connections, 16 per source, 5 seconds of handshake, 30 seconds without quorum) are first values; CC2 measures them against the lab and they become constants on the listener's settings type.
 
 ## 12. Documents that change
 
-In CC7 unless noted: `docs/REQUIREMENTS.md` (IAM-22 to IAM-25), `docs/SECURITY-PROFILES.md` (TGL-47, the owned range), `docs/certificates.md` (the integration root, the listener, the rule against forwarded certificates), `docs/access.md` (bound tokens), `docs/integrations.md` (new: enrollment, use, renewal, both scripts, troubleshooting by refusal code), `docs/cluster.md` (the integration listener and the second root), `docs/CONFORMANCE.md` (RFC 8705 binding to the key instead of the certificate; RFC 2986 requests; RFC 5280 profile), `docs/adr/README.md` (the row of ADR 0035), the upgrade notes (bound tokens during a rolling upgrade and after a rollback), and `CHANGELOG.md` with each package.
+In CC7 unless noted: `docs/REQUIREMENTS.md` (IAM-22 to IAM-25), `docs/SECURITY-PROFILES.md` (TGL-47, the owned range), `docs/certificates.md` (the integration root, the listener, the rule against forwarded certificates), `docs/access.md` (bound tokens), `docs/integrations.md` (new: enrollment, use, renewal, both scripts, troubleshooting by refusal code), `docs/cluster.md` (the integration listener and the second root), `docs/CONFORMANCE.md` (RFC 8705 binding to a lineage instead of the certificate; RFC 2986 requests; RFC 5280 profile; RFC 2104 HMAC of the enrollment proof; RFC 7627 for TLS 1.2), `docs/adr/README.md` (the row of ADR 0035), the upgrade notes (bound tokens during a rolling upgrade and after a rollback), and `CHANGELOG.md` with each package.
