@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
 import { http, HttpResponse } from "msw";
 import { api } from "../api/client";
+import { seedAccess } from "../api/mock/access-store";
 import { db } from "../api/mock/db";
 import { PROFILE_MATRIX as MOCK_PROFILE_MATRIX, profileSettings } from "../api/mock/profiles";
 import { server } from "../api/mock/node";
@@ -25,6 +26,13 @@ async function openPage() {
   return view;
 }
 
+/** A dialog's button once it is enabled: a switch to Hardened waits for the dry run of TGL-47. */
+async function enabled(dialog: HTMLElement, name: string): Promise<HTMLButtonElement> {
+  const button = (await within(dialog).findByRole("button", { name })) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(false));
+  return button;
+}
+
 function row(id: string): HTMLElement {
   const el = document.querySelector<HTMLElement>(`tr[data-toggle="${id}"]`);
   if (!el) throw new Error(`no row for ${id}`);
@@ -37,13 +45,13 @@ async function openEditor(name: string) {
 }
 
 describe("the security page", () => {
-  it("lists TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46 in order with the current and the profile value", async () => {
+  it("lists TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 to TGL-47 in order with the current and the profile value", async () => {
     await signInAs();
     await openPage();
     const ids = Array.from(document.querySelectorAll("tbody tr[data-toggle]")).map((r) => r.getAttribute("data-toggle"));
     expect(ids).toEqual(TOGGLES.map((d) => d.id));
-    expect(ids).toHaveLength(12);
-    expect(ids).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21", "TGL-23", "TGL-24", "TGL-45", "TGL-46"]);
+    expect(ids).toHaveLength(13);
+    expect(ids).toEqual(["TGL-01", "TGL-02", "TGL-03", "TGL-04", "TGL-05", "TGL-06", "TGL-07", "TGL-21", "TGL-23", "TGL-24", "TGL-45", "TGL-46", "TGL-47"]);
     // The Standard profile: administrators need MFA, passwords are at least 12 characters.
     expect(within(row("TGL-02")).getAllByText("Required for administrators")).toHaveLength(2);
     expect(within(row("TGL-01")).getAllByText("Standard: at least 12 characters")).toHaveLength(2);
@@ -218,7 +226,7 @@ describe("the security page", () => {
     expect(
       await within(dialog).findByText("Switching to Hardened resets every setting to the Hardened values."),
     ).toBeTruthy();
-    expect(within(dialog).getByText("11 settings change:")).toBeTruthy();
+    expect(within(dialog).getByText("12 settings change:")).toBeTruthy();
     const table = within(dialog).getByRole("table", { name: "Settings that change" });
     expect(within(table).getByText("Password policy preset")).toBeTruthy();
     expect(within(table).getByText("Lockout")).toBeTruthy();
@@ -228,7 +236,7 @@ describe("the security page", () => {
     // The database has not changed before the confirmation.
     expect(db.settings.profile).toBe("standard");
 
-    fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Hardened" }));
+    fireEvent.click(await enabled(dialog, "Switch to Hardened"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(db.settings.profile).toBe("hardened");
     expect(db.settings.passkey_for_admins).toBe(true);
@@ -352,6 +360,41 @@ describe("the security page", () => {
     expect((within(dialog).getByRole("button", { name: "Switch to Home" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("names the unbound service-account tokens a switch to Hardened removes, and removes them on confirmation (TGL-47)", async () => {
+    await signInAs();
+    seedAccess();
+    await openPage();
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    const notice = await within(dialog).findByTestId("unbound-removal");
+    expect(notice.textContent).toContain("1 token will be removed");
+    expect(notice.textContent).toContain("dns-sync (1)");
+    expect(notice.textContent).toContain("Turning the requirement off later brings none of them back.");
+    // The dry run wrote nothing.
+    expect(db.settings.profile).toBe("standard");
+    expect(db.tokens.some((t) => t.info.name === "ipam-readonly")).toBe(true);
+    fireEvent.click(await enabled(dialog, "Switch to Hardened and remove 1 token"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.profile).toBe("hardened");
+    expect(db.tokens.some((t) => t.info.name === "ipam-readonly")).toBe(false);
+  });
+
+  it("names the removal when TGL-47 starts to require bound tokens, and refuses TLS 1.2 under Hardened", async () => {
+    await signInAs();
+    seedAccess();
+    await openPage();
+    fireEvent.click(within(row("TGL-47")).getByTestId("toggle-edit"));
+    const dialog = await screen.findByTestId("dialog-toggle");
+    expect(within(dialog).queryByTestId("unbound-removal")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("switch", { name: /must be bound/ }));
+    expect((await within(dialog).findByTestId("unbound-removal")).textContent).toContain("1 token will be removed");
+    fireEvent.click(await enabled(dialog, "Save and remove 1 token"));
+    await waitFor(() => expect(screen.queryByTestId("dialog-toggle")).toBeNull());
+    expect(db.settings.integrations?.require_binding).toBe(true);
+    expect(db.tokens.some((t) => t.info.name === "ipam-readonly")).toBe(false);
+  });
+
   it("explains a switch refused because the profile requires an audit export (TGL-21)", async () => {
     await signInAs();
     server.use(
@@ -366,7 +409,8 @@ describe("the security page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
     const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
     fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
-    fireEvent.click(await within(dialog).findByRole("button", { name: "Switch to Hardened" }));
+    // The dry run of the switch (TGL-47) meets the refusal first, and the switch stays closed.
+    expect((within(dialog).getByRole("button", { name: "Switch to Hardened" }) as HTMLButtonElement).disabled).toBe(true);
     expect((await within(dialog).findByTestId("error-notice")).textContent).toBe(
       "The profile requires an audit export. Enable a TCP, TLS or file sink first, then switch the profile. A UDP sink confirms nothing and does not count.",
     );
@@ -532,7 +576,7 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     expect(within(reveal).getAllByText(STANDARD)).toHaveLength(2);
     expect(within(reveal).getByText("Follows the profile")).toBeTruthy();
     expect(within(reveal).queryByRole("button", { name: /Reset to profile/ })).toBeNull();
-    expect(screen.getByText("TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24, TGL-45 and TGL-46")).toBeTruthy();
+    expect(screen.getByText("TGL-01 to TGL-07, TGL-21, TGL-23, TGL-24 and TGL-45 to TGL-47")).toBeTruthy();
     expect(session()?.banner.deviations).toEqual([]);
   });
 
@@ -678,8 +722,7 @@ describe("TGL-24: what revealing an operator secret takes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
     const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
     fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
-    await within(dialog).findByRole("button", { name: "Switch to Hardened" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Hardened" }));
+    fireEvent.click(await enabled(dialog, "Switch to Hardened"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(db.settings.profile).toBe("hardened");
     expect(db.settings.secret_reveal).toBeUndefined();
@@ -853,8 +896,7 @@ describe("TGL-21: whether the audit log leaves the installation", () => {
     expect(within(home).queryByText("Audit export")).toBeNull();
 
     fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
-    await within(dialog).findByRole("button", { name: "Switch to Hardened" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Switch to Hardened" }));
+    fireEvent.click(await enabled(dialog, "Switch to Hardened"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(db.settings.audit_export).toBe("required");
     expect(within(row("TGL-21")).getAllByText(REQUIRED)).toHaveLength(2);
@@ -1021,7 +1063,7 @@ describe("the PIN coupling rule (IAM-07)", () => {
       expect(await within(dialog).findByText(PIN_NOTICE)).toBeTruthy();
       fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
       await noNotice(dialog);
-      expect((within(dialog).getByRole("button", { name: "Switch to Hardened" }) as HTMLButtonElement).disabled).toBe(false);
+      await enabled(dialog, "Switch to Hardened");
     });
 
     it("lets a switch from Home to Lab or Standard through", async () => {

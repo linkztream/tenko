@@ -25,7 +25,8 @@ import { MOCK_USER_IDS } from "./fixtures";
 import { IPAM_IDS } from "./ipam/seed";
 import { ipamState } from "./ipam/state";
 import { VrfView } from "./ipam/tree";
-import { tokenSelfRenewal } from "./profiles";
+import { integrationsOf, tokenSelfRenewal } from "./profiles";
+import { activeLineage } from "./routes-integrations";
 import { Problem, fail } from "./reply";
 import { DAY_MS, iso, randomId, randomToken, uuidHandle } from "./util";
 import { invalid, isRecord, ROLE_NAMES } from "./validate";
@@ -416,6 +417,8 @@ export interface TokenRequest {
   renewable: boolean;
   /** IAM-21: the client networks the token is accepted from. */
   sourcePrefixes: string[];
+  /** IAM-23: the certificate lineage the token is bound to. */
+  lineage: string | undefined;
 }
 
 /** Reads the body of `POST /auth/tokens` and `POST /access/service-accounts/{id}/tokens`. */
@@ -457,6 +460,7 @@ export function parseTokenRequest(body: Record<string, unknown>): TokenRequest {
     scopes,
     renewable: body.renewable === true,
     sourcePrefixes: prefixes as string[],
+    lineage: typeof body.lineage === "string" ? body.lineage : undefined,
   };
 }
 
@@ -536,8 +540,17 @@ export function issueScopedToken(
     problem("auth.token.renewal_refused", 403, { params: { reason: "disabled" } });
   }
   if (request.renewable && lifetime === null) invalid("expires_in_days", "a renewable token needs a lifetime");
-  // IAM-20, IAM-21: a renewable or bound token has the constrained form.
-  const secret = `${request.renewable || request.sourcePrefixes.length > 0 ? "tnkc_" : "tnk_"}${randomToken(43)}`;
+  // IAM-23: a binding names an active lineage of the same service account; TGL-47 may require one.
+  const service = access.accounts.has(owner.id);
+  if (request.lineage === undefined && service && integrationsOf(db.settings).require_binding) {
+    invalid("lineage", "this profile binds every service-account token to a certificate of the account (TGL-47)");
+  }
+  if (request.lineage !== undefined && (!service || !activeLineage(owner.id, request.lineage))) {
+    invalid("lineage", "no certificate of this service account in use or waiting with that lineage");
+  }
+  // IAM-20, IAM-21, IAM-23: the form follows the record: bound, constrained or plain.
+  const form = request.lineage !== undefined ? "tnkb_" : request.renewable || request.sourcePrefixes.length > 0 ? "tnkc_" : "tnk_";
+  const secret = `${form}${randomToken(43)}`;
   const now = Date.now();
   const info: TokenInfo = {
     id: randomId(),
@@ -551,10 +564,41 @@ export function issueScopedToken(
   if (lifetime !== null) info.expires_at = iso(now + lifetime * DAY_MS);
   if (request.renewable) info.renewable = true;
   if (request.sourcePrefixes.length > 0) info.source_prefixes = [...request.sourcePrefixes];
+  if (request.lineage !== undefined) info.lineage = request.lineage;
   db.tokens.push({ user_id: owner.id, info });
   access.tokens.set(info.id, { grants: structuredClone(grants), scopes: [...request.scopes] });
   const renewal = request.renewable ? { renewal_secret: `tnr_${randomToken(43)}` } : {};
   return { token: secret, ...renewal, info: { ...info } };
+}
+
+/**
+ * The service-account tokens without a binding, by account: what a change that starts to
+ * require binding (TGL-47) removes. With `remove`, they are removed too: the same function
+ * answers the dry run and makes the change, as on the server.
+ */
+export function unboundServiceTokens(remove: boolean): S["UnboundTokens"] {
+  const unbound = db.tokens.filter((t) => access.accounts.has(t.user_id) && t.info.scoped && !t.info.lineage && !t.info.revoked);
+  const accounts = new Map<string, S["AccountTokens"]>();
+  for (const token of unbound) {
+    const name = db.users.find((u) => u.id === token.user_id)?.name ?? token.user_id;
+    const entry = accounts.get(token.user_id) ?? { account: token.user_id, name, tokens: 0 };
+    entry.tokens += 1;
+    accounts.set(token.user_id, entry);
+  }
+  if (remove) {
+    db.tokens = db.tokens.filter((t) => !unbound.includes(t));
+    for (const token of unbound) forgetToken(token.info.id);
+  }
+  const list = [...accounts.values()].sort((a, b) => a.account.localeCompare(b.account));
+  return { count: unbound.length, accounts: list };
+}
+
+/** Removes the tokens bound to `lineage` (its revocation, IAM-25); returns how many. */
+export function removeBoundTokens(lineage: string): number {
+  const bound = db.tokens.filter((t) => t.info.lineage === lineage);
+  db.tokens = db.tokens.filter((t) => t.info.lineage !== lineage);
+  for (const token of bound) forgetToken(token.info.id);
+  return bound.length;
 }
 
 // ---------------------------------------------------------------------------------

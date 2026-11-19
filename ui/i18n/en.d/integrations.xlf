@@ -155,6 +155,97 @@
       <unit id="integrations.code.done">
         <segment><source>Done</source></segment>
       </unit>
+      <unit id="toggles.integrations.name">
+        <notes><note category="description">TGL-47: integration client certificates (ADR 0035), in the security settings.</note></notes>
+        <segment><source>Integration certificates</source></segment>
+      </unit>
+      <unit id="toggles.integrations.value">
+        <segment><source>{days} days · {binding} · {tls}</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_required">
+        <segment><source>bound tokens required</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_optional">
+        <segment><source>bound tokens optional</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12">
+        <segment><source>TLS 1.2 allowed</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls13">
+        <segment><source>TLS 1.3 only</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime">
+        <segment><source>Certificate lifetime in days</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime_help">
+        <segment><source>A host renews its certificate itself in the last third of this time.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.lifetime_error">
+        <segment><source>A whole number of days from 1 to {max}.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding">
+        <segment><source>Service-account tokens must be bound to a certificate</source></segment>
+      </unit>
+      <unit id="toggles.integrations.binding_hint">
+        <segment><source>Every new token of a service account names an integration certificate and works only with it. Turning this on removes the unbound tokens of service accounts; turning it off later brings none of them back.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_name">
+        <segment><source>Allow TLS 1.2 on the integration listener</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_hint">
+        <segment><source>For Windows Server 2019 and older. Under TLS 1.2 the host's certificate is visible on the network path. Raises a health warning while on.</source></segment>
+      </unit>
+      <unit id="toggles.integrations.tls12_hardened">
+        <segment><source>The Hardened profile does not allow TLS 1.2.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.none">
+        <segment><source>No service account has an unbound token, so nothing is removed.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.title">
+        <segment><source>{count, plural, one {# token will be removed} other {# tokens will be removed}}</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.body">
+        <segment><source>This change requires every service-account token to be bound to an integration certificate. It removes {count, plural, one {the unbound token} other {the # unbound tokens}} of {accounts} at once; the integrations that use them stop working until they get bound tokens.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.account">
+        <segment><source>{name} ({count})</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.permanent">
+        <segment><source>Turning the requirement off later brings none of them back.</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.save_remove">
+        <segment><source>{count, plural, one {Save and remove # token} other {Save and remove # tokens}}</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.switch_remove">
+        <segment><source>{count, plural, one {Switch to {profile} and remove # token} other {Switch to {profile} and remove # tokens}}</source></segment>
+      </unit>
+      <unit id="access.token.lineage">
+        <segment><source>Bound to host</source></segment>
+      </unit>
+      <unit id="access.token.lineage_none">
+        <segment><source>Not bound</source></segment>
+      </unit>
+      <unit id="access.token.lineage_choose">
+        <segment><source>Choose a host</source></segment>
+      </unit>
+      <unit id="access.token.lineage_help">
+        <segment><source>A bound token works only on the integration listener, with the certificate of this host; a copy of it is useless elsewhere.</source></segment>
+      </unit>
+      <unit id="access.token.lineage_required">
+        <segment><source>This profile binds every service-account token to a host's certificate (TGL-47).</source></segment>
+      </unit>
+      <unit id="access.token.lineage_no_hosts">
+        <segment><source>No host of this account is enrolled; enroll one under Integration certificates to bind tokens to it.</source></segment>
+      </unit>
+      <unit id="access.token.error.lineage">
+        <segment><source>Choose the host whose certificate the token is bound to.</source></segment>
+      </unit>
+      <unit id="access.token.bound_to">
+        <segment><source>Only with the certificate of {host}</source></segment>
+      </unit>
+      <unit id="access.token.bound_unknown">
+        <segment><source>a host whose certificate has ended</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

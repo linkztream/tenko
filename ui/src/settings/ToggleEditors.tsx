@@ -10,6 +10,7 @@ import {
   AUDIT_EXPORT,
   AUDIT_EXPORT_DEFAULT,
   ALARM_AFTER_FAILURES_DEFAULT,
+  INTEGRATION_LIFETIME_MAX_DAYS,
   LOCKOUT_MODES,
   lockoutValue,
   REVEAL_DEFAULT,
@@ -17,6 +18,7 @@ import {
   UPDATES_DEFAULT,
   UPDATES_INSTALL,
   type AuditExport,
+  type IntegrationPolicy,
   type LockoutValue,
   type RevealPolicy,
   type RevealStepUp,
@@ -656,6 +658,65 @@ export function RevealEditor(props: EditorProps<RevealPolicy>) {
       <p class="muted" id="tg-secret-reveal-pin-rule">
         {t("settings.security.secret_reveal.pin_rule")}
       </p>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------------
+// TGL-47: integration client certificates
+
+export function IntegrationsEditor(props: EditorProps<IntegrationPolicy> & { hardened: boolean }) {
+  const init = untrack(() => props.initial);
+  const [days, setDays] = createSignal(String(init.lifetime_days));
+  const [binding, setBinding] = createSignal(init.require_binding);
+  const [tls12, setTls12] = createSignal(init.allow_tls12);
+  const lifetime = createMemo(() => {
+    const n = Number(days().trim());
+    return Number.isInteger(n) && n >= 1 && n <= INTEGRATION_LIFETIME_MAX_DAYS ? n : undefined;
+  });
+  createEffect(() => {
+    const lifetime_days = lifetime();
+    props.onDraft(lifetime_days === undefined ? undefined : { lifetime_days, require_binding: binding(), allow_tls12: tls12() });
+  });
+  return (
+    <>
+      <div class="field">
+        <label for="tg-cert-days">{t("toggles.integrations.lifetime")}</label>
+        <input
+          id="tg-cert-days"
+          class="input num duration"
+          inputmode="numeric"
+          autocomplete="off"
+          value={days()}
+          aria-invalid={lifetime() === undefined ? "true" : undefined}
+          aria-describedby="tg-cert-days-help"
+          onInput={(e) => setDays(e.currentTarget.value)}
+        />
+        <FieldHelp
+          id="tg-cert-days-help"
+          help={t("toggles.integrations.lifetime_help")}
+          error={lifetime() === undefined ? t("toggles.integrations.lifetime_error", { max: INTEGRATION_LIFETIME_MAX_DAYS }) : undefined}
+        />
+      </div>
+      <div class="field">
+        <SwitchControl
+          id="tg-cert-binding"
+          checked={binding()}
+          onChange={setBinding}
+          label={t("toggles.integrations.binding")}
+          hint={t("toggles.integrations.binding_hint")}
+        />
+      </div>
+      <div class="field">
+        <SwitchControl
+          id="tg-cert-tls12"
+          checked={tls12()}
+          onChange={setTls12}
+          disabled={props.hardened && !tls12()}
+          label={t("toggles.integrations.tls12_name")}
+          hint={props.hardened ? t("toggles.integrations.tls12_hardened") : t("toggles.integrations.tls12_hint")}
+        />
+      </div>
     </>
   );
 }

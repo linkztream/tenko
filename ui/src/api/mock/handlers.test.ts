@@ -1114,6 +1114,7 @@ describe("settings", () => {
       "TGL-21",
       "TGL-45",
       "TGL-46",
+      "TGL-47",
       "TGL-23",
       "TGL-24",
     ]);
@@ -2136,14 +2137,14 @@ describe("profiles", () => {
     expect(PROFILE_MATRIX.home.session.idle_secs).toBe(7 * 86_400);
   });
 
-  it("finds Lab's lockout, breach check and token maximum weaker than Home", () => {
+  it("finds Lab's lockout, breach check, token maximum and certificate lifetime weaker than Home", () => {
     const toggles = toggleStates(profileSettings("lab"));
     expect(toggles.find((t) => t.id === "TGL-07")).toMatchObject({
       value: { mode: "off", attempts: 3 },
       deviates: false,
       weaker_than_home: true,
     });
-    expect(weaker(profileSettings("lab"))).toEqual(["TGL-05", "TGL-06", "TGL-07"]);
+    expect(weaker(profileSettings("lab"))).toEqual(["TGL-05", "TGL-06", "TGL-07", "TGL-47"]);
     expect(banner(profileSettings("lab"))).toEqual({ lab: true, weaker_than_home: true, deviations: [] });
   });
 

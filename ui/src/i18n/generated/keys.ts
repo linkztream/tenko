@@ -109,6 +109,8 @@ export type MessageKey =
   | "access.subject.service"
   | "access.title"
   | "access.token.add_grant"
+  | "access.token.bound_to"
+  | "access.token.bound_unknown"
   | "access.token.col.expires"
   | "access.token.col.last_used"
   | "access.token.col.name"
@@ -119,6 +121,7 @@ export type MessageKey =
   | "access.token.created_title"
   | "access.token.days"
   | "access.token.error.empty"
+  | "access.token.error.lineage"
   | "access.token.error.name"
   | "access.token.error.renewable_expiry"
   | "access.token.error.scope"
@@ -132,6 +135,12 @@ export type MessageKey =
   | "access.token.kind_scoped"
   | "access.token.kind_scoped_help"
   | "access.token.lifetime"
+  | "access.token.lineage"
+  | "access.token.lineage_choose"
+  | "access.token.lineage_help"
+  | "access.token.lineage_no_hosts"
+  | "access.token.lineage_none"
+  | "access.token.lineage_required"
   | "access.token.max_days"
   | "access.token.max_none"
   | "access.token.name"
@@ -1570,6 +1579,8 @@ export type MessageKey =
   | "dashboard.finding.evidence.utilization_bare"
   | "dashboard.finding.health.auth.token.expiring"
   | "dashboard.finding.health.auth.token.revoked"
+  | "dashboard.finding.health.integration.certificate_expiring"
+  | "dashboard.finding.health.integration.tls12_allowed"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -7333,6 +7344,13 @@ export type MessageKey =
   | "settings.security.transfer_site.label"
   | "settings.security.transfer_site.saved"
   | "settings.security.transfer_site.use_default"
+  | "settings.security.unbound.account"
+  | "settings.security.unbound.body"
+  | "settings.security.unbound.none"
+  | "settings.security.unbound.permanent"
+  | "settings.security.unbound.save_remove"
+  | "settings.security.unbound.switch_remove"
+  | "settings.security.unbound.title"
   | "settings.security.unit.days"
   | "settings.security.unit.hours"
   | "settings.security.unit.label"
@@ -8090,6 +8108,20 @@ export type MessageKey =
   | "toggles.breach_check.offline"
   | "toggles.breach_check.offline_preferred"
   | "toggles.breach_check.online"
+  | "toggles.integrations.binding"
+  | "toggles.integrations.binding_hint"
+  | "toggles.integrations.binding_optional"
+  | "toggles.integrations.binding_required"
+  | "toggles.integrations.lifetime"
+  | "toggles.integrations.lifetime_error"
+  | "toggles.integrations.lifetime_help"
+  | "toggles.integrations.name"
+  | "toggles.integrations.tls12"
+  | "toggles.integrations.tls12_hardened"
+  | "toggles.integrations.tls12_hint"
+  | "toggles.integrations.tls12_name"
+  | "toggles.integrations.tls13"
+  | "toggles.integrations.value"
   | "toggles.lockout.delay_then_temporary_lock"
   | "toggles.lockout.lock_until_unlock"
   | "toggles.lockout.name"
@@ -8500,6 +8532,7 @@ export interface MessageArgs {
   "access.scope.vrf": { name: string | number };
   "access.subject.option": { label: string | number; name: string | number };
   "access.subject.service": { name: string | number };
+  "access.token.bound_to": { host: string | number };
   "access.token.created_body": { name: string | number };
   "access.token.days": { count: number };
   "access.token.from": { prefixes: string | number };
@@ -8713,6 +8746,7 @@ export interface MessageArgs {
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
   "dashboard.finding.health.auth.token.expiring": { count: string | number; expires_at: string | number };
   "dashboard.finding.health.auth.token.revoked": { count: string | number };
+  "dashboard.finding.health.integration.certificate_expiring": { count: string | number; label: string | number; not_after: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -9919,6 +9953,11 @@ export interface MessageArgs {
   "settings.security.reset_row": { name: string | number };
   "settings.security.saved": { name: string | number };
   "settings.security.transfer_site.error": { line: string | number };
+  "settings.security.unbound.account": { count: string | number; name: string | number };
+  "settings.security.unbound.body": { accounts: string | number; count: number };
+  "settings.security.unbound.save_remove": { count: number };
+  "settings.security.unbound.switch_remove": { count: number; profile: string | number };
+  "settings.security.unbound.title": { count: number };
   "settings.security.unit.label": { field: string | number };
   "settings.users.action.delete_help": { name: string | number };
   "settings.users.action.disable_help": { name: string | number };
@@ -10045,6 +10084,8 @@ export interface MessageArgs {
   "shell.top.node_title": { lag: number; revision: string | number };
   "shell.top.profile": { profile: string | number };
   "shell.top.profile_title": { profile: string | number };
+  "toggles.integrations.lifetime_error": { max: string | number };
+  "toggles.integrations.value": { binding: string | number; days: string | number; tls: string | number };
   "toggles.lockout.value_delay": { attempts: number; longest: string | number; mode: string | number };
   "toggles.lockout.value_lock": { attempts: number; lock: string | number; longest: string | number; mode: string | number };
   "toggles.password_policy.custom": { min: string | number };
@@ -10236,6 +10277,8 @@ export const messageKeys: readonly MessageKey[] = [
   "access.subject.service",
   "access.title",
   "access.token.add_grant",
+  "access.token.bound_to",
+  "access.token.bound_unknown",
   "access.token.col.expires",
   "access.token.col.last_used",
   "access.token.col.name",
@@ -10246,6 +10289,7 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.created_title",
   "access.token.days",
   "access.token.error.empty",
+  "access.token.error.lineage",
   "access.token.error.name",
   "access.token.error.renewable_expiry",
   "access.token.error.scope",
@@ -10259,6 +10303,12 @@ export const messageKeys: readonly MessageKey[] = [
   "access.token.kind_scoped",
   "access.token.kind_scoped_help",
   "access.token.lifetime",
+  "access.token.lineage",
+  "access.token.lineage_choose",
+  "access.token.lineage_help",
+  "access.token.lineage_no_hosts",
+  "access.token.lineage_none",
+  "access.token.lineage_required",
   "access.token.max_days",
   "access.token.max_none",
   "access.token.name",
@@ -11697,6 +11747,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.evidence.utilization_bare",
   "dashboard.finding.health.auth.token.expiring",
   "dashboard.finding.health.auth.token.revoked",
+  "dashboard.finding.health.integration.certificate_expiring",
+  "dashboard.finding.health.integration.tls12_allowed",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
@@ -17460,6 +17512,13 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.transfer_site.label",
   "settings.security.transfer_site.saved",
   "settings.security.transfer_site.use_default",
+  "settings.security.unbound.account",
+  "settings.security.unbound.body",
+  "settings.security.unbound.none",
+  "settings.security.unbound.permanent",
+  "settings.security.unbound.save_remove",
+  "settings.security.unbound.switch_remove",
+  "settings.security.unbound.title",
   "settings.security.unit.days",
   "settings.security.unit.hours",
   "settings.security.unit.label",
@@ -18217,6 +18276,20 @@ export const messageKeys: readonly MessageKey[] = [
   "toggles.breach_check.offline",
   "toggles.breach_check.offline_preferred",
   "toggles.breach_check.online",
+  "toggles.integrations.binding",
+  "toggles.integrations.binding_hint",
+  "toggles.integrations.binding_optional",
+  "toggles.integrations.binding_required",
+  "toggles.integrations.lifetime",
+  "toggles.integrations.lifetime_error",
+  "toggles.integrations.lifetime_help",
+  "toggles.integrations.name",
+  "toggles.integrations.tls12",
+  "toggles.integrations.tls12_hardened",
+  "toggles.integrations.tls12_hint",
+  "toggles.integrations.tls12_name",
+  "toggles.integrations.tls13",
+  "toggles.integrations.value",
   "toggles.lockout.delay_then_temporary_lock",
   "toggles.lockout.lock_until_unlock",
   "toggles.lockout.name",

@@ -7,7 +7,7 @@
 // Simplifications: no enrollment changes the records; a code expires by its own time only.
 import type { HttpHandler } from "msw";
 import type { components } from "../generated/schema";
-import { ACCESS_IDS } from "./access-store";
+import { ACCESS_IDS, removeBoundTokens } from "./access-store";
 import { appendAudit } from "./audit-store";
 import { requireAdmin } from "./auth";
 import { db, onMockReset, recordEvent } from "./db";
@@ -58,6 +58,14 @@ export function integrationsState(): State {
   return state;
 }
 
+/** Whether `lineage` of `account` has a certificate in use or waiting to be (a token may bind to it). */
+export function activeLineage(account: string, lineage: string): boolean {
+  const now = Date.now();
+  return [...integrationsState().certs.values()].some(
+    (c) => c.account === account && c.lineage === lineage && (c.state === "current" || c.state === "pending") && Date.parse(c.not_after) > now,
+  );
+}
+
 /** Records a change of the `auth` tables the integration routes write. */
 function changed(tables: string[]): void {
   recordEvent("admin", { tables });
@@ -81,11 +89,12 @@ const revokeCertificate = route("delete", "/api/v1/integrations/certificates/{se
       Object.assign(cert, { state: "revoked", ended_at: now, reason: "revoked by an administrator" });
     }
   }
-  changed(["auth.client_certs"]);
+  const tokens = removeBoundTokens(target.lineage);
+  changed(["auth.client_certs", "auth.scoped_tokens"]);
   appendAudit({
     action: "auth.client_cert.revoke",
     objects: [{ kind: "user", id: target.account }],
-    context: { lineage: target.lineage, reason: "revoked by an administrator" },
+    context: { lineage: target.lineage, reason: "revoked by an administrator", tokens: String(tokens) },
   });
   return noContent();
 });

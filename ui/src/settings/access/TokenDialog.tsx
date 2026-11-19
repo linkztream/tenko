@@ -1,7 +1,8 @@
 // Creates an API token (IAM-10): a name, a lifetime within the profile's maximum (TGL-05) and,
 // for a scoped token, its grants and special scopes. The personal token page offers both kinds
 // (`personal`); a service account's tokens are always scoped, may renew themselves (IAM-20,
-// under TGL-46) and may be bound to client networks (IAM-21). The new token is shown once.
+// under TGL-46), may be bound to client networks (IAM-21) and to an enrolled host's
+// certificate (IAM-23, required under TGL-47 in Hardened). The new token is shown once.
 import { createMemo, createResource, createSignal, For, Show, untrack } from "solid-js";
 import { api } from "../../api/client";
 import type { components } from "../../api/generated/schema";
@@ -11,6 +12,7 @@ import { Dialog } from "../../components/Dialog";
 import { ErrorNotice } from "../../components/Notice";
 import { formatNumber, t } from "../../i18n";
 import type { ScopeCatalog } from "./data";
+import type { Lineage } from "./integrations";
 import { scopedTokenBody, type TokenCreate, type TokenScope } from "./model";
 import { rowsToGrants, TokenGrantsEditor, TokenOnceDialog, type GrantRow } from "./TokenGrants";
 
@@ -23,21 +25,32 @@ export function TokenDialog(props: {
   /** Offers a personal token, which acts with every right of its owner. */
   personal?: boolean;
   catalog: ScopeCatalog | undefined;
+  /** The service account's enrolled hosts whose certificate a token can be bound to. */
+  hosts?: readonly Lineage[] | undefined;
   /** Sends the request; the answer holds the secret. */
   create: (body: TokenCreate) => Promise<CreatedToken>;
   onCreated: () => void;
   onClose: () => void;
 }) {
-  // TGL-46 decides whether a service account's token may renew itself.
-  const [renewal] = createResource(
+  // TGL-46 decides whether a service account's token may renew itself, TGL-47 whether it
+  // must be bound to a host's certificate.
+  const [settings] = createResource(
     () => !props.personal,
-    // Unknown (null) when the settings cannot be read: the switch stays off.
+    // Unknown (null) when the settings cannot be read: renewal stays off, binding optional.
     () =>
       api
         .get("/api/v1/settings/security")
-        .then((view) => view.toggles.some((tg) => tg.id === "TGL-46" && (tg.value as unknown) === true))
+        .then((view) => ({
+          renewal: view.toggles.some((tg) => tg.id === "TGL-46" && (tg.value as unknown) === true),
+          binding: view.toggles.some(
+            (tg) => tg.id === "TGL-47" && (tg.value as { require_binding?: boolean } | null)?.require_binding === true,
+          ),
+        }))
         .catch(() => null),
   );
+  const renewal = () => (settings.loading ? undefined : (settings()?.renewal ?? null));
+  const bindingRequired = () => settings()?.binding === true;
+  const [lineage, setLineage] = createSignal("");
   const [renewable, setRenewable] = createSignal(false);
   const [prefixes, setPrefixes] = createSignal("");
   const max = createMemo(() => {
@@ -60,6 +73,7 @@ export function TokenDialog(props: {
   // IAM-20: a renewable token always expires.
   const lifetimeError = () =>
     submitted() && renewable() && renewal() === true && lifetime() === NO_EXPIRY ? t("access.token.error.renewable_expiry") : undefined;
+  const lineageError = () => (submitted() && bindingRequired() && lineage() === "" ? t("access.token.error.lineage") : undefined);
   const grantsError = () => {
     if (!submitted() || !scoped()) return undefined;
     const grants = rowsToGrants(rows());
@@ -75,7 +89,7 @@ export function TokenDialog(props: {
       nameInput.focus();
       return;
     }
-    if (grantsError() || lifetimeError() || busy()) return;
+    if (grantsError() || lifetimeError() || lineageError() || busy()) return;
     const days = lifetime() === NO_EXPIRY ? null : Number(lifetime());
     const body: TokenCreate = scoped()
       ? {
@@ -84,6 +98,7 @@ export function TokenDialog(props: {
           source_prefixes: prefixes()
             .split(/[\s,]+/)
             .filter((entry) => entry !== ""),
+          ...(lineage() !== "" ? { lineage: lineage() } : {}),
         }
       : { name: name().trim(), expires_in_days: days };
     setBusy(true);
@@ -203,6 +218,36 @@ export function TokenDialog(props: {
                 />
               </Show>
               <Show when={!props.personal}>
+                <div class="field">
+                  <label for="token-lineage">{t("access.token.lineage")}</label>
+                  <select
+                    id="token-lineage"
+                    class="select"
+                    data-testid="field-lineage"
+                    aria-invalid={lineageError() ? "true" : undefined}
+                    aria-describedby="token-lineage-help"
+                    onChange={(e) => setLineage(e.currentTarget.value)}
+                  >
+                    <option value="" selected={lineage() === ""} disabled={bindingRequired()}>
+                      {bindingRequired() ? t("access.token.lineage_choose") : t("access.token.lineage_none")}
+                    </option>
+                    <For each={props.hosts ?? []}>
+                      {(host) => (
+                        <option value={host.id} selected={lineage() === host.id}>
+                          {host.label}
+                        </option>
+                      )}
+                    </For>
+                  </select>
+                  <span class={lineageError() ? "help bad field-error" : "help"} id="token-lineage-help">
+                    {lineageError() ??
+                      ((props.hosts ?? []).length === 0
+                        ? t("access.token.lineage_no_hosts")
+                        : bindingRequired()
+                          ? t("access.token.lineage_required")
+                          : t("access.token.lineage_help"))}
+                  </span>
+                </div>
                 <div class="field">
                   <label class="ackrow">
                     <input

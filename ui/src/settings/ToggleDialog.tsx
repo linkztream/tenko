@@ -16,9 +16,11 @@ import { t } from "../i18n";
 import { ReloadedNote } from "./fields";
 import { homeValue, pinCoupled, sameValue } from "./profileMatrix";
 import { patchFor } from "./toggleEdit";
+import { UnboundRemoval } from "./UnboundRemoval";
 import {
   AuditExportEditor,
   BreachEditor,
+  IntegrationsEditor,
   LockoutEditor,
   MfaEditor,
   OnOffEditor,
@@ -28,7 +30,17 @@ import {
   TokenEditor,
   UpdatesEditor,
 } from "./ToggleEditors";
-import { formatToggle, lockoutValue, weakerThan, type AuditExport, type RevealPolicy, type ToggleDef, type UpdatesPolicy } from "./toggles";
+import {
+  formatToggle,
+  lockoutValue,
+  startsRequiringBinding,
+  weakerThan,
+  type AuditExport,
+  type IntegrationPolicy,
+  type RevealPolicy,
+  type ToggleDef,
+  type UpdatesPolicy,
+} from "./toggles";
 
 export function ToggleDialog(props: {
   view: SecuritySettingsView;
@@ -76,10 +88,19 @@ export function ToggleDialog(props: {
     return false;
   };
 
+  // TGL-47: turning on required binding removes the unbound service-account tokens; the dry
+  // run names them, and saving waits until it has.
+  const removalPatch = () => {
+    const d = draft();
+    return d !== undefined && changed() && startsRequiringBinding(state()?.value, d.value) ? patchFor(setting, d.value) : undefined;
+  };
+  const [removing, setRemoving] = createSignal<number | undefined>();
+  const removalPending = () => removalPatch() !== undefined && removing() === undefined;
+
   const submit = async (e: Event) => {
     e.preventDefault();
     const d = draft();
-    if (!d || !changed() || pinRefused() || busy()) return;
+    if (!d || !changed() || pinRefused() || busy() || removalPending()) return;
     setBusy(true);
     setError(null);
     try {
@@ -169,6 +190,9 @@ export function ToggleDialog(props: {
             <Match when={setting === "secret_reveal"}>
               <RevealEditor initial={initial as RevealPolicy} onDraft={onDraft} />
             </Match>
+            <Match when={setting === "integrations"}>
+              <IntegrationsEditor initial={initial as IntegrationPolicy} hardened={profile() === "hardened"} onDraft={onDraft} />
+            </Match>
           </Switch>
 
           <div class="consequences" aria-live="polite">
@@ -178,6 +202,7 @@ export function ToggleDialog(props: {
             <Show when={pinRefused()}>
               <Notice kind="bad" testid="toggle-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
+            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} />
             <Show when={changed() && draftWeak()}>
               <Notice kind="bad" title={t("settings.security.marker.weak")}>
                 {bannerOn() ? t("settings.security.consequence.weak_stays") : t("settings.security.consequence.weak_new")}
@@ -210,11 +235,13 @@ export function ToggleDialog(props: {
           </button>
           <button
             type="submit"
-            class="btn primary"
-            disabled={busy() || !changed() || pinRefused()}
+            class={(removing() ?? 0) > 0 && removalPatch() ? "btn danger" : "btn primary"}
+            disabled={busy() || !changed() || pinRefused() || removalPending()}
             data-testid="form-submit"
           >
-            {t("settings.security.save")}
+            {(removing() ?? 0) > 0 && removalPatch()
+              ? t("settings.security.unbound.save_remove", { count: removing() ?? 0 })
+              : t("settings.security.save")}
           </button>
         </div>
       </form>

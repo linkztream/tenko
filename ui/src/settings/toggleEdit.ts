@@ -17,6 +17,8 @@ export function patchFor(setting: ToggleSetting, value: unknown): SettingsPatch 
       return { update_prereleases: Boolean(value) };
     case "token_self_renewal":
       return { token_self_renewal: Boolean(value) };
+    case "integrations":
+      return { integrations: value as NonNullable<SettingsPatch["integrations"]> };
     case "session":
       return { session: value as SessionLifetime };
     case "token_max_days":

@@ -7,6 +7,7 @@
 import type { MfaRequirement, PasswordPolicy, Profile, SecuritySettings, SecuritySettingsView } from "../api/types";
 import {
   AUDIT_EXPORT_DEFAULT,
+  INTEGRATIONS_DEFAULT,
   REVEAL_DEFAULT,
   settingValue,
   TOKEN_SELF_RENEWAL_DEFAULT,
@@ -35,6 +36,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     secret_reveal: REVEAL_DEFAULT.home,
     update_prereleases: false,
     token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.home,
+    integrations: INTEGRATIONS_DEFAULT.home,
   },
   standard: {
     profile: "standard",
@@ -50,6 +52,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     secret_reveal: REVEAL_DEFAULT.standard,
     update_prereleases: false,
     token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.standard,
+    integrations: INTEGRATIONS_DEFAULT.standard,
   },
   hardened: {
     profile: "hardened",
@@ -65,6 +68,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     secret_reveal: REVEAL_DEFAULT.hardened,
     update_prereleases: false,
     token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.hardened,
+    integrations: INTEGRATIONS_DEFAULT.hardened,
   },
   lab: {
     profile: "lab",
@@ -80,6 +84,7 @@ export const PROFILE_DEFAULTS: Readonly<Record<Profile, SecuritySettings>> = {
     secret_reveal: REVEAL_DEFAULT.lab,
     update_prereleases: false,
     token_self_renewal: TOKEN_SELF_RENEWAL_DEFAULT.lab,
+    integrations: INTEGRATIONS_DEFAULT.lab,
   },
 };
 

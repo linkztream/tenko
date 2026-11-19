@@ -242,6 +242,41 @@ describe("the service accounts", () => {
     expect(within(row).getByText("renews")).toBeTruthy();
   });
 
+  it("binds a token to an enrolled host's certificate and names the host in the list (IAM-23)", async () => {
+    await openPage();
+    const account = await screen.findByTestId("access-service-account");
+    fireEvent.click(within(account).getByTestId("access-service-account-tokens"));
+    fireEvent.click(await within(account).findByTestId("access-sa-token-create"));
+    const dialog = await screen.findByTestId("dialog-token");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "bound" } });
+    fireEvent.click(within(dialog).getByTestId("token-grant-remove"));
+    fireEvent.click(within(dialog).getByTestId("field-token-scope-metrics"));
+    const host = (await within(dialog).findByRole("option", { name: "dns-sync-host" })) as HTMLOptionElement;
+    fireEvent.change(within(dialog).getByTestId("field-lineage"), { target: { value: host.value } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+
+    const shown = await screen.findByTestId("dialog-token-created");
+    expect(within(shown).getByTestId("token-secret").textContent).toMatch(/^tnkb_/);
+    fireEvent.click(within(shown).getByTestId("token-stored"));
+    fireEvent.click(within(shown).getByTestId("token-done"));
+    expect(db.tokens.find((t) => t.info.name === "bound")?.info.lineage).toBe(host.value);
+    expect((await within(account).findByTestId("access-sa-token-bound")).textContent).toBe("Only with the certificate of dns-sync-host");
+  });
+
+  it("asks for a host while TGL-47 requires bound tokens", async () => {
+    db.settings.integrations = { lifetime_days: 30, require_binding: true, allow_tls12: false };
+    await openPage();
+    const account = await screen.findByTestId("access-service-account");
+    fireEvent.click(within(account).getByTestId("access-service-account-tokens"));
+    fireEvent.click(await within(account).findByTestId("access-sa-token-create"));
+    const dialog = await screen.findByTestId("dialog-token");
+    await within(dialog).findByText("This profile binds every service-account token to a host's certificate (TGL-47).");
+    fireEvent.input(within(dialog).getByTestId("field-name"), { target: { value: "unbound" } });
+    fireEvent.click(within(dialog).getByTestId("form-submit"));
+    expect(await within(dialog).findByText("Choose the host whose certificate the token is bound to.")).toBeTruthy();
+    expect(db.tokens.some((t) => t.info.name === "unbound")).toBe(false);
+  });
+
   it("offers no renewal while TGL-46 is off and says why", async () => {
     db.settings.token_self_renewal = false;
     await openPage();
