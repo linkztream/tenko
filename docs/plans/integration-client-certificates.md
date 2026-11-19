@@ -1,6 +1,7 @@
 # Plan: client certificates for integrations
 
-- Status: Proposed. Nothing is built until the owner has decided section 10.
+- Status: Accepted. The owner decided section 10; ADR 0035 is Accepted with those decisions.
+- Phase: 4, the phase after the one release 0.1.0 closes. The step is not part of the 0.1.0 scope.
 - Scope: [ADR 0035](../adr/0035-integration-client-certificates.md). Integrations prove themselves with a private key that never travels and can sit in a TPM, through a client certificate of a separate integration CA, presented on a dedicated listener; service-account tokens can be bound to that key.
 - Depends on: the token renewal package (IAM-20, IAM-21, TGL-46). Every change to the token files and the token dialog comes after that package is on `main` (section 8).
 
@@ -17,7 +18,7 @@ Contents:
 7. [Work packages](#7-work-packages)
 8. [Order and the renewal package](#8-order-and-the-renewal-package)
 9. [Tests and the security review](#9-tests-and-the-security-review)
-10. [Decisions for the owner](#10-decisions-for-the-owner)
+10. [Decisions of the owner](#10-decisions-of-the-owner)
 11. [What the code could not settle](#11-what-the-code-could-not-settle)
 12. [Documents that change](#12-documents-that-change)
 
@@ -34,6 +35,7 @@ An integrator enrolls an automation host with `openssl` and `curl` alone, the ho
 | IC-E5 | Deleting the service account ends its certificates and bound tokens at once on every controller | CC8 |
 | IC-E6 | A rollback to the previous release refuses bound tokens (prefix check) and never opens the integration listener | CC8 |
 | IC-E7 | The fuzz targets of section 9.3 run in the fuzz job; the penetration rows of section 9.2 are recorded in the security report | CC9 |
+| IC-E8 | With TLS 1.2 allowed by TGL-47, a client offering only TLS 1.2 enrolls and renews, and an observer's capture shows the certificate and nothing of the requests; with it off (the default), the same client fails the handshake; under Hardened the setting is refused | CC8 |
 
 ## 2. Starting point in the code
 
@@ -111,20 +113,20 @@ The design column assumes decision IC-Q1 (bound tokens) under Standard. "The acc
 
 ## 5. Requirements and toggle, drafted
 
-These rows go into `docs/REQUIREMENTS.md` and `docs/SECURITY-PROFILES.md` in package CC7, after the renewal package is on `main` (it edits both files). Phase: Planned until the owner places the step.
+These rows go into `docs/REQUIREMENTS.md` and `docs/SECURITY-PROFILES.md` in package CC7, after the renewal package is on `main` (it edits both files). The Phase column is 4: the step comes after release 0.1.0, which closes Phase 3 and the Kerberos line of Slice 13.
 
 | ID | Requirement | Phase | Priority |
 |---|---|---|---|
-| IAM-22 | Client certificates for integrations: an administrator signed in within five minutes creates a single-use enrollment code (at most one hour, optionally limited to a source prefix) for one service account; the integrator enrolls a PKCS#10 request for an ECDSA P-256 key it generated, in a file or a TPM, with `openssl` and `curl` alone, and receives a certificate of a separate integration CA that names only that service account (`urn:tenko:service-account:<id>`, client authentication only). The key never leaves the host. Integration certificates are accepted only on the integration listener (mutual TLS 1.3, its own port), never on the API and UI listener or the cluster port, and no verifier of a node accepts one. | Planned | Must |
-| IAM-23 | Certificate-bound service-account tokens in the manner of RFC 8705, bound to the key: a bound token is accepted only on the integration listener over a connection whose client certificate is valid, unrevoked, names the token's owner and carries the bound key; everywhere else it is refused. A build that does not know binding refuses a bound token. | Planned | Must |
-| IAM-24 | Renewal of an integration certificate over the integration listener with the certificate alone, in the last third of its lifetime, with a new or the same key; renewal from a certificate that its lineage already replaced revokes the lineage and its bound tokens. The lifetime follows TGL-47; a lineage that does not renew raises the certificate expiry alarm (OPS-29). | Planned | Must |
-| IAM-25 | Revocation of integration certificates by an administrator, by deleting or disabling the service account, by reuse of a lineage and by reuse detection of a bound token family (IAM-21); effective on every controller within the store's replication, also on open connections; a revoked key never enrolls again. A client certificate forwarded by a reverse proxy, as a header or in the PROXY protocol, is never trusted. | Planned | Must |
+| IAM-22 | Client certificates for integrations: an administrator signed in within five minutes creates a single-use enrollment code (at most one hour, optionally limited to a source prefix) for one service account; the integrator enrolls a PKCS#10 request for an ECDSA P-256 key it generated, in a file or a TPM, with `openssl` and `curl` alone, and receives a certificate of a separate integration CA that names only that service account (`urn:tenko:service-account:<id>`, client authentication only). The key never leaves the host. Integration certificates are accepted only on the integration listener (mutual TLS 1.3, TLS 1.2 only by TGL-47, its own port), never on the API and UI listener or the cluster port, and no verifier of a node accepts one. | 4 | Must |
+| IAM-23 | Certificate-bound service-account tokens in the manner of RFC 8705, bound to the key: a bound token is accepted only on the integration listener over a connection whose client certificate is valid, unrevoked, names the token's owner and carries the bound key; everywhere else it is refused. A build that does not know binding refuses a bound token. | 4 | Must |
+| IAM-24 | Renewal of an integration certificate over the integration listener with the certificate alone, in the last third of its lifetime, with a new or the same key; renewal from a certificate that its lineage already replaced revokes the lineage and its bound tokens. The lifetime follows TGL-47; a lineage that does not renew raises the certificate expiry alarm (OPS-29). | 4 | Must |
+| IAM-25 | Revocation of integration certificates by an administrator, by deleting or disabling the service account, by reuse of a lineage and by reuse detection of a bound token family (IAM-21); effective on every controller within the store's replication, also on open connections; a revoked key never enrolls again. A client certificate forwarded by a reverse proxy, as a header or in the PROXY protocol, is never trusted. | 4 | Must |
 
 | ID | Toggle | Home | Standard | Hardened | Lab | Phase | Related |
 |---|---|---|---|---|---|---|---|
-| TGL-47 | Integration client certificates: certificate lifetime / certificate-bound tokens required for service accounts | 90 days / no | 30 days / no | 7 days / yes, every token an administrator creates for a service account (IC-Q6 for mirror tokens) | 365 days / no | Planned | IAM-22, IAM-23, IAM-24 |
+| TGL-47 | Integration client certificates: certificate lifetime / certificate-bound tokens required for service accounts / TLS 1.2 on the integration listener (for Windows Server 2019 and older; the client certificate is then visible on the path) | 90 days / no / off | 30 days / no / off | 7 days / yes, every token an administrator creates for a service account, mirror tokens once the pusher presents a certificate / off, and turning it on is refused | 365 days / no / off | 4 | IAM-22, IAM-23, IAM-24 |
 
-A lifetime longer than the profile's, or binding switched off under Hardened, is a deviation that the UI shows. A tightened lifetime applies at the next renewal; a tightened requirement refuses unbound service-account tokens at their next use, so the administrator sees the affected tokens in the settings page before saving.
+A lifetime longer than the profile's, binding switched off under Hardened, or TLS 1.2 allowed is a deviation that the UI shows. TLS 1.2 is built as the other parts of the toggle are: a field of the same settings type with the profile's default, changed through the same route and audited the same way; the listener reads it per connection, so turning it off refuses the next TLS 1.2 handshake. A tightened lifetime applies at the next renewal; a tightened requirement refuses unbound service-account tokens at their next use, so the administrator sees the affected tokens in the settings page before saving.
 
 ## 6. Cluster
 
@@ -155,7 +157,7 @@ One owner per file at a time; a file named by two packages passes from the first
 What each package proves, beyond its unit tests:
 
 - **CC1.** An integration certificate carries exactly the fields of ADR 0035 decision 2 whatever the request asked for; a node certificate cannot be issued by the integration root nor an integration certificate by the existing root (`Signer` per root, no shared constructor); the identity reader refuses every certificate of section 9.1's list. The PKCS#10 parser gets its fuzz target here (it is also the node enrollment's).
-- **CC2.** Mandatory client authentication, TLS 1.3 only, no tickets, the certificate request names only the integration root, no PROXY or forwarded header read, on-demand opening and closing, the per-request re-check, the kill switch per serial. `ConnInfo` gains `client: Option<Arc<ClientIdentity>>`, set only from the handshake; a comment there states that it is never set from a header.
+- **CC2.** Mandatory client authentication, TLS 1.3 by default and TLS 1.2 only by the third part of TGL-47 (built like the other toggles, read per connection), no tickets, the certificate request names only the integration root, no PROXY or forwarded header read, on-demand opening and closing, the per-request re-check, the kill switch per serial. `ConnInfo` gains `client: Option<Arc<ClientIdentity>>`, set only from the handshake; a comment there states that it is never set from a header.
 - **CC3.** Codes (digest only, single use across controllers, source prefix, at most one hour), the enrollment checks of ADR 0035 decision 5 with one refusal code each, at most eight active lineages, the key-digest deny of revoked keys, revocation by an administrator and the watch.
 - **CC4.** The renewal window and rate, the overlap of 15 minutes after the new certificate is first seen, lineage reuse, the alarm at the last sixth.
 - **CC5.** Binding at creation and at a renewal over 8445, the move of bound tokens on a same-lineage renewal and on a `replaces` enrollment, the refusal on 8443 (`auth.token.certificate_required`), Hardened's refusal of unbound service-account tokens, account end revoking certificates in the same pages as tokens, reuse detection of a bound family revoking the lineage.
@@ -178,7 +180,7 @@ CC8 skeleton after CC2 ······ CC8 in full after CC5
 
 - **Issuance (CC1):** a request asking for a CA, a node URI, a role URI, server authentication, DNS names or addresses gets none; RSA, P-384 and Ed25519 keys, a broken self-signature, trailing data and an oversized request are refused with their codes; issuance by the wrong root is impossible by construction.
 - **Identity reader (CC1, CC2):** refuses a certificate with no or two service-account URIs, with a node or role URI, with server authentication, with basic constraints CA, from the existing root; accepts exactly the issued form.
-- **Listener (CC2):** no client certificate, a node certificate, an expired one, a revoked one, one from another installation's integration root: handshake refused, no HTTP; TLS 1.2 offered: refused; a revoked serial on an open HTTP/2 connection: the next request refused and the connection closed; a session ticket is never issued; a PROXY header and `X-Forwarded-For` on 8445 change nothing.
+- **Listener (CC2):** no client certificate, a node certificate, an expired one, a revoked one, one from another installation's integration root: handshake refused, no HTTP; TLS 1.2 offered: refused while TGL-47 does not allow it, and accepted when it does, with a TLS 1.2 suite list of ECDHE and AEAD only and the Extended Master Secret required (a client without it is refused); a revoked serial on an open HTTP/2 connection: the next request refused and the connection closed; a session ticket is never issued; a PROXY header and `X-Forwarded-For` on 8445 change nothing.
 - **Enrollment (CC3):** every refusal of ADR 0035 decision 5 by its code; two controllers accepting the same code in parallel: exactly one certificate; a token-authenticated or stale session creating a code: refused.
 - **Renewal (CC4):** before the window, twice within an hour, from a replaced certificate (lineage revoked, bound tokens revoked), with a revoked key, with the same key (accepted, binding kept).
 - **Binding (CC5):** every row of exit checks IC-E2, IC-E5 and IC-E6; a bound token with the right account but another lineage's key; a renewal of a bound token over 8443; a rollback build refusing `tnkb_`.
@@ -201,6 +203,7 @@ CC8 skeleton after CC2 ······ CC8 in full after CC5
 | PT-IC11 | Slow handshakes and connection floods on 8445 without a certificate | Handshake timeout and connection cap hold; 8443 unaffected |
 | PT-IC12 | Deleting the service account while a bound token streams events on 8445 | The stream ends; nothing after the deletion is answered |
 | PT-IC13 | A `tnkb_` token against the previous release | Refused |
+| PT-IC14 | TLS 1.2 with TGL-47 off; with it on, a CBC or RSA key exchange suite, renegotiation, a client without Extended Master Secret; turning it on under Hardened | Refused each time; with it on, only ECDHE and AEAD with Extended Master Secret complete |
 
 ### 9.3 Fuzzing
 
@@ -214,56 +217,25 @@ Every parser of network input in this step gets a target in `fuzz/` before it me
 
 The review checks that the integration listener runs in the same process and account as 8443 with no new capability (8445 is above 1024, ADR 0023), that the integration root's key is only read by the issuing code path, that no route on 8445 is reachable without a valid certificate, and that a compromised integration host reaches nothing beyond its account's grants (section 4).
 
-## 10. Decisions for the owner
+## 10. Decisions of the owner
 
-Each question lists the options in the order security, performance, usability, features, and the recommendation first.
+The owner decided every question as recommended, except IC-Q4. The options that were not taken are kept here as the record of what was weighed (security, performance, usability, features).
 
-**IC-Q1. What does the certificate protect?**
-- (a) Every use of a token: certificate-bound tokens (RFC 8705 manner, bound to the key). A stolen token alone is worthless. **Recommended.**
-- (b) Only the token's renewal call. Smaller; the token stays a bearer token for its whole lifetime.
-- (c) The certificate replaces the token. Simplest client; loses per-token grant subsets and separate token revocation. Later, on top of (a).
+| Question | Decided | Not taken |
+|---|---|---|
+| IC-Q1. What the certificate protects | Every use of a service-account token: tokens bound to the certificate's key (RFC 8705 manner) | Only the renewal call; the certificate replacing the token (later, on top) |
+| IC-Q2. Where the certificate is presented | A dedicated integration listener, default port 8445, client certificate required, opened on demand | Optional client authentication on 8443; a route on the cluster port |
+| IC-Q3. One root or two | A separate integration root that the cluster port and nodes never trust | The existing root, told apart by URI |
+| IC-Q4. TLS versions on the integration listener | TLS 1.3 by default in every profile, with the third part of TGL-47 allowing TLS 1.2 for Windows Server 2019 and older: off in every profile, a recorded deviation when on, refused under Hardened, limited to ECDHE with AEAD suites and the Extended Master Secret. In TLS 1.2 an observer on the path sees the client certificate (account id, serial, validity, public key), never the key, a token or a request | TLS 1.3 only with no setting; TLS 1.2 on by default outside Hardened |
+| IC-Q5. The server certificate on 8445 | Always from the internal root, pinned by the code's fingerprint | Following 8443's mode |
+| IC-Q6. TGL-47 values and Hardened | Lifetimes 90 / 30 / 7 / 365 days (Home, Standard, Hardened, Lab); Hardened requires binding for every token an administrator creates for a service account, mirror tokens (ADR 0033) once the mirror pusher presents a certificate; plugin process tokens (ADR 0032) outside | Mirror tokens bound from the start; binding never required |
+| IC-Q7. A lapsed certificate | No grace period; a new code with `replaces` moves the bound tokens | A grace period after expiry |
+| IC-Q8. What reuse detection revokes | Token family reuse also revokes the lineage, and lineage reuse also revokes its bound tokens | Each revokes its own kind only |
+| IC-Q9. Key types | ECDSA P-256 only | RSA 2048 and 3072 as well |
+| IC-Q10. The host firewall | The installer opens 8445 where it opens 8443 | Only with an installer option |
+| IC-Q11. Tooling for integrators | Documented POSIX shell and PowerShell scripts in `docs/integrations.md` | A `tenko integration` client command |
 
-**IC-Q2. Where is the certificate presented?**
-- (a) A dedicated integration listener, default port 8445, mandatory client authentication, opened on demand. Works the same in all four TLS modes; browsers never see a certificate request. **Recommended.**
-- (b) Optional client authentication on 8443. No new port; browser prompts on workstations holding an integration certificate, and unusable behind a proxy.
-- (c) A route on the cluster port. Refused in the ADR: the most sensitive port, closed on a single node.
-
-**IC-Q3. One root or two?**
-- (a) A separate integration root; the cluster port and nodes never trust it. **Recommended.**
-- (b) The existing root, told apart by URI. One key fewer; the cluster port's chain check would pass.
-
-**IC-Q4. TLS versions on the integration listener.**
-- (a) TLS 1.3 only in every profile. The client certificate is encrypted in the handshake, which TLS 1.2 sends in clear. Windows Server 2019's own TLS stack (Schannel) has no TLS 1.3, so a Windows integration there needs a `curl` built with OpenSSL. **Recommended.**
-- (b) TLS 1.2 allowed outside Hardened.
-
-**IC-Q5. The server certificate on 8445.**
-- (a) Always from the internal root, pinned by the code's fingerprint, whatever 8443 uses. **Recommended.**
-- (b) Follow 8443's mode (the imported certificate where there is one). Integrators could use system roots, but the listener would depend on a certificate the operator rotates by hand.
-
-**IC-Q6. TGL-47 values, and Hardened.**
-- (a) Lifetimes 90 / 30 / 7 / 365 days (Home, Standard, Hardened, Lab); Hardened requires binding for every token an administrator creates for a service account, mirror tokens (ADR 0033) included once the mirror pusher can present a certificate; tokens the product mints for its own plugin processes (ADR 0032) are outside. **Recommended.**
-- (b) As (a), with Hardened requiring binding for mirror tokens from the start (blocks the Windows takeover under Hardened until the pusher supports certificates).
-- (c) Binding never required, only offered.
-
-**IC-Q7. When a certificate lapses.**
-- (a) No grace period; recovery is a new code with `replaces`, which moves the bound tokens. **Recommended.**
-- (b) A grace period (renewal accepted for some days after expiry). Easier after a long outage of the automation host; an expired key keeps a power it should have lost.
-
-**IC-Q8. What reuse detection revokes.**
-- (a) Reuse of a bound token family (IAM-21) also revokes the certificate lineage, and reuse of a lineage also revokes its bound tokens. **Recommended**: either reuse proves someone else used the key.
-- (b) Each revokes only its own kind.
-
-**IC-Q9. Key types.**
-- (a) ECDSA P-256 only, as for nodes; every TPM 2.0 of the PC Client profile supports it. **Recommended.**
-- (b) Also RSA 2048 and 3072, for older TPMs and tools. A second key path in the CA and the fuzz targets.
-
-**IC-Q10. The host firewall.**
-- (a) The installer opens 8445 where it opens 8443 (firewalld or ufw); nothing listens until the first code, and the listener demands a certificate. No root is needed later (ADR 0023). **Recommended.**
-- (b) The installer opens it only with an option; enabling integrations later needs root on the host.
-
-**IC-Q11. Tooling for integrators.**
-- (a) Documented scripts, POSIX shell and PowerShell, in `docs/integrations.md`; no Tenko binary on the automation host. **Recommended.**
-- (b) Also a `tenko integration enroll` and `renew` client command (the binary must then be on the host).
+The phase was decided with them: Phase 4, after release 0.1.0.
 
 ## 11. What the code could not settle
 
@@ -273,7 +245,6 @@ Each question lists the options in the order security, performance, usability, f
 - **TPM paths outside the lab.** `swtpm` with `tpm2-openssl` proves the Linux path in CC8; Windows with the Platform Crypto Provider and `curl.exe` or PowerShell needs the owner's Windows lab.
 - **The installer's firewall step** for 8445 (IC-Q10) and whether it moves the unit-hardening gates; the installer change belongs to CC2 or a small package of its own once decided.
 - **An existing gap:** the node enrollment's PKCS#10 parser has no fuzz target today; `ca_csr` in CC1 closes it, and it could be split out to land earlier.
-- **Phase.** Which phase the step belongs to, for the Phase column of IAM-22 to IAM-25 and TGL-47.
 
 ## 12. Documents that change
 
