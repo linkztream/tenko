@@ -82,6 +82,9 @@ test("the scans page has no scans and lists the probe; Stop all scans sets every
   const probe = await startProbe(server, api);
   try {
     await test.step("no scans, and the probe as the server reports it", async () => {
+      // The probe is in sync a moment after it starts, and the page reads the list once:
+      // wait for that state before the page loads, so the page and the API show the same.
+      await expect.poll(async () => (await probes(api))[0]?.in_sync).toBe(true);
       await page.goto("/scans");
       await expect(page.getByTestId("page-scans")).toBeVisible();
       await expect(page.getByTestId("scans-empty")).toBeVisible();
@@ -90,10 +93,10 @@ test("the scans page has no scans and lists the probe; Stop all scans sets every
 
       const listed = await probes(api);
       expect(listed).toHaveLength(1);
-      expect(listed[0]).toMatchObject({ node: NODE, name: NODE_NAME, in_process: false });
+      expect(listed[0]).toMatchObject({ node: NODE, name: NODE_NAME, in_process: false, in_sync: true });
       const row = page.getByTestId(`probe-row-${NODE}`);
       await expect(row).toBeVisible();
-      await expect(row.getByTestId("probe-sync")).toHaveAttribute("data-state", listed[0]!.in_sync ? "in_sync" : "out_of_sync");
+      await expect(row.getByTestId("probe-sync")).toHaveAttribute("data-state", "in_sync");
       await expect(row.getByTestId("probe-in-process")).toHaveCount(0);
       // It scans nothing: the scope it reports has no prefixes.
       expect(listed[0]!.applied?.prefixes).toEqual([]);
