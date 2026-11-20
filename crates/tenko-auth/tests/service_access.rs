@@ -2408,7 +2408,11 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
             lab.env.now(),
         )
         .await;
-        assert_eq!(outcome.is_ok(), accepted, "{source}");
+        assert_eq!(
+            outcome.err().map(|failure| failure.to_string()),
+            (!accepted).then(|| "the credentials were not accepted".to_owned()),
+            "{source}: refused like an unknown token"
+        );
     }
 
     // The removal takes the account and its token.
@@ -2430,5 +2434,9 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         lab.env.now(),
     )
     .await;
-    assert!(gone.is_err(), "the token went with its account");
+    assert_eq!(
+        gone.err().map(|failure| failure.to_string()).as_deref(),
+        Some("the credentials were not accepted"),
+        "the token went with its account"
+    );
 }

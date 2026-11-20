@@ -369,7 +369,7 @@
     {"rule":"is-err","file":"crates/tenko-core/src/ipam.rs","scope":"tags_and_field_keys_validate","text":"assert!(Tag::new(\"\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/ipam.rs","scope":"tags_and_field_keys_validate","text":"assert!(Tag::new(\"a\\nb\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/metrics/tests.rs","scope":"the_checker_refuses_broken_text","text":"assert!(check(bad).is_err())"},
-    {"rule":"is-err","file":"crates/tenko-core/src/migrate.rs","scope":"a_mirror_validates_and_knows_its_freshness","text":"assert!(mirror.validate().is_err())","count":2},
+    {"rule":"is-err","file":"crates/tenko-core/src/migrate.rs","scope":"a_mirror_validates_and_knows_its_freshness","text":"assert!(mirror.validate().is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/names.rs","scope":"idempotency_keys_are_visible_ascii","text":"assert!(IdempotencyKey::new(\"\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/names.rs","scope":"idempotency_keys_are_visible_ascii","text":"assert!(IdempotencyKey::new(\"has space\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-core/src/names.rs","scope":"idempotency_keys_are_visible_ascii","text":"assert!(IdempotencyKey::new(\"x\".repeat(256)).is_err())"},
