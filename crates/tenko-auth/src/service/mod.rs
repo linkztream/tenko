@@ -46,7 +46,7 @@ pub use devices::{
 };
 pub use guard::default_hash_memory_mib;
 pub use hold::{Follow, Hold};
-pub use mirror::MirrorCredentials;
+pub use mirror::{MirrorCredentials, MirrorTokenTerms};
 pub use renewal::{RENEWAL_FAILURES_MAX, TOKEN_EXPIRING, TOKEN_REVOKED};
 pub use reveal::{RevealGrant, STEP_UP_FRESH, STEP_UP_PASSKEY, check_step_up};
 

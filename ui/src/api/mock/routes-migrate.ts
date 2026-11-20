@@ -48,7 +48,15 @@ function withSnapshot(id: string): MirrorSeed {
 }
 
 function minted(item: MirrorItem): S["MirrorCreated"] {
-  return { mirror: item, token: `tnk_mock-mirror-${item.id.slice(-4)}`, ca_fingerprint: "ab".repeat(32) };
+  // A token bound to source prefixes has the constrained form, as on the server.
+  const form = (item.source_prefixes ?? []).length > 0 ? "tnkc_" : "tnk_";
+  return { mirror: item, token: `${form}mock-mirror-${item.id.slice(-4)}`, ca_fingerprint: "ab".repeat(32) };
+}
+
+/** The source prefixes of a request body, as the server stores them (a host address as /32). */
+function sourcesOf(body: Record<string, unknown>): string[] {
+  const list = Array.isArray(body.source_prefixes) ? body.source_prefixes.filter((p): p is string => typeof p === "string") : [];
+  return list.map((prefix) => (prefix.includes("/") ? prefix : `${prefix}/32`));
 }
 
 const list = route("get", "/api/v1/migrate/mirrors", () => {
@@ -60,9 +68,10 @@ const list = route("get", "/api/v1/migrate/mirrors", () => {
 const create = route("post", "/api/v1/migrate/mirrors", async (ctx) => {
   requireAdmin();
   const body = await ctx.body();
-  const name = typeof body.name === "string" ? body.name.trim() : "";
-  if (!name || /\s/.test(name)) throw new Problem("migrate.mirror.invalid_settings", { status: 400, params: { field: "name", reason: "no spaces" } });
-  if ([...mirrors.values()].some((seed) => seed.item.name === name)) throw new Problem("migrate.mirror.exists", { status: 409, params: { name } });
+  const name = typeof body.name === "string" ? body.name : "";
+  if (!name.trim() || name.trim() !== name || name.length > 64) {
+    throw new Problem("migrate.mirror.invalid_settings", { status: 400, params: { field: "name", reason: "1 to 64 characters, no space at either end" } });
+  }
   const id = crypto.randomUUID();
   const item: MirrorItem = {
     id,
@@ -77,6 +86,7 @@ const create = route("post", "/api/v1/migrate/mirrors", async (ctx) => {
     stale: false,
     losses_open: 0,
     scopes: [],
+    source_prefixes: sourcesOf(body),
     ca_fingerprint: "ab".repeat(32),
   };
   mirrors.set(id, { item });
@@ -109,9 +119,11 @@ const remove = route("delete", "/api/v1/migrate/mirrors/{id}", (ctx) => {
   return noContent();
 });
 
-const token = route("post", "/api/v1/migrate/mirrors/{id}/token", (ctx) => {
+const token = route("post", "/api/v1/migrate/mirrors/{id}/token", async (ctx) => {
   requireAdmin();
-  return created(minted(found(ctx.params.id).item));
+  const seed = found(ctx.params.id);
+  seed.item = { ...seed.item, source_prefixes: sourcesOf(await ctx.optionalBody()) };
+  return created(minted(seed.item));
 });
 
 const losses = route("get", "/api/v1/migrate/mirrors/{id}/losses", (ctx) => {

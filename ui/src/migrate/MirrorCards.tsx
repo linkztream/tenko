@@ -9,7 +9,7 @@ import { isAdmin } from "../auth/session";
 import { Dialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { formatDuration, formatRelative, t } from "../i18n";
-import { createMirror, listMirrors, type MirrorCreated, type MirrorItem } from "./api";
+import { createMirror, listMirrors, sourceList, type MirrorCreated, type MirrorItem } from "./api";
 import { mirrorState } from "./model";
 import { migratePaths } from "./paths";
 import { TokenShown } from "./TokenShown";
@@ -67,6 +67,7 @@ export function MirrorCard(props: { mirror: MirrorItem }) {
 
 function CreateMirror(props: { onClose: () => void; onCreated: (created: MirrorCreated) => void }) {
   const [name, setName] = createSignal("");
+  const [sources, setSources] = createSignal("");
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
   const submit = async (e: SubmitEvent) => {
@@ -74,7 +75,7 @@ function CreateMirror(props: { onClose: () => void; onCreated: (created: MirrorC
     setBusy(true);
     setError(null);
     try {
-      props.onCreated(await createMirror(name().trim(), null));
+      props.onCreated(await createMirror(name().trim(), null, sourceList(sources())));
     } catch (err) {
       setError(err);
     } finally {
@@ -89,8 +90,13 @@ function CreateMirror(props: { onClose: () => void; onCreated: (created: MirrorC
           <p class="muted">{t("migrate.create.body")}</p>
           <div class="field">
             <label for="mirror-name">{t("migrate.create.name")}</label>
-            <input id="mirror-name" class="input" required maxLength={57} pattern="\S+" value={name()} onInput={(e) => setName(e.currentTarget.value)} data-testid="mirror-name" />
+            <input id="mirror-name" class="input" required maxLength={64} value={name()} onInput={(e) => setName(e.currentTarget.value)} data-testid="mirror-name" />
             <span class="help">{t("migrate.create.name_help")}</span>
+          </div>
+          <div class="field">
+            <label for="mirror-sources">{t("migrate.create.sources")}</label>
+            <input id="mirror-sources" class="input mono" value={sources()} onInput={(e) => setSources(e.currentTarget.value)} data-testid="mirror-sources" />
+            <span class="help">{t("migrate.create.sources_help")}</span>
           </div>
           <ErrorNotice error={error()} />
         </div>

@@ -70,14 +70,15 @@ pub const LEASE_BATCH: usize = 1_000;
 /// The finding `migrate.mirror.token_expiring` is raised this many days ahead (WT-Q11).
 pub const TOKEN_EXPIRING_DAYS: u32 = 14;
 
-/// The mirror row is written with the freshness at most this often, in seconds; between
-/// writes the freshness lives in the leader's memory (section 2.4).
-pub const FRESHNESS_WRITE_SECS: u32 = 600;
+/// A snapshot whose configuration is unchanged but whose leases changed is written at most
+/// this often, in seconds (section 2.4); the controller that received it holds the newest
+/// envelope in memory meanwhile.
+pub const LEASES_WRITE_SECS: u32 = 600;
 
-/// The longest name of a mirror's service account (the user name rule of `tenko-auth`).
+/// The longest name of a mirror, in characters.
 pub const MAX_NAME_LEN: usize = 64;
 
-/// The prefix of a mirror's service account name: `mirror-<name>`.
+/// The prefix of a mirror's service account name: `mirror-<id>`.
 pub const ACCOUNT_PREFIX: &str = "mirror-";
 
 /// The SSE topic of the module.
@@ -86,13 +87,14 @@ pub const TOPIC: &str = "migrate";
 /// The kinds of the module as objects of authorization and audit.
 pub const OBJECT_KINDS: [ObjectKind; 2] = [ObjectKind::Mirror, ObjectKind::Takeover];
 
-/// A mirrored source (section 2.1): one row per source, with the freshness the leader
-/// writes at most every [`FRESHNESS_WRITE_SECS`].
+/// A mirrored source (section 2.1): one row per source, with the freshness a controller
+/// writes at most every [`Mirror::freshness_write_secs`] while pushes arrive.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Mirror {
     /// Identifier.
     pub id: MirrorId,
-    /// The name an administrator gave it, unique among mirrors.
+    /// The name an administrator gave it, shown and used to address it in the CLI; unique
+    /// among mirrors, and nothing else derives from it.
     pub name: String,
     /// The kind of source (`windows-dhcp`).
     pub kind: SourceKindLabel,
@@ -102,7 +104,7 @@ pub struct Mirror {
     pub enabled: bool,
     /// The scoped token whose only special scope is `mirror:<id>` (section 2.1, rule 2).
     pub token: ApiTokenId,
-    /// The service account `mirror-<name>` that owns the token; it holds no grants.
+    /// The service account `mirror-<id>` that owns the token; it holds no grants.
     pub account: UserId,
     /// The expected interval between pushes, in seconds.
     #[serde(default = "default_interval")]
@@ -110,15 +112,22 @@ pub struct Mirror {
     /// The sequence of the last accepted push; a push must carry a higher one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_sequence: Option<u64>,
-    /// The SHA-256 of the last accepted envelope in canonical CBOR.
+    /// The SHA-256 of the stored snapshot's configuration in canonical CBOR (everything but
+    /// the leases, their loss entries, the sequence and the time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_hash: Option<HexBytes>,
+    /// The SHA-256 of the stored snapshot's leases with their loss entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub leases_hash: Option<HexBytes>,
     /// When the last push was accepted, changed or not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_push: Option<Timestamp>,
-    /// When the snapshot last changed.
+    /// When the configuration last changed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_change: Option<Timestamp>,
+    /// When the snapshot row was last written: its leases are from then.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored_at: Option<Timestamp>,
     /// Creation.
     pub created: Stamp,
     /// Last change of the row.
@@ -134,27 +143,21 @@ const fn default_interval() -> u32 {
 }
 
 impl Mirror {
-    /// Checks the row: a name that makes the service account's name, `mirror-<name>` of at
-    /// most [`MAX_NAME_LEN`] characters (so the name has at most 57) without a space or a
-    /// character [`crate::text::is_hidden`] holds for, and an interval within [`MIN_INTERVAL_SECS`] and
-    /// [`MAX_INTERVAL_SECS`].
+    /// Checks the row: a name of 1 to [`MAX_NAME_LEN`] characters, spaces allowed but not
+    /// at either end, without a character [`crate::text::is_hidden`] holds for, and an
+    /// interval within [`MIN_INTERVAL_SECS`] and [`MAX_INTERVAL_SECS`].
     ///
     /// # Errors
     ///
     /// [`MigrateError::Invalid`] naming the field.
     pub fn validate(&self) -> Result<(), MigrateError> {
-        let longest = MAX_NAME_LEN - ACCOUNT_PREFIX.len();
-        if self.name.is_empty() || self.name.chars().count() > longest {
-            return Err(MigrateError::invalid("name", "1 to 57 characters"));
+        if self.name.trim().is_empty() || self.name.chars().count() > MAX_NAME_LEN {
+            return Err(MigrateError::invalid("name", "1 to 64 characters"));
         }
-        if self
-            .name
-            .chars()
-            .any(|c| c.is_whitespace() || crate::text::is_hidden(c))
-        {
+        if self.name.trim() != self.name || self.name.chars().any(crate::text::is_hidden) {
             return Err(MigrateError::invalid(
                 "name",
-                "no space and no control or format character: the name is part of the service account's",
+                "no space at either end and no control or format character",
             ));
         }
         if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&self.interval_secs) {
@@ -166,14 +169,22 @@ impl Mirror {
         Ok(())
     }
 
-    /// The name of the service account that owns the mirror's token.
-    pub fn account_name(name: &str) -> String {
-        format!("{ACCOUNT_PREFIX}{name}")
+    /// The name of the service account that owns the token of the mirror `id`: by its id, so
+    /// that a rename touches nothing else.
+    pub fn account_name(id: MirrorId) -> String {
+        format!("{ACCOUNT_PREFIX}{id}")
     }
 
     /// After how many seconds without a push the mirror is stale (section 2.4).
     pub const fn stale_after_secs(&self) -> u64 {
         (self.interval_secs as u64) * (STALE_AFTER_INTERVALS as u64)
+    }
+
+    /// The row is written with the freshness at most this often while pushes arrive: half
+    /// of [`Mirror::stale_after_secs`], so that another controller or a restarted one reads
+    /// a mirror that pushes as fresh, and a sequence at most this far behind (section 2.14).
+    pub const fn freshness_write_secs(&self) -> u64 {
+        self.stale_after_secs() / 2
     }
 
     /// Whether the mirror is stale at `now`: enabled, pushed at least once, and the last
@@ -200,10 +211,11 @@ pub struct Snapshot {
     pub mirror: MirrorId,
     /// The envelope's sequence.
     pub sequence: u64,
-    /// The SHA-256 in canonical CBOR of the envelope's content (without its `sequence` and
-    /// `taken_at`), the value the next push is compared with.
+    /// The SHA-256 in canonical CBOR of the envelope's configuration (without the leases,
+    /// their loss entries, the `sequence` and `taken_at`), as [`Mirror::last_hash`].
     pub hash: HexBytes,
-    /// When the push was accepted, by the node's clock.
+    /// When the push was accepted, by the node's clock: the leases are from then, and may be
+    /// up to [`LEASES_WRITE_SECS`] older than the newest push.
     pub received: Timestamp,
     /// The envelope as pushed.
     pub envelope: MirrorSnapshot,
@@ -771,8 +783,10 @@ mod tests {
             interval_secs: DEFAULT_INTERVAL_SECS,
             last_sequence: None,
             last_hash: None,
+            leases_hash: None,
             last_push: None,
             last_change: None,
+            stored_at: None,
             created: stamp(),
             updated: stamp(),
         }
@@ -864,21 +878,35 @@ mod tests {
         mirror.enabled = false;
         assert!(!mirror.is_stale(now), "a disabled mirror is never stale");
 
-        mirror.name = String::new();
-        assert!(mirror.validate().is_err());
-        for name in [" lab", "dc 1", "dc\u{202E}1", &"x".repeat(58)] {
+        assert_eq!(
+            mirror.freshness_write_secs(),
+            90,
+            "half the stale threshold"
+        );
+
+        for name in [
+            "",
+            "  ",
+            " lab",
+            "lab ",
+            "dc\u{202E}1",
+            "dc\n1",
+            &"x".repeat(65),
+        ] {
             mirror.name = name.to_owned();
             let refused = mirror.validate().expect_err(name);
             assert_eq!(crate::Coded::code(&refused), codes::MIRROR_INVALID_SETTINGS);
         }
-        mirror.name = "x".repeat(57);
-        mirror
-            .validate()
-            .expect("57 characters make a 64-character account name");
-        mirror.name = "lab".to_owned();
+        for name in ["Office DHCP 1", &"x".repeat(64)] {
+            mirror.name = name.to_owned();
+            mirror.validate().expect(name);
+        }
         mirror.interval_secs = 5;
         assert!(mirror.validate().is_err());
-        assert_eq!(Mirror::account_name("lab"), "mirror-lab");
+        assert_eq!(
+            Mirror::account_name(mirror.id),
+            format!("mirror-{}", mirror.id)
+        );
     }
 
     #[test]

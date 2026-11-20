@@ -10,6 +10,7 @@ import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
 import { setLocale } from "../i18n";
+import { sourceList } from "./api";
 import { MirrorCards } from "./MirrorCards";
 import MirrorPage from "./MirrorPage";
 import { installCommands, mirrorState } from "./model";
@@ -117,10 +118,12 @@ describe("the mirror cards", () => {
     expect(await axeViolations(view.container)).toEqual([]);
 
     fireEvent.click(screen.getByTestId("mirror-create"));
-    fireEvent.input(await screen.findByTestId("mirror-name"), { target: { value: "dc2" } });
+    fireEvent.input(await screen.findByTestId("mirror-name"), { target: { value: "Office DHCP 2" } });
+    fireEvent.input(screen.getByTestId("mirror-sources"), { target: { value: "192.0.2.10, 198.51.100.0/24" } });
     fireEvent.click(screen.getByTestId("mirror-create-submit"));
     const token = await screen.findByTestId("mirror-token");
-    expect(token.textContent).toMatch(/^tnk_mock-mirror-/);
+    // Bound to its sources, the token has the constrained form.
+    expect(token.textContent).toMatch(/^tnkc_mock-mirror-/);
     fireEvent.click(screen.getByTestId("mirror-token-done"));
     await waitFor(() => expect(screen.getAllByTestId("mirror-card")).toHaveLength(2));
     expect(screen.queryByTestId("mirror-token")).toBeNull();
@@ -160,6 +163,7 @@ describe("the mirror page", () => {
     expect(commands[1]?.textContent).toContain(`-Fingerprint '${"ab".repeat(32)}'`);
     fireEvent.click(screen.getByTestId("mirror-token-replace"));
     expect((await screen.findByTestId("mirror-token")).textContent).toMatch(/^tnk_/);
+    expect(sourceList(" 192.0.2.10,198.51.100.0/24  2001:db8::1 ")).toEqual(["192.0.2.10", "198.51.100.0/24", "2001:db8::1"]);
     fireEvent.click(screen.getByTestId("mirror-token-done"));
     fireEvent.click(screen.getByTestId("mirror-delete"));
     fireEvent.click(await screen.findByTestId("confirm-ok"));

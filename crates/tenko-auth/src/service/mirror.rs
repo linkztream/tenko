@@ -3,12 +3,14 @@
 //!
 //! The mirror service of `tenko-migrate` stages these into the batch that writes the mirror's
 //! row, so a mirror, its account and its token appear and go together. The account
-//! `mirror-<name>` holds no role and no grant; its one token carries the scope `mirror:<id>`
+//! `mirror-<id>` holds no role and no grant; its one token carries the scope `mirror:<id>`
 //! and no grant, which `crate::authz` lets reach the push of that mirror and nothing else.
-//! Minting needs an interactive session that signed in within the last five minutes, as every
-//! scoped token of a service account does: the token outlives the session.
+//! The token may be bound to source prefixes, by the source binding every scoped token has
+//! (IAM-21): a push from elsewhere is refused like an unknown token. Minting needs an
+//! interactive session that signed in within the last five minutes, as every scoped token of
+//! a service account does: the token outlives the session.
 
-use tenko_core::{ApiTokenId, MirrorId, ObjectRef, Principal, RequestCtx, Timestamp, UserId};
+use tenko_core::{ApiTokenId, MirrorId, ObjectRef, Principal, RequestCtx, UserId};
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
 
 use super::{
@@ -20,7 +22,8 @@ use crate::{
     authz::TokenAuthz,
     error::AuthError,
     model::{
-        SCOPED_TOKENS, TokenScope, USER_NAMES, USER_SCOPED_TOKENS, USERS, UserKind, UserRecord,
+        SCOPED_TOKENS, ScopedTokenRecord, TokenScope, USER_NAMES, USER_SCOPED_TOKENS, USERS,
+        UserKind, UserRecord,
     },
 };
 
@@ -28,32 +31,40 @@ use crate::{
 /// once.
 #[derive(Debug)]
 pub struct MirrorCredentials {
-    /// The service account `mirror-<name>`.
+    /// The service account `mirror-<id>`.
     pub account: UserId,
     /// The token with the scope `mirror:<id>`.
     pub token: CreatedToken,
 }
 
+/// What a mirror's token is minted with.
+#[derive(Debug, Clone, Default)]
+pub struct MirrorTokenTerms {
+    /// The lifetime in days; the profile's maximum when absent (TGL-05).
+    pub expires_in_days: Option<u32>,
+    /// The client prefixes the token is accepted from (IAM-21); empty for anywhere.
+    pub source_prefixes: Vec<String>,
+}
+
 impl AuthService {
-    /// Stages the service account `mirror-<name>` and its token into `batch`.
+    /// Stages the service account `mirror-<id>` and its token into `batch`.
     ///
     /// # Errors
     ///
     /// [`AuthError::Unauthenticated`] without a session, [`AuthError::StepUpRequired`] for a
-    /// session older than five minutes, [`AuthError::Invalid`] for a name that makes no
-    /// account name, [`AuthError::UserNameTaken`], and the token's errors (TGL-05).
+    /// session older than five minutes, [`AuthError::UserNameTaken`] when an account of that
+    /// name exists, and the token's errors (TGL-05, the source prefixes).
     pub async fn stage_mirror_account(
         &self,
         ctx: &RequestCtx,
         view: &dyn ReadView,
         batch: &mut WriteBatch,
         mirror: MirrorId,
-        name: &str,
-        expires_in_days: Option<u32>,
+        terms: &MirrorTokenTerms,
     ) -> Result<MirrorCredentials, AuthError> {
         let (creator, _, strength) = Self::session_principal(ctx)?;
         self.require_fresh_session(ctx).await?;
-        let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(name))?;
+        let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(mirror))?;
         let key = UserRecord::name_key(&name);
         if view.get_typed(&USER_NAMES, &key)?.is_some() {
             return Err(AuthError::UserNameTaken);
@@ -82,7 +93,7 @@ impl AuthService {
             &account,
             (creator, strength),
             mirror,
-            expires_in_days,
+            terms,
         )?;
         Ok(MirrorCredentials {
             account: account.id,
@@ -105,7 +116,7 @@ impl AuthService {
         account: UserId,
         mirror: MirrorId,
         old: ApiTokenId,
-        expires_in_days: Option<u32>,
+        terms: &MirrorTokenTerms,
     ) -> Result<CreatedToken, AuthError> {
         let (creator, _, strength) = Self::session_principal(ctx)?;
         self.require_fresh_session(ctx).await?;
@@ -130,7 +141,7 @@ impl AuthService {
             &account,
             (creator, strength),
             mirror,
-            expires_in_days,
+            terms,
         )
     }
 
@@ -142,11 +153,12 @@ impl AuthService {
         account: &UserRecord,
         (creator, strength): (UserId, tenko_core::AuthStrength),
         mirror: MirrorId,
-        expires_in_days: Option<u32>,
+        terms: &MirrorTokenTerms,
     ) -> Result<CreatedToken, AuthError> {
         let request = TokenRequest {
             name: format!("mirror {mirror}"),
-            expires_in_days,
+            expires_in_days: terms.expires_in_days,
+            source_prefixes: terms.source_prefixes.clone(),
             ..TokenRequest::default()
         };
         self.stage_scoped_token(
@@ -209,22 +221,22 @@ impl AuthService {
         }
     }
 
-    /// When the scoped token `token` of `account` expires; `None` for a token that never
-    /// expires or is gone.
+    /// The record of the scoped token `token` of `account` (its expiry and its source
+    /// prefixes among it); `None` when it is gone.
     ///
     /// # Errors
     ///
     /// A store or codec error.
-    pub fn scoped_token_expiry(
+    pub fn scoped_token(
         view: &dyn ReadView,
         account: UserId,
         token: ApiTokenId,
-    ) -> Result<Option<Timestamp>, AuthError> {
+    ) -> Result<Option<ScopedTokenRecord>, AuthError> {
         let Some(key) = Self::scoped_token_hash(view, account, token)? else {
             return Ok(None);
         };
         Ok(view
             .get_typed(&SCOPED_TOKENS, &key)?
-            .and_then(|(record, _)| record.expires_at))
+            .map(|(record, _)| record))
     }
 }

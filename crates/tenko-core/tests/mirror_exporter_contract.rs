@@ -49,3 +49,20 @@ fn the_exporters_expected_snapshot_parses_and_validates() {
         "the loss report names the policy, the filter and the superscope"
     );
 }
+
+#[test]
+fn the_exporter_warns_at_the_bounds_the_controller_refuses_above() {
+    use tenko_core::ir::mirror::{MAX_LEASES, MAX_RESERVATIONS, MAX_SCOPES};
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../deploy/windows/mirror/Tenko-DhcpMirror.ps1");
+    let script =
+        fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for (name, bound) in [
+        ("MaxScopes", MAX_SCOPES),
+        ("MaxReservations", MAX_RESERVATIONS),
+        ("MaxLeases", MAX_LEASES),
+    ] {
+        let line = format!("$script:{name} = {bound}");
+        assert!(script.contains(&line), "the exporter holds `{line}`");
+    }
+}

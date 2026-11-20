@@ -53,7 +53,11 @@ use axum::{
 };
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use tenko_auth::{AuthService, authz::anywhere, service::types::SecretString};
+use tenko_auth::{
+    AuthService,
+    authz::anywhere,
+    service::{MirrorTokenTerms, types::SecretString},
+};
 use tenko_core::{
     Action, CodedError, Denied, DenyReason, JobId, MirrorId, ObjectKind, RequestCtx, TakeoverId,
     Timestamp, UserId,
@@ -92,8 +96,8 @@ use crate::{
 /// `POST /migrate/mirrors`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MirrorCreate {
-    /// The name, unique among mirrors; the service account is `mirror-<name>`, so the name
-    /// holds no space and at most 57 characters.
+    /// The name shown, 1 to 64 characters, spaces allowed but not at either end; it is not
+    /// unique (the service account is `mirror-<id>`).
     pub name: String,
     /// The kind of source (`windows-dhcp`).
     pub kind: SourceKindLabel,
@@ -103,6 +107,11 @@ pub struct MirrorCreate {
     /// The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_in_days: Option<u32>,
+    /// The client addresses or networks the exporter pushes from (at most 64); empty for
+    /// anywhere, which the Hardened profile refuses. A push from elsewhere is refused like an
+    /// unknown token.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_prefixes: Vec<String>,
 }
 
 /// `POST /migrate/mirrors/{id}/token`.
@@ -111,6 +120,10 @@ pub struct MirrorTokenRequest {
     /// The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expires_in_days: Option<u32>,
+    /// The client addresses or networks the new token is accepted from, as on creation; the
+    /// old token's list does not carry over.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub source_prefixes: Vec<String>,
 }
 
 /// A mirror with the token the exporter needs, shown once (`POST /migrate/mirrors`,
@@ -355,7 +368,7 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,000 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address. A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
@@ -491,7 +504,10 @@ async fn create_mirror(
         name: body.name,
         kind: body.kind,
         interval_secs: body.interval_secs,
-        token_expires_in_days: body.token_expires_in_days,
+        token: MirrorTokenTerms {
+            expires_in_days: body.token_expires_in_days,
+            source_prefixes: body.source_prefixes,
+        },
     };
     Ok(created(service.create(&cx, new).await?, &ca_root))
 }
@@ -639,7 +655,16 @@ async fn replace_mirror_token(
         ("POST", "/migrate/mirrors/{id}/token"),
     )?;
     Ok(created(
-        service.replace_token(&cx, id, body.expires_in_days).await?,
+        service
+            .replace_token(
+                &cx,
+                id,
+                &MirrorTokenTerms {
+                    expires_in_days: body.expires_in_days,
+                    source_prefixes: body.source_prefixes,
+                },
+            )
+            .await?,
         &ca_root,
     ))
 }

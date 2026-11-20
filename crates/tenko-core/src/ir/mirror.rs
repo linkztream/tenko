@@ -45,8 +45,11 @@ pub const MAX_SCOPES: usize = 1_000;
 /// The most reservations one snapshot carries, over every scope.
 pub const MAX_RESERVATIONS: usize = 10_000;
 
-/// The most leases one snapshot carries.
-pub const MAX_LEASES: usize = 100_000;
+/// The most leases one snapshot carries: a snapshot at every bound, with the exporter's item
+/// sizes, is written in one store batch with a quarter of it to spare (`tenko-migrate`'s
+/// `a_snapshot_at_every_bound_fits_one_batch_and_is_accepted`; a lease takes about 210
+/// octets of the row).
+pub const MAX_LEASES: usize = 20_000;
 
 /// The most loss entries one snapshot carries.
 pub const MAX_LOSSES: usize = 10_000;
@@ -341,7 +344,10 @@ fn check_free(
 
 fn check_count(path: &str, len: usize, max: usize) -> Result<(), SnapshotInvalid> {
     if len > max {
-        return Err(SnapshotInvalid::new(path, format!("more than {max} items")));
+        return Err(SnapshotInvalid::new(
+            path,
+            format!("{len} items, more than {max}"),
+        ));
     }
     Ok(())
 }
@@ -588,9 +594,10 @@ impl MirrorSnapshot {
             check_options(&format!("{path}.options"), &scope.options)?;
             reservations += scope.reservations.len();
             if reservations > MAX_RESERVATIONS {
+                let all = self.reservation_count();
                 return Err(SnapshotInvalid::new(
                     format!("{path}.reservations"),
-                    format!("more than {MAX_RESERVATIONS} reservations in the snapshot"),
+                    format!("{all} reservations in the snapshot, more than {MAX_RESERVATIONS}"),
                 ));
             }
             let mut addresses = BTreeMap::new();

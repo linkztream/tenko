@@ -24848,7 +24848,7 @@
           "migrate"
         ],
         "summary": "Push a snapshot of a mirrored source",
-        "description": "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,000 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+        "description": "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address. A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
         "operationId": "push_mirror_snapshot",
         "parameters": [
           {
@@ -62782,7 +62782,7 @@
       },
       "Mirror": {
         "type": "object",
-        "description": "A mirrored source (section 2.1): one row per source, with the freshness the leader\nwrites at most every [`FRESHNESS_WRITE_SECS`].",
+        "description": "A mirrored source (section 2.1): one row per source, with the freshness a controller\nwrites at most every [`Mirror::freshness_write_secs`] while pushes arrive.",
         "required": [
           "id",
           "name",
@@ -62795,7 +62795,7 @@
         "properties": {
           "account": {
             "$ref": "#/components/schemas/UserId",
-            "description": "The service account `mirror-<name>` that owns the token; it holds no grants."
+            "description": "The service account `mirror-<id>` that owns the token; it holds no grants."
           },
           "created": {
             "$ref": "#/components/schemas/Stamp",
@@ -62823,7 +62823,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "When the snapshot last changed."
+                "description": "When the configuration last changed."
               },
               {
                 "type": "null"
@@ -62834,7 +62834,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/HexBytes",
-                "description": "The SHA-256 of the last accepted envelope in canonical CBOR."
+                "description": "The SHA-256 of the stored snapshot's configuration in canonical CBOR (everything but\nthe leases, their loss entries, the sequence and the time)."
               },
               {
                 "type": "null"
@@ -62861,9 +62861,31 @@
             "description": "The sequence of the last accepted push; a push must carry a higher one.",
             "minimum": 0
           },
+          "leases_hash": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/HexBytes",
+                "description": "The SHA-256 of the stored snapshot's leases with their loss entries."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "name": {
             "type": "string",
-            "description": "The name an administrator gave it, unique among mirrors."
+            "description": "The name an administrator gave it, shown and used to address it in the CLI; unique\namong mirrors, and nothing else derives from it."
+          },
+          "stored_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the snapshot row was last written: its leases are from then."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "token": {
             "$ref": "#/components/schemas/ApiTokenId",
@@ -62898,7 +62920,14 @@
           },
           "name": {
             "type": "string",
-            "description": "The name, unique among mirrors; the service account is `mirror-<name>`, so the name\nholds no space and at most 57 characters."
+            "description": "The name shown, 1 to 64 characters, spaces allowed but not at either end; it is not\nunique (the service account is `mirror-<id>`)."
+          },
+          "source_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The client addresses or networks the exporter pushes from (at most 64); empty for\nanywhere, which the Hardened profile refuses. A push from elsewhere is refused like an\nunknown token."
           },
           "token_expires_in_days": {
             "type": [
@@ -62984,7 +63013,7 @@
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/SnapshotCounts",
-                    "description": "The counts of the latest snapshot: scopes, reservations, leases."
+                    "description": "The counts of the stored snapshot: scopes, reservations, leases."
                   },
                   {
                     "type": "null"
@@ -63015,9 +63044,25 @@
                   }
                 ]
               },
+              "source_prefixes": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The client prefixes the mirror's token is accepted from; empty for anywhere."
+              },
               "stale": {
                 "type": "boolean",
                 "description": "Whether the mirror is stale: no push for three intervals."
+              },
+              "stored_sequence": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "description": "The sequence of the stored snapshot, written at `stored_at`: its leases are from that\npush, which may be older than the last one (`last_sequence`) by up to ten minutes.",
+                "minimum": 0
               },
               "token_expires_at": {
                 "oneOf": [
@@ -63212,6 +63257,13 @@
             "format": "int32",
             "description": "The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).",
             "minimum": 0
+          },
+          "source_prefixes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The client addresses or networks the new token is accepted from, as on creation; the\nold token's list does not carry over."
           }
         }
       },
@@ -70949,7 +71001,7 @@
                       "oneOf": [
                         {
                           "$ref": "#/components/schemas/SnapshotCounts",
-                          "description": "The counts of the latest snapshot: scopes, reservations, leases."
+                          "description": "The counts of the stored snapshot: scopes, reservations, leases."
                         },
                         {
                           "type": "null"
@@ -70980,9 +71032,25 @@
                         }
                       ]
                     },
+                    "source_prefixes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The client prefixes the mirror's token is accepted from; empty for anywhere."
+                    },
                     "stale": {
                       "type": "boolean",
                       "description": "Whether the mirror is stale: no push for three intervals."
+                    },
+                    "stored_sequence": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "format": "int64",
+                      "description": "The sequence of the stored snapshot, written at `stored_at`: its leases are from that\npush, which may be older than the last one (`last_sequence`) by up to ten minutes.",
+                      "minimum": 0
                     },
                     "token_expires_at": {
                       "oneOf": [
@@ -83461,7 +83529,7 @@
           },
           "hash": {
             "$ref": "#/components/schemas/HexBytes",
-            "description": "The SHA-256 in canonical CBOR of the envelope's content (without its `sequence` and\n`taken_at`), the value the next push is compared with."
+            "description": "The SHA-256 in canonical CBOR of the envelope's configuration (without the leases,\ntheir loss entries, the `sequence` and `taken_at`), as [`Mirror::last_hash`]."
           },
           "mirror": {
             "$ref": "#/components/schemas/MirrorId",
@@ -83469,7 +83537,7 @@
           },
           "received": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "When the push was accepted, by the node's clock."
+            "description": "When the push was accepted, by the node's clock: the leases are from then, and may be\nup to [`LEASES_WRITE_SECS`] older than the newest push."
           },
           "sequence": {
             "type": "integer",

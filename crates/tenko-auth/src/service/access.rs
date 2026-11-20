@@ -71,9 +71,10 @@ pub(super) fn scoped_token_info(record: &ScopedTokenRecord) -> TokenInfo {
 
 /// Whether `settings` require a token of `owner` with `scopes` to be bound to a certificate
 /// lineage (TGL-47, ADR 0035 decision 10): every token of a service account while the
-/// requirement is on, except mirror tokens (ADR 0033). A mirror pusher cannot present an
-/// integration certificate yet; once it can, its tokens are bound from the start and this
-/// exception goes. The one place of the rule: the creation of a token, the removal when the
+/// requirement is on, except mirror tokens (ADR 0033): the exporter runs as a scheduled
+/// script on a domain controller, which has no enrollment path for a client certificate, so
+/// the binding does not apply to it; the mirror's source prefixes (IAM-21) are the control in
+/// its place. The one place of the rule: the creation of a token, the removal when the
 /// requirement is turned on and every presentation of a token ask it.
 pub(super) fn binding_required(
     owner: &UserRecord,

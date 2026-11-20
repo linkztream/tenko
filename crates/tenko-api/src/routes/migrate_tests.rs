@@ -296,25 +296,51 @@ async fn only_the_mirror_s_own_token_pushes() {
 }
 
 #[tokio::test]
-async fn the_management_operations_answer_with_their_codes() {
+async fn a_mirror_token_bound_to_its_sources_pushes_from_nowhere_else() {
     let (harness, admin) = harness().await;
-    let (id, token) = mirror(&harness, &admin, "dc1").await;
-    let exists = harness
+    let bound = harness
         .call(
             "POST",
             "/migrate/mirrors",
             Cookie(&admin),
-            Some(&json!({ "name": "dc1", "kind": "windows-dhcp" })),
+            Some(&json!({ "name": "dc1", "kind": "windows-dhcp", "source_prefixes": ["192.0.2.0/24"] })),
         )
         .await;
-    exists.assert_problem(409, "migrate.mirror.exists");
-    assert_eq!(exists.body["params"]["name"], "dc1");
+    bound.assert_status(201);
+    assert_eq!(
+        bound.body["mirror"]["source_prefixes"],
+        json!(["192.0.2.0/24"])
+    );
+    harness
+        .call(
+            "POST",
+            "/migrate/mirrors",
+            Cookie(&admin),
+            Some(
+                &json!({ "name": "dc2", "kind": "windows-dhcp", "source_prefixes": ["0.0.0.0/0"] }),
+            ),
+        )
+        .await
+        .assert_problem(400, "migrate.mirror.invalid_settings");
+    // The harness's requests carry no client address, which is not inside the prefixes.
+    let id = bound.body["mirror"]["id"].as_str().expect("id");
+    let token = bound.body["token"].as_str().expect("token");
+    assert!(token.starts_with("tnkc_"), "the constrained form");
+    push(&harness, id, token, snapshot(1), &[])
+        .await
+        .assert_problem(401, "auth.unauthenticated");
+}
+
+#[tokio::test]
+async fn the_management_operations_answer_with_their_codes() {
+    let (harness, admin) = harness().await;
+    let (id, token) = mirror(&harness, &admin, "dc1").await;
     harness
         .call(
             "PATCH",
             &format!("/migrate/mirrors/{id}"),
             Cookie(&admin),
-            Some(&json!({ "name": "dc 1" })),
+            Some(&json!({ "name": " dc1" })),
         )
         .await
         .assert_problem(400, "migrate.mirror.invalid_settings");

@@ -8,7 +8,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use tenko_core::Coded;
-use tenko_migrate::mirror::{body, service::content_hash};
+use tenko_migrate::mirror::{body, service::content_hashes};
 
 fuzz_target!(|data: &[u8]| {
     let Some((control, rest)) = data.split_first() else {
@@ -21,8 +21,8 @@ fuzz_target!(|data: &[u8]| {
             let again = body::decode(&json, false).expect("its JSON decodes");
             assert_eq!(again, snapshot);
             assert_eq!(
-                content_hash(&again).expect("hash"),
-                content_hash(&snapshot).expect("hash")
+                content_hashes(&again).expect("hash"),
+                content_hashes(&snapshot).expect("hash")
             );
         }
         Err(error) => assert!(matches!(error.http_status(), 413 | 422), "{error}"),

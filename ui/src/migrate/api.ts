@@ -27,9 +27,14 @@ export function getMirror(id: string, signal?: AbortSignal): Promise<MirrorItem>
   return api.get("/api/v1/migrate/mirrors/{id}", { path: { id }, signal });
 }
 
-export function createMirror(name: string, intervalSecs: number | null): Promise<MirrorCreated> {
+/** The source prefixes an operator typed: separated by commas or white space. */
+export function sourceList(text: string): string[] {
+  return text.split(/[\s,]+/).filter((prefix) => prefix.length > 0);
+}
+
+export function createMirror(name: string, intervalSecs: number | null, sources: string[] = []): Promise<MirrorCreated> {
   return api.post("/api/v1/migrate/mirrors", {
-    body: { name, kind: WINDOWS_DHCP, interval_secs: intervalSecs ?? undefined },
+    body: { name, kind: WINDOWS_DHCP, interval_secs: intervalSecs ?? undefined, source_prefixes: sources },
   });
 }
 
@@ -41,8 +46,8 @@ export function deleteMirror(id: string): Promise<undefined> {
   return api.delete("/api/v1/migrate/mirrors/{id}", { path: { id } }) as Promise<undefined>;
 }
 
-export function replaceMirrorToken(id: string): Promise<MirrorCreated> {
-  return api.post("/api/v1/migrate/mirrors/{id}/token", { path: { id }, body: {} });
+export function replaceMirrorToken(id: string, sources: string[] = []): Promise<MirrorCreated> {
+  return api.post("/api/v1/migrate/mirrors/{id}/token", { path: { id }, body: { source_prefixes: sources } });
 }
 
 export function getLosses(id: string, signal?: AbortSignal): Promise<MirrorLosses> {

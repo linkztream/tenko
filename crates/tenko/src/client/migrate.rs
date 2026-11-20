@@ -86,7 +86,8 @@ pub struct MirrorCreateArgs {
     /// Connection options.
     #[command(flatten)]
     pub client: ClientOpts,
-    /// The name; the service account is `mirror-<name>`.
+    /// The name shown; spaces allowed (quote it). Names need not be unique: a name two
+    /// mirrors share is refused where a mirror is named, and its id is used instead.
     #[arg(value_name = "NAME")]
     pub name: String,
     /// The kind of source (`windows-dhcp`).
@@ -98,6 +99,10 @@ pub struct MirrorCreateArgs {
     /// The token's lifetime in days; the profile's maximum when absent.
     #[arg(long, value_name = "DAYS")]
     pub token_days: Option<u32>,
+    /// An address or network the exporter pushes from; repeat for more. None means from
+    /// anywhere, which the Hardened profile refuses.
+    #[arg(long = "source", value_name = "PREFIX")]
+    pub sources: Vec<String>,
 }
 
 /// Arguments of `tenko migrate mirror token`.
@@ -112,6 +117,10 @@ pub struct MirrorTokenArgs {
     /// The token's lifetime in days; the profile's maximum when absent.
     #[arg(long, value_name = "DAYS")]
     pub token_days: Option<u32>,
+    /// An address or network the exporter pushes from; repeat for more. The old token's
+    /// list does not carry over.
+    #[arg(long = "source", value_name = "PREFIX")]
+    pub sources: Vec<String>,
 }
 
 /// Arguments of `tenko migrate mirror ack`.
@@ -252,25 +261,32 @@ async fn resolve_mirror(client: &Client, reference: &str) -> Result<Value, Failu
         return Ok(client.get(&format!("/migrate/mirrors/{reference}")).await?);
     }
     let wanted = reference.trim();
-    let mirrors = list_all(client, "/migrate/mirrors").await?;
-    mirrors
+    let mut named: Vec<Value> = list_all(client, "/migrate/mirrors")
+        .await?
         .into_iter()
-        .find(|mirror| field(mirror, "name") == wanted)
-        .ok_or_else(|| {
-            Failure::problem(ProblemDetails {
-                type_: "about:blank".to_owned(),
-                status: 404,
-                code: "migrate.mirror.not_found".to_owned(),
-                title: "Not Found".to_owned(),
-                detail: format!("no mirror {reference}"),
-                params: std::collections::BTreeMap::from([(
-                    "name".to_owned(),
-                    reference.to_owned(),
-                )]),
-                errors: Vec::new(),
-                instance: None,
-            })
+        .filter(|mirror| field(mirror, "name") == wanted)
+        .collect();
+    if named.len() > 1 {
+        let ids: Vec<String> = named.iter().map(|mirror| field(mirror, "id")).collect();
+        return Err(usage(format!(
+            "{} mirrors are named `{}`; name one by its id: {}",
+            named.len(),
+            clean(wanted),
+            ids.join(", ")
+        )));
+    }
+    named.pop().ok_or_else(|| {
+        Failure::problem(ProblemDetails {
+            type_: "about:blank".to_owned(),
+            status: 404,
+            code: "migrate.mirror.not_found".to_owned(),
+            title: "Not Found".to_owned(),
+            detail: format!("no mirror {reference}"),
+            params: std::collections::BTreeMap::from([("name".to_owned(), reference.to_owned())]),
+            errors: Vec::new(),
+            instance: None,
         })
+    })
 }
 
 fn mirror_path(mirror: &Value) -> String {
@@ -297,6 +313,23 @@ fn scope_path(mirror: &Value, cidr: &str) -> Result<String, Failure> {
     ))
 }
 
+/// The source prefixes of a mirror's token, or `anywhere`.
+fn sources(mirror: &Value) -> String {
+    let prefixes: Vec<String> = mirror
+        .get("source_prefixes")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(clean)
+        .collect();
+    if prefixes.is_empty() {
+        "anywhere".to_owned()
+    } else {
+        prefixes.join(", ")
+    }
+}
+
 fn describe_mirror(mirror: &Value) -> String {
     let lines = [
         ("name", field(mirror, "name")),
@@ -309,7 +342,16 @@ fn describe_mirror(mirror: &Value) -> String {
         ("sequence", field(mirror, "last_sequence")),
         ("age", field(mirror, "age_secs")),
         ("stale", field(mirror, "stale")),
+        (
+            "stored",
+            format!(
+                "sequence {} at {}",
+                field(mirror, "stored_sequence"),
+                field(mirror, "stored_at")
+            ),
+        ),
         ("token expires", field(mirror, "token_expires_at")),
+        ("pushes from", sources(mirror)),
         ("open losses", field(mirror, "losses_open")),
     ];
     let width = lines.iter().map(|(key, _)| key.len()).max().unwrap_or(0);
@@ -402,6 +444,9 @@ async fn mirror_create(target: &Target, args: &MirrorCreateArgs) -> Result<Outpu
     if let Some(days) = args.token_days {
         body.insert("token_expires_in_days".to_owned(), json!(days));
     }
+    if !args.sources.is_empty() {
+        body.insert("source_prefixes".to_owned(), json!(args.sources));
+    }
     let answer: Value = client
         .post("/migrate/mirrors", &Value::Object(body), Some(&key()))
         .await?;
@@ -426,6 +471,9 @@ async fn mirror_token(target: &Target, args: &MirrorTokenArgs) -> Result<Output,
     let mut body = Map::new();
     if let Some(days) = args.token_days {
         body.insert("expires_in_days".to_owned(), json!(days));
+    }
+    if !args.sources.is_empty() {
+        body.insert("source_prefixes".to_owned(), json!(args.sources));
     }
     let answer: Value = client
         .post(
@@ -638,12 +686,24 @@ mod tests {
             "enabled": true,
             "interval_secs": 60,
             "last_sequence": 42,
+            "stored_sequence": 40,
+            "stored_at": "2026-11-20T08:00:00Z",
+            "source_prefixes": ["192.0.2.10/32", "198.51.100.0/24"],
             "stale": false,
             "losses_open": 3,
             "counts": { "scopes": 1, "reservations": 30, "leases": 60, "losses": 4 },
         });
         let text = describe_mirror(&mirror);
         assert!(text.contains("name           dc1"), "{text}");
+        assert!(
+            text.contains("stored         sequence 40 at 2026-11-20T08:00:00Z"),
+            "{text}"
+        );
+        assert!(
+            text.contains("pushes from    192.0.2.10/32, 198.51.100.0/24"),
+            "{text}"
+        );
+        assert_eq!(sources(&json!({})), "anywhere");
         assert!(text.contains("interval       60 s"), "{text}");
         assert!(text.contains("last push      -"), "{text}");
         assert!(

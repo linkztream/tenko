@@ -1,18 +1,25 @@
 //! The mirror service (plan sections 2.1 to 2.4 and 2.12, ADR 0033 decisions 1, 3, 5 to 8).
 //!
 //! The rows live in the replicated store; the freshness lives in this controller's memory
-//! ([`Memory`]): the time of the last push, the last accepted sequence, the floor between two
-//! pushes and the last refusal that was audited. A push whose content hashes like the stored
-//! snapshot writes nothing, unless the row's freshness is older than
-//! [`FRESHNESS_WRITE_SECS`]; a changed push writes the snapshot, the row and one audit
-//! record in one batch. After a restart or on another controller the row's values stand in,
-//! so a mirror reads as stale until its next push at most (decision 8).
+//! ([`Memory`]): the time of the last push, the last accepted sequence, the newest envelope,
+//! the floor between two pushes and the last refusal that was audited. What a push writes
+//! (plan section 2.4, ADR 0033 decision 6):
+//!
+//! - a changed configuration (everything but the leases, their loss entries, the sequence and
+//!   the time; a scope that turned inactive among it) writes the snapshot, the row and
+//!   `migrate.mirror.push` at once;
+//! - changed leases alone write the snapshot and the row at most every
+//!   [`LEASES_WRITE_SECS`], without an audit record; the stored leases are from
+//!   [`Mirror::stored_at`], and a prepare or a takeover takes the newest leases from a push made
+//!   for it;
+//! - otherwise the row is written with the freshness at most every
+//!   [`Mirror::freshness_write_secs`], half the stale threshold, so that another controller
+//!   or a restarted one reads a pushing mirror as fresh and a sequence at most that far behind
+//!   (section 2.14, decision 8).
 //!
 //! The memory of a mirror belongs to its token: a new token starts a new series of
 //! sequences, so a token that pushed an absurd sequence cannot hold the mirror after it is
-//! replaced. The content hash covers the envelope without its `sequence` and `taken_at`,
-//! which every push changes: an unchanged source is an unchanged hash. Every time the service
-//! reads comes from its clock, never from the request.
+//! replaced. Every time the service reads comes from its clock, never from the request.
 //!
 //! A write of a row meets a concurrent change only when another request wrote the row
 //! between the read and the commit; the service reads again and repeats the operation, at
@@ -26,11 +33,11 @@ use std::{
 };
 
 use ipnet::IpNet;
-use serde::Serialize;
 use tenko_auth::{
     AuthError, AuthService,
     clock::{Clock, SystemClock},
-    service::types::CreatedToken,
+    service::{MirrorTokenTerms, types::CreatedToken},
+    settings::Profile,
 };
 use tenko_core::{
     ApiTokenId, MirrorId, Principal, RequestCtx, Revision, Timestamp, UserId,
@@ -40,9 +47,9 @@ use tenko_core::{
     ir::{LossEntry, MirrorOrigin, MirrorSnapshot, SourceKindLabel},
     metrics::{GaugeVec, Registry},
     migrate::{
-        DEFAULT_INTERVAL_SECS, FRESHNESS_WRITE_SECS, LossAck, MIN_PUSH_INTERVAL_SECS, Mirror,
-        Snapshot, TOKEN_EXPIRING_DAYS, TakeoverState, audit, findings, metrics, mirror_object,
-        tables,
+        DEFAULT_INTERVAL_SECS, LEASES_WRITE_SECS, LossAck, MIN_PUSH_INTERVAL_SECS, Mirror,
+        Snapshot, TOKEN_EXPIRING_DAYS, TakeoverState, audit, findings, losses, metrics,
+        mirror_object, tables,
     },
     serde_util::{HexBytes, to_hex},
 };
@@ -98,19 +105,24 @@ struct Memory {
     pushed: Option<Timestamp>,
     /// The last accepted sequence.
     sequence: Option<u64>,
+    /// The envelope of the last accepted push, stored or not.
+    newest: Option<Arc<MirrorSnapshot>>,
     /// The last refusal written to the audit log.
     refusal_audited: Option<Timestamp>,
     /// Pushes by outcome, in the order of `metrics::PUSH_OUTCOMES`.
     outcomes: [u64; 3],
-    /// What the stored snapshot holds, by its hash.
+    /// What the stored snapshot holds.
     summary: Option<Arc<Summary>>,
 }
 
-/// What the card, the losses and the findings read of a stored snapshot, kept beside its
-/// hash so that a card does not decode the snapshot.
+/// What the card, the losses and the findings read of a stored snapshot, kept beside the
+/// time it was written so that a card does not decode the snapshot.
 #[derive(Debug)]
 struct Summary {
-    hash: Vec<u8>,
+    /// The snapshot's sequence.
+    sequence: u64,
+    /// When it was written ([`Mirror::stored_at`]).
+    stored_at: Timestamp,
     counts: SnapshotCounts,
     source: MirrorOrigin,
     /// Per loss entry, in the snapshot's order: its key, its hash and its scope.
@@ -119,7 +131,7 @@ struct Summary {
 }
 
 impl Summary {
-    fn of(hash: Vec<u8>, snapshot: &MirrorSnapshot) -> Result<Self, MirrorError> {
+    fn of(snapshot: &MirrorSnapshot, stored_at: Timestamp) -> Result<Self, MirrorError> {
         let scopes: Vec<MirroredScope> = snapshot
             .dhcp
             .scopes
@@ -137,7 +149,8 @@ impl Summary {
             .map(|entry| Ok((entry.key(), entry_hash(entry)?, entry_scope(entry, &scopes))))
             .collect::<Result<_, MirrorError>>()?;
         Ok(Self {
-            hash,
+            sequence: snapshot.sequence,
+            stored_at,
             counts: SnapshotCounts {
                 scopes: count(snapshot.dhcp.scopes.len()),
                 reservations: count(snapshot.reservation_count()),
@@ -169,26 +182,41 @@ fn count(n: usize) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
-/// The hash of a snapshot's content: the envelope without its sequence and its time.
+/// The two hashes of a snapshot (plan section 2.4): its configuration, which is the envelope
+/// without the leases, their loss entries, the sequence and the time; and its leases with
+/// their loss entries.
 ///
 /// # Errors
 ///
 /// A codec error.
-pub fn content_hash(snapshot: &MirrorSnapshot) -> Result<Vec<u8>, MirrorError> {
-    #[derive(Serialize)]
-    struct Content<'a> {
-        format: u16,
-        source: &'a MirrorOrigin,
-        dhcp: &'a tenko_core::ir::dhcp::DhcpIr,
-        losses: &'a tenko_core::ir::LossReport,
-    }
-    Ok(canonical_sha256(&Content {
-        format: snapshot.format,
-        source: &snapshot.source,
-        dhcp: &snapshot.dhcp,
-        losses: &snapshot.losses,
-    })?
-    .to_vec())
+pub fn content_hashes(snapshot: &MirrorSnapshot) -> Result<(Vec<u8>, Vec<u8>), MirrorError> {
+    // Every field named, so that a new one has to be placed on one side.
+    let tenko_core::ir::dhcp::DhcpIr {
+        server_options,
+        server_ddns,
+        option_defs,
+        classes,
+        scopes,
+        superscopes,
+        policies,
+        filters,
+        failover,
+        leases,
+    } = &snapshot.dhcp;
+    let (lease_losses, other_losses): (Vec<&LossEntry>, Vec<&LossEntry>) = snapshot
+        .losses
+        .entries
+        .iter()
+        .partition(|entry| entry.code == losses::LEASE_STATE);
+    let configuration = canonical_sha256(&(
+        snapshot.format,
+        &snapshot.source,
+        (server_options, server_ddns, option_defs, classes, scopes),
+        (superscopes, policies, filters, failover),
+        other_losses,
+    ))?;
+    let leases = canonical_sha256(&(leases, lease_losses))?;
+    Ok((configuration.to_vec(), leases.to_vec()))
 }
 
 fn entry_hash(entry: &LossEntry) -> Result<Vec<u8>, MirrorError> {
@@ -230,8 +258,8 @@ pub struct NewMirror {
     pub kind: SourceKindLabel,
     /// The expected interval; 60 s when absent.
     pub interval_secs: Option<u32>,
-    /// The token's lifetime in days; the TGL-05 maximum when absent.
-    pub token_expires_in_days: Option<u32>,
+    /// The token's lifetime and source prefixes.
+    pub token: MirrorTokenTerms,
 }
 
 /// The mirror service. Shared as `Arc<MirrorService>`; the API reaches it as a request
@@ -315,36 +343,37 @@ impl MirrorService {
         mirror
     }
 
-    /// The summary of a stored snapshot, from memory when its hash is known.
+    /// The summary of a stored snapshot, from memory when it is of that write.
     fn summary_of(&self, snapshot: &Snapshot) -> Result<Arc<Summary>, MirrorError> {
         let mut memory = self.memory();
         let memory = memory.entry(snapshot.mirror).or_default();
         if let Some(summary) = memory
             .summary
             .clone()
-            .filter(|summary| summary.hash == snapshot.hash.0)
+            .filter(|summary| summary.stored_at == snapshot.received)
         {
             return Ok(summary);
         }
-        let summary = Arc::new(Summary::of(snapshot.hash.0.clone(), &snapshot.envelope)?);
+        let summary = Arc::new(Summary::of(&snapshot.envelope, snapshot.received)?);
         memory.summary = Some(Arc::clone(&summary));
         Ok(summary)
     }
 
-    /// The summary of the mirror's stored snapshot, if it has one.
+    /// The summary of the mirror's stored snapshot, if it has one: from memory when this
+    /// controller wrote it or read it last.
     fn summary(
         &self,
         view: &dyn ReadView,
         mirror: &Mirror,
     ) -> Result<Option<Arc<Summary>>, MirrorError> {
-        let Some(hash) = &mirror.last_hash else {
+        let Some(stored_at) = mirror.stored_at else {
             return Ok(None);
         };
         if let Some(summary) = self
             .memory()
             .get(&mirror.id)
             .and_then(|memory| memory.summary.clone())
-            .filter(|summary| summary.hash == hash.0)
+            .filter(|summary| summary.stored_at == stored_at)
         {
             return Ok(Some(summary));
         }
@@ -377,12 +406,15 @@ impl MirrorService {
             Some(summary) => summary.open(&Self::acks(view, mirror.id)?, None),
             None => 0,
         };
+        let token = AuthService::scoped_token(view, mirror.account, mirror.token)?;
         Ok(MirrorItem {
             age_secs: mirror
                 .last_push
                 .map(|at| now.saturating_since(at).as_secs()),
             stale: mirror.is_stale(now),
-            token_expires_at: AuthService::scoped_token_expiry(view, mirror.account, mirror.token)?,
+            token_expires_at: token.as_ref().and_then(|token| token.expires_at),
+            source_prefixes: token.map(|token| token.source_prefixes).unwrap_or_default(),
+            stored_sequence: summary.as_ref().map(|summary| summary.sequence),
             counts: summary.as_ref().map(|summary| summary.counts),
             source: summary.as_ref().map(|summary| summary.source.clone()),
             scopes: summary
@@ -419,16 +451,15 @@ impl MirrorService {
         self.item(view.as_ref(), mirror)
     }
 
-    fn name_free(
-        view: &dyn ReadView,
-        name: &str,
-        other_than: Option<MirrorId>,
-    ) -> Result<(), MirrorError> {
-        if Self::rows(view)?
-            .iter()
-            .any(|mirror| mirror.name == name && Some(mirror.id) != other_than)
-        {
-            return Err(MirrorError::Exists(name.to_owned()));
+    /// Refuses, under the Hardened profile, a token for a mirror without a source prefix
+    /// (minted, or kept by a mirror that is enabled).
+    fn sources_required(&self, prefixes: usize) -> Result<(), MirrorError> {
+        if prefixes == 0 && self.auth.settings().profile == Profile::Hardened {
+            return Err(MirrorError::Settings {
+                field: "source_prefixes".to_owned(),
+                reason: "the Hardened profile requires at least one source prefix for a mirror"
+                    .to_owned(),
+            });
         }
         Ok(())
     }
@@ -451,8 +482,10 @@ impl MirrorService {
     ///
     /// # Errors
     ///
-    /// [`MirrorError::Settings`], [`MirrorError::Exists`] naming the mirror or its account,
-    /// the minting's errors (a session that signed in within five minutes), a store error.
+    /// [`MirrorError::Settings`] (also for no source prefix under the Hardened profile),
+    /// [`MirrorError::Exists`] naming the account when a person created an account of that
+    /// name, the minting's errors (a session that signed in within five minutes, the source
+    /// prefixes), a store error.
     pub async fn create(
         &self,
         ctx: &RequestCtx,
@@ -469,59 +502,50 @@ impl MirrorService {
             interval_secs: new.interval_secs.unwrap_or(DEFAULT_INTERVAL_SECS),
             last_sequence: None,
             last_hash: None,
+            leases_hash: None,
             last_push: None,
             last_change: None,
+            stored_at: None,
             created: stamp.clone(),
             updated: stamp,
         };
         Self::settings(&mirror)?;
-        let account = Mirror::account_name(&mirror.name);
-        for attempt in 1..=ATTEMPTS {
-            let view = self.view().await?;
-            Self::name_free(view.as_ref(), &mirror.name, None)?;
-            let mut batch = WriteBatch::for_request(ctx);
-            let credentials = self
-                .auth
-                .stage_mirror_account(
-                    ctx,
-                    view.as_ref(),
-                    &mut batch,
-                    mirror.id,
-                    &mirror.name,
-                    new.token_expires_in_days,
-                )
-                .await
-                .map_err(|error| match error {
-                    AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
-                    other => other.into(),
-                })?;
-            mirror.account = credentials.account;
-            mirror.token = credentials.token.info.id;
-            batch.expect_typed(&tables::MIRRORS, &mirror.id, None);
-            batch.put_typed(&tables::MIRRORS, &mirror.id, &mirror)?;
-            batch.audit(
-                AuditDraft::success(audit::MIRROR_CREATE, vec![mirror_object(mirror.id)])
-                    .with_source_ip(ctx.source_ip)
-                    .with_context("name", mirror.name.clone())
-                    .with_context("kind", mirror.kind.to_string())
-                    .with_context("interval_secs", mirror.interval_secs.to_string()),
-            );
-            match self.commit(batch).await {
-                // The account's name was taken in between: the next pass names it.
-                Err(error) if is_conflict(&error) && attempt < ATTEMPTS => continue,
-                Err(error) if is_conflict(&error) => return Err(MirrorError::Exists(account)),
-                result => result?,
-            }
-            let item = self.item(view.as_ref(), mirror)?;
-            return Ok((
-                MirrorItem {
-                    token_expires_at: credentials.token.info.expires_at,
-                    ..item
-                },
-                credentials.token,
-            ));
+        self.sources_required(new.token.source_prefixes.len())?;
+        let account = Mirror::account_name(mirror.id);
+        let view = self.view().await?;
+        let mut batch = WriteBatch::for_request(ctx);
+        let credentials = self
+            .auth
+            .stage_mirror_account(ctx, view.as_ref(), &mut batch, mirror.id, &new.token)
+            .await
+            .map_err(|error| match error {
+                AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
+                other => other.into(),
+            })?;
+        mirror.account = credentials.account;
+        mirror.token = credentials.token.info.id;
+        batch.expect_typed(&tables::MIRRORS, &mirror.id, None);
+        batch.put_typed(&tables::MIRRORS, &mirror.id, &mirror)?;
+        batch.audit(
+            AuditDraft::success(audit::MIRROR_CREATE, vec![mirror_object(mirror.id)])
+                .with_source_ip(ctx.source_ip)
+                .with_context("name", mirror.name.clone())
+                .with_context("kind", mirror.kind.to_string())
+                .with_context("interval_secs", mirror.interval_secs.to_string()),
+        );
+        match self.commit(batch).await {
+            // The account's name was taken between the read and the commit.
+            Err(error) if is_conflict(&error) => return Err(MirrorError::Exists(account)),
+            result => result?,
         }
-        Err(MirrorError::Exists(account))
+        let item = self.item(self.view().await?.as_ref(), mirror)?;
+        Ok((
+            MirrorItem {
+                token_expires_at: credentials.token.info.expires_at,
+                ..item
+            },
+            credentials.token,
+        ))
     }
 
     /// Reads the mirror's row, lets `change` stage a write of it, and commits; a write that
@@ -550,8 +574,9 @@ impl MirrorService {
     ///
     /// # Errors
     ///
-    /// [`MirrorError::NotFound`], [`MirrorError::Settings`], [`MirrorError::Exists`],
-    /// [`MirrorError::Conflict`], a store error.
+    /// [`MirrorError::NotFound`], [`MirrorError::Settings`] (also for enabling a mirror whose
+    /// token has no source prefix under the Hardened profile), [`MirrorError::Conflict`], a
+    /// store error.
     pub async fn update(
         &self,
         ctx: &RequestCtx,
@@ -560,6 +585,10 @@ impl MirrorService {
     ) -> Result<MirrorItem, MirrorError> {
         let (mirror, ()) = self
             .rewrite(ctx, id, |view, mirror, batch| {
+                if patch.enabled == Some(true) {
+                    let token = AuthService::scoped_token(view, mirror.account, mirror.token)?;
+                    self.sources_required(token.map_or(0, |token| token.source_prefixes.len()))?;
+                }
                 let mut draft = AuditDraft::success(audit::MIRROR_UPDATE, vec![mirror_object(id)])
                     .with_source_ip(ctx.source_ip);
                 if let Some(name) = &patch.name {
@@ -575,7 +604,6 @@ impl MirrorService {
                     mirror.interval_secs = interval;
                 }
                 Self::settings(mirror)?;
-                Self::name_free(view, &mirror.name, Some(id))?;
                 mirror.updated = Stamp::new(ctx.now, ctx.principal.clone());
                 batch.put_typed(&tables::MIRRORS, &id, mirror)?;
                 batch.audit(draft);
@@ -618,14 +646,15 @@ impl MirrorService {
     ///
     /// # Errors
     ///
-    /// [`MirrorError::NotFound`], the minting's errors, [`MirrorError::Conflict`], a store
-    /// error.
+    /// [`MirrorError::NotFound`], [`MirrorError::Settings`] for no source prefix under the
+    /// Hardened profile, the minting's errors, [`MirrorError::Conflict`], a store error.
     pub async fn replace_token(
         &self,
         ctx: &RequestCtx,
         id: MirrorId,
-        expires_in_days: Option<u32>,
+        terms: &MirrorTokenTerms,
     ) -> Result<(MirrorItem, CreatedToken), MirrorError> {
+        self.sources_required(terms.source_prefixes.len())?;
         // Minting awaits the session's check, so this write repeats on its own.
         let mut written = None;
         for _ in 0..ATTEMPTS {
@@ -641,7 +670,7 @@ impl MirrorService {
                     mirror.account,
                     id,
                     mirror.token,
-                    expires_in_days,
+                    terms,
                 )
                 .await?;
             mirror.token = token.info.id;
@@ -723,10 +752,12 @@ impl MirrorService {
     }
 
     /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4) from the
-    /// mirror's current token, as each attempt reads it: a sequence above the last accepted
-    /// one of that token; an unchanged content writes nothing (but the row's freshness every
-    /// [`FRESHNESS_WRITE_SECS`]); a changed one writes the snapshot, the row and
-    /// `migrate.mirror.push`.
+    /// mirror's current token, as each attempt reads it, with a sequence above the last
+    /// accepted one of that token. A changed configuration writes the snapshot, the row and
+    /// `migrate.mirror.push` at once; changed leases alone write the snapshot and the row at
+    /// most every [`LEASES_WRITE_SECS`]; otherwise the row is written at most every
+    /// [`Mirror::freshness_write_secs`]. The envelope is held in memory as the newest either
+    /// way.
     ///
     /// # Errors
     ///
@@ -740,10 +771,10 @@ impl MirrorService {
         id: MirrorId,
         snapshot: MirrorSnapshot,
     ) -> Result<SnapshotAccepted, MirrorError> {
-        let hash = content_hash(&snapshot)?;
+        let (hash, leases_hash) = content_hashes(&snapshot)?;
         let sequence = snapshot.sequence;
         let now = self.now();
-        let summary = Arc::new(Summary::of(hash.clone(), &snapshot)?);
+        let summary = Arc::new(Summary::of(&snapshot, now)?);
         let mut snapshot = Some(snapshot);
         for _ in 0..ATTEMPTS {
             let view = self.view().await?;
@@ -764,20 +795,25 @@ impl MirrorService {
             {
                 return Err(MirrorError::Sequence { sequence, last });
             }
+            let since = |at: Option<Timestamp>| {
+                at.map_or(u64::MAX, |at| now.saturating_since(at).as_secs())
+            };
             let changed = mirror
                 .last_hash
                 .as_ref()
                 .is_none_or(|stored| stored.0 != hash);
-            let row_age = mirror
-                .last_push
-                .map_or(Duration::MAX, |at| now.saturating_since(at));
-            if changed || row_age.as_secs() >= u64::from(FRESHNESS_WRITE_SECS) {
+            let leases_due = mirror
+                .leases_hash
+                .as_ref()
+                .is_none_or(|stored| stored.0 != leases_hash)
+                && since(mirror.stored_at) >= u64::from(LEASES_WRITE_SECS);
+            let stored = changed || leases_due;
+            if stored || since(mirror.last_push) >= mirror.freshness_write_secs() {
                 mirror.last_sequence = Some(sequence);
                 mirror.last_push = Some(now);
                 let mut batch = WriteBatch::for_request(ctx);
                 batch.expect_typed(&tables::MIRRORS, &id, Some(revision));
                 if changed {
-                    mirror.last_hash = Some(HexBytes(hash.clone()));
                     mirror.last_change = Some(now);
                     batch.audit(
                         AuditDraft::success(audit::MIRROR_PUSH, vec![mirror_object(id)])
@@ -789,6 +825,11 @@ impl MirrorService {
                             .with_context("losses", summary.counts.losses.to_string())
                             .with_context("hash", to_hex(&hash)),
                     );
+                }
+                if stored {
+                    mirror.last_hash = Some(HexBytes(hash.clone()));
+                    mirror.leases_hash = Some(HexBytes(leases_hash.clone()));
+                    mirror.stored_at = Some(now);
                     let envelope = snapshot.take().ok_or(MirrorError::Conflict(id))?;
                     let row = Snapshot {
                         mirror: id,
@@ -820,13 +861,25 @@ impl MirrorService {
             }
             memory.pushed = Some(now);
             memory.sequence = memory.sequence.max(Some(sequence));
+            memory.newest = snapshot.take().map(Arc::new);
             memory.outcomes[if changed { CHANGED } else { UNCHANGED }] += 1;
-            if changed {
+            if stored {
                 memory.summary = Some(Arc::clone(&summary));
             }
             return Ok(SnapshotAccepted { sequence, changed });
         }
         Err(MirrorError::Conflict(id))
+    }
+
+    /// The envelope of the last push this controller accepted for `id`, stored or not: the
+    /// newest leases, which a prepare or a takeover takes from a push made for it rather than
+    /// from the stored snapshot (plan section 2.4). `None` on a controller that took no push
+    /// of the mirror since it started, or of a token that is no longer the mirror's.
+    pub fn newest(&self, id: MirrorId, token: ApiTokenId) -> Option<Arc<MirrorSnapshot>> {
+        self.memory()
+            .get(&id)
+            .filter(|memory| memory.token == Some(token))
+            .and_then(|memory| memory.newest.clone())
     }
 
     /// Counts a refused push of `id` and writes `migrate.mirror.refuse` with the code and
@@ -1028,7 +1081,8 @@ impl MirrorService {
             if mirror.is_stale(now) {
                 raise(findings::MIRROR_STALE);
             }
-            if AuthService::scoped_token_expiry(view.as_ref(), mirror.account, mirror.token)?
+            if AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?
+                .and_then(|token| token.expires_at)
                 .is_some_and(|end| end.saturating_since(now) <= soon)
             {
                 raise(findings::MIRROR_TOKEN_EXPIRING);

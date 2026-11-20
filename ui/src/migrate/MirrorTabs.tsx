@@ -7,7 +7,7 @@ import { isAdmin } from "../auth/session";
 import { ConfirmDialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { t } from "../i18n";
-import { ackLosses, deleteMirror, getDiff, getLosses, replaceMirrorToken, updateMirror, type MirrorCreated, type MirrorItem } from "./api";
+import { ackLosses, deleteMirror, getDiff, getLosses, replaceMirrorToken, sourceList, updateMirror, type MirrorCreated, type MirrorItem } from "./api";
 import { installCommands } from "./model";
 import { TokenShown } from "./TokenShown";
 
@@ -174,6 +174,7 @@ export function LossesTab(props: { mirror: MirrorItem; onChange: () => void }) {
 export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; onDeleted: () => void }) {
   const [name, setName] = createSignal(untrack(() => props.mirror.name));
   const [interval, setIntervalSecs] = createSignal(untrack(() => props.mirror.interval_secs) ?? 60);
+  const [sources, setSources] = createSignal(untrack(() => (props.mirror.source_prefixes ?? []).join(", ")));
   const [deleting, setDeleting] = createSignal(false);
   const [created, setCreated] = createSignal<MirrorCreated | null>(null);
   const action = useAction();
@@ -181,7 +182,7 @@ export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; o
   // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
   const save = (change: { name?: string; enabled?: boolean; interval_secs?: number }) => action.run(() => updateMirror(props.mirror.id, change), props.onChange);
   // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
-  const replaceToken = () => action.run(async () => setCreated(await replaceMirrorToken(props.mirror.id)), props.onChange);
+  const replaceToken = () => action.run(async () => setCreated(await replaceMirrorToken(props.mirror.id, sourceList(sources()))), props.onChange);
   return (
     <section class="mirror-settings" data-testid="mirror-settings">
       <ErrorNotice error={action.error()} />
@@ -233,6 +234,11 @@ export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; o
         )}
       </For>
       <Show when={isAdmin()}>
+        <div class="field">
+          <label for="mirror-settings-sources">{t("migrate.create.sources")}</label>
+          <input id="mirror-settings-sources" class="input mono" value={sources()} onInput={(e) => setSources(e.currentTarget.value)} data-testid="mirror-sources" />
+          <span class="help">{t("migrate.settings.sources_help")}</span>
+        </div>
         <div class="form-row">
           <button type="button" class="btn" disabled={action.busy()} data-testid="mirror-token-replace" onClick={() => void replaceToken()}>
             {t("migrate.settings.token")}

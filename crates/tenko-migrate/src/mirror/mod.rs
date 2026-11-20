@@ -46,7 +46,15 @@ pub struct MirrorItem {
     /// When the mirror's token expires.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token_expires_at: Option<tenko_core::Timestamp>,
-    /// The counts of the latest snapshot: scopes, reservations, leases.
+    /// The client prefixes the mirror's token is accepted from; empty for anywhere.
+    #[serde(default)]
+    #[schema(value_type = Vec<String>)]
+    pub source_prefixes: Vec<IpNet>,
+    /// The sequence of the stored snapshot, written at `stored_at`: its leases are from that
+    /// push, which may be older than the last one (`last_sequence`) by up to ten minutes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored_sequence: Option<u64>,
+    /// The counts of the stored snapshot: scopes, reservations, leases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counts: Option<SnapshotCounts>,
     /// The server the latest snapshot names and the adapter's version.
@@ -439,12 +447,10 @@ impl From<tenko_dhcp::config::ConfigError> for MirrorError {
 impl From<AuthError> for MirrorError {
     fn from(error: AuthError) -> Self {
         match error {
-            AuthError::Invalid {
-                field: "name",
-                reason,
-            } => Self::Settings {
-                field: "name".to_owned(),
-                reason: format!("the service account's name: {reason}"),
+            // A field of the token's terms (the source prefixes) is a setting of the mirror.
+            AuthError::Invalid { field, reason } => Self::Settings {
+                field: field.to_owned(),
+                reason: reason.to_string(),
             },
             other => Self::Auth(other),
         }

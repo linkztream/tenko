@@ -122,7 +122,15 @@
       </unit>
       <unit id="migrate.create.name_help">
         <notes><note category="description">Help under the name field.</note></notes>
-        <segment><source>No spaces; it becomes part of the service account's name.</source><target>Inga mellanslag; namnet blir en del av tjänstekontots namn.</target></segment>
+        <segment><source>Shown on the card and in the CLI; spaces allowed.</source><target>Visas på kortet och i kommandoraden; mellanslag är tillåtna.</target></segment>
+      </unit>
+      <unit id="migrate.create.sources">
+        <notes><note category="description">Label of the addresses a mirror's exporter pushes from.</note></notes>
+        <segment><source>Source addresses</source><target>Källadresser</target></segment>
+      </unit>
+      <unit id="migrate.create.sources_help">
+        <notes><note category="description">Help under the source addresses field.</note></notes>
+        <segment><source>Addresses or networks the exporter pushes from, separated by commas, for example 192.0.2.10. Empty means from anywhere, which the Hardened profile refuses.</source><target>Adresser eller nät som exportören skickar från, åtskilda med kommatecken, till exempel 192.0.2.10. Tomt betyder varifrån som helst, vilket profilen Hardened inte tillåter.</target></segment>
       </unit>
       <unit id="migrate.create.cancel">
         <notes><note category="description">Cancel button.</note></notes>
@@ -351,6 +359,10 @@
       <unit id="migrate.settings.token">
         <notes><note category="description">Button that replaces the mirror's token.</note></notes>
         <segment><source>Replace token</source><target>Byt token</target></segment>
+      </unit>
+      <unit id="migrate.settings.sources_help">
+        <notes><note category="description">Help under the source addresses of a token replacement.</note></notes>
+        <segment><source>The new token is accepted from these addresses only; the current token keeps its own until it is replaced.</source><target>Den nya token godtas bara från dessa adresser; den nuvarande token behåller sina tills den byts.</target></segment>
       </unit>
       <unit id="migrate.settings.delete">
         <notes><note category="description">Button that deletes the mirror.</note></notes>

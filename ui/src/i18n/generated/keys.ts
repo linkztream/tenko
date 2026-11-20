@@ -6377,6 +6377,8 @@ export type MessageKey =
   | "migrate.create.name"
   | "migrate.create.name_help"
   | "migrate.create.open"
+  | "migrate.create.sources"
+  | "migrate.create.sources_help"
   | "migrate.create.submit"
   | "migrate.create.title"
   | "migrate.delete.body"
@@ -6437,6 +6439,7 @@ export type MessageKey =
   | "migrate.settings.enable"
   | "migrate.settings.interval"
   | "migrate.settings.save"
+  | "migrate.settings.sources_help"
   | "migrate.settings.token"
   | "migrate.state.disabled"
   | "migrate.state.fresh"
@@ -16640,6 +16643,8 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.create.name",
   "migrate.create.name_help",
   "migrate.create.open",
+  "migrate.create.sources",
+  "migrate.create.sources_help",
   "migrate.create.submit",
   "migrate.create.title",
   "migrate.delete.body",
@@ -16700,6 +16705,7 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.settings.enable",
   "migrate.settings.interval",
   "migrate.settings.save",
+  "migrate.settings.sources_help",
   "migrate.settings.token",
   "migrate.state.disabled",
   "migrate.state.fresh",

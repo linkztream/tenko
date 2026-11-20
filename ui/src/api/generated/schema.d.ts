@@ -3923,7 +3923,7 @@ export interface paths {
         get: operations["get_mirror_snapshot"];
         /**
          * Push a snapshot of a mirrored source
-         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,000 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address. A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
          */
         put: operations["push_mirror_snapshot"];
         post?: never;
@@ -14674,11 +14674,11 @@ export interface components {
          */
         MfaRequirement: "optional" | "administrators" | "everyone";
         /**
-         * @description A mirrored source (section 2.1): one row per source, with the freshness the leader
-         *     writes at most every [`FRESHNESS_WRITE_SECS`].
+         * @description A mirrored source (section 2.1): one row per source, with the freshness a controller
+         *     writes at most every [`Mirror::freshness_write_secs`] while pushes arrive.
          */
         Mirror: {
-            /** @description The service account `mirror-<name>` that owns the token; it holds no grants. */
+            /** @description The service account `mirror-<id>` that owns the token; it holds no grants. */
             account: components["schemas"]["UserId"];
             /** @description Creation. */
             created: components["schemas"]["Stamp"];
@@ -14704,8 +14704,13 @@ export interface components {
              * @description The sequence of the last accepted push; a push must carry a higher one.
              */
             last_sequence?: number | null;
-            /** @description The name an administrator gave it, unique among mirrors. */
+            leases_hash?: components["schemas"]["HexBytes"] | null;
+            /**
+             * @description The name an administrator gave it, shown and used to address it in the CLI; unique
+             *     among mirrors, and nothing else derives from it.
+             */
             name: string;
+            stored_at?: components["schemas"]["Timestamp"] | null;
             /** @description The scoped token whose only special scope is `mirror:<id>` (section 2.1, rule 2). */
             token: components["schemas"]["ApiTokenId"];
             /** @description Last change of the row. */
@@ -14721,10 +14726,16 @@ export interface components {
             /** @description The kind of source (`windows-dhcp`). */
             kind: components["schemas"]["SourceKindLabel"];
             /**
-             * @description The name, unique among mirrors; the service account is `mirror-<name>`, so the name
-             *     holds no space and at most 57 characters.
+             * @description The name shown, 1 to 64 characters, spaces allowed but not at either end; it is not
+             *     unique (the service account is `mirror-<id>`).
              */
             name: string;
+            /**
+             * @description The client addresses or networks the exporter pushes from (at most 64); empty for
+             *     anywhere, which the Hardened profile refuses. A push from elsewhere is refused like an
+             *     unknown token.
+             */
+            source_prefixes?: string[];
             /**
              * Format: int32
              * @description The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
@@ -14771,8 +14782,16 @@ export interface components {
             /** @description The scopes of the latest snapshot, by network. */
             scopes?: components["schemas"]["MirroredScope"][];
             source?: components["schemas"]["MirrorOrigin"] | null;
+            /** @description The client prefixes the mirror's token is accepted from; empty for anywhere. */
+            source_prefixes?: string[];
             /** @description Whether the mirror is stale: no push for three intervals. */
             stale: boolean;
+            /**
+             * Format: int64
+             * @description The sequence of the stored snapshot, written at `stored_at`: its leases are from that
+             *     push, which may be older than the last one (`last_sequence`) by up to ten minutes.
+             */
+            stored_sequence?: number | null;
             token_expires_at?: components["schemas"]["Timestamp"] | null;
         };
         /** @description One entry of the loss report with its acknowledgment (`GET /migrate/mirrors/{id}/losses`). */
@@ -14862,6 +14881,11 @@ export interface components {
              * @description The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
              */
             expires_in_days?: number | null;
+            /**
+             * @description The client addresses or networks the new token is accepted from, as on creation; the
+             *     old token's list does not carry over.
+             */
+            source_prefixes?: string[];
         };
         /** @description A scope of a mirror's latest snapshot, as the Scopes tab lists it. */
         MirroredScope: {
@@ -17832,8 +17856,16 @@ export interface components {
                 /** @description The scopes of the latest snapshot, by network. */
                 scopes?: components["schemas"]["MirroredScope"][];
                 source?: components["schemas"]["MirrorOrigin"] | null;
+                /** @description The client prefixes the mirror's token is accepted from; empty for anywhere. */
+                source_prefixes?: string[];
                 /** @description Whether the mirror is stale: no push for three intervals. */
                 stale: boolean;
+                /**
+                 * Format: int64
+                 * @description The sequence of the stored snapshot, written at `stored_at`: its leases are from that
+                 *     push, which may be older than the last one (`last_sequence`) by up to ten minutes.
+                 */
+                stored_sequence?: number | null;
                 token_expires_at?: components["schemas"]["Timestamp"] | null;
             })[];
             /** @description Cursor of the next page; `null` on the last page. */
@@ -23048,13 +23080,16 @@ export interface components {
             /** @description The envelope as pushed. */
             envelope: components["schemas"]["MirrorSnapshot"];
             /**
-             * @description The SHA-256 in canonical CBOR of the envelope's content (without its `sequence` and
-             *     `taken_at`), the value the next push is compared with.
+             * @description The SHA-256 in canonical CBOR of the envelope's configuration (without the leases,
+             *     their loss entries, the `sequence` and `taken_at`), as [`Mirror::last_hash`].
              */
             hash: components["schemas"]["HexBytes"];
             /** @description The mirror. */
             mirror: components["schemas"]["MirrorId"];
-            /** @description When the push was accepted, by the node's clock. */
+            /**
+             * @description When the push was accepted, by the node's clock: the leases are from then, and may be
+             *     up to [`LEASES_WRITE_SECS`] older than the newest push.
+             */
             received: components["schemas"]["Timestamp"];
             /**
              * Format: int64

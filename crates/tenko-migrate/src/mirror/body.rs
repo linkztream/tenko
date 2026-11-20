@@ -94,7 +94,7 @@ const SLACK_BYTES: usize = 1 << 20;
 /// The octets decoding one push may allocate in all, counted over every allocation and every
 /// growth of one: the inflated text and the strings parsed from it, each at most
 /// [`MAX_INFLATED_BYTES`], [`MAX_ELEMENTS`] items of [`ELEMENT_BYTES`], and [`SLACK_BYTES`].
-/// 286,141,440 octets (273 MiB). One push decodes at a time on a node
+/// 153,021,440 octets (146 MiB). One push decodes at a time on a node
 /// (`MirrorService::decoding`).
 pub const DECODE_ALLOCATION_BOUND: usize =
     2 * MAX_INFLATED_BYTES + ELEMENT_BYTES * MAX_ELEMENTS + SLACK_BYTES;
@@ -385,8 +385,8 @@ mod tests {
 
     #[test]
     fn the_bound_is_the_one_the_documentation_states() {
-        assert_eq!(MAX_ELEMENTS, 262_000);
-        assert_eq!(DECODE_ALLOCATION_BOUND, 286_141_440);
+        assert_eq!(MAX_ELEMENTS, 102_000);
+        assert_eq!(DECODE_ALLOCATION_BOUND, 153_021_440);
     }
 
     #[test]

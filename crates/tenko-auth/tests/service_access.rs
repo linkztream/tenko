@@ -24,8 +24,8 @@ use tenko_auth::{
     roles::{RoleName, default_policy, required_strength},
     secret::{TOKEN_PREFIX, hash_secret},
     service::{
-        GrantCreate, GrantView, PasswordLogin, RolePolicyUpdate, ServiceAccountCreate, TokenCreate,
-        TokenRequest, UserCreate, UserInfo, types::SecretString,
+        GrantCreate, GrantView, MirrorTokenTerms, PasswordLogin, RolePolicyUpdate,
+        ServiceAccountCreate, TokenCreate, TokenRequest, UserCreate, UserInfo, types::SecretString,
     },
     settings::{Profile, SettingsPatch, TokenMaxLifetime},
     testing::{TestEnv, env::ADMIN_PASSWORD},
@@ -2309,20 +2309,24 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
             .await
             .expect("a view")
     };
-    let stage = |name: &'static str| {
+    let stage = || {
         let admin = admin.clone();
         async move {
             let view = view().await;
             let mut batch = WriteBatch::for_request(&admin);
+            let terms = MirrorTokenTerms {
+                expires_in_days: Some(30),
+                source_prefixes: Vec::new(),
+            };
             let staged = lab
                 .env
                 .service
-                .stage_mirror_account(&admin, view.as_ref(), &mut batch, mirror, name, Some(30))
+                .stage_mirror_account(&admin, view.as_ref(), &mut batch, mirror, &terms)
                 .await;
             (staged, batch)
         }
     };
-    let (credentials, batch) = stage("dc1").await;
+    let (credentials, batch) = stage().await;
     let credentials = credentials.expect("staged");
     lab.env.store.propose(batch).await.expect("committed");
     let pusher = lab
@@ -2363,16 +2367,12 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         ([TokenScope::Mirror(mirror)].as_slice(), 0)
     );
 
-    // The account's name is taken now, and a name with a space makes no account.
-    let (taken, _) = stage("dc1").await;
+    // The account is named by the mirror's id, so a second account for it is refused.
+    let (taken, _) = stage().await;
     assert!(matches!(taken, Err(AuthError::UserNameTaken)), "{taken:?}");
-    let (spaced, _) = stage("dc 1").await;
-    assert!(
-        matches!(spaced, Err(AuthError::Invalid { .. })),
-        "{spaced:?}"
-    );
 
-    // A new token stops the old one at its commit.
+    // A new token stops the old one at its commit; bound to a prefix, it is accepted from
+    // there only, as every source-bound token (IAM-21).
     let mut batch = WriteBatch::for_request(&admin);
     let renewed = lab
         .env
@@ -2384,7 +2384,10 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
             credentials.account,
             mirror,
             credentials.token.info.id,
-            None,
+            &MirrorTokenTerms {
+                expires_in_days: None,
+                source_prefixes: vec!["192.0.2.0/24".to_owned()],
+            },
         )
         .await
         .expect("staged");
@@ -2396,8 +2399,17 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         .await
         .expect_err("the old token stopped");
     assert_eq!(stopped.code(), "auth.unauthenticated");
-    let pusher = lab.token_ctx(renewed.token.expose()).await.principal;
-    assert_eq!(lab.code(&pusher, Action::Execute, own), "ok");
+    let bound = Credentials::Bearer(renewed.token.expose().to_owned());
+    for (source, accepted) in [("192.0.2.10", true), ("198.51.100.10", false)] {
+        let outcome = tenko_core::Authenticator::authenticate(
+            &lab.env.service,
+            &bound,
+            source.parse().ok(),
+            lab.env.now(),
+        )
+        .await;
+        assert_eq!(outcome.is_ok(), accepted, "{source}");
+    }
 
     // The removal takes the account and its token.
     let mut batch = WriteBatch::for_request(&admin);
@@ -2411,7 +2423,12 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         )
         .expect("staged");
     lab.env.store.propose(batch).await.expect("committed");
-    let renewed = Credentials::Bearer(renewed.token.expose().to_owned());
-    let gone = lab.env.ctx_for(&renewed).await.expect_err("the token went");
-    assert_eq!(gone.code(), "auth.unauthenticated");
+    let gone = tenko_core::Authenticator::authenticate(
+        &lab.env.service,
+        &bound,
+        "192.0.2.10".parse().ok(),
+        lab.env.now(),
+    )
+    .await;
+    assert!(gone.is_err(), "the token went with its account");
 }
