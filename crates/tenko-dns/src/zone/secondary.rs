@@ -19,8 +19,14 @@
 //! written in chunks of [`CHUNK`] RRsets with the SOA last.
 //!
 //! The RRsets of a secondary zone are read-only for every other writer (409
-//! `dns.zone.secondary`, [`check_writable`]); in a primary catalog zone only the members
-//! Tenko writes are.
+//! `dns.zone.secondary`, [`check_writable`]); in a primary zone only its `transfer` RRsets
+//! are: the members Tenko writes into a catalog zone, and the names a flip froze
+//! ([`super::flip`]).
+//!
+//! The flip hands a zone over in one commit of its row: every batch of a transfer and of
+//! an expiry expects the row as it read it, so a flip committed meanwhile makes the
+//! transfer write nothing more, and the service drops the zone when it reads the rows
+//! again.
 //!
 //! Catalog zones (RFC 9432): a secondary catalog zone's members become secondary zones of
 //! this installation with the catalog's primaries (described as members of the catalog,
@@ -560,9 +566,14 @@ impl HeldCopy {
     }
 }
 
-/// The copy a secondary zone holds, if any.
+/// The copy a secondary zone holds, if any. An SOA a transfer did not write (a zone
+/// flipped back from primary, [`super::flip`]) is no copy: the next refresh asks for the
+/// zone whole and takes it whatever its serial.
 fn held_copy(view: &dyn ReadView, zone: &Zone) -> ZoneResult<Option<HeldCopy>> {
-    let Some((soa, _)) = view.get_typed(&RRSETS, &soa_key(zone))? else {
+    let Some((soa, _)) = view
+        .get_typed(&RRSETS, &soa_key(zone))?
+        .filter(|(soa, _)| soa.origin == Origin::Transfer)
+    else {
         return Ok(None);
     };
     let (Some(serial), Some(rdata)) = (super::soa_serial(&soa), soa.rdata.first()) else {
@@ -1107,10 +1118,16 @@ impl Inner {
         let cx = system();
         loop {
             let view = self.zones.view(None).await?;
-            let zone = ZoneService::zone(view.as_ref(), id)?.zone;
+            let row = ZoneService::zone(view.as_ref(), id)?;
+            // A zone flipped to primary meanwhile keeps its records.
+            if row.zone.kind != ZoneKind::Secondary {
+                return Ok(());
+            }
+            let zone = row.zone;
             let rows = view.scan_typed(&RRSETS, rrset_range(id, None, None), CHUNK, false)?;
             let mut batch = WriteBatch::for_request(&cx);
             batch.preconditions.push(tenko_store::fence(epoch));
+            batch.expect_typed(&ZONES, &id, Some(row.revision));
             let last = rows.len() < CHUNK;
             // The SOA goes in the last batch, as a transfer writes it last: a term that ends
             // between two batches leaves a copy the next leader still sees and lets go.
@@ -1299,6 +1316,7 @@ impl Inner {
             .get_typed(&RRSETS, &soa_key(&zone))
             .ok()
             .flatten()
+            .filter(|(soa, _)| soa.origin == Origin::Transfer)
             .and_then(|(soa, _)| {
                 let rdata = soa.rdata.first()?.as_bytes().to_vec();
                 Some(Held {
@@ -1441,6 +1459,15 @@ impl Inner {
         let cx = system();
         let stamp = Stamp::new(cx.now, cx.principal.clone());
         let view = self.zones.view(None).await.map_err(store_error)?;
+        // Every batch expects the zone's row as this view holds it, so that a flip to
+        // primary committed while the transfer runs makes it write nothing more.
+        let row = ZoneService::zone(view.as_ref(), zone.id).map_err(store_error)?;
+        if row.zone.kind != ZoneKind::Secondary {
+            return Err(FetchError {
+                code: codes::TRANSFER_FAILED,
+                detail: "the zone is no longer a secondary zone".to_owned(),
+            });
+        }
         let before = scope_rrsets(view.as_ref(), zone.id).map_err(store_error)?;
         let after = target(zone, &before, fetched, &stamp)?;
         let serial = after
@@ -1483,6 +1510,7 @@ impl Inner {
         for chunk in &chunks {
             let mut batch = WriteBatch::for_request(&cx);
             batch.preconditions.push(tenko_store::fence(epoch));
+            batch.expect_typed(&ZONES, &zone.id, Some(row.revision));
             stage_changes(&mut batch, chunk).map_err(store_error)?;
             self.zones
                 .store()
@@ -1492,6 +1520,7 @@ impl Inner {
         }
         let mut batch = WriteBatch::for_request(&cx);
         batch.preconditions.push(tenko_store::fence(epoch));
+        batch.expect_typed(&ZONES, &zone.id, Some(row.revision));
         if chunks.is_empty() {
             stage_changes(&mut batch, &others).map_err(store_error)?;
         }

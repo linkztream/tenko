@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use tenko_core::{
     Principal,
-    dns::{SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, UpdatePolicy},
+    dns::{SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, UpdatePolicy, ZoneFlip},
 };
 use tenko_store::{MemStore, Store};
 use tokio::{
@@ -477,4 +477,44 @@ async fn the_record_of_a_deleted_zone_is_swept() {
     assert_eq!(lab.zones.purge_orphans().await.expect("sweep"), 1);
     let view = lab.view().await;
     assert_eq!(view.get_typed(&TRANSFER_STATE, &gone).expect("read"), None);
+}
+
+/// The flip's hand-off: once a zone is flipped to primary, a refresh the service still had
+/// due writes nothing and an expiry it still had due leaves the records.
+#[tokio::test]
+async fn a_zone_flipped_to_primary_is_neither_transferred_into_nor_expired() {
+    let primary = Primary::start(Answer::Zone(7)).await;
+    let lab = Lab::new(&primary).await;
+    let node = lab.node();
+    term(&node).await;
+    let flip = ZoneFlip::Primary {
+        soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
+        ns: vec![name("ns1.example.test")],
+    };
+    let flipped = lab
+        .zones
+        .flip(&system(), lab.zone.id, &flip)
+        .await
+        .expect("flip");
+    primary.answer(Answer::Zone(9));
+    {
+        let mut state = node.lock();
+        let entry = state.get_mut(&lab.zone.id).expect("state");
+        entry.force(Timestamp::now());
+        entry.expires = Some(hours_ago(1));
+    }
+    look(&node).await;
+    let view = lab.view().await;
+    let www = RrSetKey {
+        name: name("www.example.test"),
+        rtype: Rtype::A,
+        ..soa_key(&lab.zone)
+    };
+    let (www, _) = view.get_typed(&RRSETS, &www).expect("read").expect("kept");
+    assert_eq!(www.origin, Origin::Ad);
+    let (soa, _) = view
+        .get_typed(&RRSETS, &soa_key(&lab.zone))
+        .expect("read")
+        .expect("an SOA");
+    assert_eq!(super::super::soa_serial(&soa), Some(flipped.serial));
 }

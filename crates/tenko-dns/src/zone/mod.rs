@@ -24,6 +24,7 @@
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
 //! | [`signing`] | the signing state, the writes of a signing pass, the rollover's start (WP6.3) |
+//! | [`flip`] | the flip of a zone between secondary and primary in place, and the release of frozen names |
 //!
 //! # Zones
 //!
@@ -63,6 +64,8 @@ pub mod views;
 // WP6.3: the signer's entry points and the writes of a signing pass.
 pub mod signing;
 pub mod zonefile;
+// The flip of a zone in place and the release of its frozen names.
+pub mod flip;
 
 #[cfg(test)]
 mod tests;
