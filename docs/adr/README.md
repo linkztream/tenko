@@ -87,3 +87,4 @@ The date is the date the ADR was written or last changed status.
 | [0033](0033-mirrored-sources.md) | Mirrored sources: a pushed migration source with a token that writes one mirror and nothing else | Accepted (2026-11-20, E73 passes) | 2026-11-05 |
 | [0034](0034-zone-flip-and-adoption.md) | The flip of a zone in place and the adoption of mirrored leases and names | Proposed | 2026-11-05 |
 | [0035](0035-integration-client-certificates.md) | Client certificates for integrations: a separate integration CA, a dedicated mutual-TLS listener, enrollment with an HMAC proof, service-account tokens bound to a certificate lineage | Accepted | 2026-11-19 |
+| [0038](0038-takeover-script-and-delegated-session.md) | A takeover script from the release, approved in the UI: a delegated session bound to one run | Proposed | 2026-11-20 |

@@ -3,7 +3,9 @@
 The rehearsal of the Windows takeover ([windows-takeover-plan.md](../../../../../docs/plans/windows-takeover-plan.md)
 sections 2.13 and 2.15, exit check E77): the lab domain of [the counted line](../README.md) starts
 as a Windows-first domain, with Windows DNS and Windows DHCP on both controllers and a failover
-relationship between the DHCP servers, and moves to Tenko step by step, each step with its reverse.
+relationship between the DHCP servers, and moves to Tenko step by step, each step with its reverse:
+by hand in phases 2 to 5, and by the takeover script of the plan's section 2.16 in phase 6, which
+also measures what the operator must do (E146).
 The counted line and its 43 entries are not touched; the two lines never run at the same time.
 
 The names and addresses are those of the counted line, plus the admin workstation:
@@ -23,7 +25,8 @@ The names and addresses are those of the counted line, plus the admin workstatio
 - **The inside observer** is a session on `adm1` (Windows 11, joined, with the Remote Server
   Administration Tools for Active Directory, DHCP, DNS and group policy; WinRM to the lab's
   servers). Every entry it runs is a read. It makes a change only after its own user approves
-  that change, and none is in this manifest. It never signs in to `ns1`'s API.
+  that change; the only changes in this manifest are those of phase 6, the scripted takeover. It
+  never signs in to `ns1`'s API; in phase 6 its user signs in to the UI.
 - **The lead** decides between entries and reads the evidence.
 
 No secret travels on the channels between them. Passwords and tokens live in files that only
@@ -60,7 +63,8 @@ The scope, made on `dc1` and replicated to `dc2` by the relationship:
 The profile is Standard until T28 and Hardened from then on, as the owner's cutover will be.
 Under Hardened an administrator signs in with a passkey only and no script acts as `admin`
 (counted line, "Signing in to Tenko without a person"), so every entry after T28 that writes on
-`ns1` needs the operator's passkey path (below).
+`ns1` needs the operator's passkey path (below). The takeover script of phase 6 acts on `ns1` only
+through a session that an administrator approves with a passkey, not as a script signed in alone.
 
 ## The manifest
 
@@ -83,9 +87,9 @@ phase it names.
 |---|---|---|---|---|---|
 | T03 | operator | Restore the counted line's snapshot before `08-w03-ns1-adopt` | `Get-DnsServerZone` on `dc1`: the three zones AD-integrated; `Get-ADDomainController -Filter *`: `dc1` only; on `ns1` `tenko system diagnostics`: profile `standard`, roles `controller,dns` | `start.txt` | now, B |
 | T04 | operator | On `dc2`: `Install-ADDSDomainController -DomainName corp.example.test -InstallDns:$true` (DNS client `192.0.2.5`, credentials from the secret files, `-NoRebootOnCompletion`), restart; DNS clients of both controllers: the partner first, then itself | `repadmin /replsummary`: no failure; `Get-DnsServerZone -ComputerName dc2`: the three zones, AD-integrated; `nltest /dsgetdc:corp.example.test /force` on `srv1` finds a controller | `promote.txt`, `replsummary.txt`, `zones-dc2.txt` | now, B |
-| T05 | operator | On `dc1` and `dc2`: `Install-WindowsFeature DHCP -IncludeManagementTools`, `Add-DhcpServerSecurityGroup`, `Add-DhcpServerInDC` with the server's name and address, the role's configuration marked complete, the service restarted | `Get-DhcpServerInDC`: exactly `dc1` and `dc2` | `indc.txt` | now, B |
+| T05 | operator | On `dc1`: `Install-WindowsFeature DHCP -IncludeManagementTools` (about a minute, no restart, measured on 2026-11-20), `Add-DhcpServerSecurityGroup`, `Add-DhcpServerInDC` with the server's name and address, the role's configuration marked complete, the service restarted; then `repadmin /syncall /AdeP`, and only then the same on `dc2` (run on both at once, `Add-DhcpServerSecurityGroup` creates conflicting duplicate groups, measured) | `Get-DhcpServerInDC`: exactly `dc1` and `dc2`; `DHCP Users` and `DHCP Administrators` exist once each | `indc.txt`, `groups.txt` | now, B |
 | T06 | operator | On `dc1`: the scope of the table above (`Add-DhcpServerv4Scope`, `Add-DhcpServerv4ExclusionRange` twice, `Set-DhcpServerv4OptionValue -Router -DnsServer -DnsDomain`, `Set-DhcpServerv4DnsSetting -DynamicUpdates Always -NameProtection $true -DeleteDnsRROnLeaseExpiry $true`, `Add-DhcpServerv4Reservation` three times, `pc1`'s MAC address read on `pc1` with `Get-NetAdapter`) | `Get-DhcpServerv4Scope`, `...ExclusionRange`, `...OptionValue -ScopeId 192.0.2.0`, `...Reservation`, `...DnsSetting` show the table | `scope-dc1.txt` | now, B |
-| T07 | operator | On `dc1`: `Add-DhcpServerv4Failover -Name dc1-dc2 -PartnerServer dc2.corp.example.test -ScopeId 192.0.2.0 -LoadBalancePercent 50 -MaxClientLeadTime 01:00:00 -AutoStateTransition $true -StateSwitchInterval 01:00:00` | `Get-DhcpServerv4Failover` on both: `Normal`, `LoadBalance`; `Get-DhcpServerv4Scope -ComputerName dc2` and its reservations equal `dc1`'s | `failover.txt`, `scope-dc2.txt` | now, B |
+| T07 | operator | On `dc1`: `Add-DhcpServerv4Failover -Name dc1-dc2 -PartnerServer dc2.corp.example.test -ScopeId 192.0.2.0 -LoadBalancePercent 50 -MaxClientLeadTime 01:00:00 -AutoStateTransition $true -StateSwitchInterval 01:00:00` | `Get-DhcpServerv4Failover` on both: `Normal`, `LoadBalance`; `Get-DhcpServerv4Scope -ComputerName dc2` and its reservations equal `dc1`'s (measured on 2026-11-20: the creation copies the scope, its options and reservations at once; later a state or a new reservation does not follow by itself, `Invoke-DhcpServerv4FailoverReplication -Force` carries both within about five seconds) | `failover.txt`, `scope-dc2.txt` | now, B |
 | T08 | operator | On `pc1`: DHCP on (`Set-NetIPInterface -Dhcp Enabled`, the static address and gateway removed, `Set-DnsClientServerAddress -ResetServerAddresses`), `ipconfig /renew`, a capture of the exchange with `pktmon`; then `Add-Computer -DomainName corp.example.test`, restart | `ipconfig /all`: DHCP enabled, `192.0.2.30`, DHCP server `192.0.2.5` or `.6`, DNS servers `.5` and `.6`; after the restart `nltest /sc_query:corp.example.test` succeeds; `Get-DhcpServerv4Lease -IPAddress 192.0.2.30` on both: `ActiveReservation`; on `dc1` `pc1` has an A, a PTR and a DHCID record, and which of `pc1` and the DHCP server wrote the A record is noted | `ipconfig.txt`, `dora.pcapng`, `leases.txt`, `records.txt` | now, B |
 | T09 | operator | On `adm1`: the repeatable domain join, the lab adapter up, and the name resolution policy for `corp.example.test` and `2.0.192.in-addr.arpa` (`Add-DnsClientNrptRule`) pointing at the phase's DNS target: `192.0.2.5, 192.0.2.6` until T34, `192.0.2.53` from then on (the parameter of this entry) | `Resolve-DnsName dc2.corp.example.test` answers `192.0.2.6` through the target | `nrpt.txt` | now, B |
 | T10 | inside observer | The start-state reading: controllers, operation masters and global catalogs; per controller the zones and their SOA serials; `Get-DhcpServerInDC`; per DHCP server the scope, exclusions, options at server, scope and reservation level, reservations, DNS settings, `Get-DhcpServerDnsCredential` (the user name only), `Get-DhcpServerSetting`, the relationship, and `Get-DhcpServerv4Lease -AllLeases`; `Export-DhcpServer -Leases` of each server to `adm1` | The table above holds on both servers; the export files exist (the backup of the plan's step 1) | `inventory-*.txt`, `export-dc1.xml`, `export-dc2.xml` | now, B |
@@ -154,7 +158,37 @@ phase it names.
 | T47 | operator, node | `Remove-DhcpServerv4Failover -Name dc1-dc2` on `dc1`; `Remove-DhcpServerInDC` for both; `Uninstall-WindowsFeature DHCP` on both; the exporters removed; the mirrors deleted | `Get-DhcpServerv4Scope -ComputerName dc2` empty after the removal; `Get-DhcpServerInDC` empty; no mirror on `ns1`; `pc1` still served by `ns1` | `end.txt` | WP14.2 |
 | T47r | operator | The way back: the role, `Add-DhcpServerInDC` for both, `Import-DhcpServer -Leases` of T10's export on `dc1`, `Add-DhcpServerv4Failover` as in T07 (scope inactive) | The scope on both servers again, inactive | `end-back.txt` | WP14.2 |
 | T48 | inside observer | The controllers' secondary copies against Tenko's serials | Each follows Tenko within its refresh (WT-Q12) | `secondaries.txt` | WP14.2 |
-| T49 | node | The rows `ad.mirror_token` (with a third mirror bound to `ns1`'s own address, its token on `ns1`) and `ad.dhcid_takeover` (a client with another MAC address asks for `pc1`'s address and name) | As the plan's WP14.4 states | `rows.json` | WP14.4; `ad.dhcid_takeover` also pool |
+| T49 | node | The rows `ad.mirror_token` (with a third mirror bound to `ns1`'s own address, its token on `ns1`), `ad.dhcid_takeover` (a client with another MAC address asks for `pc1`'s address and name) and `ad.delegation` (a run's delegated session walked through the served OpenAPI document) | As the plan's WP14.4 states | `rows.json` | WP14.4; `ad.dhcid_takeover` also pool; `ad.delegation` WP14.6 |
+
+### Phase 6. The scripted takeover
+
+The plan's section 2.16: one script from the release, run on `adm1`, approved in `ns1`'s UI. It starts
+from `tk-start` and replaces, for E77, the manual entries T14, T15, T17 to T19, T27r, T29 to T34,
+T35r, T36, T37, T39, T44r, T45, T47 and T47r; those stay as the manual path and are run once each.
+The other entries of phases 2 to 5 are the inside observer's checks during this phase where they
+apply (T16, T20, T21 to T23r, T35, T40 to T43r, T46, T48, T49). These are the manifest's only
+changes made from `adm1`: each runs after the observer's user approves it, and that user, the
+person at `adm1`, types the domain credential at the script's prompt, types the code into the UI and
+starts the window, so that no secret reaches the observer or a channel. For each phase the
+observer writes `usability.json`: the actions on Windows and on Tenko, the values typed, the pages
+of documentation open, and every wrong turn with its cause.
+
+| # | Actor | Action | Check, expected | Evidence | When |
+|---|---|---|---|---|---|
+| T50 | operator | Restore `tk-start`; the three scripts of the release candidate and its `SHA256SUMS` placed on `adm1` | T10's readings; nothing of Tenko on any lab machine | `start-6.txt` | WP14.5, WP14.6 |
+| T51 | inside observer | `Get-AuthenticodeSignature` and `Get-FileHash` of the three scripts against `SHA256SUMS`; `gh attestation verify` where reachable | A valid signature by the release's publisher (WT-Q15), equal digests; at a commit under test without a release, the digests against the lead's list and `-ExecutionPolicy Bypass`, named as a deviation | `verify.txt` | WP14.5 |
+| T52 | inside observer | `Tenko-Takeover.ps1 -DryRun` | The plan names `dc1` and `dc2`, the PDC emulator, the zones read on each controller, both DHCP servers, `dc1-dc2`, the scope, `CORP\dhcp-dns` on both, `pc1` as a member on DHCP, `srv1` offered as the mirror host; T10's readings before and after equal; no request in `ns1`'s log | `dryrun.txt`, `inventory-before.txt`, `inventory-after.txt` | WP14.5 |
+| T53 | inside observer | `Tenko-Takeover.ps1` to the end of phase 2, with `srv1` as the mirror host | On Windows exactly the lines of the change list (T10's readings compared); on `ns1` the run with its plan, three secondary zones from `192.0.2.5`, two paired mirrors bound to `srv1`'s /32 and fresh, the scope prepared, every action audited with the approver and the run; nothing of Tenko on `dc1` or `dc2`; the state file holds no token and no code | `phase2.txt`, `state.json`, `audit.json`, `usability.json` | WP14.5, WP14.6 |
+| T54 | inside observer | The script interrupted in phase 2 after the mirrors, then run again | It resumes at the next step after reading the state; no object twice on Windows or `ns1` | `resume.txt` | WP14.5 |
+| T55 | inside observer | On the run page: the review and **Start the window** | The loss entries acknowledged in one batch, the option 6 row decided, the bindings recorded; a passkey sign-in within five minutes asked (Hardened) | `window.json` | WP14.6 |
+| T56 | inside observer | Phases 4 and 5 | T31 to T34's and T39 to T41's checks; Windows' option 6 unchanged; M93 recorded | `window-run.txt`, `takeover.json`, `m93.txt` | WP14.2, WP14.5 |
+| T57 | inside observer | `-Reverse` of phase 5, then of phase 4; then forward again | T44r's and T35r's checks; forward as T56 | `reverse.txt` | WP14.2, WP14.5 |
+| T58 | operator, inside observer | During phase 5's wait the operator stops `tenko` on `ns1`; then `-Reverse` | Exit 2; the Windows half done alone (the scope active on both servers) and Tenko's half recorded as pending; after `tenko` starts, `-Reverse` finishes it | `tenko-down.txt` | WP14.5 |
+| T59 | operator, inside observer | A TLS-intercepting proxy with a root of its own between `adm1` and `ns1`; the script run through it, its code typed in the UI | The code matches nothing; `auth.approval.refuse` audited; nothing created (`ad.approval_code`) | `intercept.txt` | WP14.6 |
+| T60 | inside observer | After T46: the second sitting, phase 6 | T47's checks; the plan's zone objects gone from `DomainDnsZones` and `ForestDnsZones`; the group policy object kept; no task, account or mirror left | `finish.txt` | WP14.5 |
+| T60r | inside observer | `-Reverse` of the finish | T47r's checks | `finish-back.txt` | WP14.5 |
+| T61 | inside observer | From after T56, `-Reverse` walked back through phase 2 | T13r's readings on Windows; on `ns1` no mirror and no zone, the run reversed | `full-reverse.txt` | WP14.5 |
+| T62 | lead | The usability records of T51 to T61 against E146 | At most 10 Windows actions, 5 Tenko actions and 3 typed values for the takeover with its finish, at most 5 and 2 for the full reverse, one page of documentation; each wrong turn filed as a finding | `usability.md` | WP14.4 |
 
 ## What the line needs from the operator's tooling
 
@@ -167,5 +201,10 @@ phase it names.
    (a transfer on demand, the flip, the acknowledgments, the prepare, the takeover, the revert).
    Without one, the line leaves T28 out, runs phases 3 to 5 under Standard, and the result names
    the deviation.
-4. `pc1` on DHCP with its reservation (T08), and later a pool lease for T42 and T49.
+4. `pc1` on DHCP with its reservation (T08), and later a pool lease for T42 and T49, from a real
+   client: a lease record made by hand on one server does not reach the partner (measured on
+   2026-11-20).
 5. Snapshot `tk-start` within the line (T13).
+6. For phase 6: under Hardened a passkey of a lab administrator for the browser of the observer's
+   user on `adm1`, registered by the operator; the DHCP management tools on `srv1`, or the script's
+   own install of them recorded; a TLS-intercepting proxy for T59.

@@ -1,0 +1,35 @@
+# ADR 0038: A takeover script from the release, approved in the UI: a delegated session bound to one run
+
+- Status: Proposed (the owner decided the approach on 2026-11-20, `docs/plans/windows-takeover-plan.md` section 2.16; WT-Q15 to WT-Q17 open; Accepted when E144 and E145 pass)
+- Date: 2026-11-20
+
+## Context
+
+The Windows takeover ([windows-takeover-plan.md](../plans/windows-takeover-plan.md), Slice 14) as first designed asked the operator for about 85 commands and UI actions and about 30 values across Windows and Tenko, with the runbook open throughout (plan section 2.16.6). The owner decided on 2026-11-20 that one script, run by the administrator on a domain-joined Windows machine, does the Windows side with a credential it asks for and the Tenko side through Tenko's API, under three conditions: the script comes from the signed release and never from the node; it never executes text Tenko sends, only checked values in fixed commands; and it signs in to Tenko through an approval a signed-in person gives in the UI, so that the takeover stays the decision of an interactive session, while the Windows credential stays in the script's memory and the server holds no Windows right. He set aside the alternative of entering the Windows credential into Tenko.
+
+Two rules stand in the way of a script calling the takeover's operations. The flip refuses everything but an interactive session (`needs_a_session`, [ADR 0034](0034-zone-flip-and-adoption.md) decision 4), and `interactive_only` refuses every token on the kinds `mirror` and `takeover` ([ADR 0033](0033-mirrored-sources.md) choice c). A token for the script would break both rules; a session copied from a browser would carry no binding to the script and no limit. Nothing in `tenko-auth` today turns a person's approval into a session for a program: the integration enrollment code ([ADR 0035](0035-integration-client-certificates.md)) runs the other way and yields a service account's certificate.
+
+## Decision
+
+1. **The script is a release asset.** `Tenko-Takeover.ps1`, the exporter and its installer are shipped, signed with the release's Authenticode certificate (WT-Q15), listed in `SHA256SUMS` and attested. Tenko never serves, generates or links a script, and its UI shows no command to copy. The script checks the exporter's files against digests it carries and refuses a node of another version.
+2. **Tenko's answers are values.** The script takes addresses, names, ids, states and counts from the API, checks each against what Windows reports, the DNS answers of the node and the pinned connection (plan section 2.16.3), and binds them to typed parameters of fixed commands; it never builds a command, a script block or a command line from them, and prints their text without control characters.
+3. **The approval is a device-style grant with a bound code.** The script makes a P-256 key in memory and asks for an approval without a credential; Tenko answers with an id and a nonce. Both sides compute the code from the domain, the SHA-256 of the root of the TLS chain, the script's public key and the approval id (60 bits, twelve characters of Crockford's base32). The person signs in, types the code, reads the request and approves with a sign-in within five minutes (a passkey under Hardened). A script behind an interceptor computed its code over another root and cannot match. The script collects the session once by signing the nonce, pins the root for the run and hands it to the exporter.
+4. **The result is a delegated session, not a token.** It is a session of the approving administrator (`Principal::User`) with a new field `delegation` naming the run, on the session record and on the principal; it is presented as a bearer secret (`tnka_`), never as a cookie; the token API neither creates, lists nor renews it. It counts as signed in at the approval. Its reach is the intersection of the approver's rights and a fixed operation set in `tenko-auth`, narrowed to the objects of the plan the script sends once and to the run's stage, checked in `authorize` for every route (plan section 2.16.2). The flip and the takeover are in the set only after the person started the window, a second fresh interactive action on the run page that a delegated session can never take, which also acknowledges the loss entries shown and binds each takeover to the configuration it showed.
+5. **Lifetime, end and audit.** At most eight hours or the profile's absolute session lifetime, with the profile's idle limit; it ends with the run's stage, the script's exit, **Revoke** on the run page or in the session list, and the approver's disabling. Every operation it calls is audited with the approver as principal and the run in `delegation`; the approval's request, approval, denial, collection and refused codes are audited.
+6. **The run is an object.** `migrate.runs` holds the plan, the phases the script reports beside what Tenko observes, the window with its bindings, the mirrors and the takeovers. The UI's **Windows takeover** page shows it; `tenko migrate run list|show` reads it.
+
+## Consequences
+
+- No token reaches the flip, the takeover or the window: a token stays `Principal::Token`, refused as today. The interactive rule now reads "a person's session, or a session a person delegated to one run for that run's objects, after that person's second decision for what serves".
+- The administrator's actions for the reference domain fall to about fifteen and the values to three (plan section 2.16.6, E146).
+- A compromised node still decides what it serves after the flip and the takeover, as any DNS and DHCP authority does, and can lie or stall during the run; it cannot obtain the Windows credential, run code on Windows or make the script act on objects Windows did not report.
+- New surface: one route without a credential (bounded, rate-limited, strictly parsed), a signature check, and an operation set that must be extended deliberately for any future route the script needs (R221).
+
+## Alternatives considered
+
+- **The Windows credential entered into Tenko, the server managing Windows remotely.** A compromised node would hold a domain administrator's credential and a channel to the controllers. Set aside by the owner.
+- **A personal or service-account token for the script.** Opens the flip and the takeover to tokens, which the interactive rule exists to refuse.
+- **The browser's session cookie given to the script.** No binding to the script, no narrowing, the cross-site rules of a cookie, and a secret the person copies by hand.
+- **RFC 8628 as written, the code sent by the server.** The code would prove nothing about the TLS identity the script reached; the fingerprint would have to be compared by hand as a second value.
+- **A client certificate of the integration CA for the script (ADR 0035).** It identifies a service account, not a person's decision, and needs an enrollment code carried the other way.
+- **A proof of the script's key on every request (RFC 9449).** Left out: the secret lives only in the memory that holds the domain credential too.
