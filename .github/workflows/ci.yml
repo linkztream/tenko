@@ -768,6 +768,20 @@ jobs:
             echo "::warning::No target falls in shard $FUZZ_SHARD."
             exit 0
           fi
+          # A memory watchdog for the build and the runs: below 1 GiB of available memory it names
+          # the largest processes and kills the largest, so that cargo or cargo-fuzz fails with a
+          # line in this log instead of the runner running out of memory and losing the log. (A
+          # cgroup memory limit does not do this: a build at the limit stalls rather than fails.)
+          echo "$(nproc) CPUs, $(awk '/MemTotal/ { print int($2 / 1024) }' /proc/meminfo) MiB of memory"
+          while sleep 2; do
+            if [ "$(awk '/MemAvailable/ { print int($2 / 1024) }' /proc/meminfo)" -lt 1024 ]; then
+              echo "::error::Less than 1 GiB of memory is left; the largest processes:"
+              ps -eo pid,rss,args --sort=-rss | head -n 4 | cut -c 1-160 || true
+              kill -KILL "$(ps -eo pid= --sort=-rss | awk 'NR == 1 { print $1 }')" || true
+            fi
+          done &
+          watchdog=$!
+          trap 'kill "$watchdog"' EXIT
           failed=()
           while IFS= read -r target; do
             [ -n "$target" ] || continue
@@ -788,9 +802,13 @@ jobs:
             # The prebuilt cargo-fuzz is a static musl binary and would pick the musl target by
             # default, which has no sanitizer runtime; the host target is named explicitly.
             started="$(date +%s)"
-            # The memory limits: 2 GiB resident, and 1 GiB for one allocation, so that an
-            # allocation sized by the input rather than by a parser's own limit is a crash.
-            if cargo +nightly fuzz run --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- \
+            # cargo-fuzz's default of one codegen unit per crate made the rustc of tenko-api alone
+            # hold 13 GiB and four parallel ones 17 GiB, more than the 16 GiB runner; with 16 units
+            # the build peaks near 8 GiB. The memory limits of a run: 2 GiB resident, and 1 GiB
+            # for one allocation, so that an allocation sized by the input rather than by a
+            # parser's own limit is a crash.
+            if cargo +nightly fuzz run --codegen-units 16 \
+              --target x86_64-unknown-linux-gnu "$target" "${corpus[@]}" -- \
               -max_total_time=60 -rss_limit_mb=2048 -malloc_limit_mb=1024 -max_len="$max_len"; then
               result="ok"
             else
