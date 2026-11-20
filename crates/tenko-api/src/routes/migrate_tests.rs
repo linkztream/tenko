@@ -34,8 +34,25 @@ async fn harness() -> (Harness, String) {
         crate::api_with(state, ModuleSet::ALL)
             .0
             .layer(Extension(service))
+            .layer(axum::middleware::from_fn(body_deadline))
     });
     (harness, admin)
+}
+
+/// The deadline for request bodies, as `middleware::outer` sets it on both listeners: the
+/// harness's router is the API's routes without the listeners' middleware.
+async fn body_deadline(
+    mut request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    let expired = crate::middleware::body_deadline::wrap(&mut request);
+    let response = next.run(request).await;
+    if expired.is_some_and(|expired| expired.load(std::sync::atomic::Ordering::Relaxed))
+        && !response.status().is_success()
+    {
+        return crate::middleware::body_deadline::refusal();
+    }
+    response
 }
 
 /// Moves the service's clock past the floor between two pushes.
@@ -184,12 +201,13 @@ async fn a_push_answers_with_its_status_and_code() {
     assert_eq!(refusals(&harness).await, 2);
 }
 
-#[tokio::test]
-async fn a_node_decodes_one_push_at_a_time() {
-    let (harness, admin) = harness().await;
-    let (first, first_token) = mirror(&harness, &admin, "dc1").await;
-    let (second, second_token) = mirror(&harness, &admin, "dc2").await;
-    // The first body arrives in two parts; the second push comes while the first is read.
+/// A body that arrives in the parts sent on the channel it returns, and a signal that the
+/// route has started to read it.
+fn slow_body() -> (
+    Body,
+    tokio::sync::mpsc::Sender<Vec<u8>>,
+    Arc<tokio::sync::Notify>,
+) {
     let (part, parts) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
     let reading = Arc::new(tokio::sync::Notify::new());
     let body = futures::stream::unfold(
@@ -200,26 +218,69 @@ async fn a_node_decodes_one_push_at_a_time() {
             Some((Ok::<_, std::io::Error>(chunk), (parts, reading)))
         },
     );
-    let text = snapshot(1);
-    let (start, rest) = text.split_at(10);
+    (Body::from_stream(body), part, reading)
+}
+
+#[tokio::test]
+async fn a_slow_body_is_cut_by_the_deadline_and_holds_no_other_mirror_s_push() {
+    let (harness, admin) = harness().await;
+    let (first, first_token) = mirror(&harness, &admin, "dc1").await;
+    let (second, second_token) = mirror(&harness, &admin, "dc2").await;
+    // The first body sends a few octets and then nothing. Time stands still from here and
+    // moves on whenever nothing else is to be done: the second mirror pushes while the first
+    // body is still being read, and the first ends at the server's deadline for bodies.
+    let (body, part, reading) = slow_body();
+    part.send(b"{\"format\"".to_vec()).await.expect("sent");
+    tokio::time::pause();
     let harness = &harness;
-    let (slow, busy) = tokio::join!(
-        push(harness, &first, &first_token, Body::from_stream(body), &[]),
-        async move {
-            reading.notified().await;
-            let busy = push(harness, &second, &second_token, snapshot(1), &[]).await;
-            part.send(start.as_bytes().to_vec()).await.expect("sent");
-            part.send(rest.as_bytes().to_vec()).await.expect("sent");
-            (busy, second, second_token)
-        }
-    );
-    let (busy, second, second_token) = busy;
-    busy.assert_problem(429, "migrate.mirror.rate");
-    assert_eq!(busy.header("retry-after"), Some("2"));
-    slow.assert_status(200);
-    push(harness, &second, &second_token, snapshot(1), &[])
+    let (slow, other) = tokio::join!(push(harness, &first, &first_token, body, &[]), async move {
+        reading.notified().await;
+        push(harness, &second, &second_token, snapshot(1), &[]).await
+    });
+    // Had the first push held the node's decode while its body arrived, this one would
+    // have waited for it and been answered 429.
+    other.assert_status(200);
+    slow.assert_problem(408, "sys.body_timeout");
+    drop(part);
+}
+
+#[tokio::test]
+async fn a_finding_names_mirrors_that_share_a_name_by_their_ids() {
+    let (harness, admin) = harness().await;
+    let (first, first_token) = mirror(&harness, &admin, "dc").await;
+    let (second, second_token) = mirror(&harness, &admin, "dc").await;
+    push(&harness, &first, &first_token, snapshot(1), &[])
         .await
         .assert_status(200);
+    push(&harness, &second, &second_token, snapshot(1), &[])
+        .await
+        .assert_status(200);
+    later(&harness, 200);
+    let status = harness
+        .call("GET", "/system/status", Cookie(&admin), None)
+        .await;
+    status.assert_status(200);
+    let stale = status.body["warnings"]
+        .as_array()
+        .expect("warnings")
+        .iter()
+        .find(|warning| warning["code"] == "migrate.mirror.stale")
+        .expect("the stale mirrors");
+    let short = |id: &str| id[id.len() - 8..].to_owned();
+    let mut ids = vec![first.clone(), second.clone()];
+    ids.sort();
+    let mut shown: Vec<String> = stale["params"]["ids"]
+        .as_str()
+        .expect("ids")
+        .split(',')
+        .map(str::to_owned)
+        .collect();
+    shown.sort();
+    assert_eq!(shown, ids);
+    let names = stale["params"]["mirrors"].as_str().expect("names");
+    for id in [&first, &second] {
+        assert!(names.contains(&format!("dc ({})", short(id))), "{names}");
+    }
 }
 
 #[tokio::test]

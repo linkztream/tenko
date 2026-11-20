@@ -27,7 +27,7 @@ use tenko_core::{
         },
     },
     metrics::{Registry, encode},
-    migrate::{Snapshot, Takeover, TakeoverState, losses, tables},
+    migrate::{MAX_MIRRORS, Snapshot, Takeover, TakeoverState, losses, tables},
 };
 use tenko_migrate::mirror::{
     DiffAction, MirrorError, MirrorPatch, MirrorService, body,
@@ -286,7 +286,7 @@ async fn changed_leases_alone_are_written_every_ten_minutes_without_an_audit_rec
         .service
         .newest(lab.id, lab.pusher_token())
         .expect("held");
-    assert_eq!((newest.sequence, newest.dhcp.leases.len()), (2, 59));
+    assert_eq!((newest.sequence, newest.leases.len()), (2, 59));
     assert!(!lab.push(120, churned(3, 2)).await.expect("churn"));
     assert_eq!(lab.revision(), revision + 1, "the row's freshness only");
     assert_eq!(lab.service.snapshot(lab.id).await.expect("row").sequence, 1);
@@ -581,9 +581,14 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
     lab.at(181);
     let item = lab.service.get(lab.id).await.expect("item");
     assert!(item.stale && item.age_secs == Some(181));
+    let stale = lab.service.findings().await.expect("findings");
     assert_eq!(
-        codes(lab.service.findings().await.expect("findings")),
-        ["migrate.mirror.stale"]
+        (stale[0].code, stale[0].mirrors.as_slice()),
+        (
+            "migrate.mirror.stale",
+            [(lab.id, "dc1".to_owned())].as_slice()
+        ),
+        "by id, since names are not unique"
     );
     lab.push(181, fixture(2)).await.expect("again");
     assert!(!lab.service.get(lab.id).await.expect("item").stale);
@@ -825,19 +830,7 @@ async fn the_hardened_profile_needs_a_source_prefix_to_create_or_enable_a_mirror
         )
         .await
         .expect("disabled");
-    lab.env
-        .service
-        .update_security_settings(
-            &lab.admin,
-            &SettingsPatch {
-                profile: Some(Profile::Hardened),
-                audit_export: Some(tenko_auth::settings::AuditExport::Optional),
-                ..SettingsPatch::default()
-            },
-            None,
-        )
-        .await
-        .expect("Hardened");
+    hardened(&lab).await;
     let enable = MirrorPatch {
         enabled: Some(true),
         ..MirrorPatch::default()
@@ -1058,4 +1051,136 @@ proptest! {
         inactive.dhcp.scopes[0].active = false;
         prop_assert_ne!(content_hashes(&inactive).expect("hash").0, configuration);
     }
+}
+
+/// Switches the lab's installation to the Hardened profile.
+async fn hardened(lab: &Lab) {
+    lab.env
+        .service
+        .update_security_settings(
+            &lab.admin,
+            &SettingsPatch {
+                profile: Some(Profile::Hardened),
+                audit_export: Some(tenko_auth::settings::AuditExport::Optional),
+                ..SettingsPatch::default()
+            },
+            None,
+        )
+        .await
+        .expect("Hardened");
+}
+
+#[tokio::test]
+async fn a_mirror_without_prefixes_stops_pushing_when_the_profile_turns_hardened() {
+    let lab = Lab::new().await;
+    lab.push(0, fixture(1)).await.expect("pushes under Home");
+    hardened(&lab).await;
+    let refused = lab.push(10, fixture(2)).await.expect_err("unbound");
+    assert_eq!(
+        (refused.code(), refused.http_status()),
+        ("auth.unauthenticated", 401),
+        "as a push from outside the prefixes is refused"
+    );
+    let found = lab.service.findings().await.expect("findings");
+    let unbound = found
+        .iter()
+        .find(|finding| finding.code == "migrate.mirror.unbound")
+        .expect("the finding");
+    assert_eq!(unbound.mirrors, [(lab.id, "dc1".to_owned())]);
+    // Prefixes that together bind nothing are refused, whatever the profile.
+    for sources in [
+        &["0.0.0.0/1", "128.0.0.0/1"][..],
+        &["2001:db8::/32"],
+        &["::ffff:10.0.0.0/104"],
+    ] {
+        let refused = lab
+            .service
+            .create(&lab.admin, new_mirror("dc2", sources))
+            .await
+            .expect_err("too short");
+        assert_eq!(
+            (refused.code(), refused.params()["field"].as_str()),
+            ("migrate.mirror.invalid_settings", "source_prefixes"),
+            "{sources:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_newest_leases_are_held_for_a_while_and_go_with_the_token() {
+    let lab = Lab::new().await;
+    lab.push(0, fixture(1)).await.expect("first");
+    let lease_losses = fixture(1)
+        .losses
+        .entries
+        .iter()
+        .filter(|entry| entry.code == losses::LEASE_STATE)
+        .count();
+    let held = lab
+        .service
+        .newest(lab.id, lab.pusher_token())
+        .expect("held");
+    assert_eq!(
+        (held.sequence, held.leases.len(), held.losses.len()),
+        (1, 60, lease_losses),
+        "the leases and their loss entries, nothing else"
+    );
+    // Three intervals after the push they are gone.
+    lab.at(179);
+    assert!(lab.service.newest(lab.id, lab.pusher_token()).is_some());
+    lab.at(180);
+    assert!(lab.service.newest(lab.id, lab.pusher_token()).is_none());
+
+    // Disabling the mirror and replacing its token drop them at once.
+    lab.push(200, fixture(2)).await.expect("again");
+    let toggle = |enabled| MirrorPatch {
+        enabled: Some(enabled),
+        ..MirrorPatch::default()
+    };
+    lab.service
+        .update(&lab.admin, lab.id, toggle(false))
+        .await
+        .expect("disabled");
+    assert!(lab.service.newest(lab.id, lab.pusher_token()).is_none());
+    lab.service
+        .update(&lab.admin, lab.id, toggle(true))
+        .await
+        .expect("enabled");
+    lab.push(210, fixture(3)).await.expect("again");
+    let old = lab.pusher_token();
+    let (_, token) = lab
+        .service
+        .replace_token(&lab.admin, lab.id, &MirrorTokenTerms::default())
+        .await
+        .expect("token");
+    assert!(lab.service.newest(lab.id, old).is_none());
+    assert!(lab.service.newest(lab.id, token.info.id).is_none());
+}
+
+#[tokio::test]
+async fn an_installation_holds_a_bounded_number_of_mirrors() {
+    let lab = Lab::new().await;
+    for n in 1..MAX_MIRRORS {
+        lab.service
+            .create(&lab.admin, new_mirror(&format!("dc{n}"), &[]))
+            .await
+            .expect("within the bound");
+    }
+    let refused = lab
+        .service
+        .create(&lab.admin, new_mirror("one more", &[]))
+        .await
+        .expect_err("over the bound");
+    assert_eq!(
+        (
+            refused.code(),
+            refused.http_status(),
+            refused.params()["max"].as_str()
+        ),
+        (
+            "migrate.mirror.limit",
+            409,
+            MAX_MIRRORS.to_string().as_str()
+        )
+    );
 }

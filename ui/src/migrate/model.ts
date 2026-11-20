@@ -11,6 +11,14 @@ export function mirrorState(mirror: Pick<MirrorItem, "enabled" | "age_secs" | "s
   return mirror.stale ? "stale" : "fresh";
 }
 
+/**
+ * The short form of a mirror's id shown beside its name, which is not unique: its last eight
+ * hexadecimal digits, as the server's findings and `Mirror::short_id` write it.
+ */
+export function shortId(id: string): string {
+  return id.slice(-8);
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/i;
 const ORIGIN = /^https?:\/\/[A-Za-z0-9.\-[\]:]+$/;

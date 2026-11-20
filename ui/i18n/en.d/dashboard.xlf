@@ -563,6 +563,10 @@
         <notes><note category="description">A source serves a scope Tenko took over; {mirrors} lists the mirrors.</note></notes>
         <segment><source>The mirrored sources {mirrors} serve a scope Tenko took over: two DHCP servers answer one network.</source></segment>
       </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.unbound">
+        <notes><note category="description">Under the Hardened profile, mirrors whose token has no source address; {mirrors} lists them by name and short id.</note></notes>
+        <segment><source>The Hardened profile refuses the pushes of the mirrored sources {mirrors}: their tokens have no source addresses. Replace each token on the mirror's Settings tab with the server's address.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

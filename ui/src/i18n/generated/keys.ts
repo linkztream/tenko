@@ -1585,6 +1585,7 @@ export type MessageKey =
   | "dashboard.finding.health.migrate.mirror.scope_active"
   | "dashboard.finding.health.migrate.mirror.stale"
   | "dashboard.finding.health.migrate.mirror.token_expiring"
+  | "dashboard.finding.health.migrate.mirror.unbound"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -8838,6 +8839,7 @@ export interface MessageArgs {
   "dashboard.finding.health.migrate.mirror.scope_active": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.stale": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.token_expiring": { mirrors: string | number };
+  "dashboard.finding.health.migrate.mirror.unbound": { mirrors: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -11851,6 +11853,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.health.migrate.mirror.scope_active",
   "dashboard.finding.health.migrate.mirror.stale",
   "dashboard.finding.health.migrate.mirror.token_expiring",
+  "dashboard.finding.health.migrate.mirror.unbound",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",

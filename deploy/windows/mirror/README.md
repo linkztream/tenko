@@ -24,7 +24,14 @@ the `DhcpServer` module and nothing else, and download nothing.
   authority. Give the mirror the server's address as a source address when you create it
   (one address, or the network the server is in): the token is then accepted from there
   only, and a push from anywhere else is refused like an unknown token (`answer=401` in the
-  log). The Hardened profile requires it.
+  log). A network is at least a /16 (IPv4) or a /48 (IPv6). The Hardened profile requires
+  a source address; a mirror created without one before the switch to Hardened is refused
+  the same way until its token is replaced with one (the system status names it,
+  `migrate.mirror.unbound`). If the server reaches Tenko through a reverse proxy, configure
+  the proxy as trusted in Tenko (`[tls] trusted_proxies`): otherwise Tenko sees the proxy's
+  address, and the source address has to be the proxy's.
+- A body that arrives too slowly is cut by the controller's deadline for request bodies
+  (`answer=408 code=sys.body_timeout`); the exporter's own request timeout is 30 s.
 - At most 1,000 scopes, 10,000 reservations and 20,000 leases per server. Above them the
   exporter warns before it pushes and the controller refuses the push with 422
   `migrate.mirror.invalid`, naming the count.

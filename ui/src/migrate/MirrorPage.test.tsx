@@ -114,6 +114,8 @@ describe("the mirror cards", () => {
     expect(card.dataset.state).toBe("stale");
     expect(within(card).getByTestId("mirror-state").textContent).toBe("Stale");
     expect(within(card).getByTestId("mirror-losses-open").textContent).toBe("2");
+    // Names are not unique: the card tells two mirrors apart by the end of the id.
+    expect(within(card).getByTestId("mirror-short-id").textContent).toBe(MIRROR.slice(-8));
     expect(card.textContent).toContain("dc1.corp.example.test");
     expect(await axeViolations(view.container)).toEqual([]);
 

@@ -46,7 +46,7 @@ use std::{net::IpAddr, sync::Arc};
 
 use axum::{
     Extension, Json,
-    body::Body,
+    body::{Body, Bytes},
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
@@ -64,8 +64,8 @@ use tenko_core::{
     error::codes,
     ir::{MirrorSnapshot, SourceKindLabel},
     migrate::{
-        LossAck, SkippedItem, Snapshot, TakeoverCounts, TakeoverState, mirror_object,
-        takeover_object,
+        LossAck, Mirror, SkippedItem, Snapshot, TakeoverCounts, TakeoverState, findings,
+        mirror_object, takeover_object,
     },
 };
 pub use tenko_migrate::mirror::{
@@ -336,9 +336,11 @@ fn created(
 // ---------------------------------------------------------------------------------------
 // The push
 
-/// Reads and decodes the body: the read stops at [`MAX_BODY_BYTES`], with or without a
-/// declared length; `Content-Encoding` is absent, `identity` or `gzip`.
-async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, MirrorError> {
+/// Reads the body whole: the read stops at [`MAX_BODY_BYTES`], with or without a declared
+/// length, and the server's deadline for request bodies (`middleware::body_deadline`, 408
+/// `sys.body_timeout`) ends a body that arrives too slowly; `Content-Encoding` is absent,
+/// `identity` or `gzip` (`true`).
+async fn read_body(headers: &HeaderMap, raw: Body) -> Result<(Bytes, bool), MirrorError> {
     let gzip = match headers
         .get(header::CONTENT_ENCODING)
         .map(HeaderValue::as_bytes)
@@ -356,7 +358,12 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
         .map_err(|_| MirrorError::TooLarge {
             limit: MAX_BODY_BYTES,
         })?;
-    // Inflating and parsing up to 32 MiB is work for a blocking thread, not the runtime's.
+    Ok((bytes, gzip))
+}
+
+/// Inflates, parses and checks a body that was read whole: work for a blocking thread, not
+/// the runtime's.
+async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
     tokio::task::spawn_blocking(move || body::decode(&bytes, gzip))
         .await
         .map_err(|error| MirrorError::Request(format!("the body was not decoded: {error}")))?
@@ -368,16 +375,17 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address. A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
     responses(
         (status = 200, description = "The accepted sequence and whether the snapshot changed", body = SnapshotAccepted),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 401, description = "No valid token", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid token: unknown, replaced, used from outside its source prefixes, or a token without prefixes under Hardened", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The token is not this mirror's own, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 408, description = "The body did not arrive within the server's deadline for request bodies (`sys.body_timeout`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is above the bound (`migrate.mirror.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
@@ -411,11 +419,13 @@ async fn push_mirror_snapshot(
         }
         .into());
     }
-    // One push at a time on this node, from the admission to the write.
+    // The body is read first, under its deadline, so that a slow body holds no other
+    // mirror's push; one decode at a time on this node, from the inflate to the write.
     let outcome = async {
-        let _decoding = service.decoding().await?;
         service.admit(id).await?;
-        let snapshot = decoded(&headers, raw).await?;
+        let (bytes, gzip) = read_body(&headers, raw).await?;
+        let _decoding = service.decoding().await?;
+        let snapshot = decoded(bytes, gzip).await?;
         service.push(&cx, id, snapshot).await
     }
     .await;
@@ -480,7 +490,7 @@ async fn list_mirrors(
     tag = "migrate",
     operation_id = "create_mirror",
     summary = "Create a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<name>` with no grants, and one scoped token whose only scope is `mirror:<id>`, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). Audited as `migrate.mirror.create`.",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
     request_body(content = MirrorCreate, content_type = "application/json"),
     security(("session" = [])),
     responses(
@@ -488,7 +498,7 @@ async fn list_mirrors(
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A mirror or a service account of this name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "The installation holds 32 mirrors (`migrate.mirror.limit`), or an account of the service account's name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn create_mirror(
@@ -963,7 +973,8 @@ async fn get_takeover(
 // Findings
 
 /// The health findings of the mirrored sources for `GET /system/status` (plan section 2.12):
-/// one warning per code, naming its mirrors.
+/// one warning per code, naming its mirrors by name and short id (`mirrors`, since names
+/// are not unique) and by id (`ids`).
 pub(crate) async fn warnings(
     mirrors: Option<Arc<MirrorService>>,
 ) -> Vec<crate::dto::system::StatusWarning> {
@@ -980,13 +991,25 @@ pub(crate) async fn warnings(
     found
         .into_iter()
         .map(|finding| {
-            let names = finding.mirrors.join(", ");
+            let names = finding
+                .mirrors
+                .iter()
+                .map(|(id, name)| format!("{name} ({})", Mirror::short_id(*id)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ids = finding
+                .mirrors
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
             let detail = match finding.code {
-                tenko_core::migrate::findings::MIRROR_STALE => {
-                    "no push for three intervals from the mirrored sources"
-                }
-                tenko_core::migrate::findings::MIRROR_SCOPE_ACTIVE => {
+                findings::MIRROR_STALE => "no push for three intervals from the mirrored sources",
+                findings::MIRROR_SCOPE_ACTIVE => {
                     "a mirrored source serves a scope Tenko took over: two servers answer one network"
+                }
+                findings::MIRROR_UNBOUND => {
+                    "the Hardened profile refuses the pushes of mirrors whose token has no source prefix; replace their tokens with prefixes"
                 }
                 _ => "the token of a mirrored source expires within fourteen days",
             };
@@ -995,6 +1018,7 @@ pub(crate) async fn warnings(
                 detail: format!("{detail}: {names}"),
                 params: std::collections::BTreeMap::from([
                     ("mirrors".to_owned(), names),
+                    ("ids".to_owned(), ids),
                     ("count".to_owned(), finding.mirrors.len().to_string()),
                 ]),
             }

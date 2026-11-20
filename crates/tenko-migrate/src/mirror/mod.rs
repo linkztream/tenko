@@ -243,7 +243,7 @@ pub struct ScopeDiff {
 pub enum MirrorError {
     /// No such mirror (404).
     NotFound(MirrorId),
-    /// A mirror or service account of this name exists (409).
+    /// The mirror's service account name (`mirror-<id>`) is taken (409).
     Exists(String),
     /// A setting is invalid (400).
     Settings {
@@ -288,6 +288,11 @@ pub enum MirrorError {
     },
     /// The mirror's row changed under every attempt to write it (409).
     Conflict(MirrorId),
+    /// The installation holds as many mirrors as it may (409).
+    Limit {
+        /// The most mirrors.
+        max: usize,
+    },
     /// The account and token of the mirror.
     Auth(AuthError),
     /// The rows of the diff.
@@ -309,7 +314,7 @@ impl fmt::Display for MirrorError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotFound(id) => write!(f, "no mirror {id}"),
-            Self::Exists(name) => write!(f, "a mirror or an account named {name} exists"),
+            Self::Exists(name) => write!(f, "an account named {name} exists"),
             Self::Settings { field, reason } => write!(f, "invalid `{field}`: {reason}"),
             Self::Disabled(id) => write!(f, "the mirror {id} is disabled"),
             Self::Sequence { sequence, last } => write!(
@@ -333,6 +338,9 @@ impl fmt::Display for MirrorError {
             ),
             Self::Conflict(id) => {
                 write!(f, "the mirror {id} changed under every attempt to write it")
+            }
+            Self::Limit { max } => {
+                write!(f, "the installation holds {max} mirrors, the most it may")
             }
             Self::Auth(error) => error.fmt(f),
             Self::Dhcp(error) => error.fmt(f),
@@ -359,6 +367,7 @@ impl Coded for MirrorError {
             Self::Request(_) => INVALID_REQUEST,
             Self::SnapshotMoved { .. } => codes::MIRROR_SNAPSHOT_MOVED,
             Self::Conflict(_) => codes::MIRROR_CONFLICT,
+            Self::Limit { .. } => codes::MIRROR_LIMIT,
             Self::Auth(error) => error.code(),
             Self::Dhcp(error) => error.code(),
             Self::Store(error) => error.code(),
@@ -371,7 +380,8 @@ impl Coded for MirrorError {
             Self::Exists(_)
             | Self::Sequence { .. }
             | Self::SnapshotMoved { .. }
-            | Self::Conflict(_) => 409,
+            | Self::Conflict(_)
+            | Self::Limit { .. } => 409,
             Self::Settings { .. } | Self::Request(_) => 400,
             Self::Disabled(_) => 403,
             Self::TooLarge { .. } => 413,
@@ -411,6 +421,7 @@ impl Coded for MirrorError {
                 ("sequence", sequence.to_string()),
                 ("latest", latest.to_string()),
             ]),
+            Self::Limit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::Auth(error) => error.params(),
             Self::Dhcp(error) => error.params(),
             Self::Store(error) => error.params(),

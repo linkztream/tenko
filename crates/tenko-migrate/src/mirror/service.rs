@@ -44,12 +44,12 @@ use tenko_core::{
     audit::AuditDraft,
     codec::{canonical_sha256, encode_key},
     ipam::Stamp,
-    ir::{LossEntry, MirrorOrigin, MirrorSnapshot, SourceKindLabel},
+    ir::{LossEntry, MirrorOrigin, MirrorSnapshot, SourceKindLabel, dhcp::IrLease},
     metrics::{GaugeVec, Registry},
     migrate::{
-        DEFAULT_INTERVAL_SECS, LEASES_WRITE_SECS, LossAck, MIN_PUSH_INTERVAL_SECS, Mirror,
-        Snapshot, TOKEN_EXPIRING_DAYS, TakeoverState, audit, findings, losses, metrics,
-        mirror_object, tables,
+        DEFAULT_INTERVAL_SECS, LEASES_WRITE_SECS, LossAck, MAX_MIRRORS, MIN_PUSH_INTERVAL_SECS,
+        MIN_SOURCE_PREFIX_V4, MIN_SOURCE_PREFIX_V6, Mirror, Snapshot, TOKEN_EXPIRING_DAYS,
+        TakeoverState, audit, findings, losses, metrics, mirror_object, tables,
     },
     serde_util::{HexBytes, to_hex},
 };
@@ -62,8 +62,13 @@ use super::{
     SnapshotAccepted, SnapshotCounts,
 };
 
-/// The mirrors with metric series (three push outcomes and one age each).
-const MIRROR_SLOTS: u16 = 32;
+/// The mirrors with metric series (three push outcomes and one age each): every mirror an
+/// installation may hold.
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "MAX_MIRRORS is a small constant"
+)]
+const MIRROR_SLOTS: u16 = MAX_MIRRORS as u16;
 
 /// A refused push is audited at most this often per mirror (plan section 2.12).
 const REFUSAL_AUDIT_SECS: u64 = 60;
@@ -105,8 +110,8 @@ struct Memory {
     pushed: Option<Timestamp>,
     /// The last accepted sequence.
     sequence: Option<u64>,
-    /// The envelope of the last accepted push, stored or not.
-    newest: Option<Arc<MirrorSnapshot>>,
+    /// The leases of the last accepted push, stored or not, and until when they are held.
+    newest: Option<(Arc<NewestLeases>, Timestamp)>,
     /// The last refusal written to the audit log.
     refusal_audited: Option<Timestamp>,
     /// Pushes by outcome, in the order of `metrics::PUSH_OUTCOMES`.
@@ -161,6 +166,19 @@ impl Summary {
             losses,
             scopes,
         })
+    }
+
+    /// The record `migrate.mirror.push` of a push of `id` whose configuration hashes to
+    /// `hash`, with its counts.
+    fn audited(&self, ctx: &RequestCtx, id: MirrorId, hash: &[u8]) -> AuditDraft {
+        AuditDraft::success(audit::MIRROR_PUSH, vec![mirror_object(id)])
+            .with_source_ip(ctx.source_ip)
+            .with_context("sequence", self.sequence.to_string())
+            .with_context("scopes", self.counts.scopes.to_string())
+            .with_context("reservations", self.counts.reservations.to_string())
+            .with_context("leases", self.counts.leases.to_string())
+            .with_context("losses", self.counts.losses.to_string())
+            .with_context("hash", to_hex(hash))
     }
 
     /// The entries no acknowledgment holds for, within `scope` when given (an entry without
@@ -239,14 +257,51 @@ fn entry_scope(entry: &LossEntry, scopes: &[MirroredScope]) -> Option<IpNet> {
         })
 }
 
-/// A health finding of the mirrors (plan section 2.12): the code and the names of the
-/// mirrors it holds for.
+/// A health finding of the mirrors (plan section 2.12): the code and the mirrors it holds
+/// for, by id and name (names are not unique).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     /// One of `tenko_core::migrate::findings::ALL`.
     pub code: &'static str,
-    /// The mirrors, by name.
-    pub mirrors: Vec<String>,
+    /// The mirrors, by id and name.
+    pub mirrors: Vec<(MirrorId, String)>,
+}
+
+/// The newest leases of a mirror on the controller that took its last push, stored or not
+/// (plan section 2.4): what the prepare and the takeover need of a push, the leases and the
+/// loss entries of leases, with the push's sequence and times. Held until
+/// [`Mirror::stale_after_secs`] after the push, and dropped when the token is replaced,
+/// when the mirror is disabled and when it is deleted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewestLeases {
+    /// The push's sequence.
+    pub sequence: u64,
+    /// When the source read them, by its own clock.
+    pub taken_at: Timestamp,
+    /// When this controller accepted the push.
+    pub received: Timestamp,
+    /// The leases.
+    pub leases: Vec<IrLease>,
+    /// The loss entries of leases (`migrate.loss.lease_state`).
+    pub losses: Vec<LossEntry>,
+}
+
+impl NewestLeases {
+    /// The lease side of an envelope accepted at `received`; the rest is dropped.
+    fn of(envelope: MirrorSnapshot, received: Timestamp) -> Self {
+        let (losses, _): (Vec<LossEntry>, Vec<LossEntry>) = envelope
+            .losses
+            .entries
+            .into_iter()
+            .partition(|entry| entry.code == losses::LEASE_STATE);
+        Self {
+            sequence: envelope.sequence,
+            taken_at: envelope.taken_at,
+            received,
+            leases: envelope.dhcp.leases,
+            losses,
+        }
+    }
 }
 
 /// A new mirror.
@@ -451,15 +506,54 @@ impl MirrorService {
         self.item(view.as_ref(), mirror)
     }
 
+    fn hardened(&self) -> bool {
+        self.auth.settings().profile == Profile::Hardened
+    }
+
     /// Refuses, under the Hardened profile, a token for a mirror without a source prefix
     /// (minted, or kept by a mirror that is enabled).
     fn sources_required(&self, prefixes: usize) -> Result<(), MirrorError> {
-        if prefixes == 0 && self.auth.settings().profile == Profile::Hardened {
+        if prefixes == 0 && self.hardened() {
             return Err(MirrorError::Settings {
                 field: "source_prefixes".to_owned(),
                 reason: "the Hardened profile requires at least one source prefix for a mirror"
                     .to_owned(),
             });
+        }
+        Ok(())
+    }
+
+    /// Checks the source prefixes of a mirror's new token: under Hardened at least one, and
+    /// none shorter than [`MIN_SOURCE_PREFIX_V4`] or [`MIN_SOURCE_PREFIX_V6`], so that the
+    /// list binds the token to something (two /1 prefixes would cover every address). An
+    /// entry that is no prefix at all is refused by the token's minting, with its reason.
+    fn check_sources(&self, prefixes: &[String]) -> Result<(), MirrorError> {
+        self.sources_required(prefixes.len())?;
+        for entry in prefixes {
+            let entry = entry.trim();
+            let Some(prefix) = entry
+                .parse::<IpNet>()
+                .ok()
+                .or_else(|| entry.parse::<IpAddr>().ok().map(IpNet::from))
+            else {
+                continue;
+            };
+            let short = match prefix {
+                IpNet::V4(net) => net.prefix_len() < MIN_SOURCE_PREFIX_V4,
+                // An IPv4-mapped prefix is the IPv4 prefix it covers, as the binding reads it.
+                IpNet::V6(net) if net.addr().to_ipv4_mapped().is_some() => {
+                    net.prefix_len() < 96 + MIN_SOURCE_PREFIX_V4
+                }
+                IpNet::V6(net) => net.prefix_len() < MIN_SOURCE_PREFIX_V6,
+            };
+            if short {
+                return Err(MirrorError::Settings {
+                    field: "source_prefixes".to_owned(),
+                    reason: format!(
+                        "{entry} is shorter than a /{MIN_SOURCE_PREFIX_V4} (IPv4) or a /{MIN_SOURCE_PREFIX_V6} (IPv6) and binds too little"
+                    ),
+                });
+            }
         }
         Ok(())
     }
@@ -510,9 +604,14 @@ impl MirrorService {
             updated: stamp,
         };
         Self::settings(&mirror)?;
-        self.sources_required(new.token.source_prefixes.len())?;
+        self.check_sources(&new.token.source_prefixes)?;
         let account = Mirror::account_name(mirror.id);
         let view = self.view().await?;
+        // shortcut: two creations at once may pass the count together and hold one mirror
+        // more than the bound, which only administrators can do; a counter row would close it.
+        if Self::rows(view.as_ref())?.len() >= MAX_MIRRORS {
+            return Err(MirrorError::Limit { max: MAX_MIRRORS });
+        }
         let mut batch = WriteBatch::for_request(ctx);
         let credentials = self
             .auth
@@ -610,7 +709,17 @@ impl MirrorService {
                 Ok(())
             })
             .await?;
+        if !mirror.enabled {
+            self.drop_newest(id);
+        }
         self.item(self.view().await?.as_ref(), mirror)
+    }
+
+    /// Drops the newest leases this controller holds for `id`.
+    fn drop_newest(&self, id: MirrorId) {
+        if let Some(memory) = self.memory().get_mut(&id) {
+            memory.newest = None;
+        }
     }
 
     /// Deletes a mirror with its snapshot, its acknowledgments, its account and its token;
@@ -654,7 +763,7 @@ impl MirrorService {
         id: MirrorId,
         terms: &MirrorTokenTerms,
     ) -> Result<(MirrorItem, CreatedToken), MirrorError> {
-        self.sources_required(terms.source_prefixes.len())?;
+        self.check_sources(&terms.source_prefixes)?;
         // Minting awaits the session's check, so this write repeats on its own.
         let mut written = None;
         for _ in 0..ATTEMPTS {
@@ -692,6 +801,8 @@ impl MirrorService {
             }
         }
         let (mirror, token) = written.ok_or(MirrorError::Conflict(id))?;
+        // Nothing reads the old token's leases any more.
+        self.drop_newest(id);
         let item = self.item(self.view().await?.as_ref(), mirror)?;
         Ok((
             MirrorItem {
@@ -702,10 +813,10 @@ impl MirrorService {
         ))
     }
 
-    /// The node's one decode of a push body: the route holds it from the admission through
-    /// the read, the decode and the write, so that the memory a decode may take
-    /// (`body::DECODE_ALLOCATION_BOUND`) is taken once on a node, however many mirrors and
-    /// controllers push.
+    /// The node's one decode of a push body: the route takes it once the body is read, and
+    /// holds it through the inflate, the decode and the write, so that the memory a decode
+    /// may take (`body::DECODE_ALLOCATION_BOUND`) is taken once on a node, however many
+    /// mirrors and controllers push, and a body that arrives slowly holds no one else.
     ///
     /// # Errors
     ///
@@ -724,16 +835,26 @@ impl MirrorService {
     }
 
     /// Lets a push of `id` through before its body is read: the mirror exists, is enabled,
-    /// and its last admitted push is at least [`MIN_PUSH_INTERVAL_SECS`] old.
+    /// its token is bound to source prefixes when the profile is Hardened (a token without
+    /// them is refused as one from outside its prefixes is, so that a mirror created before
+    /// the switch to Hardened stops; the finding `migrate.mirror.unbound` names it), and its
+    /// last admitted push is at least [`MIN_PUSH_INTERVAL_SECS`] old.
     ///
     /// # Errors
     ///
-    /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Rate`].
+    /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Auth`],
+    /// [`MirrorError::Rate`].
     pub async fn admit(&self, id: MirrorId) -> Result<(), MirrorError> {
         let view = self.view().await?;
         let (mirror, _) = Self::row(view.as_ref(), id)?;
         if !mirror.enabled {
             return Err(MirrorError::Disabled(id));
+        }
+        if self.hardened()
+            && AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?
+                .is_none_or(|token| token.source_prefixes.is_empty())
+        {
+            return Err(MirrorError::Auth(AuthError::Unauthenticated));
         }
         let now = self.now();
         let mut memory = self.memory();
@@ -815,16 +936,7 @@ impl MirrorService {
                 batch.expect_typed(&tables::MIRRORS, &id, Some(revision));
                 if changed {
                     mirror.last_change = Some(now);
-                    batch.audit(
-                        AuditDraft::success(audit::MIRROR_PUSH, vec![mirror_object(id)])
-                            .with_source_ip(ctx.source_ip)
-                            .with_context("sequence", sequence.to_string())
-                            .with_context("scopes", summary.counts.scopes.to_string())
-                            .with_context("reservations", summary.counts.reservations.to_string())
-                            .with_context("leases", summary.counts.leases.to_string())
-                            .with_context("losses", summary.counts.losses.to_string())
-                            .with_context("hash", to_hex(&hash)),
-                    );
+                    batch.audit(summary.audited(ctx, id, &hash));
                 }
                 if stored {
                     mirror.last_hash = Some(HexBytes(hash.clone()));
@@ -853,6 +965,12 @@ impl MirrorService {
                     Err(error) => return Err(error.into()),
                 }
             }
+            let until = now
+                .checked_add(Duration::from_secs(mirror.stale_after_secs()))
+                .unwrap_or(now);
+            let newest = snapshot
+                .take()
+                .map(|envelope| (Arc::new(NewestLeases::of(envelope, now)), until));
             let mut memory = self.memory();
             let memory = memory.entry(id).or_default();
             if memory.token != Some(mirror.token) {
@@ -861,7 +979,7 @@ impl MirrorService {
             }
             memory.pushed = Some(now);
             memory.sequence = memory.sequence.max(Some(sequence));
-            memory.newest = snapshot.take().map(Arc::new);
+            memory.newest = newest;
             memory.outcomes[if changed { CHANGED } else { UNCHANGED }] += 1;
             if stored {
                 memory.summary = Some(Arc::clone(&summary));
@@ -871,15 +989,18 @@ impl MirrorService {
         Err(MirrorError::Conflict(id))
     }
 
-    /// The envelope of the last push this controller accepted for `id`, stored or not: the
-    /// newest leases, which a prepare or a takeover takes from a push made for it rather than
-    /// from the stored snapshot (plan section 2.4). `None` on a controller that took no push
-    /// of the mirror since it started, or of a token that is no longer the mirror's.
-    pub fn newest(&self, id: MirrorId, token: ApiTokenId) -> Option<Arc<MirrorSnapshot>> {
+    /// The newest leases of `id` on this controller (plan section 2.4): those of the last
+    /// push it accepted, stored or not, which a prepare or a takeover takes rather than the
+    /// stored snapshot's. `None` on a controller that took no push of the mirror within
+    /// [`Mirror::stale_after_secs`], or of a token that is no longer the mirror's.
+    pub fn newest(&self, id: MirrorId, token: ApiTokenId) -> Option<Arc<NewestLeases>> {
+        let now = self.now();
         self.memory()
             .get(&id)
             .filter(|memory| memory.token == Some(token))
             .and_then(|memory| memory.newest.clone())
+            .filter(|(_, until)| now < *until)
+            .map(|(leases, _)| leases)
     }
 
     /// Counts a refused push of `id` and writes `migrate.mirror.refuse` with the code and
@@ -1058,8 +1179,8 @@ impl MirrorService {
     }
 
     /// The health findings of the mirrors (plan section 2.12): stale mirrors, tokens that
-    /// expire within [`TOKEN_EXPIRING_DAYS`] days, and taken-over scopes the source serves
-    /// again.
+    /// expire within [`TOKEN_EXPIRING_DAYS`] days, taken-over scopes the source serves
+    /// again, and under Hardened the enabled mirrors whose token has no source prefix.
     ///
     /// # Errors
     ///
@@ -1067,28 +1188,42 @@ impl MirrorService {
     pub async fn findings(&self) -> Result<Vec<Finding>, MirrorError> {
         let now = self.now();
         let view = self.view().await?;
-        let taken: Vec<(MirrorId, IpNet)> = view
+        let takeovers: Vec<(MirrorId, IpNet)> = view
             .scan_typed(&tables::TAKEOVERS, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .filter(|(_, takeover, _)| takeover.state == TakeoverState::Done)
             .map(|(_, takeover, _)| (takeover.mirror, takeover.scope))
             .collect();
-        let mut found: BTreeMap<&'static str, Vec<String>> = BTreeMap::new();
+        let mut found: BTreeMap<&'static str, Vec<(MirrorId, String)>> = BTreeMap::new();
         let soon = Duration::from_secs(u64::from(TOKEN_EXPIRING_DAYS) * 86_400);
+        let hardened = self.hardened();
         for mirror in Self::rows(view.as_ref())? {
             let mirror = self.fresh(mirror);
-            let mut raise = |code| found.entry(code).or_default().push(mirror.name.clone());
+            let mut raise = |code| {
+                found
+                    .entry(code)
+                    .or_default()
+                    .push((mirror.id, mirror.name.clone()));
+            };
             if mirror.is_stale(now) {
                 raise(findings::MIRROR_STALE);
             }
-            if AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?
+            let token = AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?;
+            if token
+                .as_ref()
                 .and_then(|token| token.expires_at)
                 .is_some_and(|end| end.saturating_since(now) <= soon)
             {
                 raise(findings::MIRROR_TOKEN_EXPIRING);
             }
+            if hardened
+                && mirror.enabled
+                && token.is_none_or(|token| token.source_prefixes.is_empty())
+            {
+                raise(findings::MIRROR_UNBOUND);
+            }
             if let Some(summary) = self.summary(view.as_ref(), &mirror)?
-                && taken.iter().any(|(of, scope)| {
+                && takeovers.iter().any(|(of, scope)| {
                     *of == mirror.id
                         && summary
                             .scopes
@@ -1106,13 +1241,24 @@ impl MirrorService {
     }
 
     /// Sets the metric series of every mirror from memory: the pushes by outcome and the
-    /// age of the last push. Run by the metrics timer.
+    /// age of the last push; and drops the newest leases held past their age. Run by the
+    /// metrics timer (every 30 s by default).
     ///
     /// # Errors
     ///
     /// A store error.
     pub async fn refresh_metrics(&self) -> Result<(), MirrorError> {
         let now = self.now();
+        // The newest leases past their age go with this round.
+        for memory in self.memory().values_mut() {
+            if memory
+                .newest
+                .as_ref()
+                .is_some_and(|(_, until)| *until <= now)
+            {
+                memory.newest = None;
+            }
+        }
         let view = self.view().await?;
         for mirror in Self::rows(view.as_ref())? {
             let mirror = self.fresh(mirror);

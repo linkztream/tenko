@@ -10,7 +10,7 @@ import { Dialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { formatDuration, formatRelative, t } from "../i18n";
 import { createMirror, listMirrors, sourceList, type MirrorCreated, type MirrorItem } from "./api";
-import { mirrorState } from "./model";
+import { mirrorState, shortId } from "./model";
 import { migratePaths } from "./paths";
 import { TokenShown } from "./TokenShown";
 import "./migrate.css";
@@ -27,6 +27,9 @@ export function MirrorCard(props: { mirror: MirrorItem }) {
         <A href={migratePaths.mirror(m().id)} class="conn-link">
           <strong>{m().name}</strong>
         </A>
+        <span class="mono muted grow" title={m().id} data-testid="mirror-short-id">
+          {shortId(m().id)}
+        </span>
         <span class={`pill ${state() === "stale" ? "danger" : ""}`} data-testid="mirror-state">
           {t(`migrate.state.${state()}`)}
         </span>

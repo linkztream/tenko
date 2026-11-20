@@ -78,6 +78,19 @@ pub const LEASES_WRITE_SECS: u32 = 600;
 /// The longest name of a mirror, in characters.
 pub const MAX_NAME_LEN: usize = 64;
 
+/// The most mirrors an installation holds (409 `migrate.mirror.limit`). A mirror stands for
+/// one DHCP server being migrated: a few in a small domain, a few dozen at most in a large
+/// one, so 32 is not reached by accident. It bounds what every controller holds in memory
+/// (each mirror's newest leases), and every mirror keeps its own metric series.
+pub const MAX_MIRRORS: usize = 32;
+
+/// The shortest IPv4 source prefix of a mirror's token: a list of shorter ones could cover
+/// the whole address space (two /1 prefixes) and bind nothing.
+pub const MIN_SOURCE_PREFIX_V4: u8 = 16;
+
+/// The shortest IPv6 source prefix of a mirror's token, for the same reason.
+pub const MIN_SOURCE_PREFIX_V6: u8 = 48;
+
 /// The prefix of a mirror's service account name: `mirror-<id>`.
 pub const ACCOUNT_PREFIX: &str = "mirror-";
 
@@ -173,6 +186,14 @@ impl Mirror {
     /// that a rename touches nothing else.
     pub fn account_name(id: MirrorId) -> String {
         format!("{ACCOUNT_PREFIX}{id}")
+    }
+
+    /// The short form of the mirror `id` that the card, the findings and the CLI show beside
+    /// a name, which is not unique: its last eight hexadecimal digits (the random end of
+    /// the identifier, where its start is the creation time).
+    pub fn short_id(id: MirrorId) -> String {
+        let text = id.to_string();
+        text[text.len() - 8..].to_owned()
     }
 
     /// After how many seconds without a push the mirror is stale (section 2.4).
@@ -427,7 +448,8 @@ impl fmt::Display for MigrateScope {
 pub mod codes {
     /// No such mirror (404). Params: `id`.
     pub const MIRROR_NOT_FOUND: &str = "migrate.mirror.not_found";
-    /// A mirror of this name exists (409). Params: `name`.
+    /// An account of the mirror's service account name (`mirror-<id>`) exists (409).
+    /// Params: `name`.
     pub const MIRROR_EXISTS: &str = "migrate.mirror.exists";
     /// A mirror's settings are invalid (400). Params: `field`, `reason`.
     pub const MIRROR_INVALID_SETTINGS: &str = "migrate.mirror.invalid_settings";
@@ -484,9 +506,14 @@ pub mod codes {
     /// A write of the mirror's row met a concurrent change and could not be repeated (409).
     /// Params: `id`.
     pub const MIRROR_CONFLICT: &str = "migrate.mirror.conflict";
+    /// The installation holds as many mirrors as it may (409). Params: `max`.
+    pub const MIRROR_LIMIT: &str = "migrate.mirror.limit";
+    /// The profile requires source prefixes and the mirror's token has none (the finding;
+    /// its pushes are refused like an unknown token's). Params: `mirrors`, `ids`.
+    pub const MIRROR_UNBOUND: &str = "migrate.mirror.unbound";
 
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 24] = [
+    pub const ALL: [&str; 26] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -511,6 +538,8 @@ pub mod codes {
         TAKEOVER_RUNNING,
         MIRROR_SNAPSHOT_MOVED,
         MIRROR_CONFLICT,
+        MIRROR_LIMIT,
+        MIRROR_UNBOUND,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -721,9 +750,17 @@ pub mod findings {
     pub const MIRROR_SCOPE_ACTIVE: &str = super::codes::MIRROR_SCOPE_ACTIVE;
     /// The mirror's token expires within fourteen days (WT-Q11).
     pub const MIRROR_TOKEN_EXPIRING: &str = super::codes::MIRROR_TOKEN_EXPIRING;
+    /// Under Hardened, an enabled mirror whose token has no source prefix: its pushes are
+    /// refused until the token is replaced with prefixes (a warning).
+    pub const MIRROR_UNBOUND: &str = super::codes::MIRROR_UNBOUND;
 
     /// Every finding.
-    pub const ALL: [&str; 3] = [MIRROR_STALE, MIRROR_SCOPE_ACTIVE, MIRROR_TOKEN_EXPIRING];
+    pub const ALL: [&str; 4] = [
+        MIRROR_STALE,
+        MIRROR_SCOPE_ACTIVE,
+        MIRROR_TOKEN_EXPIRING,
+        MIRROR_UNBOUND,
+    ];
 }
 
 // ---------------------------------------------------------------------------------------
@@ -907,6 +944,10 @@ mod tests {
             Mirror::account_name(mirror.id),
             format!("mirror-{}", mirror.id)
         );
+        let id: MirrorId = "0190d1c2-0000-7000-8000-00000000abcd"
+            .parse()
+            .expect("an id");
+        assert_eq!(Mirror::short_id(id), "0000abcd");
     }
 
     #[test]
