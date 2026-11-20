@@ -24,7 +24,10 @@ the `DhcpServer` module and nothing else, and download nothing.
   authority. Give the mirror the server's address as a source address when you create it
   (one address, or the network the server is in): the token is then accepted from there
   only, and a push from anywhere else is refused like an unknown token (`answer=401` in the
-  log). A network is at least a /16 (IPv4) or a /48 (IPv6). The Hardened profile requires
+  log). A network is at least a /16 (IPv4) or a /48 (IPv6). That bound does not see what
+  a prefix stands for: a NAT64 prefix such as `64:ff9b::/96` is a /96 but covers every IPv4
+  address behind the translator, so give the server's own address rather than such a
+  prefix. The Hardened profile requires
   a source address; a mirror created without one before the switch to Hardened is refused
   the same way until its token is replaced with one (the system status names it,
   `migrate.mirror.unbound`). If the server reaches Tenko through a reverse proxy, configure

@@ -1184,3 +1184,67 @@ async fn an_installation_holds_a_bounded_number_of_mirrors() {
         )
     );
 }
+
+#[tokio::test]
+async fn one_push_of_a_mirror_is_in_flight_at_a_time() {
+    let lab = Lab::new().await;
+    let (other, _) = lab
+        .service
+        .create(&lab.admin, new_mirror("dc2", &[]))
+        .await
+        .expect("another mirror");
+    lab.at(0);
+    let held = lab.service.admit(lab.id).await.expect("admitted");
+    // Past the floor, but the first push is still in flight.
+    lab.at(10);
+    let refused = lab.service.admit(lab.id).await.expect_err("in flight");
+    assert_eq!(
+        (refused.code(), refused.params()["retry_after"].as_str()),
+        ("migrate.mirror.rate", "10")
+    );
+    lab.service
+        .admit(other.mirror.id)
+        .await
+        .expect("another mirror is not held");
+    drop(held);
+    lab.service.admit(lab.id).await.expect("the push ended");
+}
+
+#[tokio::test]
+async fn two_creations_at_once_hold_no_mirror_over_the_bound() {
+    let mut gate = None;
+    let lab = Lab::over(|store| {
+        let held = Arc::new(Gate::new(store));
+        gate = Some(Arc::clone(&held));
+        held
+    })
+    .await;
+    let gate = gate.expect("the gate");
+    for n in 2..MAX_MIRRORS {
+        lab.service
+            .create(&lab.admin, new_mirror(&format!("dc{n}"), &[]))
+            .await
+            .expect("within the bound");
+    }
+    // One place is left. The first creation counted and waits at its write while the
+    // second takes the place; the first then fails its write, counts again and is refused.
+    let (arrived, go) = gate.arm();
+    let (first, second) = tokio::join!(
+        lab.service.create(&lab.admin, new_mirror("first", &[])),
+        async {
+            arrived.await.expect("the first reached its write");
+            let second = lab
+                .service
+                .create(&lab.admin, new_mirror("second", &[]))
+                .await;
+            go.send(()).expect("let go");
+            second
+        }
+    );
+    second.expect("the last place");
+    assert_eq!(
+        first.expect_err("over the bound").code(),
+        "migrate.mirror.limit"
+    );
+    assert_eq!(lab.service.list().await.expect("list").len(), MAX_MIRRORS);
+}

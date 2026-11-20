@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use tenko_auth::AuthError;
 use tenko_core::{
     Coded, MirrorId, PrefixId,
-    error::codes::INVALID_REQUEST,
+    error::codes::{BODY_TIMEOUT, INVALID_REQUEST},
     ir::{LossEntry, MirrorOrigin, SnapshotInvalid},
     migrate::{LossAck, Mirror, codes},
 };
@@ -288,6 +288,9 @@ pub enum MirrorError {
     },
     /// The mirror's row changed under every attempt to write it (409).
     Conflict(MirrorId),
+    /// The push's body did not arrive within the server's deadline for request bodies (408;
+    /// the server answers it, the refusal is audited as this).
+    BodyTimeout,
     /// The installation holds as many mirrors as it may (409).
     Limit {
         /// The most mirrors.
@@ -342,6 +345,7 @@ impl fmt::Display for MirrorError {
             Self::Limit { max } => {
                 write!(f, "the installation holds {max} mirrors, the most it may")
             }
+            Self::BodyTimeout => f.write_str("the body did not arrive in time"),
             Self::Auth(error) => error.fmt(f),
             Self::Dhcp(error) => error.fmt(f),
             Self::Store(error) => error.fmt(f),
@@ -368,6 +372,7 @@ impl Coded for MirrorError {
             Self::SnapshotMoved { .. } => codes::MIRROR_SNAPSHOT_MOVED,
             Self::Conflict(_) => codes::MIRROR_CONFLICT,
             Self::Limit { .. } => codes::MIRROR_LIMIT,
+            Self::BodyTimeout => BODY_TIMEOUT,
             Self::Auth(error) => error.code(),
             Self::Dhcp(error) => error.code(),
             Self::Store(error) => error.code(),
@@ -382,6 +387,7 @@ impl Coded for MirrorError {
             | Self::SnapshotMoved { .. }
             | Self::Conflict(_)
             | Self::Limit { .. } => 409,
+            Self::BodyTimeout => 408,
             Self::Settings { .. } | Self::Request(_) => 400,
             Self::Disabled(_) => 403,
             Self::TooLarge { .. } => 413,
@@ -416,7 +422,7 @@ impl Coded for MirrorError {
             Self::ScopeNotFound(mirror, scope) => {
                 BTreeMap::from([("id", mirror.to_string()), ("scope", scope.to_string())])
             }
-            Self::Request(_) => BTreeMap::new(),
+            Self::Request(_) | Self::BodyTimeout => BTreeMap::new(),
             Self::SnapshotMoved { sequence, latest } => BTreeMap::from([
                 ("sequence", sequence.to_string()),
                 ("latest", latest.to_string()),

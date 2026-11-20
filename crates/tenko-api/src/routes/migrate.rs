@@ -355,10 +355,32 @@ async fn read_body(headers: &HeaderMap, raw: Body) -> Result<(Bytes, bool), Mirr
     };
     let bytes = axum::body::to_bytes(raw, MAX_BODY_BYTES)
         .await
-        .map_err(|_| MirrorError::TooLarge {
-            limit: MAX_BODY_BYTES,
+        .map_err(|error| {
+            if timed_out(&error) {
+                MirrorError::BodyTimeout
+            } else {
+                MirrorError::TooLarge {
+                    limit: MAX_BODY_BYTES,
+                }
+            }
         })?;
     Ok((bytes, gzip))
+}
+
+/// Whether a body's read ended on the server's deadline for bodies, which ends it with a
+/// `TimedOut` error somewhere in the error's chain.
+fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
+    let mut next = Some(error);
+    while let Some(error) = next {
+        if error
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
+        {
+            return true;
+        }
+        next = error.source();
+    }
+    false
 }
 
 /// Inflates, parses and checks a body that was read whole: work for a blocking thread, not
@@ -375,7 +397,7 @@ async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
@@ -389,7 +411,7 @@ async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError
         (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is above the bound (`migrate.mirror.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 429, description = "A push came faster than the floor, or another push held the node's decode for 2 s (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 429, description = "A push came faster than the floor or while another push of the mirror is in flight, or another push held the node's decode for 2 s (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn push_mirror_snapshot(
@@ -419,10 +441,11 @@ async fn push_mirror_snapshot(
         }
         .into());
     }
-    // The body is read first, under its deadline, so that a slow body holds no other
+    // One push of the mirror in flight on this controller until this one ends, however it
+    // ends. The body is read first, under its deadline, so that a slow body holds no other
     // mirror's push; one decode at a time on this node, from the inflate to the write.
     let outcome = async {
-        service.admit(id).await?;
+        let _in_flight = service.admit(id).await?;
         let (bytes, gzip) = read_body(&headers, raw).await?;
         let _decoding = service.decoding().await?;
         let snapshot = decoded(bytes, gzip).await?;

@@ -40,7 +40,7 @@ use tenko_auth::{
     settings::Profile,
 };
 use tenko_core::{
-    ApiTokenId, MirrorId, Principal, RequestCtx, Revision, Timestamp, UserId,
+    ApiTokenId, CounterKey, MirrorId, Principal, RequestCtx, Revision, Timestamp, UserId,
     audit::AuditDraft,
     codec::{canonical_sha256, encode_key},
     ipam::Stamp,
@@ -69,6 +69,10 @@ use super::{
     reason = "MAX_MIRRORS is a small constant"
 )]
 const MIRROR_SLOTS: u16 = MAX_MIRRORS as u16;
+
+/// Bumped by every creation of a mirror, which expects the value it read, so that two
+/// creations cannot pass the count of [`MAX_MIRRORS`] together.
+const CREATIONS: CounterKey = CounterKey::new("migrate.mirror_creations");
 
 /// A refused push is audited at most this often per mirror (plan section 2.12).
 const REFUSAL_AUDIT_SECS: u64 = 60;
@@ -106,6 +110,8 @@ struct Memory {
     token: Option<ApiTokenId>,
     /// The last push let through the floor, accepted or not.
     admitted: Option<Timestamp>,
+    /// Whether an admitted push is still in flight ([`InFlight`]).
+    in_flight: bool,
     /// The last accepted push.
     pushed: Option<Timestamp>,
     /// The last accepted sequence.
@@ -118,6 +124,24 @@ struct Memory {
     outcomes: [u64; 3],
     /// What the stored snapshot holds.
     summary: Option<Arc<Summary>>,
+}
+
+/// A push of a mirror in flight on this controller, from its admission until it ends in any
+/// way (answered, refused, cut by the body deadline, or dropped with its connection): while
+/// it lives, the mirror's next push is refused, so that one token holds at most one body on
+/// a controller.
+#[derive(Debug)]
+pub struct InFlight<'a> {
+    service: &'a MirrorService,
+    id: MirrorId,
+}
+
+impl Drop for InFlight<'_> {
+    fn drop(&mut self) {
+        if let Some(memory) = self.service.memory().get_mut(&self.id) {
+            memory.in_flight = false;
+        }
+    }
 }
 
 /// What the card, the losses and the findings read of a stored snapshot, kept beside the
@@ -606,45 +630,51 @@ impl MirrorService {
         Self::settings(&mirror)?;
         self.check_sources(&new.token.source_prefixes)?;
         let account = Mirror::account_name(mirror.id);
-        let view = self.view().await?;
-        // shortcut: two creations at once may pass the count together and hold one mirror
-        // more than the bound, which only administrators can do; a counter row would close it.
-        if Self::rows(view.as_ref())?.len() >= MAX_MIRRORS {
-            return Err(MirrorError::Limit { max: MAX_MIRRORS });
+        for _ in 0..ATTEMPTS {
+            let view = self.view().await?;
+            if Self::rows(view.as_ref())?.len() >= MAX_MIRRORS {
+                return Err(MirrorError::Limit { max: MAX_MIRRORS });
+            }
+            let mut batch = WriteBatch::for_request(ctx);
+            // Creations go one after the other: a creation the count let through fails at its
+            // commit when another committed in between, and counts again.
+            batch.expect_counter(CREATIONS, view.counter(&CREATIONS)?);
+            batch.bump(CREATIONS);
+            let credentials = self
+                .auth
+                .stage_mirror_account(ctx, view.as_ref(), &mut batch, mirror.id, &new.token)
+                .await
+                .map_err(|error| match error {
+                    AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
+                    other => other.into(),
+                })?;
+            mirror.account = credentials.account;
+            mirror.token = credentials.token.info.id;
+            batch.expect_typed(&tables::MIRRORS, &mirror.id, None);
+            batch.put_typed(&tables::MIRRORS, &mirror.id, &mirror)?;
+            batch.audit(
+                AuditDraft::success(audit::MIRROR_CREATE, vec![mirror_object(mirror.id)])
+                    .with_source_ip(ctx.source_ip)
+                    .with_context("name", mirror.name.clone())
+                    .with_context("kind", mirror.kind.to_string())
+                    .with_context("interval_secs", mirror.interval_secs.to_string()),
+            );
+            match self.commit(batch).await {
+                // Another creation, or an account of the name, came first: the next pass
+                // counts again and names the account.
+                Err(error) if is_conflict(&error) => continue,
+                result => result?,
+            }
+            let item = self.item(self.view().await?.as_ref(), mirror)?;
+            return Ok((
+                MirrorItem {
+                    token_expires_at: credentials.token.info.expires_at,
+                    ..item
+                },
+                credentials.token,
+            ));
         }
-        let mut batch = WriteBatch::for_request(ctx);
-        let credentials = self
-            .auth
-            .stage_mirror_account(ctx, view.as_ref(), &mut batch, mirror.id, &new.token)
-            .await
-            .map_err(|error| match error {
-                AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
-                other => other.into(),
-            })?;
-        mirror.account = credentials.account;
-        mirror.token = credentials.token.info.id;
-        batch.expect_typed(&tables::MIRRORS, &mirror.id, None);
-        batch.put_typed(&tables::MIRRORS, &mirror.id, &mirror)?;
-        batch.audit(
-            AuditDraft::success(audit::MIRROR_CREATE, vec![mirror_object(mirror.id)])
-                .with_source_ip(ctx.source_ip)
-                .with_context("name", mirror.name.clone())
-                .with_context("kind", mirror.kind.to_string())
-                .with_context("interval_secs", mirror.interval_secs.to_string()),
-        );
-        match self.commit(batch).await {
-            // The account's name was taken between the read and the commit.
-            Err(error) if is_conflict(&error) => return Err(MirrorError::Exists(account)),
-            result => result?,
-        }
-        let item = self.item(self.view().await?.as_ref(), mirror)?;
-        Ok((
-            MirrorItem {
-                token_expires_at: credentials.token.info.expires_at,
-                ..item
-            },
-            credentials.token,
-        ))
+        Err(MirrorError::Conflict(mirror.id))
     }
 
     /// Reads the mirror's row, lets `change` stage a write of it, and commits; a write that
@@ -837,14 +867,15 @@ impl MirrorService {
     /// Lets a push of `id` through before its body is read: the mirror exists, is enabled,
     /// its token is bound to source prefixes when the profile is Hardened (a token without
     /// them is refused as one from outside its prefixes is, so that a mirror created before
-    /// the switch to Hardened stops; the finding `migrate.mirror.unbound` names it), and its
-    /// last admitted push is at least [`MIN_PUSH_INTERVAL_SECS`] old.
+    /// the switch to Hardened stops; the finding `migrate.mirror.unbound` names it), no other
+    /// push of it is in flight on this controller, and its last admitted push is at least
+    /// [`MIN_PUSH_INTERVAL_SECS`] old. The push holds the answer until it ends.
     ///
     /// # Errors
     ///
     /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Auth`],
-    /// [`MirrorError::Rate`].
-    pub async fn admit(&self, id: MirrorId) -> Result<(), MirrorError> {
+    /// [`MirrorError::Rate`] (also while another push of the mirror is in flight).
+    pub async fn admit(&self, id: MirrorId) -> Result<InFlight<'_>, MirrorError> {
         let view = self.view().await?;
         let (mirror, _) = Self::row(view.as_ref(), id)?;
         if !mirror.enabled {
@@ -860,6 +891,9 @@ impl MirrorService {
         let mut memory = self.memory();
         let memory = memory.entry(id).or_default();
         let floor = u64::from(MIN_PUSH_INTERVAL_SECS);
+        if memory.in_flight {
+            return Err(MirrorError::Rate { retry_after: floor });
+        }
         if let Some(last) = memory.admitted {
             let since = now.saturating_since(last).as_secs();
             if since < floor {
@@ -869,7 +903,8 @@ impl MirrorService {
             }
         }
         memory.admitted = Some(now);
-        Ok(())
+        memory.in_flight = true;
+        Ok(InFlight { service: self, id })
     }
 
     /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4) from the

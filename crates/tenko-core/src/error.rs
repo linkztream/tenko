@@ -25,6 +25,8 @@ pub mod codes {
     pub const INVALID_VALUE: &str = "sys.invalid_value";
     /// A namespaced name is malformed or uses an unknown namespace (400).
     pub const INVALID_NAME: &str = "sys.invalid_name";
+    /// A request body did not arrive within the server's deadline for bodies (408).
+    pub const BODY_TIMEOUT: &str = "sys.body_timeout";
 }
 
 /// An error with a stable code, an HTTP status and named parameters.

@@ -99,6 +99,18 @@ const SLACK_BYTES: usize = 1 << 20;
 pub const DECODE_ALLOCATION_BOUND: usize =
     2 * MAX_INFLATED_BYTES + ELEMENT_BYTES * MAX_ELEMENTS + SLACK_BYTES;
 
+/// The push bodies a node holds while they arrive: one push in flight per mirror on a
+/// controller (`MirrorService::admit`), each body at most [`MAX_BODY_BYTES`], over at most
+/// `MAX_MIRRORS` mirrors: 268,435,456 octets (256 MiB), 8 MiB per token. With the one
+/// decode, a node's worst case for pushes is [`PUSH_MEMORY_BOUND`].
+pub const BUFFERED_BODIES_BOUND: usize = MAX_BODY_BYTES * tenko_core::migrate::MAX_MIRRORS;
+
+/// What all pushes together may hold on a node at worst: the bodies arriving
+/// ([`BUFFERED_BODIES_BOUND`]) and the one decode ([`DECODE_ALLOCATION_BOUND`]),
+/// 421,456,896 octets (402 MiB). A body is joined into one buffer when it has arrived, which
+/// briefly holds it twice; the one being decoded is counted in both.
+pub const PUSH_MEMORY_BOUND: usize = BUFFERED_BODIES_BOUND + DECODE_ALLOCATION_BOUND;
+
 /// Decodes a push body that the caller read within [`MAX_BODY_BYTES`]: `gzip` when the
 /// request says `Content-Encoding: gzip`.
 ///
@@ -387,6 +399,8 @@ mod tests {
     fn the_bound_is_the_one_the_documentation_states() {
         assert_eq!(MAX_ELEMENTS, 102_000);
         assert_eq!(DECODE_ALLOCATION_BOUND, 153_021_440);
+        assert_eq!(BUFFERED_BODIES_BOUND, 268_435_456);
+        assert_eq!(PUSH_MEMORY_BOUND, 421_456_896);
     }
 
     #[test]

@@ -69,8 +69,9 @@ pub mod codes {
     /// 429: the principal, or the server in all, holds the most event streams it may.
     pub const TOO_MANY_STREAMS: &str = "sys.events.too_many_streams";
     /// 408: the request body arrived too slowly (`middleware::body_deadline`); the
-    /// connection is closed.
-    pub const BODY_TIMEOUT: &str = "sys.body_timeout";
+    /// connection is closed. Declared in `tenko-core`, since the mirror service audits a
+    /// push it ended as this code.
+    pub const BODY_TIMEOUT: &str = tenko_core::error::codes::BODY_TIMEOUT;
 }
 
 /// Body sent when a problem document cannot be serialized, which should never happen.

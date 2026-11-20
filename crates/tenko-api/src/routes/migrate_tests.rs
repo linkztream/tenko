@@ -7,52 +7,56 @@
 use std::{io::Write as _, sync::Arc, time::Duration};
 
 use axum::{
-    Extension,
+    Extension, Router,
     body::Body,
     http::{Request, header},
 };
 use serde_json::json;
 use tenko_auth::clock::Clock;
+use tenko_core::Authenticator;
 use tenko_migrate::mirror::MirrorService;
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, Store as _, tables};
 
 use crate::{
     API_BASE,
+    middleware::HttpConfig,
     modules::ModuleSet,
-    routes::auth::testkit::{Credential::*, Harness, Reply},
+    routes::auth::testkit::{Credential::*, Harness, Reply, send_to},
+    server,
+    state::AppState,
+    ui::UiSource,
 };
 
 const FIXTURE: &str = include_str!("../../../tenko-core/tests/fixtures/mirror/snapshot.json");
 
 async fn harness() -> (Harness, String) {
+    let (harness, admin, _) = harness_with_app().await;
+    (harness, admin)
+}
+
+/// A harness over the API's routes, and the API listener's router as the server builds it
+/// (`server::app`, with `middleware::outer` and its deadline for request bodies) over the
+/// same environment and mirror service.
+async fn harness_with_app() -> (Harness, String, Router) {
     let (plain, admin) = Harness::installed().await;
     let env = plain.env;
     let clock: Arc<dyn Clock> = env.clock.clone();
     let service =
         Arc::new(MirrorService::new(env.store.clone(), Arc::clone(&env.service)).with_clock(clock));
+    let authenticator: Arc<dyn Authenticator> = env.service.clone();
+    let mut state = AppState::new(env.store.clone());
+    state.auth = Some(authenticator);
+    state.authorizer = Some(env.service.authorizer());
+    let app = server::app(state, &HttpConfig::default(), &UiSource::Embedded)
+        .expect("the application")
+        .layer(Extension(Arc::clone(&service)))
+        .layer(Extension(env.service.clone()));
     let harness = Harness::wired(env, move |state| {
         crate::api_with(state, ModuleSet::ALL)
             .0
             .layer(Extension(service))
-            .layer(axum::middleware::from_fn(body_deadline))
     });
-    (harness, admin)
-}
-
-/// The deadline for request bodies, as `middleware::outer` sets it on both listeners: the
-/// harness's router is the API's routes without the listeners' middleware.
-async fn body_deadline(
-    mut request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> axum::response::Response {
-    let expired = crate::middleware::body_deadline::wrap(&mut request);
-    let response = next.run(request).await;
-    if expired.is_some_and(|expired| expired.load(std::sync::atomic::Ordering::Relaxed))
-        && !response.status().is_success()
-    {
-        return crate::middleware::body_deadline::refusal();
-    }
-    response
+    (harness, admin, app)
 }
 
 /// Moves the service's clock past the floor between two pushes.
@@ -86,13 +90,12 @@ fn snapshot(sequence: u64) -> String {
     FIXTURE.replacen("\"sequence\": 1,", &format!("\"sequence\": {sequence},"), 1)
 }
 
-async fn push(
-    harness: &Harness,
+fn push_request(
     id: &str,
     credential: &str,
     body: impl Into<Body>,
     headers: &[(&str, &str)],
-) -> Reply {
+) -> Request<Body> {
     let mut request = Request::builder()
         .method("PUT")
         .uri(format!("{API_BASE}/migrate/mirrors/{id}/snapshot"))
@@ -101,18 +104,28 @@ async fn push(
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
+    request.body(body.into()).expect("a request")
+}
+
+async fn push(
+    harness: &Harness,
+    id: &str,
+    credential: &str,
+    body: impl Into<Body>,
+    headers: &[(&str, &str)],
+) -> Reply {
     harness
-        .send(request.body(body.into()).expect("a request"))
+        .send(push_request(id, credential, body, headers))
         .await
 }
 
-fn gzip(text: &str) -> Vec<u8> {
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(text.as_bytes()).expect("gzip");
-    encoder.finish().expect("gzip")
+/// A push through the server's own router.
+async fn push_to(app: &Router, id: &str, credential: &str, body: impl Into<Body>) -> Reply {
+    send_to(app.clone(), push_request(id, credential, body, &[])).await
 }
 
-async fn refusals(harness: &Harness) -> usize {
+/// The codes of the audited refusals of pushes, oldest first.
+async fn refused_codes(harness: &Harness) -> Vec<String> {
     let view = harness
         .env
         .store
@@ -123,7 +136,18 @@ async fn refusals(harness: &Harness) -> usize {
         .expect("audit")
         .into_iter()
         .filter(|(_, record, _)| record.draft.action.as_str() == "migrate.mirror.refuse")
-        .count()
+        .map(|(_, record, _)| record.draft.details.context["code"].clone())
+        .collect()
+}
+
+fn gzip(text: &str) -> Vec<u8> {
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder.write_all(text.as_bytes()).expect("gzip");
+    encoder.finish().expect("gzip")
+}
+
+async fn refusals(harness: &Harness) -> usize {
+    refused_codes(harness).await.len()
 }
 
 #[tokio::test]
@@ -222,26 +246,68 @@ fn slow_body() -> (
 }
 
 #[tokio::test]
-async fn a_slow_body_is_cut_by_the_deadline_and_holds_no_other_mirror_s_push() {
-    let (harness, admin) = harness().await;
+async fn a_slow_body_holds_one_push_of_its_mirror_and_no_other_mirror_s() {
+    let (harness, admin, app) = harness_with_app().await;
     let (first, first_token) = mirror(&harness, &admin, "dc1").await;
     let (second, second_token) = mirror(&harness, &admin, "dc2").await;
-    // The first body sends a few octets and then nothing. Time stands still from here and
-    // moves on whenever nothing else is to be done: the second mirror pushes while the first
-    // body is still being read, and the first ends at the server's deadline for bodies.
+    // Through the server's own router: the first body sends a few octets and then nothing.
+    // Time stands still from here and moves on whenever nothing else is to be done: while
+    // the first body is still arriving, its mirror's next push and the other mirror push,
+    // and the first ends at the server's deadline for bodies.
     let (body, part, reading) = slow_body();
     part.send(b"{\"format\"".to_vec()).await.expect("sent");
     tokio::time::pause();
-    let harness = &harness;
-    let (slow, other) = tokio::join!(push(harness, &first, &first_token, body, &[]), async move {
+    let app = &app;
+    let (slow, (again, other)) = tokio::join!(push_to(app, &first, &first_token, body), async {
         reading.notified().await;
-        push(harness, &second, &second_token, snapshot(1), &[]).await
+        (
+            push_to(app, &first, &first_token, snapshot(1)).await,
+            push_to(app, &second, &second_token, snapshot(1)).await,
+        )
     });
-    // Had the first push held the node's decode while its body arrived, this one would
-    // have waited for it and been answered 429.
+    // One push of a mirror in flight on the node: the second waits for no body.
+    again.assert_problem(429, "migrate.mirror.rate");
+    assert_eq!(again.header("retry-after"), Some("10"));
+    // Had the first push held the node's decode while its body arrived, the other mirror
+    // would have waited for it and been answered 429.
     other.assert_status(200);
     slow.assert_problem(408, "sys.body_timeout");
     drop(part);
+    // The cut push is over: the mirror's next one is admitted.
+    later(&harness, 10);
+    push_to(app, &first, &first_token, snapshot(1))
+        .await
+        .assert_status(200);
+}
+
+#[tokio::test]
+async fn a_push_cut_by_the_body_deadline_is_audited_as_such() {
+    let (harness, admin, app) = harness_with_app().await;
+    let (id, token) = mirror(&harness, &admin, "dc1").await;
+    let (body, part, _) = slow_body();
+    part.send(b"{".to_vec()).await.expect("sent");
+    tokio::time::pause();
+    push_to(&app, &id, &token, body)
+        .await
+        .assert_problem(408, "sys.body_timeout");
+    assert_eq!(refused_codes(&harness).await, ["sys.body_timeout"]);
+    drop(part);
+}
+
+#[tokio::test]
+async fn a_push_whose_connection_drops_lets_its_mirror_s_next_one_in() {
+    let (harness, admin, app) = harness_with_app().await;
+    let (id, token) = mirror(&harness, &admin, "dc1").await;
+    let (body, part, reading) = slow_body();
+    let dropped = tokio::spawn(send_to(app.clone(), push_request(&id, &token, body, &[])));
+    reading.notified().await;
+    dropped.abort();
+    assert!(dropped.await.expect_err("aborted").is_cancelled());
+    drop(part);
+    later(&harness, 10);
+    push_to(&app, &id, &token, snapshot(1))
+        .await
+        .assert_status(200);
 }
 
 #[tokio::test]
