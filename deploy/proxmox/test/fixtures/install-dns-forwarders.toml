@@ -1,0 +1,12 @@
+
+[dns]
+# Where the dns role answers (UDP and TCP). Port 53 needs the unit's CAP_NET_BIND_SERVICE.
+listen = ["192.0.2.53:53"]
+# Every name outside the zones goes to these upstream resolvers (install.sh --forwarders);
+# the answers are still validated with DNSSEC. Forwarding rules of the store go first.
+forwarders = ["192.0.2.1"]
+
+[dns.recursion]
+# Off, so that the forwarders above answer every name outside the zones: with it on, they
+# would serve only a view whose resolution is forward.
+enabled = false

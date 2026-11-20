@@ -1002,7 +1002,8 @@ pub struct DnsNodeStatus {
     #[serde(default)]
     pub cache_stale: u64,
     /// What keeps the resolver side from working as configured: stub zones whose name
-    /// servers could not be learned, views whose recursion access list does not exist.
+    /// servers could not be learned, views whose recursion access list does not exist, the
+    /// upstreams of `[dns] forwarders` while the built-in recursion leaves them unused.
     #[serde(default)]
     pub problems: Vec<String>,
     /// When the role started.

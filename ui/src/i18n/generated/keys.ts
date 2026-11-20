@@ -1579,6 +1579,7 @@ export type MessageKey =
   | "dashboard.finding.evidence.utilization_bare"
   | "dashboard.finding.health.auth.token.expiring"
   | "dashboard.finding.health.auth.token.revoked"
+  | "dashboard.finding.health.dns.recursion.forwarders_unused"
   | "dashboard.finding.health.integration.certificate_expiring"
   | "dashboard.finding.health.integration.tls12_allowed"
   | "dashboard.finding.health.sys.update.installer_repair"
@@ -8748,6 +8749,7 @@ export interface MessageArgs {
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
   "dashboard.finding.health.auth.token.expiring": { count: string | number; expires_at: string | number };
   "dashboard.finding.health.auth.token.revoked": { count: string | number };
+  "dashboard.finding.health.dns.recursion.forwarders_unused": { count: string | number; node: string | number };
   "dashboard.finding.health.integration.certificate_expiring": { count: string | number; label: string | number; not_after: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
@@ -11750,6 +11752,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.evidence.utilization_bare",
   "dashboard.finding.health.auth.token.expiring",
   "dashboard.finding.health.auth.token.revoked",
+  "dashboard.finding.health.dns.recursion.forwarders_unused",
   "dashboard.finding.health.integration.certificate_expiring",
   "dashboard.finding.health.integration.tls12_allowed",
   "dashboard.finding.health.sys.update.installer_repair",

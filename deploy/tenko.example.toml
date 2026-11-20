@@ -408,9 +408,13 @@ workers = 0
 # BADCOOKIE (spoofed sources get no amplified answer); "off" ignores cookies.
 cookies = "on"
 # The default forwarder (docs/dns-resolver.md): the upstream resolvers for names outside the
-# zones that no forwarding rule of the store covers. A root rule "." in the store
-# (`tenko dns forwarder create . --upstream ...`) wins over this list. Empty: only the rules
-# and stub zones of the store forward; other names are refused. Who may recurse at all is
+# zones that no forwarding rule of the store covers. While the built-in recursion runs (the
+# default, see [dns.recursion]) they serve only a view whose resolution is "forward": set
+# [dns.recursion] enabled = false to send every such name to them; the start line and the
+# node's status name forwarders that get no query. A root rule "." in the store
+# (`tenko dns forwarder create . --upstream ...`) wins over this list. Empty with the
+# recursion off: only the rules and stub zones of the store forward; other names are
+# refused. Who may recurse at all is
 # the recursion access list of the client's view, or the profile's default (Home and
 # Standard: the prefixes IPAM knows and loopback; Hardened: nobody; Lab: everyone).
 # An entry is an address ("192.0.2.1", "192.0.2.1:5353") or a table
@@ -601,9 +605,12 @@ max_upload = 64
 # WP10.0: the recursive resolver.
 # [dns.recursion]
 # The iterative resolver of this node (recursion plan section 3.4). The keys are read and
-# checked at start; nothing uses them until the engine arrives (WP10.1). Keys that are not
-# set follow the profile in force when the role starts.
-# Resolve iteratively on this node. Not set: on under every profile.
+# checked at start; a change needs a restart. Keys that are not set follow the profile in
+# force when the role starts.
+# Resolve iteratively on this node. Not set: on under every profile. false sends every name
+# outside the zones that no rule or stub zone covers to [dns] forwarders (what
+# `install.sh --forwarders` writes).
+# Environment: TENKO_DNS__RECURSION__ENABLED=false
 # enabled = true
 # A root hints file in the format of named.root. Not set: the hints shipped with Tenko.
 # hints = "/etc/tenko/root.hints"

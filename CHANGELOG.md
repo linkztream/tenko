@@ -4,6 +4,11 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+### Fixed
+
+- `deploy/install.sh --forwarders <address>,...` now sends every name outside the node's zones to those resolvers. Before, the installer wrote them as `[dns] forwarders` beside the built-in recursion, which is on by default and resolves those names from the root servers itself, so the forwarders never got a query; with split horizon, a private name that only the forwarder knows was answered from the public tree. The installer now writes `[dns.recursion] enabled = false` with the list; answers are still validated with DNSSEC. Without the flag (also under `--yes`) it writes no forwarders, where it used to copy the host's own resolvers, and the recursion applies; the help, the questions and the comments in `tenko.toml` say which happens. The Proxmox container script's `var_forwarders` follows. An existing installation is not rewritten and keeps its behavior; `install.sh --reconfigure --forwarders <address>,...` (or `none`) applies the new rule to it. The interactive `--reconfigure` offers what the node does today (none while the recursion runs, and names a list the file holds beside it), and pressing Enter there changes nothing.
+- A node whose `[dns] forwarders` names upstreams that get no query, because the recursion resolves those names and no view's resolution is `forward`, says so: the `dns role answering on ...` line ends with `the <n> upstream(s) of [dns] forwarders are not used: ...` and how to make them used (`[dns.recursion] enabled = false` and a restart, or a forwarding rule for `.`), `GET /api/v1/nodes/{id}/dns` lists the same sentence in `problems`, which the forwarders page shows, and `GET /api/v1/system/status` warns with `dns.recursion.forwarders_unused`, which the start page shows among the findings. The forwarders page's note on names no rule covers now says that the node resolves them itself unless a view forwards (`docs/dns-resolver.md` section 10.1).
+
 ## [0.0.12-rc.6] - 2026-11-20
 
 ### Fixed

@@ -17,6 +17,11 @@
 //!   names and the names under them with NXDOMAIN and the extended error "Blocked"; a second
 //!   fetch sends the entity tag, gets 304 and keeps the version; the node status counts the
 //!   blocked queries of the list; a disabled list blocks nothing.
+//! - The `[dns]` sections the installer writes: with `--forwarders` a name outside the zones
+//!   is asked of the upstream; without it the node resolves by itself with no default
+//!   forwarder; forwarders an older installer wrote beside the recursion are named unused in
+//!   the start line, in the node's status and as a warning of `GET /system/status`, which
+//!   the two new shapes do not raise.
 
 mod serve_support;
 
@@ -711,5 +716,140 @@ fn a_fetched_block_list_blocks_its_names_with_the_extended_error() {
         |answer| header(answer).rcode == NOERROR,
     );
     assert!(holds(&open, [203, 0, 113, 9]), "forwarded once disabled");
+    server.stop().assert_graceful_shutdown();
+}
+
+/// The `[dns]` section the installer writes with `--forwarders 192.0.2.1` and without the
+/// flag; `deploy/proxmox/test/install-sh-test.sh` checks that it writes these files.
+const INSTALLED_FORWARDERS: &str =
+    include_str!("../../../deploy/proxmox/test/fixtures/install-dns-forwarders.toml");
+const INSTALLED_RECURSION: &str =
+    include_str!("../../../deploy/proxmox/test/fixtures/install-dns-recursion.toml");
+
+/// An installer's section with this test's listen address.
+fn installed(section: &str, dns: SocketAddr) -> String {
+    section.replace("192.0.2.53:53", &dns.to_string())
+}
+
+/// `node` with root hints of a server on loopback port 53, where nothing of the test
+/// answers: the recursion runs and no query leaves the host.
+fn with_local_root(node: Node) -> Node {
+    let hints = node.root().join("root.hints");
+    std::fs::write(
+        &hints,
+        ". 3600000 NS a.root.test.\na.root.test. 3600000 A 127.0.0.1\n",
+    )
+    .expect("the hints");
+    let line = format!(
+        "[dns.recursion]\nhints = {:?}\n",
+        hints.display().to_string()
+    );
+    node.with_config(&line)
+}
+
+/// Starts `node` with the dns role and returns it with its `dns role answering` line.
+fn dns_line(node: &mut Node) -> (serve_support::Proc, String) {
+    let server = node.start();
+    let line = server
+        .wait_stdout_line(Duration::from_secs(30), |line| {
+            line.starts_with("dns role answering on")
+        })
+        .unwrap_or_else(|| panic!("no dns line\n{}", server.diagnostics()));
+    (server, line)
+}
+
+/// Completes first-run setup and returns the API with `GET /system/status`.
+fn signed_in(node: &Node, server: &serve_support::Proc) -> (Api, Value) {
+    let token = wait_for_setup_token(server);
+    let mut api = Api::new(node);
+    api.setup(&token);
+    let status = api.get("/system/status").expect(200);
+    (api, status)
+}
+
+/// Whether the health status warns that `[dns] forwarders` get no query.
+fn warns_unused(status: &Value) -> bool {
+    status["warnings"].as_array().is_some_and(|warnings| {
+        warnings
+            .iter()
+            .any(|warning| warning["code"] == "dns.recursion.forwarders_unused")
+    })
+}
+
+#[test]
+fn the_installers_forwarders_get_every_name_outside_the_zones() {
+    let (upstream, asked) = upstream();
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port().release()).into();
+    let mut node = Node::new()
+        .with_args(&["--roles", "controller,dns"])
+        .with_config(
+            &installed(INSTALLED_FORWARDERS, dns).replace("192.0.2.1", &upstream.to_string()),
+        );
+    let (mut server, line) = dns_line(&mut node);
+    assert!(
+        line.contains("forwarding to 1 default upstream(s)"),
+        "{line}"
+    );
+    assert!(!line.contains("not used"), "{line}");
+    let answer = ask_until(
+        "the forwarder's answer",
+        || udp(dns, OUTSIDE, TYPE_A),
+        |answer| holds(answer, [203, 0, 113, 9]),
+    );
+    assert!(header(&answer).ra);
+    assert!(asked.load(Ordering::Relaxed) >= 1);
+    let (_, status) = signed_in(&node, &server);
+    assert!(!warns_unused(&status), "{status}");
+    server.stop().assert_graceful_shutdown();
+}
+
+#[test]
+fn without_the_installers_forwarders_the_node_resolves_by_itself() {
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port().release()).into();
+    let mut node = with_local_root(
+        Node::new()
+            .with_args(&["--roles", "controller,dns"])
+            .with_config(&installed(INSTALLED_RECURSION, dns)),
+    );
+    let (mut server, line) = dns_line(&mut node);
+    assert!(
+        line.contains("resolving the names outside the zones itself")
+            && line.contains("no default forwarder"),
+        "{line}"
+    );
+    let (_, status) = signed_in(&node, &server);
+    assert!(!warns_unused(&status), "{status}");
+    server.stop().assert_graceful_shutdown();
+}
+
+#[test]
+fn forwarders_an_older_installer_wrote_beside_the_recursion_are_named_unused() {
+    let dns: SocketAddr = (Ipv4Addr::LOCALHOST, free_port().release()).into();
+    // The shape an older installer wrote: forwarders, and the recursion on by default.
+    let section = installed(INSTALLED_RECURSION, dns)
+        .replace("forwarders = []", "forwarders = [\"192.0.2.1\"]");
+    let mut node = with_local_root(
+        Node::new()
+            .with_args(&["--roles", "controller,dns"])
+            .with_config(&section),
+    );
+    let (mut server, line) = dns_line(&mut node);
+    let unused = "the 1 upstream(s) of [dns] forwarders are not used";
+    assert!(
+        line.contains(unused) && line.contains("[dns.recursion] enabled = false"),
+        "{line}"
+    );
+    let (api, status) = signed_in(&node, &server);
+    assert!(warns_unused(&status), "{status}");
+    let node_id = status["node"]["id"].as_u64().expect("a node id");
+    let report = api.get(&format!("/nodes/{node_id}/dns")).expect(200);
+    assert!(
+        report["problems"]
+            .as_array()
+            .is_some_and(|problems| problems
+                .iter()
+                .any(|p| p.as_str().is_some_and(|p| p.starts_with(unused)))),
+        "{report}"
+    );
     server.stop().assert_graceful_shutdown();
 }

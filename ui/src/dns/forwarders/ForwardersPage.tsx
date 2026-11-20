@@ -2,7 +2,8 @@
 // rules by suffix with the root rule (the default forwarder) first, their upstreams with the
 // transport and the TLS name, and the view a rule applies in. Create, edit (with the rule's
 // revision) and delete. Without a root rule the note says where the remaining names go: the
-// configuration file's `[dns] forwarders`, which the node status does not list. Below the
+// default resolution (the node's own recursion unless a view forwards to the configuration
+// file's `[dns] forwarders`). Below the
 // rules, who may recurse: the profile's default for the implicit default view, which is no
 // row and so has nothing to edit (WP6.4: each view names its own recursion access list on the
 // views page, linked here), and the problems the node reports for stub zones and recursion

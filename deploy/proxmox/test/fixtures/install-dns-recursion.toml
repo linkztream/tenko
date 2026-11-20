@@ -1,0 +1,8 @@
+
+[dns]
+# Where the dns role answers (UDP and TCP). Port 53 needs the unit's CAP_NET_BIND_SERVICE.
+listen = ["192.0.2.53:53"]
+# Names outside the zones: the built-in recursion resolves them from the root servers.
+# To send every such name to upstream resolvers instead, list them here and add
+# [dns.recursion] with enabled = false (install.sh --reconfigure --forwarders does both).
+forwarders = []

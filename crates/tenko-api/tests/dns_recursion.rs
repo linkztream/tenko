@@ -424,6 +424,7 @@ mod node_routes {
                 trust_anchors: Vec::new(),
                 stripping_rules: Vec::new(),
                 active_ntas: Vec::new(),
+                unused_forwarders: 0,
                 node: NODE,
                 serving: true,
                 revision: Revision(0),

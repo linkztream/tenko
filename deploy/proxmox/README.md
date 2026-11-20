@@ -106,7 +106,7 @@ every upgrade: `pct snapshot <ctid> <name>`.
 | `var_profile` | `home` | `--profile` |
 | `var_tenko_host` | the container's host name | `--host-name` |
 | `var_dns_address` | `all` | `--dns-address` |
-| `var_forwarders` | empty: the container's resolvers | `--forwarders` |
+| `var_forwarders` | empty: no forwarders, the node resolves names outside its zones itself | `--forwarders` (a list sends every such name to those resolvers) |
 | `var_language` | `en` | `--language` |
 | `var_kek` | `auto` | `--kek` |
 | `GITHUB_TOKEN` | empty | Only for the binary download in the container, from a private fork or a private mirror; without `--binary` it goes to the container on the install script's standard input, and nowhere else. It is never used to fetch the scripts |

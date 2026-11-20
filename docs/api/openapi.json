@@ -51277,7 +51277,7 @@
             "items": {
               "type": "string"
             },
-            "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learned, views whose recursion access list does not exist."
+            "description": "What keeps the resolver side from working as configured: stub zones whose name\nservers could not be learned, views whose recursion access list does not exist, the\nupstreams of `[dns] forwarders` while the built-in recursion leaves them unused."
           },
           "query_log": {
             "oneOf": [

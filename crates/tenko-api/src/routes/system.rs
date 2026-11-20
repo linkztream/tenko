@@ -218,10 +218,35 @@ pub const DNS_ROLE_NOT_SERVING: &str = "dns.role.not_serving";
 /// Warning code of a `dns` role whose index is far behind the store.
 pub const DNS_ROLE_LAGGING: &str = "dns.role.lagging";
 
+/// Warning code of a `dns` role whose `[dns] forwarders` get no query: the recursion resolves
+/// the names outside the zones and no view forwards (`docs/dns-resolver.md` section 10.1).
+pub const DNS_FORWARDERS_UNUSED: &str = "dns.recursion.forwarders_unused";
+
+/// The warning `dns.recursion.forwarders_unused`, when `[dns] forwarders` get no query.
+fn unused_forwarders_warning(role: &tenko_dns::status::DnsStatus) -> Option<StatusWarning> {
+    let count = role.unused_forwarders;
+    (count > 0).then(|| StatusWarning {
+        code: DNS_FORWARDERS_UNUSED.to_owned(),
+        detail: format!(
+            "the {count} upstream(s) of [dns] forwarders get no query: the built-in recursion \
+             resolves the names outside the zones and no view forwards; set [dns.recursion] \
+             enabled = false and restart to send every such name to them"
+        ),
+        params: [
+            ("node", role.node.to_string()),
+            ("count", count.to_string()),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value))
+        .collect(),
+    })
+}
+
 /// Revisions a `dns` role may be behind the store before the status warns.
 pub const DNS_LAG_WARNING: u64 = 1_000;
 
-/// The warnings of the `dns` role of this node: not answering, or far behind the store.
+/// The warnings of the `dns` role of this node: not answering, far behind the store, the
+/// findings of the validator, `[dns] forwarders` that get no query.
 pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarning> {
     use tenko_core::dns::{AnchorState, findings};
     let mut params = std::collections::BTreeMap::new();
@@ -247,7 +272,7 @@ pub fn dns_role_warnings(role: &tenko_dns::status::DnsStatus) -> Vec<StatusWarni
     // WP10.2: the validator's findings (recursion plan section 2.3): the clock, stale and
     // pending anchors, the negative trust anchors in force, the rules whose upstream
     // strips the DNSSEC records.
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<StatusWarning> = unused_forwarders_warning(role).into_iter().collect();
     let node = |extra: &[(&str, String)]| {
         let mut params = params.clone();
         for (key, value) in extra {

@@ -132,6 +132,13 @@ describe("findingEvidence", () => {
     expect(findingEvidence(disk).text).toBe("the server's one-line summary");
   });
 
+  it("says in words that the forwarders of the configuration get no query", () => {
+    const unused = finding({ kind: "health", source: "health", code: "dns.recursion.forwarders_unused", params: { node: "1", count: "2" } });
+    expect(findingEvidence(unused).text).toBe(
+      "Node 1 resolves names outside its zones itself, so the forwarders in [dns] forwarders of its tenko.toml (2) get no query. To send those names to them, set [dns.recursion] enabled = false there and restart the service.",
+    );
+  });
+
   it("falls back to the summary for a health code the page has no words for", () => {
     const unknown = finding({ kind: "health", source: "health", code: "sys.unheard.of", params: { detail: "x" } });
     expect(findingEvidence(unknown)).toEqual({ text: "the server's one-line summary", mono: false });

@@ -9961,7 +9961,8 @@ export interface components {
             node: components["schemas"]["NodeId"];
             /**
              * @description What keeps the resolver side from working as configured: stub zones whose name
-             *     servers could not be learned, views whose recursion access list does not exist.
+             *     servers could not be learned, views whose recursion access list does not exist, the
+             *     upstreams of `[dns] forwarders` while the built-in recursion leaves them unused.
              */
             problems?: string[];
             query_log?: components["schemas"]["QueryLogStatus"] | null;

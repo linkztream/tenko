@@ -215,7 +215,7 @@ CFG_END
     # The answers of an installer run, as answers() leaves them before the file is read.
     rerun_defaults() {
       ROLES=controller,dns MODULES=wizard PROFILE=home HOST_NAME=default.example.test
-      DNS_ADDRESS=all FORWARDERS=198.51.100.1 API_PORT=8443
+      DNS_ADDRESS=all FORWARDERS=none API_PORT=8443
       OPT_ROLES="" OPT_MODULES="" OPT_PROFILE="" OPT_HOST="" OPT_DATA_DIR="" OPT_DNS_ADDRESS="" OPT_FORWARDERS=""
       SET_ROLES=0 SET_MODULES=0 SET_FORWARDERS=0 SET_DNS_ADDRESS=0
       HAVE_CONFIG=1 OPT_RECONFIGURE=1 KEK_TARGET=file DATA_DIR=/var/lib/tenko
@@ -230,7 +230,7 @@ CFG_END
     has "$carried" 'roles = "controller,dns,dhcp,probe"' "reconfigure: the roles are the ones given"
     has "$carried" '  "192.0.2.10:53", # the one address of the node' "reconfigure: [dns] listen is carried over, comment and all"
     lacks "$carried" '0.0.0.0:53' "reconfigure: [dns] listen is not reset to every address"
-    has "$carried" 'forwarders = ["192.0.2.1"]' "reconfigure: the forwarders are carried over, not the host's resolvers"
+    has "$carried" 'forwarders = ["192.0.2.1"]' "reconfigure: the forwarders are carried over, not reset"
     has "$carried" 'listen = ["0.0.0.0:9443", "[::]:9443"]' "reconfigure: [server] listen is carried over"
     has "$carried" 'host_name = "tenko.example.test"' "reconfigure: [tls] is carried over"
     has "$carried" 'name = "standard"' "reconfigure: the profile is carried over"
@@ -261,6 +261,66 @@ CFG_END
     config_carry "$cfg" >"${work}/carry.out"
     expect "reconfigure with no answers changes nothing" "same" "$(cmp -s "$CARRY_FILE" "$cfg" && echo same || echo differs)"
     expect "the dns answer is the file's own listen" "192.0.2.10:53" "$DNS_ADDRESS"
+
+    # The two shapes of [dns] a new installation writes; crates/tenko/tests/acceptance_dns.rs
+    # runs a node on each of these files.
+    expect "--forwarders: every name to them, the recursion off" "same" \
+      "$(cmp -s <(config_dns_section '"192.0.2.53:53"' '"192.0.2.1"') "${here}/fixtures/install-dns-forwarders.toml" && echo same || echo differs)"
+    expect "no --forwarders: none written, the built-in recursion" "same" \
+      "$(cmp -s <(config_dns_section '"192.0.2.53:53"' '') "${here}/fixtures/install-dns-recursion.toml" && echo same || echo differs)"
+    # --reconfigure --forwarders with the file's own list, which a recursing node never asks
+    # (the file above): the list becomes effective.
+    rerun_defaults
+    OPT_FORWARDERS=192.0.2.1 SET_FORWARDERS=1 FORWARDERS=192.0.2.1
+    seed_from_config "$cfg"
+    config_carry "$cfg" >"${work}/carry.out"
+    carried="$(cat "$CARRY_FILE")"
+    after_recursion() { grep -A1 -xF '[dns.recursion]' <<<"$carried" | tail -n 1; }
+    expect "reconfigure --forwarders: the recursion is turned off" "enabled = false" "$(after_recursion)"
+    lacks "$carried" 'enabled = true' "reconfigure --forwarders: the old switch is replaced, not doubled"
+    has "$carried" 'roots = [' "reconfigure --forwarders: the rest of [dns.recursion] stays"
+    has "$(cat "${work}/carry.out")" "Carried over [dns.recursion] of ${CONFIG}, except enabled (your answer)" "reconfigure --forwarders: says so"
+    # --reconfigure --forwarders none: no forwarders, and the switch goes so the recursion applies.
+    rerun_defaults
+    OPT_FORWARDERS=none SET_FORWARDERS=1
+    seed_from_config "$cfg"
+    config_carry "$cfg" >"${work}/carry.out"
+    carried="$(cat "$CARRY_FILE")"
+    has "$carried" 'forwarders = []' "reconfigure --forwarders none: no forwarders"
+    expect "reconfigure --forwarders none: no recursion switch" "0" "$(grep -c '^enabled' <<<"$carried")"
+    # A file without [dns.recursion] gains it with the forwarders.
+    printf '[dns]\nlisten = ["192.0.2.10:53"]\nforwarders = []\n' >"${work}/plain.toml"
+    rerun_defaults
+    OPT_FORWARDERS=192.0.2.7 SET_FORWARDERS=1 FORWARDERS=192.0.2.7
+    seed_from_config "${work}/plain.toml"
+    config_carry "${work}/plain.toml" >/dev/null
+    carried="$(cat "$CARRY_FILE")"
+    has "$carried" 'forwarders = ["192.0.2.7"]' "reconfigure --forwarders on a recursing file: the list"
+    expect "reconfigure --forwarders on a recursing file: the recursion off" "enabled = false" "$(after_recursion)"
+    # Interactive --reconfigure: the forwarders question offers what the node does today, and
+    # Enter (an empty answer) leaves the file as it is.
+    ask_case() { # <file> <answer, empty: Enter>
+      (
+        ANSWER="$2"
+        ask() { printf 'offered=%s\nquestion=%s\n' "$3" "$2"; printf -v "$1" '%s' "${ANSWER:-$3}"; }
+        rerun_defaults
+        seed_from_config "$1"
+        ask_forwarders
+        config_carry "$1" >/dev/null
+        cmp -s "$CARRY_FILE" "$1" && echo "file=same" || echo "file=changed"
+        echo "after=$(grep -A1 -xF '[dns.recursion]' "$CARRY_FILE" | tail -n 1)"
+      )
+    }
+    out="$(ask_case "$cfg" "")"
+    has "$out" "offered=none" "interactive: an unused list is not offered, none is"
+    has "$out" "${CONFIG} lists 192.0.2.1, which get no query" "interactive: the question shows the unused list"
+    has "$out" "file=same" "interactive: Enter on the unused list leaves the file, the recursion stays on"
+    out="$(ask_case "$cfg" 192.0.2.1)"
+    has "$out" "after=enabled = false" "interactive: typing the list makes it effective"
+    printf '[kek]\nprovider = "file"\n\n[dns]\nlisten = ["192.0.2.10:53"]\nforwarders = ["192.0.2.1"]\n\n[dns.recursion]\nenabled = false\n' >"${work}/forwarding.toml"
+    out="$(ask_case "${work}/forwarding.toml" "")"
+    has "$out" "offered=192.0.2.1" "interactive: a list in use is offered"
+    has "$out" "file=same" "interactive: Enter on a list in use leaves the file"
 
     # The stub of systemd-resolved: the dns role on every address is refused with --keep-resolved-stub.
     ss() {
@@ -721,6 +781,7 @@ check "prepared-roles: every role" grep -qx 'roles=controller,dns,dhcp,probe' /e
 check "the probe drop-in is in place" test -f /etc/systemd/system/tenko.service.d/probe.conf
 check "tenko.toml: the file provider" grep -qx 'provider = "file"' /etc/tenko/tenko.toml
 check "tenko.toml: forwarders" grep -qx 'forwarders = \["192.0.2.1"\]' /etc/tenko/tenko.toml
+check "tenko.toml: --forwarders turns the recursion off" grep -qx 'enabled = false' /etc/tenko/tenko.toml
 check "tenko.toml: the API listens on IPv4 and IPv6" grep -qx 'listen = \["0.0.0.0:8443", "\[::\]:8443"\]' /etc/tenko/tenko.toml
 check "tenko config check" /root/tenko config check --config /etc/tenko/tenko.toml
 key_before="$(sha256sum </etc/tenko/kek.key)"

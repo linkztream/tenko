@@ -4,7 +4,8 @@
 //! not kept after it, a run of changes is audited once; a CNAME chain that crosses into a
 //! rule's names is resolved through the rule, one that leaves a rule is resolved outside it,
 //! across several rules within the chain's budget, and the resolver asks no public server
-//! for a name a rule governs.
+//! for a name a rule governs. The upstreams of `[dns] forwarders` beside the resolver are
+//! named unused until a view forwards.
 
 use std::{
     net::{SocketAddr, UdpSocket},
@@ -15,7 +16,7 @@ use std::{
 use tenko_core::{
     Revision,
     audit::AuditDraft,
-    dns::{DnsName, ForwardRule, ForwardRuleId, RuleMode},
+    dns::{DnsName, ForwardRule, ForwardRuleId, ResolutionMode, RuleMode, View, ViewId},
     testing::wait_until_async,
 };
 use tokio_util::sync::CancellationToken;
@@ -244,8 +245,13 @@ impl Node {
         }
     }
 
-    /// The resolver from the test's root at `root`, with `rules`.
-    fn recursing(root: &Scripted, rules: &[ForwardRule]) -> Self {
+    /// The resolver from the test's root at `root`, with `rules` and the default upstreams
+    /// `upstreams`.
+    fn recursing(
+        root: &Scripted,
+        rules: &[ForwardRule],
+        upstreams: Vec<crate::pool::UpstreamSpec>,
+    ) -> Self {
         let hints = tempfile::tempdir().expect("a directory");
         let path = hints.path().join("root.hints");
         std::fs::write(
@@ -271,6 +277,7 @@ impl Node {
                 unwanted_flush: false,
             }),
             validation: None,
+            upstreams,
             ..ForwardSettings::default()
         };
         Self::with_hints(settings, rules, Some(hints))
@@ -722,6 +729,7 @@ async fn the_resolver_asks_no_public_server_for_a_name_a_rule_governs() {
     let node = Node::recursing(
         &root,
         &[rule(ForwardRuleId::generate(), "corp.test", &inside)],
+        Vec::new(),
     );
     assert_eq!(
         records(&node.ask("alias.zone.test").await),
@@ -742,5 +750,48 @@ async fn the_resolver_asks_no_public_server_for_a_name_a_rule_governs() {
             cname("out.corp.test", "www.zone.test"),
             a("www.zone.test", PUBLIC),
         ]
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn configured_upstreams_beside_the_engine_are_named_unused_until_a_view_forwards() {
+    let root = Scripted::start(&[("www.zone.test", Data::A(PUBLIC))], true);
+    let upstream = Scripted::start(&[("www.zone.test", Data::A(INSIDE))], false);
+    let node = Node::recursing(&root, &[], vec![public_spec(&upstream)]);
+    let unused = node.forwarder.unused_upstreams().expect("named unused");
+    assert!(
+        unused.contains("[dns.recursion] enabled = false"),
+        "{unused}"
+    );
+    // As the sentence says: the engine answers and the upstream is not asked.
+    assert_eq!(
+        records(&node.ask("www.zone.test").await),
+        vec![a("www.zone.test", PUBLIC)]
+    );
+    assert_eq!(upstream.asked("www.zone.test"), 0);
+    // A view whose resolution is forward uses them.
+    let mut data = DnsData::at(Revision(2));
+    let id = ViewId::generate();
+    data.views.insert(
+        id,
+        View {
+            id,
+            name: "lan".to_owned(),
+            rules: Vec::new(),
+            scope_map: Vec::new(),
+            order: 0,
+            recursion: None,
+            resolution: Some(ResolutionMode::Forward),
+            description: None,
+        },
+    );
+    node.catalog.store(Catalog::build(&data));
+    assert_eq!(node.forwarder.unused_upstreams(), None);
+    // Without the engine (`[dns.recursion] enabled = false`) they get every name.
+    let forwarding = Node::start(generous(vec![public_spec(&upstream)]), &[]);
+    assert_eq!(forwarding.forwarder.unused_upstreams(), None);
+    assert_eq!(
+        records(&forwarding.ask("www.zone.test").await),
+        vec![a("www.zone.test", INSIDE)]
     );
 }

@@ -45,7 +45,7 @@ What is not in Phase 2: DNSSEC validation (the DO and CD bits go upstream and th
 
 A forwarding rule (`dns.forwarders`, DNS-02) sends the names at or below its suffix to its upstreams: 1 to 16 addresses, each with an optional port and, for DoH, an optional path, all over one transport (`plain`, `dot` or `doh`; DoT and DoH need `tls_name`, the name in the upstreams' certificates). A rule applies in one view or in all views; there is one rule per suffix and view.
 
-The rule for a name is the one with the longest suffix; at the same length a rule of the query's view goes before a rule of all views. The root suffix `.` covers every name: a root rule is the default forwarder of the store, and it wins over `[dns] forwarders` of the configuration file, which applies only when no rule of the store covers a name. A node needs neither: with no rule, no stub zone and no configured upstream, names outside the zones are refused.
+The rule for a name is the one with the longest suffix; at the same length a rule of the query's view goes before a rule of all views. The root suffix `.` covers every name: a root rule is the default forwarder of the store, and it wins over `[dns] forwarders` of the configuration file, which applies only when no rule of the store covers a name. A node needs neither: it resolves the names no rule and no stub zone covers itself (section 10.1). Only a node whose resolver is off, with no rule, no stub zone and no configured upstream, refuses names outside the zones.
 
 | Route | Operation | Scope |
 |---|---|---|
@@ -168,7 +168,7 @@ When a hit finds an entry with less than a tenth of its lifetime left that has b
 
 | Where | What |
 |---|---|
-| `GET /api/v1/nodes/{id}/dns` | `cache_entries`, `cache_bytes`, `cache_hits`, `cache_misses`, `cache_hit_ratio` (0 to 1, absent before the first lookup), `cache_stale`, and `problems` (stub zones and recursion lists) |
+| `GET /api/v1/nodes/{id}/dns` | `cache_entries`, `cache_bytes`, `cache_hits`, `cache_misses`, `cache_hit_ratio` (0 to 1, absent before the first lookup), `cache_stale`, and `problems` (stub zones, recursion lists, and the upstreams of `[dns] forwarders` that get no query beside the resolver, section 10.1) |
 | `dns.stats` | The forwarder's counts: answered, failed, timed out, dropped, refused, hits, misses, stale, prefetched |
 | Metrics | `tenko_dns_cache_hits_total{view}`, `tenko_dns_cache_misses_total{view}`, `tenko_dns_cache_stale_total`, `tenko_dns_cache_entries` ([observability.md](observability.md)) |
 
@@ -236,7 +236,7 @@ The `[dns]` keys of the resolver side ([`deploy/tenko.example.toml`](../deploy/t
 
 | Key | Default | Meaning |
 |---|---|---|
-| `forwarders` | none | The default forwarder: addresses, or tables `{ address, port, transport, tls_name, path }` with `transport` `udp`, `tcp`, `dot` or `doh` (section 2.1). With the recursive resolver on, it serves only where a view says `forward` (section 10.1); to forward everything, add a root rule or switch the resolver off |
+| `forwarders` | none | The default forwarder: addresses, or tables `{ address, port, transport, tls_name, path }` with `transport` `udp`, `tcp`, `dot` or `doh` (section 2.1). With the recursive resolver on, it serves only where a view says `forward` (section 10.1); to forward everything, add a root rule or switch the resolver off (`[dns.recursion] enabled = false`, which `install.sh --forwarders` writes) |
 | `forward_timeout_ms` | 2000 | Milliseconds one attempt has, 100 to 30,000 |
 | `forward_retries` | 2 | Attempts after the first, 0 to 5 |
 | `upstream_ca` | none | A PEM file of CA certificates for DoT and DoH upstreams, instead of the system's roots |
@@ -843,7 +843,9 @@ The lookup order of section 1 has one more route and one more default. A query p
 | 7. The cache | The answer cache, as in section 3 |
 | 8. The runtime | The forwarder for a `forward` route, the engine for a `recurse` route. Both fill the same cache and answer through the same reply path |
 
-A `forward` resolution with no default forwarder is answered REFUSED with the extended error "Not Authoritative" (20); `refuse` is REFUSED with "Prohibited" (18). `[dns] forwarders` is therefore used only where a view says `forward`, or on a node whose resolver is off; it is never a silent default beside the resolver.
+A `forward` resolution with no default forwarder is answered REFUSED with the extended error "Not Authoritative" (20); `refuse` is REFUSED with "Prohibited" (18). `[dns] forwarders` is therefore used only where a view says `forward`, or on a node whose resolver is off; it is never a silent default beside the resolver. A node whose `[dns] forwarders` names upstreams while the resolver runs and no view says `forward` says so: its start line ends with `the <n> upstream(s) of [dns] forwarders are not used: the built-in recursion resolves the names outside the zones, and no view's resolution is forward; ...` and what to change, its status (`GET /api/v1/nodes/{id}/dns`) carries the sentence in `problems`, which the forwarders page lists, and the health status (`GET /api/v1/system/status`) warns with `dns.recursion.forwarders_unused` (parameters `node` and `count`), which the start page shows among the findings. The installer writes one of two shapes: with `--forwarders <address>,...` the list and `[dns.recursion] enabled = false`, so that the list gets every name no rule and no stub zone covers; without it `forwarders = []` and the resolver on. It does not rewrite the file of an existing installation, so a node an older installer set up with forwarders keeps recursing and names them unused; `install.sh --reconfigure --forwarders <address>,...` (or `none`) applies the two shapes to it ([../deploy/README.md](../deploy/README.md)).
+
+With the resolver off, forwarded answers are still validated with DNSSEC (the validator fetches the keys through the same upstreams, [dnssec.md](dnssec.md) section 12), so an upstream that strips the signatures, or answers a private copy of a signed public zone (split horizon), makes those answers bogus: a forwarding rule for that suffix with `validate: false` is the escape. A node whose resolver is off also does no RFC 5011 refresh of its trust anchors through itself, and a later rule of mode `recurse` or a view that says `recurse` has no engine to use: such a rule answers SERVFAIL and such a view forwards. To recurse again, turn the resolver back on.
 
 A rule's `mode` and a view's `resolution` are rows of the store and the engine follows them; they are set through the API, the command line and the forwarders page (section 2.1). A view without a `resolution` follows the profile's default, which recurses, so a node recurses for every name its rules and stub zones do not cover unless a view or a rule says otherwise.
 
@@ -1056,7 +1058,7 @@ The keys of the section ([`deploy/tenko.example.toml`](../deploy/tenko.example.t
 
 | Key | Default | Consumed by | Meaning |
 |---|---|---|---|
-| `enabled` | on in every profile | WP10.1 | Run the resolver. Off: no engine, no recursion metrics, and `[dns] forwarders` serves as it did in Phase 2 |
+| `enabled` | on in every profile | WP10.1 | Run the resolver. Off: no engine, no recursion metrics, and `[dns] forwarders` gets every name no rule and no stub zone covers (section 10.1 says what else follows) |
 | `hints` | not set: the shipped hints | WP10.1 | A root hints file in the format of `named.root`. A file that cannot be read stops the start (`config.invalid`) |
 | `outbound` | `auto` | WP10.1 | `auto`, `both`, `v4` (`ipv4`) or `v6` (`ipv6`) (section 10.7) |
 | `timeout_ms` | 2,000 | WP10.1 | The longest an attempt has, 100 to 30,000 (section 10.4) |

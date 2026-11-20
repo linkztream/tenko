@@ -893,6 +893,28 @@ impl Forwarder {
         problems
     }
 
+    /// Why the upstreams of `[dns] forwarders` get no query, when they get none: the engine
+    /// resolves every name no rule and no stub zone covers, and no view says `forward`.
+    pub fn unused_upstreams(&self) -> Option<String> {
+        let unused = !self.shared.settings.upstreams.is_empty()
+            && self.shared.engine.is_some()
+            && !self
+                .shared
+                .catalog
+                .load()
+                .view_rows()
+                .any(|view| view.resolution == Some(ResolutionMode::Forward));
+        unused.then(|| {
+            format!(
+                "the {} upstream(s) of [dns] forwarders are not used: the built-in recursion \
+                 resolves the names outside the zones, and no view's resolution is forward; to \
+                 send every such name to them, set [dns.recursion] enabled = false and restart, \
+                 or create a forwarding rule for . with them",
+                self.shared.settings.upstreams.len()
+            )
+        })
+    }
+
     // dns-visibility: the upstreams of every rule with their figures.
     /// The upstreams of the default forwarder, of every forwarding rule (by suffix) and of
     /// the stub zones whose name servers were learned, each with its state and times; an

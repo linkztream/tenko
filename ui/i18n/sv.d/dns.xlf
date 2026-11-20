@@ -1334,7 +1334,7 @@
         <segment><source>No default forwarder in the store.</source><target>Ingen standardvidarebefordrare i lagret.</target></segment>
       </unit>
       <unit id="dns.fwd.no_default_body">
-        <segment><source>Names that no rule here covers go to the forwarders of [dns] forwarders in tenko.toml of the node; without them they are refused. The node status does not list the forwarders of the file: look in the configuration file, or create a rule for the suffix . here.</source><target>Namn som ingen regel här täcker går till vidarebefordrarna i [dns] forwarders i nodens tenko.toml; utan dem nekas de. Nodens status visar inte filens vidarebefordrare: titta i konfigurationsfilen, eller skapa en regel för suffixet . här.</target></segment>
+        <segment><source>Names that no rule here covers are resolved as the default resolution below says: by the node itself unless a view forwards. The forwarders of [dns] forwarders in tenko.toml of the node get them only in a view that forwards, or on a node whose recursion is off ([dns.recursion] enabled = false). To send them to resolvers of your choice, create a rule for the suffix . here.</source><target>Namn som ingen regel här täcker slås upp som standarduppslagningen nedan säger: av noden själv, om inte en vy vidarebefordrar. Vidarebefordrarna i [dns] forwarders i nodens tenko.toml får dem bara i en vy som vidarebefordrar, eller på en nod där rekursionen är avstängd ([dns.recursion] enabled = false). För att skicka dem till resolvrar du väljer, skapa en regel för suffixet . här.</target></segment>
       </unit>
       <unit id="dns.fwd.no_default_link">
         <segment><source>DNS settings of the node</source><target>Nodens DNS-inställningar</target></segment>

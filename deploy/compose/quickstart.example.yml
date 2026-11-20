@@ -65,8 +65,10 @@ services:
       TENKO_TLS__ALT_NAMES: localhost
       # The bridge network of the container has no IPv6 unless Docker is set up for it.
       TENKO_DNS__LISTEN: 0.0.0.0:53
-      # Upstream resolvers for names outside your zones; without them such names are refused.
+      # Names outside your zones: the node resolves them itself from the root servers. To send
+      # every such name to upstream resolvers instead, set both lines.
       # TENKO_DNS__FORWARDERS: 192.0.2.1,192.0.2.2
+      # TENKO_DNS__RECURSION__ENABLED: "false"
     secrets:
       - tenko_kek
     volumes:

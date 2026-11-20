@@ -283,7 +283,8 @@ pub struct DnsStatus {
     /// Stale answers since the role started.
     pub cache_stale: u64,
     /// What keeps the resolver side from working as configured: stub zones whose name
-    /// servers could not be learned, views whose recursion access list does not exist.
+    /// servers could not be learned, views whose recursion access list does not exist, the
+    /// upstreams of `[dns] forwarders` while the built-in recursion leaves them unused.
     pub problems: Vec<String>,
     /// When the role started.
     pub started: Timestamp,
@@ -315,6 +316,10 @@ pub struct DnsStatus {
     /// The negative trust anchors in force (`dns.nta.active`).
     pub active_ntas: Vec<tenko_core::dns::NegativeTrustAnchor>,
     // WP10.2: end.
+    /// The upstreams of `[dns] forwarders` that get no query because the recursion resolves
+    /// the names outside the zones and no view forwards; 0 when they are used or there are
+    /// none.
+    pub unused_forwarders: usize,
 }
 
 /// The counters `dns.stats` reports.
@@ -1068,6 +1073,7 @@ impl DnsNode for LocalNode {
             .map(|forwarder| forwarder.stats())
             .unwrap_or_default();
         let mut problems = Vec::new();
+        let mut unused_forwarders = 0;
         if let Some(forwarder) = &self.forwarder {
             for stub in forwarder.stubs() {
                 if let Some(error) = stub.error {
@@ -1075,6 +1081,10 @@ impl DnsNode for LocalNode {
                 }
             }
             problems.extend(forwarder.recursion_problems());
+            if let Some(unused) = forwarder.unused_upstreams() {
+                unused_forwarders = forwarder.upstreams().len();
+                problems.push(unused);
+            }
             // A forwarding rule stored before the rules of `validate: false` (TGL-12): the
             // Hardened profile is the one whose recursion default allows nobody.
             let hardened = forwarder.recursion().default_rule() == RecursionDefault::Nobody;
@@ -1171,6 +1181,7 @@ impl DnsNode for LocalNode {
             trust_anchors,
             stripping_rules,
             active_ntas,
+            unused_forwarders,
         }
     }
 

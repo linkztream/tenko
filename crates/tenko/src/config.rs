@@ -599,7 +599,9 @@ pub struct DnsSection {
     /// EDNS.
     pub edns: DnsEdnsSection,
     /// The default forwarder for names outside the zones that no forwarding rule of the
-    /// store covers (a root rule `.` in the store wins over it): addresses (`"192.0.2.1"`,
+    /// store covers (a root rule `.` in the store wins over it), used where a view's
+    /// resolution is `forward` or with `[dns.recursion] enabled = false` (the recursion
+    /// resolves those names otherwise): addresses (`"192.0.2.1"`,
     /// `"192.0.2.1:5353"`) or tables `{ address, port, transport, tls_name, path }` with
     /// `transport = "udp"` (default, TCP when an answer is truncated), `"tcp"`, `"dot"`
     /// (DNS over TLS, port 853) or `"doh"` (DNS over HTTPS, port 443, `path` default

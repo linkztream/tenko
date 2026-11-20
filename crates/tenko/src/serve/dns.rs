@@ -734,19 +734,28 @@ fn describe(
     let workers = server.config().udp.workers;
     let mode = server.config().udp.mode.as_str();
     let rules = catalog.forward_rules().count() + catalog.stub_zones().count();
-    let upstreams = if forwarder.upstreams().is_empty() {
-        format!("{rules} forwarding rule(s) and stub zone(s), no default forwarder")
-    } else {
-        format!(
-            "forwarding to {} default upstream(s) and {rules} rule(s) and stub zone(s)",
-            forwarder.upstreams().len()
-        )
+    let count = forwarder.upstreams().len();
+    let routes = format!("{rules} forwarding rule(s) and stub zone(s)");
+    let itself = "resolving the names outside the zones itself";
+    let unused = forwarder.unused_upstreams();
+    let upstreams = match (forwarder.engine().is_some(), count) {
+        (true, 0) => format!("{itself}, {routes}, no default forwarder"),
+        (true, _) if unused.is_some() => format!("{itself}, {routes}"),
+        (true, _) => {
+            format!("{itself}, {count} default upstream(s) for the views that forward, {routes}")
+        }
+        (false, 0) => format!("{routes}, no default forwarder"),
+        (false, _) => format!("forwarding to {count} default upstream(s) and {routes}"),
     };
     let cache = forwarder.cache().map_or_else(
         || "no cache".to_owned(),
         |cache| format!("cache of {} entries", cache.settings().entries),
     );
-    let forwarding = format!("{upstreams}, {cache}");
+    // The warning closes the line, where an operator reading the journal finds it.
+    let forwarding = format!(
+        "{upstreams}, {cache}{}",
+        unused.map_or_else(String::new, |unused| format!("; {unused}"))
+    );
     let logging = log.map_or_else(
         || "query log off".to_owned(),
         |writer| {

@@ -1334,7 +1334,7 @@
         <segment><source>No default forwarder in the store.</source></segment>
       </unit>
       <unit id="dns.fwd.no_default_body">
-        <segment><source>Names that no rule here covers go to the forwarders of [dns] forwarders in tenko.toml of the node; without them they are refused. The node status does not list the forwarders of the file: look in the configuration file, or create a rule for the suffix . here.</source></segment>
+        <segment><source>Names that no rule here covers are resolved as the default resolution below says: by the node itself unless a view forwards. The forwarders of [dns] forwarders in tenko.toml of the node get them only in a view that forwards, or on a node whose recursion is off ([dns.recursion] enabled = false). To send them to resolvers of your choice, create a rule for the suffix . here.</source></segment>
       </unit>
       <unit id="dns.fwd.no_default_link">
         <segment><source>DNS settings of the node</source></segment>

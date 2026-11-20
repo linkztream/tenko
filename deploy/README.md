@@ -59,7 +59,8 @@ read -rs GITHUB_TOKEN && export GITHUB_TOKEN && bash install.sh   # private: pas
 Run the file; piped into bash it still asks its questions on the terminal, but read it
 first. Without `--yes` it asks, with `whiptail` when installed and plain prompts otherwise:
 the security profile first, the roles only under the Hardened profile, the modules, the
-host name, the addresses and upstream resolvers of the dns role, the data directory, and an
+host name, the addresses of the dns role and whether it forwards (none, the default: it
+resolves names outside the zones itself), the data directory, and an
 administrator for first-run setup (empty: setup in the browser with the setup token). On a
 rerun with an existing `/etc/tenko/tenko.toml` it asks nothing and keeps the file.
 Unattended, every answer is a flag:
@@ -111,7 +112,7 @@ sudo bash install.sh --prepare --roles controller,dns,probe    # Hardened: these
 | `--modules wizard\|all\|<list>` | `wizard` | `ipam,dns,dhcp,discovery`; `wizard` leaves the choice to first-run setup |
 | `--host-name <name>` | `hostname -f` | The name clients use: the certificate and the passkey ID; not an address |
 | `--dns-address all\|<addr>,...` | `all` | Where the dns role answers; port 53 unless given (`192.0.2.53`, `[2001:db8::53]:5353`) |
-| `--forwarders <addr>,...\|none` | the host's resolvers, loopback excluded | Upstream resolvers for names outside the zones |
+| `--forwarders <addr>,...\|none` | none | Upstream resolvers that get every name outside the zones: the installer writes them as `[dns] forwarders` with `[dns.recursion] enabled = false`. With `none` it writes no forwarders and the node resolves such names itself from the root servers (the built-in recursion). With `--reconfigure` the flag rewrites both keys. The interactive question offers what the node does today (the file's list only while the recursion is off, else none, naming a list the file holds beside the recursion), and an answer rewrites the keys only when it differs from that, so Enter changes nothing; a rerun without either leaves them as they are |
 | `--data-dir <path>` | `/var/lib/tenko` | The data directory, on SSD or NVMe (OPS-19); another path gets a drop-in. An existing directory is taken only when it is empty (it becomes the account's, mode 0700) or already the account's own (owner `tenko`, mode 0700, kept as it is); anything else is refused with the reason, exit 2 |
 | `--version latest\|<x.y.z>` | `latest` | The release to install |
 | `--language en\|sv` | `en` | The default UI language, with `--admin` |
@@ -169,7 +170,8 @@ What it does, in this order:
    `[profile]`, `[server] listen` on IPv4 and IPv6 (`0.0.0.0:8443` and `[::]:8443`; IPv4
    only on a kernel without IPv6), `[tls]` with the host name and `localhost` on the
    certificate, plus the host's IPv4 and global IPv6 addresses when it has them, `[dns]
-   listen` and `forwarders` when the machine is prepared for the dns role, a commented
+   listen` and `forwarders` when the machine is prepared for the dns role (with
+   `[dns.recursion] enabled = false` when `--forwarders` names resolvers), a commented
    `[dhcp] listen` example when it is prepared for the dhcp role, and `[kek]` for a key file)
    and checks it with `tenko config check`. With the dhcp role it closes with a reminder:
    set `[dhcp] listen` (section "DHCP" below).
@@ -194,8 +196,8 @@ What it does, in this order:
    into `/etc/systemd/resolved.conf.d/tenko.conf` (next to `DNSStubListener=no` where step 1
    turned the stub off) and the service restarts; otherwise `/etc/resolv.conf` becomes
    `nameserver 127.0.0.1`, with its `search`, `domain` and `options` lines kept, and the
-   previous file or link is recorded. Names Tenko does not serve go to its forwarders, so
-   keep them set (the default is the host's former resolvers). Without the flag the host
+   previous file or link is recorded. Names Tenko does not serve it resolves itself, or
+   sends to the resolvers of `--forwarders` when they were given. Without the flag the host
    keeps resolving through its uplink. `--uninstall` puts the previous resolver back before
    it stops the service. With `--no-start` nothing is changed; run the installer again with
    `--use-self` once the node runs.
@@ -969,12 +971,17 @@ macvlan children, which is why every check runs in a container.
 A controller node answers DNS when `roles` lists `dns` and the DNS module is on: `roles =
 "controller,dns"` in tenko.toml (or `--roles controller,dns`, `TENKO_ROLES`). The `[dns]`
 section says where it answers (`listen`, default `0.0.0.0:53` and `[::]:53`), how many
-workers it runs, the upstreams of the plain forwarder for names outside the zones, and the
-query log; see the section in `tenko.example.toml` and [../docs/dns.md](../docs/dns.md)
-sections 8 and 9. `tenko config check` validates it. The role starts after the API and the
-start fails with `start.dns.bind` (exit status 4) when a listen address cannot be bound.
-`tenko serve` prints `dns role answering on ...` below its ready line, and
-`GET /api/v1/nodes/{id}/dns` reports the role.
+workers it runs, the default forwarder, and the query log; see the section in
+`tenko.example.toml` and [../docs/dns.md](../docs/dns.md) sections 8 and 9. Names outside
+the zones are resolved by the node's own recursion; `[dns] forwarders` gets them only with
+`[dns.recursion] enabled = false` (or in a view whose resolution is `forward`,
+[../docs/dns-resolver.md](../docs/dns-resolver.md) section 10.1). `tenko config check`
+validates it. The role starts after the API and the start fails with `start.dns.bind` (exit
+status 4) when a listen address cannot be bound. `tenko serve` prints `dns role answering on
+...` below its ready line, which says how names outside the zones are resolved and, when the
+upstreams of `[dns] forwarders` get no query, why; `GET /api/v1/nodes/{id}/dns` reports the
+role, with that sentence in its `problems`, and `GET /api/v1/system/status` warns with
+`dns.recursion.forwarders_unused`.
 
 Check a node from another host with any DNS client, for example
 `dig @192.0.2.53 www.example.test A` and `dig +tcp @192.0.2.53 www.example.test A`.
@@ -1005,8 +1012,9 @@ image needs no capability on a bridge or macvlan network: publish the port with
 `-p 53:53/udp -p 53:53/tcp` (bridge) or give the container its own address (macvlan). With
 `network_mode: host` the host's sysctl applies: add `cap_add: [NET_BIND_SERVICE]`, or give
 the dns role a port above 1023. Set the role and its addresses with variables:
-`TENKO_ROLES=controller,dns`, `TENKO_DNS__LISTEN=0.0.0.0:53,[::]:53`,
-`TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2`.
+`TENKO_ROLES=controller,dns`, `TENKO_DNS__LISTEN=0.0.0.0:53,[::]:53`, and to forward every
+name outside the zones `TENKO_DNS__FORWARDERS=192.0.2.1,192.0.2.2` with
+`TENKO_DNS__RECURSION__ENABLED=false`.
 
 **Windows.** The service needs no privilege for port 53. The Windows DNS Server role and
 Internet Connection Sharing hold the port (see [windows/README.md](windows/README.md),

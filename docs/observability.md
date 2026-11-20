@@ -189,7 +189,7 @@ The recursive resolver ([dns-resolver.md](dns-resolver.md) and [dnssec.md](dnsse
 | `tenko_dns_infra_entries` | gauge | `kind` | Entries of the infrastructure cache, computed at the scrape: `zone`, `server` |
 | `tenko_dns_priming_total` | counter | `outcome` | Root priming runs: `ok`, `failed` |
 
-The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering) and `dns.role.lagging` (its index is more than 1,000 revisions behind the store).
+The health of the role is in `GET /api/v1/nodes/{id}/dns` and in the warnings of `GET /api/v1/system/status`: `dns.role.not_serving` (the role stopped answering), `dns.role.lagging` (its index is more than 1,000 revisions behind the store) and `dns.recursion.forwarders_unused` (`[dns] forwarders` get no query while the recursion runs; `docs/dns-resolver.md` section 10.1).
 
 The query log of the role ([dns-resolver.md](dns-resolver.md) section 8), registered when the role starts:
 

@@ -180,8 +180,10 @@ Answers (asked when --yes is not given; the default is in brackets):
                                       the choice to first-run setup [wizard]
   --host-name <name>                  the name clients use, not an address [hostname -f]
   --dns-address all|<addr>[,<addr>]   where the dns role answers, port 53 unless given [all]
-  --forwarders <addr>[,<addr>]        upstream resolvers for names outside the zones, or
-                                      none [the host's resolvers, loopback excluded]
+  --forwarders <addr>[,<addr>]|none   send every name outside the zones to these upstream
+                                      resolvers (writes [dns.recursion] enabled = false), or
+                                      none: the node resolves such names itself from the root
+                                      servers, its built-in recursion [none]
   --data-dir <path>                   the data directory, on SSD or NVMe [/var/lib/tenko]. An
                                       existing directory is taken only when it is empty or
                                       already the account's own (owner tenko)
@@ -796,16 +798,6 @@ listen_answer() {
   printf '%s' "$list"
 }
 
-# host_resolvers: the resolvers this host uses, loopback excluded, comma separated (the
-# upstreams of systemd-resolved when it runs, else /etc/resolv.conf).
-host_resolvers() {
-  local file=/etc/resolv.conf
-  [[ -r /run/systemd/resolve/resolv.conf ]] && file=/run/systemd/resolve/resolv.conf
-  [[ -r "$file" ]] || return 0
-  awk '$1 == "nameserver" && $2 !~ /^127\./ && $2 != "::1" && $2 !~ /%/ {print $2}' "$file" |
-    head -n 3 | paste -sd, -
-}
-
 # primary_ipv4: the address of the interface with the default route.
 primary_ipv4() {
   have ip || return 0
@@ -1149,7 +1141,7 @@ check_or_die() {
 
 # What the configuration on the host says, as answers (FILE_VAL, only for the keys it sets
 # to a usable value): roles, modules, profile, host, dns (the --dns-address form), fwd (the
-# --forwarders form) and data_dir.
+# --forwarders form), recursion_off ([dns.recursion] enabled = false) and data_dir.
 declare -A FILE_VAL=()
 read_config_values() {
   local v cfg="${1:-$CONFIG}"
@@ -1173,6 +1165,7 @@ read_config_values() {
     v="${v:-none}"
     if forwarder_list "$v" >/dev/null; then FILE_VAL[fwd]="$v"; fi
   fi
+  if [[ "$(toml_get "$cfg" dns.recursion enabled)" =~ ^false[[:space:]]*$ ]]; then FILE_VAL[recursion_off]=1; fi
   v="$(toml_get "$cfg" server listen | toml_strings | head -n 1)"
   v="${v##*:}"
   if valid_port "$v"; then API_PORT="$v"; fi
@@ -1206,18 +1199,40 @@ seed_from_config() {
   return 0
 }
 
+# ask_forwarders: the forwarders question. Its default is what the node does today: on a kept
+# file the file's list only while [dns.recursion] is off, else none (a list the file names
+# beside the recursion is shown, not offered). An answer applies, like the flag, only when it
+# differs from that default, so that Enter never changes how the node resolves.
+ask_forwarders() {
+  local before="$FORWARDERS" offered="$FORWARDERS" note=""
+  if ((HAVE_CONFIG)) && [[ -z "${FILE_VAL[recursion_off]:-}" ]]; then
+    offered=none
+    [[ "$before" == none ]] ||
+      note=" ${CONFIG} lists ${before}, which get no query while the recursion runs (a view whose resolution is forward excepted); type them to send every such name to them."
+  fi
+  while true; do
+    ask FORWARDERS "Names outside your zones: none to resolve them on this node from the root servers (its built-in recursion), or a list of upstream resolvers that get every such name.${note}" "$offered"
+    forwarder_list "$FORWARDERS" >/dev/null && break
+    printf 'Not a resolver list: %s\n' "$FORWARDERS" >"$TTY"
+  done
+  if ((HAVE_CONFIG)) && [[ "$(forwarder_list "$FORWARDERS")" == "$(forwarder_list "$offered")" ]]; then
+    FORWARDERS="$before"
+  else
+    SET_FORWARDERS=1
+  fi
+}
+
 # answers: the defaults, the flags, and in interactive mode the questions.
 answers() {
-  local default_host forwarders_default
+  local default_host
   default_host="$(hostname -f 2>/dev/null || hostname 2>/dev/null || echo tenko)"
   valid_hostname "$default_host" || default_host="$(hostname 2>/dev/null || echo tenko)"
-  forwarders_default="$(host_resolvers || true)"
   ROLES="$OPT_ROLES"
   MODULES="${OPT_MODULES:-wizard}"
   PROFILE="${OPT_PROFILE:-home}"
   HOST_NAME="${OPT_HOST:-$default_host}"
   DNS_ADDRESS="${OPT_DNS_ADDRESS:-all}"
-  FORWARDERS="${OPT_FORWARDERS:-${forwarders_default:-none}}"
+  FORWARDERS="${OPT_FORWARDERS:-none}"
   read_record
   seed_from_config "$CONFIG"
   LANGUAGE="${OPT_LANGUAGE:-en}"
@@ -1305,16 +1320,11 @@ The probe role probes an address before the dhcp role offers it (conflict detect
         printf 'Not an address list: %s\n' "$DNS_ADDRESS" >"$TTY"
         SET_DNS_ADDRESS=0
       done
-      while true; do
-        ((SET_FORWARDERS)) || ask FORWARDERS "Upstream resolvers for names outside your zones (a list, or none)" "$FORWARDERS"
-        forwarder_list "$FORWARDERS" >/dev/null && break
-        printf 'Not a resolver list: %s\n' "$FORWARDERS" >"$TTY"
-        SET_FORWARDERS=0
-      done
+      ((SET_FORWARDERS)) || ask_forwarders
       if ((!OPT_USE_SELF)) && [[ "$ROLES" == *dns* ]] && dns_listen "$DNS_ADDRESS" | grep -qE '"(0\.0\.0\.0|127\.0\.0\.1):53"'; then
         ask_yes_no "Use Tenko as this host's own resolver (127.0.0.1)?
 
-Names the host looks up then go through Tenko: your zones first, forwarders for the rest. --uninstall puts the previous resolver back. Choose no to leave the host's resolver as it is." no &&
+Names the host looks up then go through Tenko: your zones first, then the rest as Tenko resolves it (its own recursion, or the forwarders you gave). --uninstall puts the previous resolver back. Choose no to leave the host's resolver as it is." no &&
           OPT_USE_SELF=1
       fi
     fi
@@ -1542,8 +1552,8 @@ resolved_manages() {
 }
 
 # node_listens_dns: something accepts a TCP connection on 127.0.0.1:53. A query would prove
-# more, but the node forwards every name it does not serve and answers only when an upstream
-# does, so the listener is what can be checked at once.
+# more, but the node answers a name it does not serve only once a root server or an upstream
+# has, so the listener is what can be checked at once.
 node_listens_dns() {
   have timeout || return 0
   for _ in 1 2 3 4 5; do
@@ -1561,7 +1571,7 @@ resolved_dropin() {
     printf '# The dns role of Tenko answers on port 53.\nDNSStubListener=no\n'
   fi
   if (($1)); then
-    printf '# --use-self: this host resolves through Tenko (127.0.0.1); a name that Tenko does not\n# serve goes to its forwarders. `install.sh --uninstall` removes this.\nDNS=127.0.0.1\nDomains=~.\n'
+    printf '# --use-self: this host resolves through Tenko (127.0.0.1), which resolves a name it does\n# not serve itself or through its forwarders. `install.sh --uninstall` removes this.\nDNS=127.0.0.1\nDomains=~.\n'
   fi
 }
 
@@ -1626,8 +1636,6 @@ step_use_self() {
     ok "The host resolves through Tenko: ${RESOLV_CONF} lists 127.0.0.1 only"
   fi
   USE_SELF_DONE=1
-  [[ "$FORWARDERS" == none ]] &&
-    warn "The dns role has no forwarders, so the host resolves your zones and nothing else; add upstream resolvers to [dns] forwarders in ${CONFIG}"
   return 0
 }
 
@@ -1879,13 +1887,26 @@ config_add_kek_file() {
 }
 
 # config_dns_section <listen> <forwarders>: the [dns] section of a configuration written by
-# the installer (the TOML strings, comma separated).
+# the installer (the TOML strings, comma separated). Forwarders turn the built-in recursion
+# off, since a recursing node asks them only for a view whose resolution is forward.
 config_dns_section() {
   printf '\n[dns]\n'
   printf "# Where the dns role answers (UDP and TCP). Port 53 needs the unit's CAP_NET_BIND_SERVICE.\n"
   printf 'listen = [%s]\n' "$1"
-  printf '# Upstream resolvers for names outside the zones; empty: such names are refused.\n'
+  if [[ -z "$2" ]]; then
+    printf '# Names outside the zones: the built-in recursion resolves them from the root servers.\n'
+    printf '# To send every such name to upstream resolvers instead, list them here and add\n'
+    printf '# [dns.recursion] with enabled = false (install.sh --reconfigure --forwarders does both).\n'
+    printf 'forwarders = []\n'
+    return 0
+  fi
+  printf '# Every name outside the zones goes to these upstream resolvers (install.sh --forwarders);\n'
+  printf '# the answers are still validated with DNSSEC. Forwarding rules of the store go first.\n'
   printf 'forwarders = [%s]\n' "$2"
+  printf '\n[dns.recursion]\n'
+  printf '# Off, so that the forwarders above answer every name outside the zones: with it on, they\n'
+  printf '# would serve only a view whose resolution is forward.\n'
+  printf 'enabled = false\n'
 }
 
 # config_dhcp_section: the [dhcp] section of a configuration written by the installer.
@@ -1937,7 +1958,7 @@ carry_append() {
 # give again is not reset to a default: [dns] listen, [dhcp], [server], [tls], [kek],
 # [dns.recursion] and every other section stay as they are.
 config_carry() {
-  local src="${1:-$CONFIG}" sections s e keys
+  local src="${1:-$CONFIG}" sections s e keys fwd
   CARRY_FILE="${TMP}/tenko.toml.carry" CARRY_SET=() CARRY_ADDED=()
   cp "$src" "$CARRY_FILE"
   sections="$(toml_sections "$src")"
@@ -1962,9 +1983,13 @@ config_carry() {
         { [[ -z "${FILE_VAL[dns]:-}" ]] && ((SET_DNS_ADDRESS)); }; then
         carry_set dns listen "[$(dns_listen "$DNS_ADDRESS")]"
       fi
-      if [[ "$(forwarder_list "$FORWARDERS")" != "$(forwarder_list "${FILE_VAL[fwd]:-$FORWARDERS}")" ]] ||
-        { [[ -z "${FILE_VAL[fwd]:-}" ]] && ((SET_FORWARDERS)); }; then
-        carry_set dns forwarders "[$(forwarder_list "$FORWARDERS")]"
+      # Forwarders given (a flag or an answer) are made effective: recursion off with a list,
+      # the key dropped with none. An answer not given leaves both as the file has them.
+      fwd="$(forwarder_list "$FORWARDERS")"
+      if [[ "$fwd" != "$(forwarder_list "${FILE_VAL[fwd]:-$FORWARDERS}")" ]] || ((SET_FORWARDERS)); then
+        [[ -n "${FILE_VAL[fwd]:-}" && "$fwd" == "$(forwarder_list "${FILE_VAL[fwd]}")" ]] ||
+          carry_set dns forwarders "[${fwd}]"
+        carry_set dns.recursion enabled "${fwd:+false}"
       fi
     else
       carry_append dns "$(config_dns_section "$(dns_listen "$DNS_ADDRESS")" "$(forwarder_list "$FORWARDERS")")"
