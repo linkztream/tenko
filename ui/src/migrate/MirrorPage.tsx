@@ -1,13 +1,17 @@
-// A mirrored source (/connectors/mirrors/:id/:tab?): the three tabs of plan section 3.3, Scopes
-// (each mirrored scope with its Tenko counterpart, the diff and the Prepare, Take over and
-// Revert actions), Losses (the entries with their acknowledgment) and Settings (name, token,
-// fingerprint, the PowerShell commands, deletion). WP14.0 stubs the route and the tabs; WP14.1
-// and WP14.2 fill them.
+// A mirrored source (/connectors/mirrors/:id/:tab?): the three tabs of plan section 3.3. Scopes
+// lists each mirrored scope and shows the diff of the one chosen against Tenko's scope of the
+// same network (the Prepare, Take over and Revert actions arrive with WP14.2); Losses lists the
+// loss report and acknowledges entries; Settings changes the name, the interval and whether
+// pushes are accepted, replaces the token, shows the PowerShell commands and deletes the mirror.
 import { A, useNavigate, useParams } from "@solidjs/router";
-import { For } from "solid-js";
+import { createResource, For, Match, Show, Switch } from "solid-js";
 import { decodeSegment, paths } from "../app/paths";
+import { ErrorNotice } from "../components/Notice";
 import { PageHead } from "../components/PageHead";
 import { t } from "../i18n";
+import { getMirror } from "./api";
+import { MirrorCard } from "./MirrorCards";
+import { LossesTab, ScopesTab, SettingsTab } from "./MirrorTabs";
 import { MIRROR_TABS, migratePaths, type MirrorTab } from "./paths";
 
 export default function MirrorPage() {
@@ -15,9 +19,11 @@ export default function MirrorPage() {
   const navigate = useNavigate();
   const id = () => decodeSegment(params.id);
   const tab = (): MirrorTab => (MIRROR_TABS.includes(params.tab as MirrorTab) ? (params.tab as MirrorTab) : "scopes");
+  const [mirror, { refetch }] = createResource(id, (key) => getMirror(key));
   return (
     <div class="page" data-testid="page-migrate-mirror" data-id={id()}>
-      <PageHead crumbs={<A href={paths.connectors()}>{t("shell.nav.connectors")}</A>} title={t("migrate.mirror.title")} sub={<span class="mono">{id()}</span>} />
+      <PageHead crumbs={<A href={paths.connectors()}>{t("shell.nav.connectors")}</A>} title={t("migrate.mirror.title")} sub={<span class="mono">{mirror.latest?.name ?? id()}</span>} />
+      <ErrorNotice error={mirror.error} />
       <div class="tabs" role="tablist" aria-label={t("migrate.mirror.tabs")}>
         <For each={MIRROR_TABS}>
           {(name) => (
@@ -27,12 +33,23 @@ export default function MirrorPage() {
           )}
         </For>
       </div>
-      <div class="empty" role="tabpanel" data-testid="migrate-coming" data-tab={tab()}>
-        <h2>{t("migrate.coming.title")}</h2>
-        <p>{t("migrate.coming.body")}</p>
-        <A class="btn" href={paths.connectors()} data-testid="migrate-coming-back">
-          {t("migrate.coming.connectors")}
-        </A>
+      <div role="tabpanel" data-testid="mirror-panel" data-tab={tab()}>
+        <Show when={mirror.latest}>
+          {(m) => (
+            <Switch>
+              <Match when={tab() === "scopes"}>
+                <MirrorCard mirror={m()} />
+                <ScopesTab mirror={m()} />
+              </Match>
+              <Match when={tab() === "losses"}>
+                <LossesTab mirror={m()} onChange={() => void refetch()} />
+              </Match>
+              <Match when={tab() === "settings"}>
+                <SettingsTab mirror={m()} onChange={() => void refetch()} onDeleted={() => navigate(paths.connectors())} />
+              </Match>
+            </Switch>
+          )}
+        </Show>
       </div>
     </div>
   );

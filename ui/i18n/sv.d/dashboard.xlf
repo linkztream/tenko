@@ -551,6 +551,18 @@
       <unit id="dashboard.hidden.admin">
         <segment><source>DNS, DHCP and system metrics (for administrators)</source><target>DNS-, DHCP- och systemmätvärden (för administratörer)</target></segment>
       </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.stale">
+        <notes><note category="description">Mirrored sources without a push for three intervals; {mirrors} lists their names.</note></notes>
+        <segment><source>No push for three intervals from the mirrored sources {mirrors}. Check the scheduled task on the DHCP server.</source><target>Ingen sändning på tre intervall från de speglade källorna {mirrors}. Kontrollera den schemalagda aktiviteten på DHCP-servern.</target></segment>
+      </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.token_expiring">
+        <notes><note category="description">Mirror tokens that expire within 14 days; {mirrors} lists the mirrors.</note></notes>
+        <segment><source>The tokens of the mirrored sources {mirrors} expire within 14 days. Replace them on the mirror's Settings tab.</source><target>Token för de speglade källorna {mirrors} upphör inom 14 dagar. Byt dem under spegelns flik Inställningar.</target></segment>
+      </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.scope_active">
+        <notes><note category="description">A source serves a scope Tenko took over; {mirrors} lists the mirrors.</note></notes>
+        <segment><source>The mirrored sources {mirrors} serve a scope Tenko took over: two DHCP servers answer one network.</source><target>De speglade källorna {mirrors} delar ut ett omfång som Tenko tagit över: två DHCP-servrar svarar på samma nät.</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

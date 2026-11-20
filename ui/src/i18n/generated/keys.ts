@@ -1582,6 +1582,9 @@ export type MessageKey =
   | "dashboard.finding.health.dns.recursion.forwarders_unused"
   | "dashboard.finding.health.integration.certificate_expiring"
   | "dashboard.finding.health.integration.tls12_allowed"
+  | "dashboard.finding.health.migrate.mirror.scope_active"
+  | "dashboard.finding.health.migrate.mirror.stale"
+  | "dashboard.finding.health.migrate.mirror.token_expiring"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -6356,12 +6359,65 @@ export type MessageKey =
   | "metrics.unit.per_second"
   | "metrics.unit.percent"
   | "metrics.waiting"
-  | "migrate.coming.body"
-  | "migrate.coming.connectors"
+  | "migrate.card.ago"
+  | "migrate.card.counts"
+  | "migrate.card.counts_text"
+  | "migrate.card.last_change"
+  | "migrate.card.last_push"
+  | "migrate.card.losses"
+  | "migrate.card.never"
+  | "migrate.card.sequence"
+  | "migrate.card.source"
+  | "migrate.cards.empty"
+  | "migrate.cards.title"
   | "migrate.coming.title"
   | "migrate.coming.zone"
+  | "migrate.create.body"
+  | "migrate.create.cancel"
+  | "migrate.create.name"
+  | "migrate.create.name_help"
+  | "migrate.create.open"
+  | "migrate.create.submit"
+  | "migrate.create.title"
+  | "migrate.delete.body"
+  | "migrate.delete.title"
+  | "migrate.diff.action.attach"
+  | "migrate.diff.action.create"
+  | "migrate.diff.action.decide"
+  | "migrate.diff.action.keep"
+  | "migrate.diff.action.remove"
+  | "migrate.diff.action.update"
+  | "migrate.diff.col.action"
+  | "migrate.diff.col.item"
+  | "migrate.diff.col.kind"
+  | "migrate.diff.col.mirror"
+  | "migrate.diff.col.tenko"
+  | "migrate.diff.disabled"
+  | "migrate.diff.empty"
+  | "migrate.diff.enabled"
+  | "migrate.diff.kind.ddns"
+  | "migrate.diff.kind.exclusion"
+  | "migrate.diff.kind.lease_time"
+  | "migrate.diff.kind.option"
+  | "migrate.diff.kind.pool"
+  | "migrate.diff.kind.prefix"
+  | "migrate.diff.kind.reservation"
+  | "migrate.diff.missing"
+  | "migrate.diff.summary"
   | "migrate.flip.body"
   | "migrate.flip.title"
+  | "migrate.losses.ack"
+  | "migrate.losses.acked"
+  | "migrate.losses.col.ack"
+  | "migrate.losses.col.code"
+  | "migrate.losses.col.detail"
+  | "migrate.losses.col.pick"
+  | "migrate.losses.col.scope"
+  | "migrate.losses.col.where"
+  | "migrate.losses.every_scope"
+  | "migrate.losses.none"
+  | "migrate.losses.open"
+  | "migrate.losses.pick"
   | "migrate.mirror.tab.losses"
   | "migrate.mirror.tab.scopes"
   | "migrate.mirror.tab.settings"
@@ -6369,6 +6425,31 @@ export type MessageKey =
   | "migrate.mirror.title"
   | "migrate.release.body"
   | "migrate.release.title"
+  | "migrate.scopes.active"
+  | "migrate.scopes.choose"
+  | "migrate.scopes.inactive"
+  | "migrate.scopes.none"
+  | "migrate.settings.commands"
+  | "migrate.settings.commands_help"
+  | "migrate.settings.copy"
+  | "migrate.settings.delete"
+  | "migrate.settings.disable"
+  | "migrate.settings.enable"
+  | "migrate.settings.interval"
+  | "migrate.settings.save"
+  | "migrate.settings.token"
+  | "migrate.state.disabled"
+  | "migrate.state.fresh"
+  | "migrate.state.stale"
+  | "migrate.state.waiting"
+  | "migrate.token.copy"
+  | "migrate.token.done"
+  | "migrate.token.expires"
+  | "migrate.token.fingerprint"
+  | "migrate.token.no_fingerprint"
+  | "migrate.token.once"
+  | "migrate.token.title"
+  | "migrate.token.token"
   | "move.checklist"
   | "move.checklist_foot"
   | "move.checklist_sum"
@@ -8751,6 +8832,9 @@ export interface MessageArgs {
   "dashboard.finding.health.auth.token.revoked": { count: string | number };
   "dashboard.finding.health.dns.recursion.forwarders_unused": { count: string | number; node: string | number };
   "dashboard.finding.health.integration.certificate_expiring": { count: string | number; label: string | number; not_after: string | number };
+  "dashboard.finding.health.migrate.mirror.scope_active": { mirrors: string | number };
+  "dashboard.finding.health.migrate.mirror.stale": { mirrors: string | number };
+  "dashboard.finding.health.migrate.mirror.token_expiring": { mirrors: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -9759,6 +9843,12 @@ export interface MessageArgs {
   "metrics.tile.raft_hint": { term: number };
   "metrics.tile.requests_hint": { p50: string | number; p99: string | number };
   "metrics.tile.store_hint": { data: string | number };
+  "migrate.card.ago": { age: string | number };
+  "migrate.card.counts_text": { leases: number; reservations: number; scopes: number };
+  "migrate.delete.title": { name: string | number };
+  "migrate.diff.summary": { losses: number; source: string | number; tenko: string | number };
+  "migrate.losses.ack": { count: number };
+  "migrate.losses.pick": { key: string | number };
   "move.checklist_sum": { count: number };
   "move.group.cleanup": { count: number };
   "move.group.device_manual": { count: number };
@@ -11755,6 +11845,9 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.health.dns.recursion.forwarders_unused",
   "dashboard.finding.health.integration.certificate_expiring",
   "dashboard.finding.health.integration.tls12_allowed",
+  "dashboard.finding.health.migrate.mirror.scope_active",
+  "dashboard.finding.health.migrate.mirror.stale",
+  "dashboard.finding.health.migrate.mirror.token_expiring",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
@@ -16529,12 +16622,65 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.unit.per_second",
   "metrics.unit.percent",
   "metrics.waiting",
-  "migrate.coming.body",
-  "migrate.coming.connectors",
+  "migrate.card.ago",
+  "migrate.card.counts",
+  "migrate.card.counts_text",
+  "migrate.card.last_change",
+  "migrate.card.last_push",
+  "migrate.card.losses",
+  "migrate.card.never",
+  "migrate.card.sequence",
+  "migrate.card.source",
+  "migrate.cards.empty",
+  "migrate.cards.title",
   "migrate.coming.title",
   "migrate.coming.zone",
+  "migrate.create.body",
+  "migrate.create.cancel",
+  "migrate.create.name",
+  "migrate.create.name_help",
+  "migrate.create.open",
+  "migrate.create.submit",
+  "migrate.create.title",
+  "migrate.delete.body",
+  "migrate.delete.title",
+  "migrate.diff.action.attach",
+  "migrate.diff.action.create",
+  "migrate.diff.action.decide",
+  "migrate.diff.action.keep",
+  "migrate.diff.action.remove",
+  "migrate.diff.action.update",
+  "migrate.diff.col.action",
+  "migrate.diff.col.item",
+  "migrate.diff.col.kind",
+  "migrate.diff.col.mirror",
+  "migrate.diff.col.tenko",
+  "migrate.diff.disabled",
+  "migrate.diff.empty",
+  "migrate.diff.enabled",
+  "migrate.diff.kind.ddns",
+  "migrate.diff.kind.exclusion",
+  "migrate.diff.kind.lease_time",
+  "migrate.diff.kind.option",
+  "migrate.diff.kind.pool",
+  "migrate.diff.kind.prefix",
+  "migrate.diff.kind.reservation",
+  "migrate.diff.missing",
+  "migrate.diff.summary",
   "migrate.flip.body",
   "migrate.flip.title",
+  "migrate.losses.ack",
+  "migrate.losses.acked",
+  "migrate.losses.col.ack",
+  "migrate.losses.col.code",
+  "migrate.losses.col.detail",
+  "migrate.losses.col.pick",
+  "migrate.losses.col.scope",
+  "migrate.losses.col.where",
+  "migrate.losses.every_scope",
+  "migrate.losses.none",
+  "migrate.losses.open",
+  "migrate.losses.pick",
   "migrate.mirror.tab.losses",
   "migrate.mirror.tab.scopes",
   "migrate.mirror.tab.settings",
@@ -16542,6 +16688,31 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.mirror.title",
   "migrate.release.body",
   "migrate.release.title",
+  "migrate.scopes.active",
+  "migrate.scopes.choose",
+  "migrate.scopes.inactive",
+  "migrate.scopes.none",
+  "migrate.settings.commands",
+  "migrate.settings.commands_help",
+  "migrate.settings.copy",
+  "migrate.settings.delete",
+  "migrate.settings.disable",
+  "migrate.settings.enable",
+  "migrate.settings.interval",
+  "migrate.settings.save",
+  "migrate.settings.token",
+  "migrate.state.disabled",
+  "migrate.state.fresh",
+  "migrate.state.stale",
+  "migrate.state.waiting",
+  "migrate.token.copy",
+  "migrate.token.done",
+  "migrate.token.expires",
+  "migrate.token.fingerprint",
+  "migrate.token.no_fingerprint",
+  "migrate.token.once",
+  "migrate.token.title",
+  "migrate.token.token",
   "move.checklist",
   "move.checklist_foot",
   "move.checklist_sum",

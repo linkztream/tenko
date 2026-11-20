@@ -34,6 +34,7 @@ import { eventRoutes } from "./sse";
 import { stubs } from "./stubs";
 import { nodeRoutes } from "./routes-nodes";
 import { connectorRoutes } from "./routes-connectors";
+import { migrateRoutes } from "./routes-migrate";
 import { dnsRoutes } from "./routes-dns";
 import { dnsKerberosRoutes } from "./routes-dns-kerberos"; // WP13.3
 // WP7.4
@@ -105,6 +106,8 @@ export const happyPaths: HttpHandler[] = [
   ...reserveRoutes,
   // The findings counts (docs/reconciliation.md section 12), ahead of the 501 stubs.
   ...findingsRoutes,
+  // WP14.1: the mirrored sources, ahead of the 501 stubs of the scope actions.
+  ...migrateRoutes,
 ];
 
 export const handlers: HttpHandler[] = [...happyPaths, ...stubs];

@@ -1,0 +1,6 @@
+/* The cards of the mirrored sources (connectors page, mirror page). */
+.mirror-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--sp-4); }
+.mirror-card { display: grid; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-3); background: var(--surface); }
+.mirror-card[data-state="stale"] { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.mirror-scopes, .mirror-losses, .mirror-settings { display: grid; gap: var(--sp-4); margin-block-start: var(--sp-4); }
+.mirror-settings code { overflow-wrap: anywhere; }

@@ -15,6 +15,7 @@ import { createColumnState } from "../grid/prefs";
 import { createListSource } from "../grid/source";
 import type { Column, RowAction } from "../grid/types";
 import { formatList, t } from "../i18n";
+import { MirrorCards } from "../migrate/MirrorCards";
 import { useCommands } from "../shell/commands";
 import { listPlugins, type ConnectorView, type PluginInfo } from "./api";
 import { ConnectorForm } from "./ConnectorForm";
@@ -207,6 +208,9 @@ export default function ConnectorsView() {
             />
           </div>
         </section>
+
+        {/* WP14.1: the mirrored sources beside the plugin instances. */}
+        <MirrorCards />
 
         <section class="connectors-plugins page-section" aria-labelledby="conn-plugins" data-testid="connectors-plugins">
           <h2 id="conn-plugins">

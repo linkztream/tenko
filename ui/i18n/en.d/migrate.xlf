@@ -26,13 +26,6 @@
         <notes><note category="description">Heading of the notice on a migration page whose content a later work package builds.</note></notes>
         <segment><source>Coming in a later package</source></segment>
       </unit>
-      <unit id="migrate.coming.body">
-        <segment><source>The scopes of the mirrored source with their diff and actions, the loss report and the settings arrive with the next packages of the Windows takeover.</source></segment>
-      </unit>
-      <unit id="migrate.coming.connectors">
-        <notes><note category="description">Link back to the connectors page from a mirrored source's page.</note></notes>
-        <segment><source>Back to connectors</source></segment>
-      </unit>
       <unit id="migrate.coming.zone">
         <notes><note category="description">Link back to the zone page from a zone action's page.</note></notes>
         <segment><source>Back to the zone</source></segment>
@@ -50,6 +43,326 @@
       </unit>
       <unit id="migrate.release.body">
         <segment><source>The release turns the frozen names a takeover did not adopt into manual records, or deletes them; it arrives with a later package of the Windows takeover.</source></segment>
+      </unit>
+      <unit id="migrate.state.disabled">
+        <notes><note category="description">State of a mirror whose pushes are refused.</note></notes>
+        <segment><source>Disabled</source></segment>
+      </unit>
+      <unit id="migrate.state.waiting">
+        <notes><note category="description">State of a mirror that has not pushed yet.</note></notes>
+        <segment><source>Waiting for its first push</source></segment>
+      </unit>
+      <unit id="migrate.state.fresh">
+        <notes><note category="description">State of a mirror that pushed within three intervals.</note></notes>
+        <segment><source>Fresh</source></segment>
+      </unit>
+      <unit id="migrate.state.stale">
+        <notes><note category="description">State of a mirror without a push for three intervals.</note></notes>
+        <segment><source>Stale</source></segment>
+      </unit>
+      <unit id="migrate.cards.title">
+        <notes><note category="description">Heading of the mirrored sources on the connectors page.</note></notes>
+        <segment><source>Mirrored sources</source></segment>
+      </unit>
+      <unit id="migrate.cards.empty">
+        <notes><note category="description">Shown when no mirror exists.</note></notes>
+        <segment><source>No mirrored source yet. A mirror receives what an exporter on a DHCP server pushes, such as the Windows DHCP exporter.</source></segment>
+      </unit>
+      <unit id="migrate.card.last_push">
+        <notes><note category="description">Label: time since the last accepted push.</note></notes>
+        <segment><source>Last push</source></segment>
+      </unit>
+      <unit id="migrate.card.never">
+        <notes><note category="description">Value when something has not happened yet.</note></notes>
+        <segment><source>Never</source></segment>
+      </unit>
+      <unit id="migrate.card.ago">
+        <notes><note category="description">How long ago, {age} being a duration such as 5 min.</note></notes>
+        <segment><source>{age} ago</source></segment>
+      </unit>
+      <unit id="migrate.card.last_change">
+        <notes><note category="description">Label: when the snapshot last changed.</note></notes>
+        <segment><source>Last change</source></segment>
+      </unit>
+      <unit id="migrate.card.sequence">
+        <notes><note category="description">Label: the last accepted push sequence number.</note></notes>
+        <segment><source>Sequence</source></segment>
+      </unit>
+      <unit id="migrate.card.counts">
+        <notes><note category="description">Label: what the latest snapshot holds.</note></notes>
+        <segment><source>Snapshot</source></segment>
+      </unit>
+      <unit id="migrate.card.counts_text">
+        <notes><note category="description">The counts of the latest snapshot.</note></notes>
+        <segment><source>{scopes, plural, one {# scope} other {# scopes}}, {reservations, plural, one {# reservation} other {# reservations}}, {leases, plural, one {# lease} other {# leases}}</source></segment>
+      </unit>
+      <unit id="migrate.card.source">
+        <notes><note category="description">Label: the server the snapshot was read from and the exporter's name and version.</note></notes>
+        <segment><source>Source</source></segment>
+      </unit>
+      <unit id="migrate.card.losses">
+        <notes><note category="description">Label: how many loss report entries are not acknowledged.</note></notes>
+        <segment><source>Open losses</source></segment>
+      </unit>
+      <unit id="migrate.create.open">
+        <notes><note category="description">Button that opens the dialog to create a mirror.</note></notes>
+        <segment><source>New mirror</source></segment>
+      </unit>
+      <unit id="migrate.create.title">
+        <notes><note category="description">Title of the dialog that creates a mirror.</note></notes>
+        <segment><source>New mirrored source</source></segment>
+      </unit>
+      <unit id="migrate.create.body">
+        <notes><note category="description">Explains what creating a mirror does.</note></notes>
+        <segment><source>Tenko creates the service account mirror-&lt;name&gt; with no rights and one token that can only push this mirror. The token is shown once.</source></segment>
+      </unit>
+      <unit id="migrate.create.name">
+        <notes><note category="description">Label of the name of a mirror.</note></notes>
+        <segment><source>Name</source></segment>
+      </unit>
+      <unit id="migrate.create.name_help">
+        <notes><note category="description">Help under the name field.</note></notes>
+        <segment><source>No spaces; it becomes part of the service account's name.</source></segment>
+      </unit>
+      <unit id="migrate.create.cancel">
+        <notes><note category="description">Cancel button.</note></notes>
+        <segment><source>Cancel</source></segment>
+      </unit>
+      <unit id="migrate.create.submit">
+        <notes><note category="description">Button that creates the mirror.</note></notes>
+        <segment><source>Create</source></segment>
+      </unit>
+      <unit id="migrate.token.title">
+        <notes><note category="description">Title of the dialog that shows a mirror's token once.</note></notes>
+        <segment><source>The mirror's token</source></segment>
+      </unit>
+      <unit id="migrate.token.once">
+        <notes><note category="description">Warning that the token is shown only now.</note></notes>
+        <segment><source>Copy the token now: it is not shown again. Store it on the DHCP server with Install-TenkoDhcpMirror.ps1.</source></segment>
+      </unit>
+      <unit id="migrate.token.token">
+        <notes><note category="description">Label of the token.</note></notes>
+        <segment><source>Token</source></segment>
+      </unit>
+      <unit id="migrate.token.expires">
+        <notes><note category="description">Label of the token's end.</note></notes>
+        <segment><source>Expires</source></segment>
+      </unit>
+      <unit id="migrate.token.fingerprint">
+        <notes><note category="description">Label of the SHA-256 fingerprint of the CA root that the exporter pins.</note></notes>
+        <segment><source>CA fingerprint</source></segment>
+      </unit>
+      <unit id="migrate.token.no_fingerprint">
+        <notes><note category="description">Shown when Tenko does not serve a certificate of its own CA.</note></notes>
+        <segment><source>None: the API does not serve a certificate of Tenko's own authority</source></segment>
+      </unit>
+      <unit id="migrate.token.copy">
+        <notes><note category="description">Button that copies the token.</note></notes>
+        <segment><source>Copy token</source></segment>
+      </unit>
+      <unit id="migrate.token.done">
+        <notes><note category="description">Button that closes the token dialog.</note></notes>
+        <segment><source>Done</source></segment>
+      </unit>
+      <unit id="migrate.scopes.none">
+        <notes><note category="description">Shown when the mirror holds no snapshot or no scope.</note></notes>
+        <segment><source>No snapshot yet: the scopes show after the first push.</source></segment>
+      </unit>
+      <unit id="migrate.scopes.choose">
+        <notes><note category="description">Accessible name of the scope buttons.</note></notes>
+        <segment><source>Mirrored scopes</source></segment>
+      </unit>
+      <unit id="migrate.scopes.active">
+        <notes><note category="description">The source serves the scope.</note></notes>
+        <segment><source>active at the source</source></segment>
+      </unit>
+      <unit id="migrate.scopes.inactive">
+        <notes><note category="description">The source does not serve the scope.</note></notes>
+        <segment><source>inactive at the source</source></segment>
+      </unit>
+      <unit id="migrate.diff.summary">
+        <notes><note category="description">Summary above the diff of one scope.</note></notes>
+        <segment><source>The scope is {source}; Tenko's scope is {tenko}; {losses, plural, =0 {no open losses} one {# open loss} other {# open losses}}.</source></segment>
+      </unit>
+      <unit id="migrate.diff.enabled">
+        <notes><note category="description">Tenko's scope serves.</note></notes>
+        <segment><source>enabled</source></segment>
+      </unit>
+      <unit id="migrate.diff.disabled">
+        <notes><note category="description">Tenko's scope exists and does not serve.</note></notes>
+        <segment><source>disabled</source></segment>
+      </unit>
+      <unit id="migrate.diff.missing">
+        <notes><note category="description">Tenko has no scope of the network.</note></notes>
+        <segment><source>not created yet</source></segment>
+      </unit>
+      <unit id="migrate.diff.empty">
+        <notes><note category="description">Shown when the two scopes agree.</note></notes>
+        <segment><source>No differences: Tenko's scope equals the mirror's.</source></segment>
+      </unit>
+      <unit id="migrate.diff.col.kind">
+        <notes><note category="description">Column: what a diff row is about.</note></notes>
+        <segment><source>Kind</source></segment>
+      </unit>
+      <unit id="migrate.diff.col.item">
+        <notes><note category="description">Column: the item of a diff row.</note></notes>
+        <segment><source>Item</source></segment>
+      </unit>
+      <unit id="migrate.diff.col.mirror">
+        <notes><note category="description">Column: the mirror's value.</note></notes>
+        <segment><source>Mirror</source></segment>
+      </unit>
+      <unit id="migrate.diff.col.tenko">
+        <notes><note category="description">Column: Tenko's value.</note></notes>
+        <segment><source>Tenko</source></segment>
+      </unit>
+      <unit id="migrate.diff.col.action">
+        <notes><note category="description">Column: what the prepare would do.</note></notes>
+        <segment><source>Prepare would</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.prefix">
+        <notes><note category="description">Diff row kind: the IPAM network.</note></notes>
+        <segment><source>Network</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.pool">
+        <notes><note category="description">Diff row kind: a pool range.</note></notes>
+        <segment><source>Pool</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.exclusion">
+        <notes><note category="description">Diff row kind: an exclusion range.</note></notes>
+        <segment><source>Exclusion</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.lease_time">
+        <notes><note category="description">Diff row kind: the lease time.</note></notes>
+        <segment><source>Lease time</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.option">
+        <notes><note category="description">Diff row kind: a DHCP option.</note></notes>
+        <segment><source>Option</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.reservation">
+        <notes><note category="description">Diff row kind: a reservation.</note></notes>
+        <segment><source>Reservation</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.ddns">
+        <notes><note category="description">Diff row kind: the DDNS settings.</note></notes>
+        <segment><source>DDNS</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.create">
+        <notes><note category="description">What the prepare would do.</note></notes>
+        <segment><source>create</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.update">
+        <notes><note category="description">What the prepare would do.</note></notes>
+        <segment><source>update</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.remove">
+        <notes><note category="description">What the prepare would do.</note></notes>
+        <segment><source>remove</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.attach">
+        <notes><note category="description">What the prepare would do: use the IPAM host that already holds the MAC address or address.</note></notes>
+        <segment><source>attach to the existing host</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.keep">
+        <notes><note category="description">What the prepare would do.</note></notes>
+        <segment><source>keep</source></segment>
+      </unit>
+      <unit id="migrate.diff.action.decide">
+        <notes><note category="description">The operator must decide before the prepare runs.</note></notes>
+        <segment><source>wait for your decision</source></segment>
+      </unit>
+      <unit id="migrate.losses.none">
+        <notes><note category="description">Shown when the loss report is empty.</note></notes>
+        <segment><source>Nothing was lost: the mirror carries everything the source holds.</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.pick">
+        <notes><note category="description">Accessible header of the selection column.</note></notes>
+        <segment><source>Select</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.where">
+        <notes><note category="description">Column: where in the source the entry is.</note></notes>
+        <segment><source>Where</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.code">
+        <notes><note category="description">Column: the entry's code.</note></notes>
+        <segment><source>Code</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.detail">
+        <notes><note category="description">Column: the entry's English detail as the exporter wrote it.</note></notes>
+        <segment><source>Detail</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.scope">
+        <notes><note category="description">Column: the scope the entry belongs to.</note></notes>
+        <segment><source>Scope</source></segment>
+      </unit>
+      <unit id="migrate.losses.col.ack">
+        <notes><note category="description">Column: whether the entry is acknowledged.</note></notes>
+        <segment><source>State</source></segment>
+      </unit>
+      <unit id="migrate.losses.pick">
+        <notes><note category="description">Accessible name of the checkbox of one entry.</note></notes>
+        <segment><source>Select {key}</source></segment>
+      </unit>
+      <unit id="migrate.losses.every_scope">
+        <notes><note category="description">The entry names no scope, so it holds for every scope.</note></notes>
+        <segment><source>every scope</source></segment>
+      </unit>
+      <unit id="migrate.losses.acked">
+        <notes><note category="description">The entry is acknowledged.</note></notes>
+        <segment><source>Acknowledged</source></segment>
+      </unit>
+      <unit id="migrate.losses.open">
+        <notes><note category="description">The entry is not acknowledged.</note></notes>
+        <segment><source>Open</source></segment>
+      </unit>
+      <unit id="migrate.losses.ack">
+        <notes><note category="description">Button that acknowledges the selected entries.</note></notes>
+        <segment><source>{count, plural, =0 {Acknowledge} one {Acknowledge # entry} other {Acknowledge # entries}}</source></segment>
+      </unit>
+      <unit id="migrate.settings.interval">
+        <notes><note category="description">Label of the expected interval between pushes.</note></notes>
+        <segment><source>Interval (seconds)</source></segment>
+      </unit>
+      <unit id="migrate.settings.save">
+        <notes><note category="description">Button that saves the settings.</note></notes>
+        <segment><source>Save</source></segment>
+      </unit>
+      <unit id="migrate.settings.disable">
+        <notes><note category="description">Button that makes the mirror refuse pushes.</note></notes>
+        <segment><source>Refuse pushes</source></segment>
+      </unit>
+      <unit id="migrate.settings.enable">
+        <notes><note category="description">Button that makes the mirror accept pushes again.</note></notes>
+        <segment><source>Accept pushes</source></segment>
+      </unit>
+      <unit id="migrate.settings.commands">
+        <notes><note category="description">Heading of the PowerShell commands.</note></notes>
+        <segment><source>Install on the DHCP server</source></segment>
+      </unit>
+      <unit id="migrate.settings.commands_help">
+        <notes><note category="description">Explains the two commands.</note></notes>
+        <segment><source>Compare the digests with SHA256SUMS of the release, then install the scheduled task under the DHCP read account; it asks for the token.</source></segment>
+      </unit>
+      <unit id="migrate.settings.copy">
+        <notes><note category="description">Button that copies a command.</note></notes>
+        <segment><source>Copy</source></segment>
+      </unit>
+      <unit id="migrate.settings.token">
+        <notes><note category="description">Button that replaces the mirror's token.</note></notes>
+        <segment><source>Replace token</source></segment>
+      </unit>
+      <unit id="migrate.settings.delete">
+        <notes><note category="description">Button that deletes the mirror.</note></notes>
+        <segment><source>Delete mirror</source></segment>
+      </unit>
+      <unit id="migrate.delete.title">
+        <notes><note category="description">Title of the confirmation that deletes a mirror.</note></notes>
+        <segment><source>Delete {name}?</source></segment>
+      </unit>
+      <unit id="migrate.delete.body">
+        <notes><note category="description">What deleting a mirror removes.</note></notes>
+        <segment><source>The snapshot, the acknowledgments, the service account and its token go with it; takeover records stay. Remove the scheduled task on the DHCP server first.</source></segment>
       </unit>
     </group>
   </file>

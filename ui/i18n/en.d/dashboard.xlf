@@ -551,6 +551,18 @@
       <unit id="dashboard.hidden.admin">
         <segment><source>DNS, DHCP and system metrics (for administrators)</source></segment>
       </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.stale">
+        <notes><note category="description">Mirrored sources without a push for three intervals; {mirrors} lists their names.</note></notes>
+        <segment><source>No push for three intervals from the mirrored sources {mirrors}. Check the scheduled task on the DHCP server.</source></segment>
+      </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.token_expiring">
+        <notes><note category="description">Mirror tokens that expire within 14 days; {mirrors} lists the mirrors.</note></notes>
+        <segment><source>The tokens of the mirrored sources {mirrors} expire within 14 days. Replace them on the mirror's Settings tab.</source></segment>
+      </unit>
+      <unit id="dashboard.finding.health.migrate.mirror.scope_active">
+        <notes><note category="description">A source serves a scope Tenko took over; {mirrors} lists the mirrors.</note></notes>
+        <segment><source>The mirrored sources {mirrors} serve a scope Tenko took over: two DHCP servers answer one network.</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

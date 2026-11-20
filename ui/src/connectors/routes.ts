@@ -3,8 +3,8 @@ import type { AppRoute } from "../app/router";
 import { withPacks } from "../i18n";
 
 // The connectors area: the instances and plugins, and one instance with its recent runs (job
-// words from the jobs pack).
-const PACKS = ["grid", "connectors", "jobs"] as const;
+// words from the jobs pack), with the cards of the mirrored sources (the migrate pack).
+const PACKS = ["grid", "connectors", "jobs", "migrate"] as const;
 
 export const routes: AppRoute[] = [
   { path: "/connectors", component: lazy(withPacks(PACKS, () => import("./ConnectorsView"))), title: "shell.nav.connectors" },
