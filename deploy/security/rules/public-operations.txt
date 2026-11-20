@@ -50,6 +50,16 @@ POST /api/v1/nodes/enroll
 # by the fingerprint shown at install (OPS-22).
 GET /api/v1/system/ca-root
 
+# Integration enrollment (ADR 0035, decision 5): the host proves a single-use, time-limited
+# enrollment code an administrator created with an HMAC of the code's secret in its headers,
+# never the secret itself; the code can be limited to a source prefix, plain HTTP is refused
+# outside the Lab profile, and the address limiter guards the route.
+POST /api/v1/integrations/enroll
+
+# The root of the integration listener's server certificate: public by nature, so the host
+# can fetch it and compare it with the fingerprint the enrollment code carries.
+GET /api/v1/integrations/ca
+
 # The OpenAPI document: it describes the API and holds no data of the installation.
 GET /api/v1/openapi.json
 

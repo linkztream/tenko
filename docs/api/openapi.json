@@ -22135,7 +22135,11 @@
             }
           }
         },
-        "security": []
+        "security": [
+          {
+            "certificate": []
+          }
+        ]
       }
     },
     "/api/v1/integrations/certificates": {
@@ -91831,6 +91835,10 @@
       }
     },
     "securitySchemes": {
+      "certificate": {
+        "type": "mutualTLS",
+        "description": "Client certificate of an integration (ADR 0035), presented on the integration listener (`[integrations] listen`); the API listener asks for none."
+      },
       "session": {
         "type": "apiKey",
         "in": "cookie",

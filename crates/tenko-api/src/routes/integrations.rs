@@ -569,7 +569,7 @@ async fn enroll_integration(
         (status = 415, description = "The body is not `application/pkcs10` (`integration.request.media_type`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The request is not usable (`integration.request.invalid`)", body = ProblemDetails, content_type = "application/problem+json")
     ),
-    security()
+    security(("certificate" = []))
 )]
 async fn renew_integration_certificate(
     PublicCtx { ctx, .. }: PublicCtx,

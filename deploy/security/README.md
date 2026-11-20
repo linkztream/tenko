@@ -137,9 +137,11 @@ with a reason in the file, as narrow as the tool allows.
   readiness, the setup flow (`GET` and `POST /setup`; the password check of the wizard is
   marked `setup-only`, since it is public only while setup is open), the sign-in steps
   (password, TOTP, recovery code, passkey), the languages of the sign-in page, node
-  enrollment (the token in the body is the credential), the internal CA's root and the
-  OpenAPI document; and, outside the API, the web interface's static files. `web.unauth`
-  fails when the document's public operations and this list differ in either direction.
+  enrollment (the token in the body is the credential), integration enrollment (the code's
+  proof in the headers is the credential), the internal CA's root, the root of the
+  integration listener and the OpenAPI document; and, outside the API, the web interface's
+  static files. `web.unauth` fails when the document's public operations and this list
+  differ in either direction.
 - `rules/zap-baseline.tsv`: ZAP's rule file (rule id, action, name, separated by tabs). `FAIL`
   for what the node's response headers and session cookie rule out, `WARN` for findings the
   triage reads, `IGNORE` only with the reason in the comment above it. Today's ignores:

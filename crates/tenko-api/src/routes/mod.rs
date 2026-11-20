@@ -183,7 +183,8 @@ pub mod vlans;
 )]
 struct ApiDoc;
 
-/// Adds the security schemes `session` (the UI cookie) and `token` (personal API tokens).
+/// Adds the security schemes `session` (the UI cookie), `token` (personal API tokens) and
+/// `certificate` (an integration's client certificate, which alone renews itself).
 struct SecurityAddon;
 
 impl Modify for SecurityAddon {
@@ -210,6 +211,19 @@ impl Modify for SecurityAddon {
                     ))
                     .build(),
             ),
+        );
+        components.add_security_scheme(
+            "certificate",
+            SecurityScheme::MutualTls {
+                description: Some(
+                    "Client certificate of an integration (ADR 0035), presented on the \
+                     integration listener (`[integrations] listen`); the API listener asks for \
+                     none."
+                        .to_owned(),
+                ),
+                deprecated: None,
+                extensions: None,
+            },
         );
     }
 }

@@ -16,7 +16,7 @@ use super::auth::testkit::{Credential, Credential::*, Harness, Reply};
 use crate::{API_BASE, modules::ModuleSet};
 
 /// The operations anybody may call: their handlers take no `Ctx`.
-const PUBLIC: [&str; 21] = [
+const PUBLIC: [&str; 20] = [
     "GET /auth/negotiate",
     "GET /auth/oidc/{id}/callback",
     "GET /auth/oidc/{id}/start",
@@ -34,7 +34,6 @@ const PUBLIC: [&str; 21] = [
     "POST /auth/login/totp",
     "POST /auth/webauthn/login/finish",
     "POST /auth/webauthn/login/start",
-    "POST /integrations/certificate/renew",
     "POST /integrations/enroll",
     "POST /nodes/enroll",
     "POST /setup",
@@ -52,6 +51,9 @@ enum Requirement {
     SessionOrToken,
     /// The calling scoped token's own routes (IAM-20): a session has no token.
     Token,
+    /// The integration certificate's own renewal: the handler takes no `Ctx` and refuses
+    /// a connection without the certificate (`integrations.rs` tests that).
+    Certificate,
 }
 
 /// Every operation of the whole API, as `"METHOD /path"` relative to the API base, with its
@@ -74,6 +76,7 @@ fn operations() -> Vec<(String, Requirement, Value)> {
                 r#"[{"session":[]}]"# => Requirement::Session,
                 r#"[{"session":[]},{"token":[]}]"# => Requirement::SessionOrToken,
                 r#"[{"token":[]}]"# => Requirement::Token,
+                r#"[{"certificate":[]}]"# => Requirement::Certificate,
                 other => panic!("{key}: unexpected security requirement {other}"),
             };
             out.push((key, requirement, operation.clone()));
@@ -123,6 +126,12 @@ fn every_operation_declares_its_security_requirement() {
             "POST /access/token/renew".to_owned()
         ]),
         "the token-only operations"
+    );
+    assert_eq!(schemes["certificate"]["type"], "mutualTLS");
+    assert_eq!(
+        with(Requirement::Certificate),
+        BTreeSet::from(["POST /integrations/certificate/renew".to_owned()]),
+        "the certificate-only operations"
     );
 }
 
@@ -198,6 +207,10 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
             Requirement::Public => {
                 assert_ne!(reply.status.as_u16(), 401, "a public operation: {label}");
             }
+            // Refused by the handler without the certificate, not by authentication.
+            Requirement::Certificate => {
+                assert!(!reply.status.is_success(), "{label}");
+            }
             // The installation has completed setup: refused before the body is read.
             Requirement::PublicUntilSetup => {
                 assert!(refused_as_unauthenticated(&reply), "{label}");
@@ -208,7 +221,10 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
             }
         }
     }
-    assert_eq!(refused, 460 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len());
+    assert_eq!(
+        refused,
+        460 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+    );
 }
 
 /// Every operation without a request body called with a personal token of the
