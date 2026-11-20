@@ -38,7 +38,15 @@ export function createMirror(name: string, intervalSecs: number | null, sources:
   });
 }
 
-export function updateMirror(id: string, change: { name?: string; enabled?: boolean; interval_secs?: number }): Promise<MirrorItem> {
+/** A change of a mirror; `partner: null` takes its pair apart. */
+export interface MirrorChange {
+  name?: string;
+  enabled?: boolean;
+  interval_secs?: number;
+  partner?: string | null;
+}
+
+export function updateMirror(id: string, change: MirrorChange): Promise<MirrorItem> {
   return api.patch("/api/v1/migrate/mirrors/{id}", { path: { id }, body: change });
 }
 

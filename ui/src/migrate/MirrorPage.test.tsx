@@ -15,13 +15,30 @@ import { setLocale } from "../i18n";
 import { sourceList } from "./api";
 import { MirrorCards, REFRESH_MS } from "./MirrorCards";
 import MirrorPage from "./MirrorPage";
-import { installCommands, mirrorState } from "./model";
+import { mirrorState } from "./model";
 import { migratePaths } from "./paths";
 
 type S = components["schemas"];
 
 const MIRROR = "0190d1c2-0000-7000-8000-00000000a001";
+const PARTNER = "0190d1c2-0000-7000-8000-00000000b001";
 const SCOPE = "192.0.2.0/24";
+
+/** The diff of a paired mirror: one row against Tenko, one against the partner. */
+const PAIRED_DIFF: S["ScopeDiff"] = {
+  mirror: MIRROR,
+  scope: SCOPE,
+  sequence: 42,
+  source_active: true,
+  tenko_enabled: false,
+  losses_open: 0,
+  partner: PARTNER,
+  partner_sequence: 41,
+  rows: [
+    { kind: "pool", item: "192.0.2.100-192.0.2.199", mirror: "192.0.2.100-192.0.2.199", action: "create" },
+    { kind: "partner", item: "scope:42", mirror: "192.0.2.5", partner: "192.0.2.6", action: "decide", reason: "the partners differ" },
+  ],
+};
 
 function item(change: Partial<S["MirrorItem"]> = {}): S["MirrorItem"] {
   return {
@@ -89,22 +106,11 @@ afterEach(async () => {
 const open = (tab = "") => renderRoute(MirrorPage, { url: `/connectors/mirrors/${MIRROR}${tab ? `/${tab}` : ""}`, path: "/connectors/mirrors/:id/:tab?" });
 
 describe("the mirror model", () => {
-  it("names the card's state and writes the two commands", () => {
+  it("names the card's state", () => {
     expect(mirrorState({ enabled: false, age_secs: 1, stale: false })).toBe("disabled");
     expect(mirrorState({ enabled: true, age_secs: null, stale: false })).toBe("waiting");
     expect(mirrorState({ enabled: true, age_secs: 200, stale: true })).toBe("stale");
     expect(mirrorState({ enabled: true, age_secs: 20, stale: false })).toBe("fresh");
-    const fingerprint = "ab".repeat(32);
-    const [hash, install] = installCommands({ id: MIRROR, ca_fingerprint: fingerprint }, "https://tenko.example.test:8443");
-    expect(hash).toContain("Get-FileHash");
-    expect(install).toBe(
-      `.\\Install-TenkoDhcpMirror.ps1 -Url 'https://tenko.example.test:8443' -MirrorId '${MIRROR}' -Fingerprint '${fingerprint}' -Account 'DOMAIN\\account' -PromptToken`,
-    );
-    // A value of another shape never reaches the command.
-    const [, forged] = installCommands({ id: "x'; Remove-Item C:\\ -Recurse; '", ca_fingerprint: "ab'" }, "https://tenko.example.test:8443'");
-    expect(forged).toBe(
-      ".\\Install-TenkoDhcpMirror.ps1 -Url '<https://tenko:8443>' -MirrorId '<mirror id>' -Fingerprint '<fingerprint>' -Account 'DOMAIN\\account' -PromptToken",
-    );
   });
 });
 
@@ -207,12 +213,29 @@ describe("the mirror page", () => {
     await waitFor(() => expect(screen.getAllByTestId("mirror-loss")[0]?.dataset.acked).toBe("true"));
   });
 
-  it("shows the commands, replaces the token and deletes the mirror", async () => {
+  it("shows the diff's partner column for a paired mirror", async () => {
+    seedMirror({ item: item({ partner: PARTNER }), diffs: { [SCOPE]: PAIRED_DIFF } });
+    open();
+    const diff = await screen.findByTestId("mirror-diff");
+    const row = diff.querySelector("[data-kind='partner']");
+    expect(row?.textContent).toContain("192.0.2.6");
+    expect(row?.textContent).toContain("Partner differs");
+    expect(within(diff).getAllByRole("columnheader").map((cell) => cell.textContent)).toContain("Partner");
+  });
+
+  it("shows the values as text without a command, pairs the mirror, replaces the token and deletes it", async () => {
     seed();
+    seedMirror({ item: item({ id: PARTNER, name: "dc2" }) });
     const view = open("settings");
-    const commands = await screen.findAllByTestId("mirror-command");
-    expect(commands[1]?.textContent).toContain(`-MirrorId '${MIRROR}'`);
-    expect(commands[1]?.textContent).toContain(`-Fingerprint '${"ab".repeat(32)}'`);
+    expect((await screen.findByTestId("mirror-value-id")).textContent).toBe(MIRROR);
+    expect(screen.getByTestId("mirror-value-fingerprint").textContent).toBe("ab".repeat(32));
+    expect(screen.getByTestId("mirror-value-url").textContent).toBe(window.location.origin);
+    expect(screen.getByTestId("mirror-settings").textContent).not.toContain("Install-TenkoDhcpMirror");
+    const partner = screen.getByTestId("mirror-partner") as HTMLSelectElement;
+    await waitFor(() => expect(partner.options).toHaveLength(2));
+    fireEvent.change(partner, { target: { value: PARTNER } });
+    await waitFor(() => expect((screen.getByTestId("mirror-partner") as HTMLSelectElement).value).toBe(PARTNER));
+    expect(await axeViolations(view.container)).toEqual([]);
     fireEvent.click(screen.getByTestId("mirror-token-replace"));
     expect((await screen.findByTestId("mirror-token")).textContent).toMatch(/^tnk_/);
     expect(sourceList(" 192.0.2.10,198.51.100.0/24  2001:db8::1 ")).toEqual(["192.0.2.10", "198.51.100.0/24", "2001:db8::1"]);

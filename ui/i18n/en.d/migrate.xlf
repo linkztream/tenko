@@ -224,6 +224,10 @@
         <notes><note category="description">Column: Tenko's value.</note></notes>
         <segment><source>Tenko</source></segment>
       </unit>
+      <unit id="migrate.diff.col.partner">
+        <notes><note category="description">Column: the partner mirror's value.</note></notes>
+        <segment><source>Partner</source></segment>
+      </unit>
       <unit id="migrate.diff.col.action">
         <notes><note category="description">Column: what the prepare would do.</note></notes>
         <segment><source>Prepare would</source></segment>
@@ -255,6 +259,14 @@
       <unit id="migrate.diff.kind.ddns">
         <notes><note category="description">Diff row kind: the DDNS settings.</note></notes>
         <segment><source>DDNS</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.filter">
+        <notes><note category="description">Diff row kind: the MAC filters and the scope's restriction to the allow list.</note></notes>
+        <segment><source>MAC filter</source></segment>
+      </unit>
+      <unit id="migrate.diff.kind.partner">
+        <notes><note category="description">Diff row kind: a difference between the mirror and its partner.</note></notes>
+        <segment><source>Partner differs</source></segment>
       </unit>
       <unit id="migrate.diff.action.create">
         <notes><note category="description">What the prepare would do.</note></notes>
@@ -344,17 +356,41 @@
         <notes><note category="description">Button that makes the mirror accept pushes again.</note></notes>
         <segment><source>Accept pushes</source></segment>
       </unit>
-      <unit id="migrate.settings.commands">
-        <notes><note category="description">Heading of the PowerShell commands.</note></notes>
-        <segment><source>Install on the DHCP server</source></segment>
+      <unit id="migrate.settings.partner">
+        <notes><note category="description">Label of the choice of the other mirror of a pair of DHCP servers.</note></notes>
+        <segment><source>Partner (the other DHCP server of a pair)</source></segment>
       </unit>
-      <unit id="migrate.settings.commands_help">
-        <notes><note category="description">Explains the two commands.</note></notes>
-        <segment><source>Compare the digests with SHA256SUMS of the release, then install the scheduled task under the DHCP read account; it asks for the token.</source></segment>
+      <unit id="migrate.settings.partner_none">
+        <notes><note category="description">The mirror has no partner.</note></notes>
+        <segment><source>No partner</source></segment>
+      </unit>
+      <unit id="migrate.settings.partner_help">
+        <notes><note category="description">Help under the partner choice.</note></notes>
+        <segment><source>Both mirrors are paired at once, and the diff then shows every difference between the two servers.</source></segment>
+      </unit>
+      <unit id="migrate.settings.values">
+        <notes><note category="description">Heading of the values the install script needs.</note></notes>
+        <segment><source>Values for the install script</source></segment>
+      </unit>
+      <unit id="migrate.settings.values_help">
+        <notes><note category="description">Explains where the values go and how to check the fingerprint.</note></notes>
+        <segment><source>Type these values into the install command of the exporter's README on the DHCP server. Compare the fingerprint with the one the Tenko node printed when it started (its console and its log), not only with this page.</source></segment>
+      </unit>
+      <unit id="migrate.settings.url">
+        <notes><note category="description">Label of the controller's address the exporter pushes to.</note></notes>
+        <segment><source>Controller URL</source></segment>
+      </unit>
+      <unit id="migrate.settings.id">
+        <notes><note category="description">Label of the mirror's id.</note></notes>
+        <segment><source>Mirror id</source></segment>
       </unit>
       <unit id="migrate.settings.copy">
-        <notes><note category="description">Button that copies a command.</note></notes>
+        <notes><note category="description">Button that copies a value.</note></notes>
         <segment><source>Copy</source></segment>
+      </unit>
+      <unit id="migrate.settings.copy_value">
+        <notes><note category="description">Accessible name of the button that copies one value.</note></notes>
+        <segment><source>Copy {name}</source></segment>
       </unit>
       <unit id="migrate.settings.token">
         <notes><note category="description">Button that replaces the mirror's token.</note></notes>

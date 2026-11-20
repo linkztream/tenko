@@ -6410,14 +6410,17 @@ export type MessageKey =
   | "migrate.diff.col.item"
   | "migrate.diff.col.kind"
   | "migrate.diff.col.mirror"
+  | "migrate.diff.col.partner"
   | "migrate.diff.col.tenko"
   | "migrate.diff.disabled"
   | "migrate.diff.empty"
   | "migrate.diff.enabled"
   | "migrate.diff.kind.ddns"
   | "migrate.diff.kind.exclusion"
+  | "migrate.diff.kind.filter"
   | "migrate.diff.kind.lease_time"
   | "migrate.diff.kind.option"
+  | "migrate.diff.kind.partner"
   | "migrate.diff.kind.pool"
   | "migrate.diff.kind.prefix"
   | "migrate.diff.kind.reservation"
@@ -6448,16 +6451,22 @@ export type MessageKey =
   | "migrate.scopes.choose"
   | "migrate.scopes.inactive"
   | "migrate.scopes.none"
-  | "migrate.settings.commands"
-  | "migrate.settings.commands_help"
   | "migrate.settings.copy"
+  | "migrate.settings.copy_value"
   | "migrate.settings.delete"
   | "migrate.settings.disable"
   | "migrate.settings.enable"
+  | "migrate.settings.id"
   | "migrate.settings.interval"
+  | "migrate.settings.partner"
+  | "migrate.settings.partner_help"
+  | "migrate.settings.partner_none"
   | "migrate.settings.save"
   | "migrate.settings.sources_help"
   | "migrate.settings.token"
+  | "migrate.settings.url"
+  | "migrate.settings.values"
+  | "migrate.settings.values_help"
   | "migrate.state.disabled"
   | "migrate.state.fresh"
   | "migrate.state.stale"
@@ -9879,6 +9888,7 @@ export interface MessageArgs {
   "migrate.diff.summary": { losses: number; source: string | number; tenko: string | number };
   "migrate.losses.ack": { count: number };
   "migrate.losses.pick": { key: string | number };
+  "migrate.settings.copy_value": { name: string | number };
   "move.checklist_sum": { count: number };
   "move.group.cleanup": { count: number };
   "move.group.device_manual": { count: number };
@@ -16703,14 +16713,17 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.diff.col.item",
   "migrate.diff.col.kind",
   "migrate.diff.col.mirror",
+  "migrate.diff.col.partner",
   "migrate.diff.col.tenko",
   "migrate.diff.disabled",
   "migrate.diff.empty",
   "migrate.diff.enabled",
   "migrate.diff.kind.ddns",
   "migrate.diff.kind.exclusion",
+  "migrate.diff.kind.filter",
   "migrate.diff.kind.lease_time",
   "migrate.diff.kind.option",
+  "migrate.diff.kind.partner",
   "migrate.diff.kind.pool",
   "migrate.diff.kind.prefix",
   "migrate.diff.kind.reservation",
@@ -16741,16 +16754,22 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.scopes.choose",
   "migrate.scopes.inactive",
   "migrate.scopes.none",
-  "migrate.settings.commands",
-  "migrate.settings.commands_help",
   "migrate.settings.copy",
+  "migrate.settings.copy_value",
   "migrate.settings.delete",
   "migrate.settings.disable",
   "migrate.settings.enable",
+  "migrate.settings.id",
   "migrate.settings.interval",
+  "migrate.settings.partner",
+  "migrate.settings.partner_help",
+  "migrate.settings.partner_none",
   "migrate.settings.save",
   "migrate.settings.sources_help",
   "migrate.settings.token",
+  "migrate.settings.url",
+  "migrate.settings.values",
+  "migrate.settings.values_help",
   "migrate.state.disabled",
   "migrate.state.fresh",
   "migrate.state.stale",

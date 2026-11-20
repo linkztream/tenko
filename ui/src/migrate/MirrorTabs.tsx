@@ -1,14 +1,16 @@
-// The three tabs of a mirror's page (plan section 3.3): the diff of a mirrored scope, the loss
-// report with its acknowledgment, and the settings with the token, the commands and deletion.
-// Every text of the source (names, details, values) is shown as text, never as markup.
+// The three tabs of a mirror's page (plan section 3.3): the diff of a mirrored scope (with the
+// partner's column for a paired mirror), the loss report with its acknowledgment, and the
+// settings with the partner, the token, the values the install script needs and deletion.
+// Every text of the source (names, details, values) is shown as text, never as markup; the page
+// offers no command line to run, since an administrator never runs text a node produced.
 import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { copyText } from "../auth/account/shared";
 import { isAdmin } from "../auth/session";
 import { ConfirmDialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { t } from "../i18n";
-import { ackLosses, deleteMirror, getDiff, getLosses, replaceMirrorToken, sourceList, updateMirror, type MirrorCreated, type MirrorItem } from "./api";
-import { installCommands } from "./model";
+import { ackLosses, deleteMirror, getDiff, getLosses, listMirrors, replaceMirrorToken, sourceList, updateMirror, type MirrorChange, type MirrorCreated, type MirrorItem } from "./api";
+import { shortId } from "./model";
 import { TokenShown } from "./TokenShown";
 
 /** Runs an action, keeping its error for the tab's notice. */
@@ -66,6 +68,9 @@ export function ScopesTab(props: { mirror: MirrorItem }) {
                       <th>{t("migrate.diff.col.item")}</th>
                       <th>{t("migrate.diff.col.mirror")}</th>
                       <th>{t("migrate.diff.col.tenko")}</th>
+                      <Show when={d().partner}>
+                        <th>{t("migrate.diff.col.partner")}</th>
+                      </Show>
                       <th>{t("migrate.diff.col.action")}</th>
                     </tr>
                   </thead>
@@ -77,6 +82,9 @@ export function ScopesTab(props: { mirror: MirrorItem }) {
                           <td class="mono">{row.item}</td>
                           <td class="mono">{row.mirror ?? ""}</td>
                           <td class="mono">{row.tenko ?? ""}</td>
+                          <Show when={d().partner}>
+                            <td class="mono">{row.partner ?? ""}</td>
+                          </Show>
                           <td title={row.reason ?? undefined}>{t(`migrate.diff.action.${row.action}`)}</td>
                         </tr>
                       )}
@@ -177,10 +185,16 @@ export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; o
   const [sources, setSources] = createSignal(untrack(() => (props.mirror.source_prefixes ?? []).join(", ")));
   const [deleting, setDeleting] = createSignal(false);
   const [created, setCreated] = createSignal<MirrorCreated | null>(null);
+  const [others] = createResource(() => listMirrors().then((all) => all.filter((other) => other.id !== props.mirror.id)));
   const action = useAction();
-  const commands = () => installCommands(props.mirror, window.location.origin);
+  // Shown as text to type into the README's command, never as a command line to run.
+  const values = (): [string, string, string | null | undefined][] => [
+    ["url", t("migrate.settings.url"), window.location.origin],
+    ["id", t("migrate.settings.id"), props.mirror.id],
+    ["fingerprint", t("migrate.token.fingerprint"), props.mirror.ca_fingerprint],
+  ];
   // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
-  const save = (change: { name?: string; enabled?: boolean; interval_secs?: number }) => action.run(() => updateMirror(props.mirror.id, change), props.onChange);
+  const save = (change: MirrorChange) => action.run(() => updateMirror(props.mirror.id, change), props.onChange);
   // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
   const replaceToken = () => action.run(async () => setCreated(await replaceMirrorToken(props.mirror.id, sourceList(sources()))), props.onChange);
   return (
@@ -219,20 +233,44 @@ export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; o
           </button>
         </Show>
       </form>
-      <h3 class="section-title">{t("migrate.settings.commands")}</h3>
-      <p class="muted">{t("migrate.settings.commands_help")}</p>
-      <For each={commands()}>
-        {(command) => (
-          <div class="form-row">
-            <code class="mono grow" data-testid="mirror-command">
-              {command}
-            </code>
-            <button type="button" class="btn ghost" onClick={() => void copyText(command)}>
-              {t("migrate.settings.copy")}
-            </button>
-          </div>
-        )}
-      </For>
+      <div class="field">
+        <label for="mirror-settings-partner">{t("migrate.settings.partner")}</label>
+        <select
+          id="mirror-settings-partner"
+          class="input"
+          data-testid="mirror-partner"
+          disabled={!isAdmin() || action.busy()}
+          value={props.mirror.partner ?? ""}
+          onChange={(e) => void save({ partner: e.currentTarget.value || null })}
+        >
+          <option value="">{t("migrate.settings.partner_none")}</option>
+          <For each={others.latest ?? []}>{(other) => <option value={other.id}>{`${other.name} (${shortId(other.id)})`}</option>}</For>
+        </select>
+        <span class="help">{t("migrate.settings.partner_help")}</span>
+      </div>
+      <h2 class="section-title">{t("migrate.settings.values")}</h2>
+      <p class="muted">{t("migrate.settings.values_help")}</p>
+      <dl class="kv">
+        <For each={values()}>
+          {([key, label, value]) => (
+            <>
+              <dt>{label}</dt>
+              <dd class="form-row">
+                <span class="mono grow" data-testid={`mirror-value-${key}`}>
+                  {value ?? t("migrate.token.no_fingerprint")}
+                </span>
+                <Show when={value}>
+                  {(text) => (
+                    <button type="button" class="btn ghost" aria-label={t("migrate.settings.copy_value", { name: label })} onClick={() => void copyText(text())}>
+                      {t("migrate.settings.copy")}
+                    </button>
+                  )}
+                </Show>
+              </dd>
+            </>
+          )}
+        </For>
+      </dl>
       <Show when={isAdmin()}>
         <div class="field">
           <label for="mirror-settings-sources">{t("migrate.create.sources")}</label>

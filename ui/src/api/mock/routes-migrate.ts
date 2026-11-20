@@ -5,7 +5,8 @@
 // What the mock simplifies: there is no exporter and no push. A mirror starts without a
 // snapshot (no scopes, no losses, never pushed); a test seeds the freshness, the scopes, the
 // losses and the diff of a mirror with `seedMirror`. The token is a fixed text per mirror.
-// Nothing is audited and no event is published: the cards read the list on a timer.
+// Nothing is audited and no event is published: the cards read the list on a timer. A pair is
+// set and taken apart on both mirrors, with the server's refusals.
 import type { HttpHandler } from "msw";
 import type { components } from "../generated/schema";
 import { requireAdmin, requireSession } from "./auth";
@@ -98,10 +99,24 @@ const one = route("get", "/api/v1/migrate/mirrors/{id}", (ctx) => {
   return ok(found(ctx.params.id).item);
 });
 
+/** Pairs two mirrors on both rows, or takes a pair apart, with the server's refusals. */
+function pair(seed: MirrorSeed, partner: string | null): void {
+  const refuse = (reason: string) => new Problem("migrate.mirror.partner", { status: 409, params: { id: seed.item.id, partner: partner ?? "", reason } });
+  const other = partner === null ? (seed.item.partner ?? null) : partner;
+  if (partner === seed.item.id) throw refuse("a mirror cannot be its own partner");
+  if (partner !== null && seed.item.partner && seed.item.partner !== partner) throw refuse("the mirror is paired with another mirror");
+  const theirs = other === null ? undefined : mirrors.get(other);
+  if (partner !== null && !theirs) throw refuse("no mirror of that id exists");
+  if (partner !== null && theirs?.item.partner && theirs.item.partner !== seed.item.id) throw refuse("the partner is paired with another mirror");
+  if (theirs) theirs.item = { ...theirs.item, partner: partner === null ? null : seed.item.id };
+  seed.item = { ...seed.item, partner };
+}
+
 const patch = route("patch", "/api/v1/migrate/mirrors/{id}", async (ctx) => {
   requireAdmin();
   const seed = found(ctx.params.id);
   const body = await ctx.optionalBody();
+  if ("partner" in body) pair(seed, typeof body.partner === "string" ? body.partner : null);
   seed.item = {
     ...seed.item,
     name: typeof body.name === "string" ? body.name : seed.item.name,
@@ -114,7 +129,7 @@ const patch = route("patch", "/api/v1/migrate/mirrors/{id}", async (ctx) => {
 
 const remove = route("delete", "/api/v1/migrate/mirrors/{id}", (ctx) => {
   requireAdmin();
-  found(ctx.params.id);
+  pair(found(ctx.params.id), null);
   mirrors.delete(ctx.params.id);
   return noContent();
 });

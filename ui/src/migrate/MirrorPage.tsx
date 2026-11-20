@@ -2,7 +2,8 @@
 // lists each mirrored scope and shows the diff of the one chosen against Tenko's scope of the
 // same network (the Prepare, Take over and Revert actions arrive with WP14.2); Losses lists the
 // loss report and acknowledges entries; Settings changes the name, the interval and whether
-// pushes are accepted, replaces the token, shows the PowerShell commands and deletes the mirror.
+// pushes are accepted and the partner, replaces the token, shows the values the install script
+// needs and deletes the mirror.
 import { A, useNavigate, useParams } from "@solidjs/router";
 import { createResource, For, Match, Show, Switch } from "solid-js";
 import { decodeSegment, paths } from "../app/paths";
