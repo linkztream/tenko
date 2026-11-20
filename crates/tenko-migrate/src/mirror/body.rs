@@ -197,6 +197,9 @@ mod tests {
             decode(&gzip(FIXTURE.as_bytes()), true).expect("gzip"),
             plain
         );
+        // The invariant of the fuzz target: a decoded snapshot reads back from its own JSON.
+        let json = serde_json::to_vec(&plain).expect("json");
+        assert_eq!(decode(&json, false).expect("again"), plain);
     }
 
     #[test]

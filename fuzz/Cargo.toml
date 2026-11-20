@@ -39,6 +39,8 @@ tenko-dns = { path = "../crates/tenko-dns" }
 tenko-ipam = { path = "../crates/tenko-ipam" }
 # The Kerberos codec, cipher, keytab, PAC, SPNEGO, AP-REQ and MIC targets.
 tenko-krb = { path = "../crates/tenko-krb" }
+# The push body of a mirrored source of `migrate_mirror_snapshot`.
+tenko-migrate = { path = "../crates/tenko-migrate" }
 tenko-scan = { path = "../crates/tenko-scan" }
 # The read view of the `dns_zonefile` target; `raft` for the snapshot files of `store_snapshot`.
 tenko-store = { path = "../crates/tenko-store", features = ["raft"] }
@@ -488,6 +490,13 @@ bench = false
 [[bin]]
 name = "integration_enroll"
 path = "fuzz_targets/integration_enroll.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "migrate_mirror_snapshot"
+path = "fuzz_targets/migrate_mirror_snapshot.rs"
 test = false
 doc = false
 bench = false
