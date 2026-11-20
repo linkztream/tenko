@@ -48,7 +48,7 @@ expect. A step that fails stops the lab until the lead has read it with you.
 | `TombstoneInterval` of the domain (how long Windows keeps a deleted name and its owner) | |
 | Do the controllers register their own host records (`dc1`, `dc2`) through Netlogon or through the DNS client, and under which principal? | |
 | Does the DNS client register the PTR record itself, and under which principal? | |
-| Which event does the DNS client log when an update is refused for ownership (8018, 8020, other)? | |
+| Which event does the DNS client log when an update is refused for ownership (8012, 8018, 8020, other)? | |
 
 ## The dcdiag tests that need the DNS Server role (W6, W14)
 

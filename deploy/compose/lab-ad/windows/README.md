@@ -570,7 +570,8 @@ tenko dns record list 2.0.192.in-addr.arpa --name 20
 **Expect:** `pc1` adds `192.0.2.20` to its own name, which it owns; its update of the PTR name
 `20.2.0.192.in-addr.arpa`, owned by `SRV1$`, is refused (`dns.update.refuse`, the owner named
 in the reason), and the PTR record still points at `srv1`; the DNS client logs a
-registration failure (event 8018 or 8020). Start `srv1` again afterwards. **Keep:**
+registration failure (event 8012 for the refused PTR record; 8018 or 8020 for a host record).
+Start `srv1` again afterwards. **Keep:**
 `results/w12.txt`.
 
 ## W13. A restart of the Tenko node mid-day
