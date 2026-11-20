@@ -395,6 +395,8 @@ pub struct ZoneService {
     staging: Arc<ImportStaging>,
     config: ZoneConfig,
     direct: Option<Arc<DirectJobs>>,
+    /// A flip or a release runs on this node ([`flip`]): one at a time.
+    flipping: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for ZoneService {
@@ -438,6 +440,7 @@ impl ZoneService {
             staging,
             config,
             direct: None,
+            flipping: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -460,6 +463,7 @@ impl ZoneService {
             staging,
             config,
             direct: Some(direct),
+            flipping: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -517,11 +521,25 @@ impl ZoneService {
     where
         F: FnMut(&dyn ReadView) -> ZoneResult<Planned<T>>,
     {
+        self.execute_async(cx, |view| std::future::ready(plan(view.as_ref())))
+            .await
+    }
+
+    /// [`ZoneService::execute`] with a plan that takes its view and may run elsewhere (a
+    /// blocking thread for a plan over a whole zone).
+    pub(crate) async fn execute_async<T, F, P>(
+        &self,
+        cx: &RequestCtx,
+        mut plan: P,
+    ) -> ZoneResult<(T, Option<Written>)>
+    where
+        P: FnMut(Arc<dyn ReadView>) -> F,
+        F: Future<Output = ZoneResult<Planned<T>>>,
+    {
         let mut last = None;
         for attempt in 0..self.config.max_attempts {
             let view = self.fresh_view(attempt).await?;
-            let planned = plan(view.as_ref())?;
-            drop(view);
+            let planned = plan(view).await?;
             let Some(write) = planned.write else {
                 return Ok((planned.result, None));
             };
@@ -544,7 +562,7 @@ impl ZoneService {
         }
         Err(last.unwrap_or_else(|| {
             ZoneError::new(
-                "sys.store.precondition_failed",
+                tenko_store::StoreError::PRECONDITION_FAILED,
                 409,
                 "the zone changed meanwhile",
             )

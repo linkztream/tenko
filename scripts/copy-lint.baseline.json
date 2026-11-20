@@ -225,7 +225,6 @@
     {"rule":"store-code","file":"crates/tenko-dns/src/zone/keys.rs","scope":"create_key","text":"\"sys.store.precondition_failed\""},
     {"rule":"store-code","file":"crates/tenko-dns/src/zone/keys.rs","scope":"delete_key","text":"\"sys.store.precondition_failed\""},
     {"rule":"store-code","file":"crates/tenko-dns/src/zone/mod.rs","scope":"check_expect","text":"\"sys.store.precondition_failed\""},
-    {"rule":"store-code","file":"crates/tenko-dns/src/zone/mod.rs","scope":"execute","text":"\"sys.store.precondition_failed\""},
     {"rule":"civil-date","file":"crates/tenko-dns/src/zone/serial.rs","scope":"date_number","text":"719_468 in date_number"},
     {"rule":"base64","file":"crates/tenko-dns/src/zone/zonefile/parse.rs","scope":"base64","text":"fn base64"},
     {"rule":"hex","file":"crates/tenko-dns/src/zone/zonefile/parse.rs","scope":"hex","text":"fn hex"},

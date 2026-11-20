@@ -13,7 +13,7 @@ use std::{
 };
 
 use tenko_core::{
-    RequestCtx, SystemComponent,
+    RequestCtx, SystemComponent, Timestamp,
     audit::AuditDraft,
     cluster::LeaderService,
     dns::{
@@ -40,7 +40,7 @@ use tenko_dns::{
     zone::{
         NewZone, ZoneConfig, ZoneService,
         acl::NewAcl,
-        secondary::{KeyLoader, SecondaryService, SecondarySettings},
+        secondary::{KeyLoader, MEMBER_OF, SecondaryService, SecondarySettings},
         serial,
         zonefile::{Item, Reader},
     },
@@ -351,14 +351,15 @@ async fn the_ad_zones_flip_take_updates_release_and_flip_back() {
         corp.serial
     );
     // Sixty DHCP names with their A and DHCID records stay frozen; the controllers' records,
-    // the locators and the static host become `ad`; the apex SOA and NS are the operator's.
+    // the locators become `ad`; the apex SOA and NS are the operator's, and so is the address of
+    // the new name server `tenko1`.
     assert_eq!(
         (
             count(&corp, Origin::Transfer),
             count(&corp, Origin::Ad),
             count(&corp, Origin::Manual)
         ),
-        (120, 17, 2)
+        (120, 16, 3)
     );
     let msdcs = lab.to_primary(MSDCS).await;
     assert_eq!(
@@ -385,7 +386,7 @@ async fn the_ad_zones_flip_take_updates_release_and_flip_back() {
         ("old-laptop-02.corp.example.test", DHCID, Origin::Transfer),
         ("dc1.corp.example.test", Rtype::A, Origin::Ad),
         ("_ldap._tcp.corp.example.test", Rtype::SRV, Origin::Ad),
-        ("tenko1.corp.example.test", Rtype::A, Origin::Ad),
+        ("tenko1.corp.example.test", Rtype::A, Origin::Manual),
     ] {
         let rrset = lab.rrset(CORP, owner, rtype).await.expect(owner);
         assert_eq!(rrset.origin, origin, "{owner} {rtype}");
@@ -451,29 +452,44 @@ async fn the_ad_zones_flip_take_updates_release_and_flip_back() {
         .await
         .expect("SRV");
     assert_eq!((locator.origin, locator.rdata.len()), (Origin::Dynamic, 1));
-    // Windows DHCP rewrites a frozen name: refused and audited.
-    let mut records = Vec::new();
-    push_record(
-        &mut records,
-        &name("laptop-01.corp.example.test").to_wire(),
-        Rtype::A.0,
-        CLASS_IN,
-        1200,
-        &[192, 0, 2, 250],
-    );
-    assert_eq!(
-        update(&path, CORP, "192.0.2.6", (1, &records)).await,
-        rcode::REFUSED
-    );
+    // Windows DHCP rewrites a frozen name, or adds any other type there: each is refused
+    // and audited.
+    let frozen = name("laptop-01.corp.example.test").to_wire();
+    let mut srv = vec![0, 0, 0, 100, 1, 0x85];
+    srv.extend_from_slice(&name("dc1.corp.example.test").to_wire());
+    let aaaa = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    for (rtype, data) in [
+        (Rtype::A, &[192, 0, 2, 250][..]),
+        (Rtype::AAAA, &aaaa[..]),
+        (Rtype::TXT, &b"\x04test"[..]),
+        (Rtype::SRV, &srv[..]),
+    ] {
+        let mut records = Vec::new();
+        push_record(&mut records, &frozen, rtype.0, CLASS_IN, 1200, data);
+        assert_eq!(
+            update(&path, CORP, "192.0.2.6", (1, &records)).await,
+            rcode::REFUSED,
+            "{rtype}"
+        );
+    }
     let refused = refusals.0.lock().expect("refusals").clone();
-    assert!(
+    assert_eq!(
         refused
             .iter()
-            .any(|draft| draft.action.as_str() == "dns.update.refuse"
+            .filter(|draft| draft.action.as_str() == "dns.update.refuse"
                 && draft.details.context.get("code").map(String::as_str)
-                    == Some(codes::UPDATE_REFUSED)),
+                    == Some(codes::UPDATE_REFUSED))
+            .count(),
+        4,
         "{refused:?}"
     );
+    for rtype in [Rtype::AAAA, Rtype::TXT, Rtype::SRV] {
+        assert!(
+            lab.rrset(CORP, "laptop-01.corp.example.test", rtype)
+                .await
+                .is_none()
+        );
+    }
     assert_eq!(
         lab.rrset(CORP, "laptop-01.corp.example.test", Rtype::A)
             .await
@@ -680,4 +696,473 @@ async fn a_catalog_zone_and_a_zone_without_a_copy_are_refused() {
         .await
         .expect_err("refused");
     assert!(flip.is(codes::ZONE_INVALID), "{flip:?}");
+}
+
+/// A zone service on its own store, for the rules a written copy shows without a transfer.
+fn service() -> (Arc<MemStore>, Arc<ZoneService>) {
+    let store = Arc::new(MemStore::default());
+    let zones = ZoneService::with_direct_jobs(
+        Arc::clone(&store) as Arc<dyn Store>,
+        None,
+        ZoneConfig::default(),
+    );
+    (store, zones)
+}
+
+fn primary_at(address: &str) -> PrimaryServer {
+    PrimaryServer {
+        address: address.parse().expect("address"),
+        port: 53,
+        key: None,
+        xot: false,
+        tls_name: None,
+    }
+}
+
+/// A zone of `kind` at `apex`, changed by `edit` before it is created.
+async fn new_zone(
+    zones: &ZoneService,
+    apex: &str,
+    kind: ZoneKind,
+    edit: impl FnOnce(&mut NewZone),
+) -> Zone {
+    let mut new = catalog_zone();
+    new.name = name(apex);
+    new.kind = kind;
+    new.catalog = false;
+    if kind == ZoneKind::Secondary {
+        new.name_servers = Vec::new();
+        new.source = Some(SecondarySource {
+            primaries: vec![primary_at("192.0.2.5")],
+        });
+    } else {
+        new.name_servers = vec![name(&format!("ns1.{apex}"))];
+    }
+    edit(&mut new);
+    zones.create(&cx(), new).await.expect("zone").zone
+}
+
+/// The SOA record of the fixtures, in wire form.
+fn soa() -> Vec<u8> {
+    tenko_core::dns::Rdata::from_data(&RecordData::Soa {
+        mname: name("dc1.corp.example.test"),
+        rname: name("hostmaster.corp.example.test"),
+        serial: FIXTURE_SERIAL,
+        refresh: 900,
+        retry: 600,
+        expire: 86_400,
+        minimum: 3600,
+    })
+    .as_bytes()
+    .to_vec()
+}
+
+/// Writes RRsets of `origin` into `zone` as a transfer or a writer would, each `(owner,
+/// type, records in wire form)`.
+async fn write_copy(
+    store: &MemStore,
+    zone: &Zone,
+    rrsets: &[(&str, Rtype, Vec<Vec<u8>>)],
+    at: Timestamp,
+    origin: Origin,
+) {
+    let mut batch = tenko_store::WriteBatch::for_request(&cx());
+    for (owner, rtype, records) in rrsets {
+        let (owner, rtype) = (*owner, *rtype);
+        let rrset = RrSet {
+            zone: zone.id,
+            scope: tenko_core::dns::ScopeName::DEFAULT,
+            name: name(owner),
+            rtype,
+            ttl: 1200,
+            rdata: records
+                .iter()
+                .map(|wire| tenko_core::dns::Rdata::from_wire(rtype, wire).expect("record"))
+                .collect(),
+            origin,
+            key: None,
+            principal: None,
+            updated: tenko_core::ipam::Stamp::new(at, cx().principal),
+        };
+        batch
+            .put_typed(&RRSETS, &rrset.key(), &rrset)
+            .expect("stage");
+    }
+    store.propose(batch).await.expect("write");
+}
+
+fn a(last: u8) -> Vec<u8> {
+    vec![192, 0, 2, last]
+}
+
+fn dhcid() -> Vec<u8> {
+    let mut out = vec![0, 1, 1];
+    out.extend_from_slice(&[0x5a; 32]);
+    out
+}
+
+fn ptr(target: &str) -> Vec<u8> {
+    name(target).to_wire()
+}
+
+async fn origin_of(zones: &ZoneService, zone: &Zone, owner: &str, rtype: Rtype) -> Option<Origin> {
+    let view = zones.view(None).await.expect("view");
+    let key = tenko_core::dns::RrSetKey {
+        zone: zone.id,
+        scope: tenko_core::dns::ScopeName::DEFAULT,
+        name: name(owner),
+        rtype,
+    };
+    view.get_typed(&RRSETS, &key)
+        .expect("read")
+        .map(|(rrset, _)| rrset.origin)
+}
+
+fn to_primary_with(ns: &str) -> ZoneFlip {
+    ZoneFlip::Primary {
+        soa: SoaDefaults::new(name(ns), name("hostmaster.example.test")),
+        ns: vec![name(ns)],
+    }
+}
+
+/// What freezes and what does not: the apex never, a name with other types than A, AAAA
+/// and DHCID not, the A record of the new name server becomes `manual`, a PTR whose target
+/// is in another tenant's zone is not frozen by it; the flip clears the marker of a
+/// catalog member.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "one zone per rule, in one place")]
+async fn a_flip_freezes_dhcp_names_only() {
+    let (store, zones) = service();
+    let (ours, theirs) = (
+        Some(tenko_core::TenantId::generate()),
+        Some(tenko_core::TenantId::generate()),
+    );
+    let forward = new_zone(&zones, "fwd.example.test", ZoneKind::Secondary, |new| {
+        new.tenant = ours;
+        new.description = Some(format!("{MEMBER_OF}catalog.example.test"));
+    })
+    .await;
+    let now = Timestamp::now();
+    write_copy(
+        &store,
+        &forward,
+        &[
+            ("fwd.example.test", Rtype::SOA, vec![soa()]),
+            ("fwd.example.test", Rtype::A, vec![a(1)]),
+            ("fwd.example.test", DHCID, vec![dhcid()]),
+            ("mixed.fwd.example.test", Rtype::A, vec![a(2)]),
+            ("mixed.fwd.example.test", DHCID, vec![dhcid()]),
+            (
+                "mixed.fwd.example.test",
+                Rtype::TXT,
+                vec![b"\x04test".to_vec()],
+            ),
+            ("pc.fwd.example.test", Rtype::A, vec![a(3)]),
+            ("pc.fwd.example.test", DHCID, vec![dhcid()]),
+            ("ns1.fwd.example.test", Rtype::A, vec![a(53)]),
+        ],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    let other = new_zone(&zones, "other.example.test", ZoneKind::Secondary, |new| {
+        new.tenant = theirs;
+    })
+    .await;
+    write_copy(
+        &store,
+        &other,
+        &[
+            ("pc.other.example.test", Rtype::A, vec![a(4)]),
+            ("pc.other.example.test", DHCID, vec![dhcid()]),
+        ],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    let reverse = new_zone(&zones, "2.0.192.in-addr.arpa", ZoneKind::Secondary, |new| {
+        new.tenant = ours;
+    })
+    .await;
+    write_copy(
+        &store,
+        &reverse,
+        &[
+            ("2.0.192.in-addr.arpa", Rtype::SOA, vec![soa()]),
+            (
+                "3.2.0.192.in-addr.arpa",
+                Rtype::PTR,
+                vec![ptr("pc.fwd.example.test")],
+            ),
+            (
+                "4.2.0.192.in-addr.arpa",
+                Rtype::PTR,
+                vec![ptr("pc.other.example.test")],
+            ),
+        ],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    zones
+        .flip(&cx(), forward.id, &to_primary_with("ns1.fwd.example.test"))
+        .await
+        .expect("flip");
+    for (owner, rtype, origin) in [
+        ("fwd.example.test", Rtype::A, Origin::Ad),
+        ("fwd.example.test", DHCID, Origin::Ad),
+        ("mixed.fwd.example.test", DHCID, Origin::Ad),
+        ("pc.fwd.example.test", Rtype::A, Origin::Transfer),
+        ("pc.fwd.example.test", DHCID, Origin::Transfer),
+        ("ns1.fwd.example.test", Rtype::A, Origin::Manual),
+    ] {
+        assert_eq!(
+            origin_of(&zones, &forward, owner, rtype).await,
+            Some(origin),
+            "{owner} {rtype}"
+        );
+    }
+    let view = zones.view(None).await.expect("view");
+    let row = ZoneService::zone(view.as_ref(), forward.id).expect("zone");
+    assert_eq!(
+        row.zone.description, None,
+        "the flipped zone left its catalog"
+    );
+    zones
+        .flip(&cx(), reverse.id, &to_primary_with("ns1.fwd.example.test"))
+        .await
+        .expect("flip");
+    assert_eq!(
+        origin_of(&zones, &reverse, "3.2.0.192.in-addr.arpa", Rtype::PTR).await,
+        Some(Origin::Transfer)
+    );
+    assert_eq!(
+        origin_of(&zones, &reverse, "4.2.0.192.in-addr.arpa", Rtype::PTR).await,
+        Some(Origin::Ad)
+    );
+}
+
+/// The copies and the zones a flip refuses, with the field it names: a signed copy, a copy
+/// written in part, a zone with other scopes, a copy past one change set, a zone whose
+/// settings a secondary cannot keep. A release acts on its frozen RRsets alone.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "one zone per rule, in one place")]
+async fn a_flip_refuses_what_it_cannot_keep() {
+    let (store, zones) = service();
+    let now = Timestamp::now();
+    let refused = |error: tenko_dns::zone::ZoneError, field: &str| {
+        assert!(error.is(codes::ZONE_INVALID), "{error:?}");
+        assert_eq!(
+            error.coded().params.get("field").map(String::as_str),
+            Some(field),
+            "{error:?}"
+        );
+    };
+    let signed = new_zone(&zones, "signed.example.test", ZoneKind::Secondary, |_| {}).await;
+    write_copy(
+        &store,
+        &signed,
+        &[
+            ("signed.example.test", Rtype::SOA, vec![soa()]),
+            (
+                "signed.example.test",
+                Rtype::DNSKEY,
+                vec![vec![1, 1, 3, 13, 0xaa, 0xbb]],
+            ),
+        ],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    refused(
+        zones
+            .flip(&cx(), signed.id, &to_primary_with("ns1.example.test"))
+            .await
+            .expect_err("signed"),
+        "dnssec",
+    );
+
+    let partial = new_zone(&zones, "partial.example.test", ZoneKind::Secondary, |_| {}).await;
+    let earlier = now
+        .checked_sub(std::time::Duration::from_secs(60))
+        .expect("time");
+    write_copy(
+        &store,
+        &partial,
+        &[
+            ("partial.example.test", Rtype::SOA, vec![soa()]),
+            ("www.partial.example.test", Rtype::A, vec![a(1)]),
+        ],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    let mut batch = tenko_store::WriteBatch::for_request(&cx());
+    let stamp = tenko_core::dns::TransferStamp {
+        zone: partial.id,
+        serial: FIXTURE_SERIAL,
+        refreshed: earlier,
+    };
+    batch
+        .put_typed(
+            &tenko_core::dns::tables::TRANSFER_STATE,
+            &partial.id,
+            &stamp,
+        )
+        .expect("stage");
+    store.propose(batch).await.expect("write");
+    refused(
+        zones
+            .flip(&cx(), partial.id, &to_primary_with("ns1.example.test"))
+            .await
+            .expect_err("partial"),
+        "kind",
+    );
+
+    let scoped = new_zone(&zones, "scoped.example.test", ZoneKind::Secondary, |new| {
+        new.scopes = vec![tenko_core::dns::ZoneScope {
+            name: "internal".parse().expect("scope"),
+            description: None,
+        }];
+    })
+    .await;
+    refused(
+        zones
+            .flip(&cx(), scoped.id, &to_primary_with("ns1.example.test"))
+            .await
+            .expect_err("scopes"),
+        "scopes",
+    );
+
+    let large = new_zone(&zones, "large.example.test", ZoneKind::Secondary, |_| {}).await;
+    let hosts: Vec<(String, Rtype, Vec<Vec<u8>>)> = (0..tenko_dns::zone::flip::FLIP_MAX)
+        .map(|index| (format!("h{index}.large.example.test"), Rtype::A, vec![a(1)]))
+        .collect();
+    let mut hosts: Vec<(&str, Rtype, Vec<Vec<u8>>)> = hosts
+        .iter()
+        .map(|(owner, rtype, data)| (owner.as_str(), *rtype, data.clone()))
+        .collect();
+    hosts.push(("large.example.test", Rtype::SOA, vec![soa()]));
+    write_copy(&store, &large, &hosts, now, Origin::Transfer).await;
+    refused(
+        zones
+            .flip(&cx(), large.id, &to_primary_with("ns1.example.test"))
+            .await
+            .expect_err("too large"),
+        "rrsets",
+    );
+
+    // A primary zone past the bound with one frozen RRset: the release lists it.
+    let big = new_zone(&zones, "big.example.test", ZoneKind::Primary, |_| {}).await;
+    hosts.pop();
+    write_copy(&store, &big, &hosts, now, Origin::Manual).await;
+    write_copy(
+        &store,
+        &big,
+        &[("stale.big.example.test", Rtype::A, vec![a(9)])],
+        now,
+        Origin::Transfer,
+    )
+    .await;
+    let listed = zones
+        .release(
+            &cx(),
+            big.id,
+            ZoneRelease {
+                delete: false,
+                dry_run: true,
+            },
+        )
+        .await
+        .expect("a release past the RRset bound");
+    assert_eq!((listed.rrsets, listed.names.len()), (1, 1));
+
+    let kerberos = new_zone(&zones, "krb.example.test", ZoneKind::Primary, |new| {
+        new.update.kerberos = Some(tenko_core::dns::KerberosUpdate::for_realm(
+            tenko_core::dns::Realm::new("CORP.EXAMPLE.TEST").expect("realm"),
+        ));
+    })
+    .await;
+    let back = ZoneFlip::Secondary {
+        primaries: vec![primary_at("192.0.2.5")],
+    };
+    refused(
+        zones
+            .flip(&cx(), kerberos.id, &back)
+            .await
+            .expect_err("kerberos"),
+        "update.kerberos",
+    );
+    let online = new_zone(&zones, "online.example.test", ZoneKind::Primary, |new| {
+        new.dnssec.mode = tenko_core::dns::DnssecMode::Online;
+    })
+    .await;
+    refused(
+        zones
+            .flip(&cx(), online.id, &back)
+            .await
+            .expect_err("online"),
+        "dnssec.mode",
+    );
+}
+
+/// The flip to secondary removes the owners of the zone's names and audits the primaries,
+/// their keys and the owners it removed.
+#[tokio::test]
+async fn a_flip_to_secondary_removes_the_owners_and_says_so() {
+    let (store, zones) = service();
+    let zone = new_zone(&zones, "owned.example.test", ZoneKind::Primary, |_| {}).await;
+    let key = tenko_core::dns::NameOwnerKey {
+        zone: zone.id,
+        scope: tenko_core::dns::ScopeName::DEFAULT,
+        name: name("pc.owned.example.test"),
+    };
+    let owner = tenko_core::dns::NameOwner {
+        sid: None,
+        principal: tenko_core::dns::PrincipalName::new(
+            vec!["pc$".to_owned()],
+            tenko_core::dns::Realm::new("CORP.EXAMPLE.TEST").expect("realm"),
+        )
+        .expect("principal"),
+        since: Timestamp::now(),
+        hold_until: None,
+        how: tenko_core::dns::OwnerSource::Created,
+    };
+    let mut batch = tenko_store::WriteBatch::for_request(&cx());
+    batch
+        .put_typed(&tenko_core::dns::tables::NAME_OWNERS, &key, &owner)
+        .expect("stage");
+    store.propose(batch).await.expect("write");
+    zones
+        .flip(
+            &cx(),
+            zone.id,
+            &ZoneFlip::Secondary {
+                primaries: vec![primary_at("192.0.2.5")],
+            },
+        )
+        .await
+        .expect("flip");
+    let view = zones.view(None).await.expect("view");
+    assert!(
+        view.get_typed(&tenko_core::dns::tables::NAME_OWNERS, &key)
+            .expect("read")
+            .is_none()
+    );
+    let flip = view
+        .scan_typed(
+            &tenko_store::tables::AUDIT,
+            KeyRange::all(),
+            usize::MAX,
+            false,
+        )
+        .expect("audit")
+        .into_iter()
+        .map(|(_, record, _)| record.draft)
+        .find(|draft| draft.action.as_str() == "dns.zone.flip")
+        .expect("audited");
+    let context = |key: &str| flip.details.context.get(key).cloned();
+    assert_eq!(context("primaries").as_deref(), Some("192.0.2.5:53"));
+    assert_eq!(context("keys").as_deref(), Some(""));
+    assert_eq!(context("owners").as_deref(), Some("1"));
 }
