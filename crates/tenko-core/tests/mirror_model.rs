@@ -12,8 +12,9 @@
 //! the identity kinds (a six-octet identifier for a client that sends option 61 of type 1 or
 //! none, an RFC 4361 identifier), options at the server, scope and reservation level, and
 //! one policy, one filter and one superscope in the loss report. `snapshot-inactive.json`
-//! is the same with the scope inactive, one sequence and one minute later. Regenerate both
-//! with
+//! is the same with the scope inactive, one sequence and one minute later.
+//! `snapshot-partner.json` and its inactive form are the failover partner's view of the
+//! same domain (section 2.15, [`partner`]). Regenerate them with
 //!
 //! ```text
 //! TENKO_REGENERATE_FIXTURES=1 cargo test -p tenko-core --test mirror_model
@@ -440,6 +441,42 @@ fn fixture(active: bool) -> MirrorSnapshot {
     }
 }
 
+/// The partner's view of the same domain (plan sections 2.15 and 3.4): `dc2`, which
+/// differs from `dc1` in what Windows does not replicate by itself and in what its binding
+/// updates had not carried yet. Configuration: the reservation `192.0.2.39` was made on
+/// `dc1` only, and the scope's option 42 was changed on `dc2` only. Leases: `192.0.2.157`
+/// is known to `dc1` only, `192.0.2.110` ends an hour earlier on `dc2`, and `192.0.2.111`
+/// is held by another client on `dc2` (a lease conflict).
+fn partner(active: bool) -> MirrorSnapshot {
+    let mut snapshot = fixture(active);
+    "dc2.corp.example.test".clone_into(&mut snapshot.source.server);
+    let scope = &mut snapshot.dhcp.scopes[0];
+    scope
+        .reservations
+        .retain(|reservation| reservation.ip != ip(39));
+    for option in &mut scope.options {
+        if option.code == 42 {
+            option.values = vec!["192.0.2.6".to_owned()];
+        }
+    }
+    let leases = &mut snapshot.dhcp.leases;
+    leases.retain(|lease| lease.ip != ip(157));
+    for lease in leases.iter_mut() {
+        if lease.ip == ip(110) {
+            lease.expires = lease
+                .expires
+                .and_then(|end| end.checked_sub(std::time::Duration::from_secs(3_600)));
+        }
+        if lease.ip == ip(111) {
+            lease.client = IrClientId {
+                mac: Some(mac(0x7f)),
+                client_id: None,
+            };
+        }
+    }
+    snapshot
+}
+
 fn pretty(snapshot: &MirrorSnapshot) -> String {
     format!(
         "{}\n",
@@ -450,9 +487,14 @@ fn pretty(snapshot: &MirrorSnapshot) -> String {
 #[test]
 fn the_fixture_is_the_contract() {
     let regenerate = std::env::var_os("TENKO_REGENERATE_FIXTURES").is_some();
-    for (name, active) in [("snapshot.json", true), ("snapshot-inactive.json", false)] {
+    for (name, built, reservations, leases) in [
+        ("snapshot.json", fixture(true), 30, 60),
+        ("snapshot-inactive.json", fixture(false), 30, 60),
+        ("snapshot-partner.json", partner(true), 29, 59),
+        ("snapshot-partner-inactive.json", partner(false), 29, 59),
+    ] {
         let path = fixtures().join(name);
-        let built = fixture(active);
+        let active = built.sequence == 1;
         built.validate().expect("the fixture validates");
         let text = pretty(&built);
         if regenerate {
@@ -471,8 +513,8 @@ fn the_fixture_is_the_contract() {
         );
         assert_eq!(parsed.dhcp.scopes.len(), 1);
         assert_eq!(parsed.dhcp.scopes[0].active, active);
-        assert_eq!(parsed.reservation_count(), 30);
-        assert_eq!(parsed.dhcp.leases.len(), 60);
+        assert_eq!(parsed.reservation_count(), reservations);
+        assert_eq!(parsed.dhcp.leases.len(), leases);
         assert_eq!(parsed.losses.entries.len(), 4);
     }
 }

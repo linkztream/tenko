@@ -397,7 +397,7 @@ async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. The first push a token makes binds the mirror to the server its `source.server` names, and a push naming another is refused until the token is replaced. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
@@ -408,7 +408,7 @@ async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError
         (status = 403, description = "The token is not this mirror's own, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 408, description = "The body did not arrive within the server's deadline for request bodies (`sys.body_timeout`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), the push names another server than the one the mirror is bound to (`migrate.mirror.source`, `params.bound`, `params.server`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is above the bound (`migrate.mirror.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "A push came faster than the floor or while another push of the mirror is in flight, or another push held the node's decode for 2 s (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
@@ -585,7 +585,7 @@ async fn get_mirror(
     tag = "migrate",
     operation_id = "update_mirror",
     summary = "Change a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval. Audited as `migrate.mirror.update`.",
+    description = "Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorPatch, content_type = "application/json"),
     security(("session" = [])),
@@ -595,7 +595,7 @@ async fn get_mirror(
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A mirror of the new name exists (`migrate.mirror.exists`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "A mirror of the new name exists (`migrate.mirror.exists`), the pairing is refused: the mirror itself, a mirror that does not exist, or a mirror already paired with another (`migrate.mirror.partner`, `params.reason`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn update_mirror(
@@ -815,7 +815,7 @@ async fn ack_mirror_losses(
     tag = "migrate",
     operation_id = "get_mirror_scope_diff",
     summary = "The diff of a mirrored scope against Tenko's scope",
-    description = "Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision.",
+    description = "Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings, the MAC filters (the scope's restriction to the allow list and the source's entries) and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision. For a paired mirror, rows of kind `partner` name every configuration difference of the scope between the mirror's latest snapshot and its partner's (`partner_sequence`), each for the operator to decide.",
     params(
         ("id" = String, Path, description = "Mirror identifier (UUID)"),
         ("cidr" = String, Path, description = "The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`)")
@@ -1030,6 +1030,9 @@ pub(crate) async fn warnings(
                 findings::MIRROR_STALE => "no push for three intervals from the mirrored sources",
                 findings::MIRROR_SCOPE_ACTIVE => {
                     "a mirrored source serves a scope Tenko took over: two servers answer one network"
+                }
+                findings::MIRROR_STALE_AFTER_TAKEOVER => {
+                    "no push for three intervals from mirrored sources whose scope, or whose partner's, Tenko took over"
                 }
                 findings::MIRROR_UNBOUND => {
                     "the Hardened profile refuses the pushes of mirrors whose token has no source prefix; replace their tokens with prefixes"

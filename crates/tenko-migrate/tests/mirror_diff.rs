@@ -362,7 +362,7 @@ async fn every_row_says_what_the_prepare_would_do() {
     });
     let view = store.read(ReadConsistency::Local).await.expect("view");
     let scope: IpNet = SCOPE.parse().expect("net");
-    let found = diff(view.as_ref(), &snapshot(envelope.clone()), scope, 2).expect("diff");
+    let found = diff(view.as_ref(), &snapshot(envelope.clone()), scope, 2, None).expect("diff");
     assert_eq!(found.tenko_scope, Some(prefix.id));
     assert_eq!(found.losses_open, 2);
     let rows = &found.rows;
@@ -461,7 +461,7 @@ async fn every_row_says_what_the_prepare_would_do() {
 
     // The same lease time as the inherited one gives no row.
     envelope.dhcp.scopes[0].lease_secs = Some(86_400);
-    let found = diff(view.as_ref(), &snapshot(envelope), scope, 0).expect("diff");
+    let found = diff(view.as_ref(), &snapshot(envelope), scope, 0, None).expect("diff");
     assert_eq!(rows_of(&found.rows, DiffKind::LeaseTime), []);
 }
 
@@ -477,6 +477,7 @@ async fn the_network_is_looked_up_in_the_default_vrf() {
         &snapshot(fixture()),
         SCOPE.parse().expect("net"),
         0,
+        None,
     )
     .expect("diff");
     assert_eq!(

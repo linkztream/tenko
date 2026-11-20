@@ -17,15 +17,23 @@
 //!   address is attached; an address on a host with another identity, and the address and
 //!   the identity on two hosts, are the operator's decision.
 //! - The lease time compares with Tenko's effective one: the scope's, else the server's.
+//! - The MAC filters: the scope's restriction to the allow list and the source's entries
+//!   against Tenko's server-wide filters, so that a takeover is never silently less
+//!   restrictive than the source.
+//! - For a paired mirror (plan section 2.15), rows of kind `partner` name every
+//!   configuration difference of the scope between the two mirrors' latest snapshots; the
+//!   operator decides each. Differences are normal: Windows copies a scope's settings to
+//!   its partner only when its replication is run.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use ipnet::IpNet;
 use tenko_core::{
-    InterfaceId, PrefixId,
+    InterfaceId, MirrorId, PrefixId,
     dhcp::{
-        DhcpSettings, OptionData, OptionDef, OptionOwner, OptionValue, SERVER_MANAGED_V4,
-        tables::{OPTION_SETS, SCOPES},
+        DhcpSettings, Filter, FilterKind, MacPattern, OptionData, OptionDef, OptionOwner,
+        OptionValue, SERVER_MANAGED_V4,
+        tables::{FILTERS, OPTION_SETS, SCOPES},
     },
     ipam::{AssignmentMode, Host, Interface, RangeRole},
     ir::dhcp::{IrOption, IrReservation, IrScope},
@@ -44,6 +52,7 @@ fn row(kind: DiffKind, item: impl Into<String>, action: DiffAction) -> DiffRow {
         item: item.into(),
         mirror: None,
         tenko: None,
+        partner: None,
         action,
         reason: None,
     }
@@ -182,6 +191,172 @@ fn options(
     }
 }
 
+/// The rows of the MAC filters (DHCP-08): whether the scope is restricted to the allow list,
+/// and the source's entries Tenko's server-wide filters lack. Tenko's own deny entries stay,
+/// as its own server options do; its own allow entries on a scope the source restricts are
+/// the operator's decision, since they admit clients the source does not serve.
+fn filters(
+    rows: &mut Vec<DiffRow>,
+    ir: &IrScope,
+    snapshot: &Snapshot,
+    tenko: &[Filter],
+    restricted: Option<bool>,
+) {
+    if restricted != Some(ir.restricted) && (restricted.is_some() || ir.restricted) {
+        let action = if restricted.is_some() {
+            DiffAction::Update
+        } else {
+            DiffAction::Create
+        };
+        rows.push(row(DiffKind::Filter, "restricted", action).values(
+            Some(ir.restricted.to_string()),
+            restricted.map(|on| on.to_string()),
+        ));
+    }
+    let mirrored: BTreeSet<String> = snapshot
+        .envelope
+        .dhcp
+        .filters
+        .iter()
+        .map(|filter| filter_item(filter.kind, &filter.mac))
+        .collect();
+    let ours: BTreeSet<String> = tenko
+        .iter()
+        .map(|filter| filter_item(filter.kind, &filter.mac))
+        .collect();
+    rows.extend(mirrored.difference(&ours).map(|item| {
+        row(DiffKind::Filter, item.clone(), DiffAction::Create).values(Some(item.clone()), None)
+    }));
+    if ir.restricted {
+        rows.extend(
+            ours.difference(&mirrored)
+                .filter(|item| item.starts_with("allow "))
+                .map(|item| {
+                    row(DiffKind::Filter, item.clone(), DiffAction::Decide)
+                        .values(None, Some(item.clone()))
+                        .because("Tenko's allow entry admits a client on this scope that the source does not serve")
+                }),
+        );
+    }
+}
+
+/// What the partner rows compare of one scope of a snapshot (plan section 2.15), by item:
+/// the pools, the exclusions, the lease time, the options at every level, the reservations,
+/// the DDNS settings and the MAC filters, each as text.
+fn configuration(snapshot: &Snapshot, ir: &IrScope) -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    let range = |r: &tenko_core::ir::dhcp::IrRange| format!("{}-{}", r.first, r.last);
+    for pool in &ir.ranges {
+        out.insert(format!("pool {}", range(pool)), range(pool));
+    }
+    for exclusion in &ir.exclusions {
+        out.insert(format!("exclusion {}", range(exclusion)), range(exclusion));
+    }
+    if let Some(secs) = ir.lease_secs {
+        out.insert("lease_secs".to_owned(), secs.to_string());
+    }
+    let mut options = |level: &str, options: &[IrOption]| {
+        for option in options {
+            let class = option.vendor_class.as_ref().or(option.user_class.as_ref());
+            let item = match class {
+                Some(class) => format!("{level}:{}@{class}", option.code),
+                None => format!("{level}:{}", option.code),
+            };
+            out.insert(item, option.values.join(", "));
+        }
+    };
+    options("server", &snapshot.envelope.dhcp.server_options);
+    options("scope", &ir.options);
+    for reservation in &ir.reservations {
+        options(&reservation.ip.to_string(), &reservation.options);
+    }
+    for reservation in &ir.reservations {
+        let name = (reservation.name.as_ref().map(ToString::to_string))
+            .or_else(|| reservation.source_name.clone())
+            .map(|name| format!("name {name}"));
+        let text = std::iter::once(identity(reservation))
+            .chain(name)
+            .chain(reservation.description.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.insert(format!("reservation {}", reservation.ip), text);
+    }
+    if let Some(ddns) = ir
+        .ddns
+        .as_ref()
+        .or(snapshot.envelope.dhcp.server_ddns.as_ref())
+    {
+        out.insert(
+            "ddns".to_owned(),
+            serde_json::to_string(ddns).unwrap_or_default(),
+        );
+    }
+    out.insert("restricted".to_owned(), ir.restricted.to_string());
+    for filter in &snapshot.envelope.dhcp.filters {
+        let item = filter_item(filter.kind, &filter.mac);
+        out.insert(item.clone(), item);
+    }
+    out
+}
+
+/// A filter entry as the item of a row: `allow 00:00:5e:00:53:20`.
+fn filter_item(kind: FilterKind, mac: &MacPattern) -> String {
+    let kind = if kind == FilterKind::Allow {
+        "allow"
+    } else {
+        "deny"
+    };
+    format!("{kind} {mac}")
+}
+
+/// The partner rows: every configuration difference of the scope between the mirror's
+/// snapshot and its partner's, which the operator decides (Windows copies a scope's
+/// settings to its partner only when someone runs the replication).
+fn partner_rows(
+    rows: &mut Vec<DiffRow>,
+    snapshot: &Snapshot,
+    ir: &IrScope,
+    partner: Option<&Snapshot>,
+) {
+    let decide = |item: &str, mine: Option<&String>, theirs: Option<&String>, reason: &str| {
+        let mut row = row(DiffKind::Partner, item, DiffAction::Decide).because(reason);
+        row.mirror = mine.cloned();
+        row.partner = theirs.cloned();
+        row
+    };
+    let Some(partner) = partner else {
+        rows.push(decide(
+            "snapshot",
+            None,
+            None,
+            "the partner mirror holds no snapshot yet",
+        ));
+        return;
+    };
+    let Some(theirs) = partner.envelope.scope(&ir.cidr) else {
+        rows.push(decide(
+            "scope",
+            Some(&ir.cidr.to_string()),
+            None,
+            "the partner's snapshot holds no such scope",
+        ));
+        return;
+    };
+    let mine = configuration(snapshot, ir);
+    let theirs = configuration(partner, theirs);
+    for item in mine.keys().chain(theirs.keys()).collect::<BTreeSet<_>>() {
+        let (a, b) = (mine.get(item), theirs.get(item));
+        if a != b {
+            rows.push(decide(
+                item,
+                a,
+                b,
+                "the partners differ; Windows copies a scope's settings to the partner only when its replication is run",
+            ));
+        }
+    }
+}
+
 fn identity(reservation: &IrReservation) -> String {
     match (&reservation.client.client_id, &reservation.client.mac) {
         (Some(id), _) => format!("client-id {}", to_hex(&id.0)),
@@ -254,8 +429,10 @@ fn set_of(
         .unwrap_or_default())
 }
 
-/// The diff of `scope` of `snapshot` against Tenko's scope of the same network;
-/// `losses_open` comes from the caller, who holds the acknowledgments.
+/// The diff of `scope` of `snapshot` against Tenko's scope of the same network, and for a
+/// paired mirror against the partner's latest snapshot (`partner`: its id and its snapshot,
+/// none while it has none); `losses_open` comes from the caller, who holds the
+/// acknowledgments.
 ///
 /// # Errors
 ///
@@ -269,6 +446,7 @@ pub fn diff(
     snapshot: &Snapshot,
     scope: IpNet,
     losses_open: u32,
+    partner: Option<(MirrorId, Option<&Snapshot>)>,
 ) -> Result<ScopeDiff, MirrorError> {
     let ir: &IrScope = snapshot
         .envelope
@@ -469,6 +647,22 @@ pub fn diff(
         }
     }
 
+    let tenko_filters: Vec<Filter> = view
+        .scan_typed(&FILTERS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .map(|(_, filter, _)| filter)
+        .collect();
+    filters(
+        &mut rows,
+        ir,
+        snapshot,
+        &tenko_filters,
+        tenko_scope.map(|scope| scope.restricted),
+    );
+    if let Some((_, theirs)) = partner {
+        partner_rows(&mut rows, snapshot, ir, theirs);
+    }
+
     rows.sort_by(|a, b| (a.kind, &a.item).cmp(&(b.kind, &b.item)));
     Ok(ScopeDiff {
         mirror: snapshot.mirror,
@@ -477,6 +671,8 @@ pub fn diff(
         source_active: ir.active,
         tenko_scope: tenko_scope.map(|scope| scope.prefix),
         tenko_enabled: tenko_scope.is_some_and(|scope| scope.enabled),
+        partner: partner.map(|(id, _)| id),
+        partner_sequence: partner.and_then(|(_, theirs)| theirs.map(|theirs| theirs.sequence)),
         rows,
         losses_open,
     })

@@ -141,6 +141,16 @@ pub struct Mirror {
     /// When the snapshot row was last written: its leases are from then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_at: Option<Timestamp>,
+    /// The server the mirror is bound to: the `source.server` of the first push its token
+    /// made (section 2.15). A push naming another server is refused with
+    /// `migrate.mirror.source` until the token is replaced, which clears the binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server: Option<String>,
+    /// The other mirror of a pair of DHCP servers that share their scopes (section 2.15),
+    /// set on both rows at once by an administrator; never a match of server names, since
+    /// two partners name each other differently.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<MirrorId>,
     /// Creation.
     pub created: Stamp,
     /// Last change of the row.
@@ -351,12 +361,28 @@ pub struct Takeover {
     /// The before-images of every RRset the takeover changed.
     #[serde(default)]
     pub before: Vec<RrSetImage>,
+    /// The partner's push the takeover used beside the mirror's, for a paired mirror
+    /// (section 2.15).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<TakeoverPartner>,
     /// The job that ran it.
     pub job: JobId,
     /// When the state was reached.
     pub at: Timestamp,
     /// Who started the job.
     pub by: UserId,
+}
+
+/// The partner's push a takeover used (section 2.15): the mirror, the sequence and the hash
+/// of its leases.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TakeoverPartner {
+    /// The partner's mirror.
+    pub mirror: MirrorId,
+    /// The sequence of its push.
+    pub sequence: u64,
+    /// The SHA-256 of that push's leases with their loss entries, as [`Mirror::leases_hash`].
+    pub leases_hash: HexBytes,
 }
 
 /// An acknowledged loss entry (`migrate.loss_acks`, section 2.3): the entry's key within the
@@ -511,9 +537,19 @@ pub mod codes {
     /// The profile requires source prefixes and the mirror's token has none (the finding;
     /// its pushes are refused like an unknown token's). Params: `mirrors`, `ids`.
     pub const MIRROR_UNBOUND: &str = "migrate.mirror.unbound";
+    /// The push names another server than the one the mirror is bound to (409, audited as a
+    /// refused push). Params: `id`, `bound`, `server`.
+    pub const MIRROR_SOURCE: &str = "migrate.mirror.source";
+    /// A pairing of two mirrors is refused: the mirror itself, a mirror that does not exist,
+    /// or one already paired with another (409). Params: `id`, `partner`, `reason`.
+    pub const MIRROR_PARTNER: &str = "migrate.mirror.partner";
+    /// A mirror is stale while a scope of it or of its partner is taken over: the Windows
+    /// side is expected to be quiet and nothing shows that it is (the finding, an error).
+    /// Params: `mirrors`, `ids`.
+    pub const MIRROR_STALE_AFTER_TAKEOVER: &str = "migrate.mirror.stale_after_takeover";
 
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 26] = [
+    pub const ALL: [&str; 29] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -540,6 +576,9 @@ pub mod codes {
         MIRROR_CONFLICT,
         MIRROR_LIMIT,
         MIRROR_UNBOUND,
+        MIRROR_SOURCE,
+        MIRROR_PARTNER,
+        MIRROR_STALE_AFTER_TAKEOVER,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -583,12 +622,20 @@ pub mod codes {
 /// The codes of the loss entries a mirrored source writes (plan sections 2.2 and 2.9; the
 /// `code` of a [`LossEntry`](crate::ir::LossEntry)). The exporter writes one entry per item
 /// it does not carry, with the cmdlet as the location's `sheet` and the object's key as its
-/// `column`; the prepare writes the last two for what it derives no record from.
+/// `column` (an address of the scope it belongs to first, `192.0.2.0:81` for an option of
+/// that scope; none for an entry of the whole server); the prepare writes
+/// [`RESERVATION_NAME`] and [`FOREIGN_NAME`] for what it derives no record from.
+///
+/// A code outside [`ALL`] is accepted, shown and must be acknowledged like any other, and
+/// counts as configuration: only [`LEASE_STATE`] is an entry of the lease side.
 pub mod losses {
     /// A policy (WT-Q2).
     pub const POLICY: &str = "migrate.loss.policy";
-    /// A MAC filter entry (WT-Q2).
+    /// A MAC filter entry Tenko cannot match (not a MAC address pattern): not carried.
     pub const FILTER: &str = "migrate.loss.filter";
+    /// A reservation that the source's allow list does not list: the source does not serve
+    /// it, and Tenko serves a reservation on a restricted scope whatever the allow list says.
+    pub const FILTER_RESERVATION: &str = "migrate.loss.filter_reservation";
     /// A superscope (WT-Q2).
     pub const SUPERSCOPE: &str = "migrate.loss.superscope";
     /// A failover relationship.
@@ -605,9 +652,23 @@ pub mod losses {
     /// A reservation whose fully qualified name is outside every zone Tenko serves: kept as
     /// the host's name, no record derived (section 2.9; written by the prepare).
     pub const FOREIGN_NAME: &str = "migrate.loss.foreign_name";
+    /// An option a policy sets (WT-Q2).
+    pub const OPTION_POLICY: &str = "migrate.loss.option_policy";
+    /// An option Tenko computes itself (T1 and T2 from the lease time).
+    pub const OPTION_MANAGED: &str = "migrate.loss.option_managed";
+    /// An option definition of a type Tenko has no kind for.
+    pub const OPTION_DEF_TYPE: &str = "migrate.loss.option_def_type";
+    /// The default value of an option definition; Tenko has no option defaults.
+    pub const OPTION_DEF_DEFAULT: &str = "migrate.loss.option_def_default";
+    /// A scope that keeps its DNS records when a lease expires (ADR 0020).
+    pub const DDNS_KEEP_ON_EXPIRY: &str = "migrate.loss.ddns_keep_on_expiry";
+    /// A scope that registers names under a DNS suffix of its own.
+    pub const DDNS_SUFFIX: &str = "migrate.loss.ddns_suffix";
+    /// A reservation that answers BOOTP only.
+    pub const RESERVATION_BOOTP: &str = "migrate.loss.reservation_bootp";
 
     /// Every loss code.
-    pub const ALL: [&str; 9] = [
+    pub const ALL: [&str; 17] = [
         POLICY,
         FILTER,
         SUPERSCOPE,
@@ -617,6 +678,14 @@ pub mod losses {
         LEASE_STATE,
         RESERVATION_NAME,
         FOREIGN_NAME,
+        FILTER_RESERVATION,
+        OPTION_POLICY,
+        OPTION_MANAGED,
+        OPTION_DEF_TYPE,
+        OPTION_DEF_DEFAULT,
+        DDNS_KEEP_ON_EXPIRY,
+        DDNS_SUFFIX,
+        RESERVATION_BOOTP,
     ];
 }
 
@@ -753,13 +822,17 @@ pub mod findings {
     /// Under Hardened, an enabled mirror whose token has no source prefix: its pushes are
     /// refused until the token is replaced with prefixes (a warning).
     pub const MIRROR_UNBOUND: &str = super::codes::MIRROR_UNBOUND;
+    /// No push for three intervals from a mirror whose scope, or whose partner's scope, is
+    /// taken over (an error; it replaces [`MIRROR_STALE`] for that mirror).
+    pub const MIRROR_STALE_AFTER_TAKEOVER: &str = super::codes::MIRROR_STALE_AFTER_TAKEOVER;
 
     /// Every finding.
-    pub const ALL: [&str; 4] = [
+    pub const ALL: [&str; 5] = [
         MIRROR_STALE,
         MIRROR_SCOPE_ACTIVE,
         MIRROR_TOKEN_EXPIRING,
         MIRROR_UNBOUND,
+        MIRROR_STALE_AFTER_TAKEOVER,
     ];
 }
 
@@ -824,6 +897,8 @@ mod tests {
             last_push: None,
             last_change: None,
             stored_at: None,
+            server: None,
+            partner: None,
             created: stamp(),
             updated: stamp(),
         }
@@ -952,7 +1027,14 @@ mod tests {
 
     #[test]
     fn the_rows_round_trip_through_the_tables() {
-        let mirror = mirror();
+        let unpaired = mirror();
+        let bytes = tables::MIRRORS.encode(&unpaired).expect("cbor");
+        assert_eq!(tables::MIRRORS.decode(&bytes).expect("decode"), unpaired);
+        let mirror = Mirror {
+            server: Some("dc1.corp.example.test".to_owned()),
+            partner: Some(MirrorId::generate()),
+            ..unpaired
+        };
         let bytes = tables::MIRRORS.encode(&mirror).expect("cbor");
         assert_eq!(tables::MIRRORS.decode(&bytes).expect("decode"), mirror);
         let ack = LossAck {

@@ -3784,7 +3784,7 @@ export interface paths {
         head?: never;
         /**
          * Change a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval. Audited as `migrate.mirror.update`.
+         * @description Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes.
          */
         patch: operations["update_mirror"];
         trace?: never;
@@ -3838,7 +3838,7 @@ export interface paths {
         };
         /**
          * The diff of a mirrored scope against Tenko's scope
-         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision.
+         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings, the MAC filters (the scope's restriction to the allow list and the source's entries) and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision. For a paired mirror, rows of kind `partner` name every configuration difference of the scope between the mirror's latest snapshot and its partner's (`partner_sequence`), each for the operator to decide.
          */
         get: operations["get_mirror_scope_diff"];
         put?: never;
@@ -3923,7 +3923,7 @@ export interface paths {
         get: operations["get_mirror_snapshot"];
         /**
          * Push a snapshot of a mirrored source
-         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. The first push a token makes binds the mirror to the server its `source.server` names, and a push naming another is refused until the token is replaced. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
          */
         put: operations["push_mirror_snapshot"];
         post?: never;
@@ -9740,7 +9740,7 @@ export interface components {
          * @description What a row of the diff is about (plan section 2.5).
          * @enum {string}
          */
-        DiffKind: "prefix" | "pool" | "exclusion" | "lease_time" | "option" | "reservation" | "ddns";
+        DiffKind: "prefix" | "pool" | "exclusion" | "lease_time" | "option" | "reservation" | "ddns" | "filter" | "partner";
         /** @description One row of the diff of a mirrored scope against Tenko's scope of the same network. */
         DiffRow: {
             /** @description What the prepare would do. */
@@ -9754,6 +9754,8 @@ export interface components {
             kind: components["schemas"]["DiffKind"];
             /** @description The mirror's value, as text. */
             mirror?: string | null;
+            /** @description The partner mirror's value, as text, for a row of kind `partner`. */
+            partner?: string | null;
             /** @description Why the operator must decide, for `decide`. */
             reason?: string | null;
             /** @description Tenko's value, as text. */
@@ -14710,6 +14712,13 @@ export interface components {
              *     among mirrors, and nothing else derives from it.
              */
             name: string;
+            partner?: components["schemas"]["MirrorId"] | null;
+            /**
+             * @description The server the mirror is bound to: the `source.server` of the first push its token
+             *     made (section 2.15). A push naming another server is refused with
+             *     `migrate.mirror.source` until the token is replaced, which clears the binding.
+             */
+            server?: string | null;
             stored_at?: components["schemas"]["Timestamp"] | null;
             /** @description The scoped token whose only special scope is `mirror:<id>` (section 2.1, rule 2). */
             token: components["schemas"]["ApiTokenId"];
@@ -14844,6 +14853,12 @@ export interface components {
             interval_secs?: number | null;
             /** @description A new name; the service account keeps the name it was created with. */
             name?: string | null;
+            /**
+             * @description The other mirror of a pair (plan section 2.15), set on both rows at once; `null`
+             *     takes the pair apart on both. Refused for the mirror itself, a mirror that does not
+             *     exist and a mirror already paired with another (`migrate.mirror.partner`).
+             */
+            partner?: string | null;
         };
         /**
          * @description One push of a mirrored source: the IR of the whole source at `taken_at`, with the loss
@@ -22362,6 +22377,13 @@ export interface components {
             losses_open: number;
             /** @description The mirror. */
             mirror: components["schemas"]["MirrorId"];
+            partner?: components["schemas"]["MirrorId"] | null;
+            /**
+             * Format: int64
+             * @description The sequence of the partner's snapshot the `partner` rows compare with; none while
+             *     the partner holds no snapshot.
+             */
+            partner_sequence?: number | null;
             /** @description The rows; empty when the two agree. */
             rows: components["schemas"]["DiffRow"][];
             /**
@@ -44519,7 +44541,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A mirror of the new name exists (`migrate.mirror.exists`), or the row changed under every attempt (`migrate.mirror.conflict`) */
+            /** @description A mirror of the new name exists (`migrate.mirror.exists`), the pairing is refused: the mirror itself, a mirror that does not exist, or a mirror already paired with another (`migrate.mirror.partner`, `params.reason`), or the row changed under every attempt (`migrate.mirror.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -45088,7 +45110,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`) */
+            /** @description The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), the push names another server than the one the mirror is bound to (`migrate.mirror.source`, `params.bound`, `params.server`), or the row changed under every attempt (`migrate.mirror.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;

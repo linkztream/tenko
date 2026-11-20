@@ -607,6 +607,7 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
         frozen_names: Vec::new(),
         skipped: Vec::new(),
         before: Vec::new(),
+        partner: None,
         job: JobId::generate(),
         at: lab.env.now(),
         by: UserId::generate(),
@@ -630,6 +631,421 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
     assert_eq!(
         codes(lab.service.findings().await.expect("findings")),
         ["migrate.mirror.token_expiring"]
+    );
+}
+
+// ---------------------------------------------------------------------------------------
+// The exporter's snapshots, the binding to a server, the pair (plan section 2.15)
+
+const EXPORTER_CORP: &str =
+    include_str!("../../../deploy/windows/mirror/tests/fixtures/expected-snapshot.json");
+const EXPORTER_LAB: &str =
+    include_str!("../../../deploy/windows/mirror/tests/fixtures/lab-dc1/expected-snapshot.json");
+const PARTNER: &str = include_str!("../../tenko-core/tests/fixtures/mirror/snapshot-partner.json");
+
+/// Another mirror of the lab with the context its exporter's pushes carry.
+async fn another(lab: &Lab, name: &str) -> (MirrorId, RequestCtx) {
+    let (item, _) = lab
+        .service
+        .create(&lab.admin, new_mirror(name, &[]))
+        .await
+        .expect("created");
+    let pusher = RequestCtx::new(Principal::Token {
+        id: item.mirror.token,
+        owner: item.mirror.account,
+    });
+    (item.mirror.id, pusher)
+}
+
+async fn push_as(
+    lab: &Lab,
+    id: MirrorId,
+    pusher: &RequestCtx,
+    snapshot: MirrorSnapshot,
+) -> Result<bool, MirrorError> {
+    lab.service.admit(id).await?;
+    Ok(lab.service.push(pusher, id, snapshot).await?.changed)
+}
+
+fn pair(partner: Option<MirrorId>) -> MirrorPatch {
+    MirrorPatch {
+        partner: Some(partner),
+        ..MirrorPatch::default()
+    }
+}
+
+/// The exporter's own expected output (the Pester suites hold the script to these files)
+/// decodes, validates, is stored, and every loss entry carries a code of the server's set
+/// and is placed in its scope whenever its column names an address: one fixture tested by
+/// both sides, so that the two cannot read the contract differently unnoticed.
+#[tokio::test]
+async fn the_exporters_snapshots_carry_the_servers_codes_and_place_every_entry() {
+    for (name, text) in [("corp", EXPORTER_CORP), ("lab", EXPORTER_LAB)] {
+        let lab = Lab::new().await;
+        let snapshot = body::decode(text.as_bytes(), false).expect(name);
+        lab.push(0, snapshot).await.expect(name);
+        let report = lab.service.losses(lab.id).await.expect("losses");
+        assert!(!report.entries.is_empty(), "{name}");
+        for item in &report.entries {
+            let entry = &item.entry;
+            assert!(
+                losses::ALL.contains(&entry.code.as_ref()),
+                "{name}: the server knows no code {}",
+                entry.code
+            );
+            let column = entry.location.column.as_deref().unwrap_or_default();
+            let names_an_address = column
+                .split([',', '=', ':'])
+                .any(|part| part.trim().parse::<std::net::IpAddr>().is_ok());
+            assert_eq!(
+                item.scope.is_some(),
+                names_an_address,
+                "{name}: the entry at `{column}` ({}) is placed in its scope exactly when it names an address",
+                entry.code
+            );
+        }
+    }
+}
+
+/// The lab server's snapshot (Windows Server 2025, an allow list that is on and empty):
+/// option 81 is not among its options, and the diff shows the scope's restriction.
+#[tokio::test]
+async fn the_lab_servers_snapshot_is_diffed_with_its_restriction_and_without_option_81() {
+    let lab = Lab::new().await;
+    let snapshot = body::decode(EXPORTER_LAB.as_bytes(), false).expect("the lab snapshot");
+    let scope = "192.0.2.0/24".parse().expect("net");
+    let restricted = snapshot.scope(&scope).expect("scope").restricted;
+    assert!(restricted && snapshot.dhcp.server_options.is_empty());
+    lab.push(0, snapshot.clone()).await.expect("pushed");
+    let diff = lab.service.diff(lab.id, scope).await.expect("diff");
+    let rows: Vec<(String, DiffAction)> = diff
+        .rows
+        .iter()
+        .filter(|row| {
+            matches!(
+                row.kind,
+                tenko_migrate::mirror::DiffKind::Filter | tenko_migrate::mirror::DiffKind::Option
+            )
+        })
+        .map(|row| (row.item.clone(), row.action))
+        .collect();
+    let create = |item: &str| (item.to_owned(), DiffAction::Create);
+    assert_eq!(
+        rows,
+        [
+            create("scope:15"),
+            create("scope:3"),
+            create("scope:6"),
+            create("restricted"),
+        ]
+    );
+    assert_eq!(
+        diff.losses_open, 5,
+        "a name, three reservations the allow list does not list, the failover"
+    );
+
+    // What the server did with option 81 as an ordinary option before the exporter left it
+    // out: it validated, and the diff (and so a prepare) never offered it, since 81 is a code
+    // the server writes itself and an option set never holds.
+    let mut with_81 = snapshot;
+    with_81.sequence += 1;
+    let option = |column: &str| tenko_core::ir::dhcp::IrOption {
+        code: 81,
+        vendor_class: None,
+        user_class: None,
+        values: vec!["4".to_owned()],
+        origin: tenko_core::ir::SourceLocation {
+            sheet: Some("Get-DhcpServerv4OptionValue".to_owned()),
+            row: None,
+            column: Some(column.to_owned()),
+        },
+    };
+    with_81.dhcp.server_options.push(option("81"));
+    with_81.dhcp.scopes[0].options.push(option("192.0.2.0:81"));
+    // A deny entry of the source is one Tenko's server-wide filters must hold too.
+    with_81.dhcp.filters.push(tenko_core::ir::dhcp::IrFilter {
+        mac: "00:00:5e:00:53:21".parse().expect("pattern"),
+        kind: tenko_core::dhcp::FilterKind::Deny,
+        description: None,
+        origin: tenko_core::ir::SourceLocation::default(),
+    });
+    with_81.validate().expect("option 81 validates");
+    lab.push(10, with_81).await.expect("pushed");
+    let diff = lab.service.diff(lab.id, scope).await.expect("diff");
+    assert!(
+        diff.rows.iter().all(|row| !row.item.ends_with(":81")),
+        "no row offers option 81"
+    );
+    assert!(
+        diff.rows
+            .iter()
+            .any(|row| row.item == "deny 00:00:5e:00:53:21" && row.action == DiffAction::Create)
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_loss_code_is_shown_counted_as_configuration_and_acknowledged() {
+    let lab = Lab::new().await;
+    lab.push(0, fixture(1)).await.expect("first");
+    let mut unknown = fixture(2);
+    unknown.losses.entries.push(tenko_core::ir::LossEntry {
+        location: tenko_core::ir::SourceLocation {
+            sheet: Some("Get-DhcpServerv4Scope".to_owned()),
+            row: None,
+            column: Some("192.0.2.0".to_owned()),
+        },
+        code: std::borrow::Cow::Borrowed("migrate.loss.something_new"),
+        detail: "a loss of a later exporter".to_owned(),
+    });
+    assert!(
+        lab.push(10, unknown).await.expect("accepted"),
+        "a changed configuration, audited"
+    );
+    assert_eq!(lab.audit("migrate.mirror.push").await, 2);
+    let report = lab.service.losses(lab.id).await.expect("losses");
+    let item = report
+        .entries
+        .iter()
+        .find(|item| item.entry.code == "migrate.loss.something_new")
+        .expect("shown");
+    assert!(item.ack.is_none() && item.scope.is_some());
+    assert_eq!(lab.service.get(lab.id).await.expect("item").losses_open, 5);
+}
+
+#[tokio::test]
+async fn a_mirror_is_bound_to_the_server_of_its_first_push_until_its_token_is_replaced() {
+    let lab = Lab::new().await;
+    lab.push(0, fixture(1)).await.expect("first");
+    let row = lab.service.get(lab.id).await.expect("item").mirror;
+    assert_eq!(row.server.as_deref(), Some("dc1.corp.example.test"));
+    let mut upper = fixture(2);
+    upper.source.server = "DC1.corp.example.test".to_owned();
+    lab.push(10, upper.clone())
+        .await
+        .expect("a host name compares without case");
+
+    let mut other = body::decode(PARTNER.as_bytes(), false).expect("partner");
+    other.sequence = 3;
+    let refused = lab.push(20, other).await.expect_err("another server");
+    assert_eq!(
+        (
+            refused.code(),
+            refused.http_status(),
+            refused.params()["bound"].as_str(),
+            refused.params()["server"].as_str()
+        ),
+        (
+            "migrate.mirror.source",
+            409,
+            "dc1.corp.example.test",
+            "dc2.corp.example.test"
+        )
+    );
+    // The route writes the refusal to the audit log as it does for every refused push.
+    lab.service.refused(&lab.pusher, lab.id, &refused).await;
+    assert_eq!(lab.audit("migrate.mirror.refuse").await, 1);
+    assert_eq!(lab.service.snapshot(lab.id).await.expect("row").sequence, 2);
+
+    // A new token binds anew, with its first push even when the snapshot is unchanged.
+    let (item, _) = lab
+        .service
+        .replace_token(&lab.admin, lab.id, &new_mirror("dc1", &[]).token)
+        .await
+        .expect("replaced");
+    assert_eq!(item.mirror.server, None);
+    let pusher = RequestCtx::new(Principal::Token {
+        id: item.mirror.token,
+        owner: item.mirror.account,
+    });
+    lab.at(30);
+    upper.sequence = 1;
+    let changed = push_as(&lab, lab.id, &pusher, upper)
+        .await
+        .expect("bound anew");
+    assert!(!changed, "the snapshot is the stored one");
+    let row = lab.service.get(lab.id).await.expect("item").mirror;
+    assert_eq!(row.server.as_deref(), Some("DC1.corp.example.test"));
+}
+
+#[tokio::test]
+async fn a_pair_is_set_on_both_rows_at_once_and_refused_when_it_cannot_be_one() {
+    let lab = Lab::new().await;
+    let (dc2, _) = another(&lab, "dc2").await;
+    let (dc3, _) = another(&lab, "dc3").await;
+    let partner_of = |id| {
+        let service = &lab.service;
+        async move { service.get(id).await.expect("item").mirror.partner }
+    };
+    let refusal = |result: Result<tenko_migrate::mirror::MirrorItem, MirrorError>| {
+        let error = result.expect_err("refused");
+        (error.code(), error.params()["reason"].clone())
+    };
+
+    let item = lab
+        .service
+        .update(&lab.admin, lab.id, pair(Some(dc2)))
+        .await
+        .expect("paired");
+    assert_eq!(item.mirror.partner, Some(dc2));
+    assert_eq!(partner_of(dc2).await, Some(lab.id));
+    assert_eq!(
+        lab.audit("migrate.mirror.update").await,
+        1,
+        "one record for both"
+    );
+
+    for (id, partner, reason) in [
+        (lab.id, lab.id, "a mirror cannot be its own partner"),
+        (lab.id, dc3, "the mirror is paired with another mirror"),
+        (dc3, lab.id, "the partner is paired with another mirror"),
+        (dc3, MirrorId::generate(), "no mirror of that id exists"),
+    ] {
+        assert_eq!(
+            refusal(
+                lab.service
+                    .update(&lab.admin, id, pair(Some(partner)))
+                    .await
+            ),
+            ("migrate.mirror.partner", reason.to_owned())
+        );
+    }
+    assert_eq!(partner_of(dc3).await, None);
+
+    // Taken apart on both rows; then a deleted partner leaves no pair behind.
+    lab.service
+        .update(&lab.admin, dc2, pair(None))
+        .await
+        .expect("apart");
+    assert_eq!(
+        (partner_of(lab.id).await, partner_of(dc2).await),
+        (None, None)
+    );
+    lab.service
+        .update(&lab.admin, lab.id, pair(Some(dc3)))
+        .await
+        .expect("paired");
+    lab.service.delete(&lab.admin, dc3).await.expect("deleted");
+    assert_eq!(partner_of(lab.id).await, None);
+}
+
+#[tokio::test]
+async fn the_diff_of_the_fixture_pair_shows_exactly_the_fixtures_differences() {
+    let lab = Lab::new().await;
+    let (dc2, dc2_pusher) = another(&lab, "dc2").await;
+    lab.push(0, fixture(1)).await.expect("dc1");
+    lab.service
+        .update(&lab.admin, lab.id, pair(Some(dc2)))
+        .await
+        .expect("paired");
+    let scope = "192.0.2.0/24".parse().expect("net");
+    let partner_rows = |diff: tenko_migrate::mirror::ScopeDiff| {
+        diff.rows
+            .into_iter()
+            .filter(|row| row.kind == tenko_migrate::mirror::DiffKind::Partner)
+            .map(|row| (row.item, row.mirror, row.partner, row.action))
+            .collect::<Vec<_>>()
+    };
+    let before = lab.service.diff(lab.id, scope).await.expect("diff");
+    assert_eq!((before.partner, before.partner_sequence), (Some(dc2), None));
+    assert_eq!(
+        partner_rows(before),
+        [("snapshot".to_owned(), None, None, DiffAction::Decide)]
+    );
+
+    let partner = body::decode(PARTNER.as_bytes(), false).expect("the partner fixture");
+    push_as(&lab, dc2, &dc2_pusher, partner).await.expect("dc2");
+    let diff = lab.service.diff(lab.id, scope).await.expect("diff");
+    assert_eq!(diff.partner_sequence, Some(1));
+    // The leases differ too (one known to dc1 only, a shorter end, a conflict): they are no
+    // configuration and make no row.
+    assert_eq!(
+        partner_rows(diff),
+        [
+            (
+                "reservation 192.0.2.39".to_owned(),
+                Some(format!(
+                    "client-id {}, BOOTP terminal",
+                    tenko_core::serde_util::to_hex(
+                        &fixture(1).dhcp.scopes[0].reservations[29]
+                            .client
+                            .client_id
+                            .clone()
+                            .expect("an identifier")
+                            .0
+                    )
+                )),
+                None,
+                DiffAction::Decide
+            ),
+            (
+                "scope:42".to_owned(),
+                Some("192.0.2.5".to_owned()),
+                Some("192.0.2.6".to_owned()),
+                DiffAction::Decide
+            ),
+        ]
+    );
+    // The partner's own diff names the same differences from its side.
+    let theirs = partner_rows(lab.service.diff(dc2, scope).await.expect("diff"));
+    assert_eq!(theirs.len(), 2);
+}
+
+#[tokio::test]
+async fn either_mirror_of_a_pair_answers_for_a_scope_taken_over_from_the_pair() {
+    let lab = Lab::new().await;
+    let (dc2, dc2_pusher) = another(&lab, "dc2").await;
+    lab.service
+        .update(&lab.admin, lab.id, pair(Some(dc2)))
+        .await
+        .expect("paired");
+    lab.push(0, inactive(1)).await.expect("dc1 inactive");
+    let partner = body::decode(PARTNER.as_bytes(), false).expect("the partner fixture");
+    push_as(&lab, dc2, &dc2_pusher, partner)
+        .await
+        .expect("dc2 active");
+    let codes = |findings: Vec<tenko_migrate::mirror::Finding>| {
+        findings
+            .into_iter()
+            .map(|finding| (finding.code, finding.mirrors.len()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(codes(lab.service.findings().await.expect("findings")), []);
+
+    // The takeover is recorded on dc1; dc2 still serves the scope.
+    let mut batch = WriteBatch::for_request(&lab.admin);
+    let takeover = Takeover {
+        id: TakeoverId::generate(),
+        mirror: lab.id,
+        scope: "192.0.2.0/24".parse().expect("net"),
+        sequence: 1,
+        state: TakeoverState::Done,
+        counts: tenko_core::migrate::TakeoverCounts::default(),
+        adopted_leases: Vec::new(),
+        adopted_names: Vec::new(),
+        frozen_names: Vec::new(),
+        skipped: Vec::new(),
+        before: Vec::new(),
+        partner: None,
+        job: JobId::generate(),
+        at: lab.env.now(),
+        by: UserId::generate(),
+    };
+    batch
+        .put_typed(&tables::TAKEOVERS, &takeover.id, &takeover)
+        .expect("row");
+    lab.env.store.propose(batch).await.expect("committed");
+    let found = lab.service.findings().await.expect("findings");
+    assert_eq!(codes(found.clone()), [("migrate.mirror.scope_active", 1)]);
+    assert_eq!(found[0].mirrors[0].0, dc2, "the partner that serves it");
+
+    // Both go quiet: each is stale while the pair's scope is taken over, an error.
+    lab.at(181);
+    assert_eq!(
+        codes(lab.service.findings().await.expect("findings")),
+        [
+            ("migrate.mirror.scope_active", 1),
+            ("migrate.mirror.stale_after_takeover", 2)
+        ]
     );
 }
 

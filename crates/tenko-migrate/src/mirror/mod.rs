@@ -109,6 +109,16 @@ pub struct MirrorPatch {
     /// The expected interval between pushes, in seconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub interval_secs: Option<u32>,
+    /// The other mirror of a pair (plan section 2.15), set on both rows at once; `null`
+    /// takes the pair apart on both. Refused for the mirror itself, a mirror that does not
+    /// exist and a mirror already paired with another (`migrate.mirror.partner`).
+    #[serde(
+        default,
+        deserialize_with = "tenko_ipam::command::nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<String>, nullable)]
+    pub partner: Option<Option<MirrorId>>,
 }
 
 /// The answer of a push: `200 {"sequence", "changed"}`.
@@ -169,6 +179,12 @@ pub enum DiffKind {
     Reservation,
     /// The DDNS settings.
     Ddns,
+    /// The MAC filters: whether the scope is restricted to the allow list, and the entries.
+    Filter,
+    /// A configuration difference between the mirror and its partner (plan section 2.15):
+    /// the item names what differs (`pool 192.0.2.100-192.0.2.199`, `scope:6`,
+    /// `reservation 192.0.2.10`).
+    Partner,
 }
 
 /// What the prepare would do about a row.
@@ -208,6 +224,9 @@ pub struct DiffRow {
     /// Tenko's value, as text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tenko: Option<String>,
+    /// The partner mirror's value, as text, for a row of kind `partner`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<String>,
     /// What the prepare would do.
     pub action: DiffAction,
     /// Why the operator must decide, for `decide`.
@@ -232,6 +251,13 @@ pub struct ScopeDiff {
     pub tenko_scope: Option<PrefixId>,
     /// Whether Tenko's scope is enabled.
     pub tenko_enabled: bool,
+    /// The partner mirror, for a paired mirror.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner: Option<MirrorId>,
+    /// The sequence of the partner's snapshot the `partner` rows compare with; none while
+    /// the partner holds no snapshot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub partner_sequence: Option<u64>,
     /// The rows; empty when the two agree.
     pub rows: Vec<DiffRow>,
     /// How many loss entries of the scope are not acknowledged.
@@ -296,6 +322,24 @@ pub enum MirrorError {
         /// The most mirrors.
         max: usize,
     },
+    /// The push names another server than the one the mirror is bound to (409).
+    Source {
+        /// The mirror.
+        id: MirrorId,
+        /// The server it is bound to.
+        bound: String,
+        /// The server the push names.
+        server: String,
+    },
+    /// A pairing is refused (409).
+    Partner {
+        /// The mirror.
+        id: MirrorId,
+        /// The partner asked for.
+        partner: MirrorId,
+        /// Why.
+        reason: &'static str,
+    },
     /// The account and token of the mirror.
     Auth(AuthError),
     /// The rows of the diff.
@@ -346,6 +390,18 @@ impl fmt::Display for MirrorError {
                 write!(f, "the installation holds {max} mirrors, the most it may")
             }
             Self::BodyTimeout => f.write_str("the body did not arrive in time"),
+            Self::Source { id, bound, server } => write!(
+                f,
+                "the mirror {id} is bound to the server {bound}, and the push names {server}; replace the token to bind it anew"
+            ),
+            Self::Partner {
+                id,
+                partner,
+                reason,
+            } => write!(
+                f,
+                "the mirror {id} cannot be paired with {partner}: {reason}"
+            ),
             Self::Auth(error) => error.fmt(f),
             Self::Dhcp(error) => error.fmt(f),
             Self::Store(error) => error.fmt(f),
@@ -373,6 +429,8 @@ impl Coded for MirrorError {
             Self::Conflict(_) => codes::MIRROR_CONFLICT,
             Self::Limit { .. } => codes::MIRROR_LIMIT,
             Self::BodyTimeout => BODY_TIMEOUT,
+            Self::Source { .. } => codes::MIRROR_SOURCE,
+            Self::Partner { .. } => codes::MIRROR_PARTNER,
             Self::Auth(error) => error.code(),
             Self::Dhcp(error) => error.code(),
             Self::Store(error) => error.code(),
@@ -386,7 +444,9 @@ impl Coded for MirrorError {
             | Self::Sequence { .. }
             | Self::SnapshotMoved { .. }
             | Self::Conflict(_)
-            | Self::Limit { .. } => 409,
+            | Self::Limit { .. }
+            | Self::Source { .. }
+            | Self::Partner { .. } => 409,
             Self::BodyTimeout => 408,
             Self::Settings { .. } | Self::Request(_) => 400,
             Self::Disabled(_) => 403,
@@ -428,6 +488,20 @@ impl Coded for MirrorError {
                 ("latest", latest.to_string()),
             ]),
             Self::Limit { max } => BTreeMap::from([("max", max.to_string())]),
+            Self::Source { id, bound, server } => BTreeMap::from([
+                ("id", id.to_string()),
+                ("bound", bound.clone()),
+                ("server", server.clone()),
+            ]),
+            Self::Partner {
+                id,
+                partner,
+                reason,
+            } => BTreeMap::from([
+                ("id", id.to_string()),
+                ("partner", partner.to_string()),
+                ("reason", (*reason).to_owned()),
+            ]),
             Self::Auth(error) => error.params(),
             Self::Dhcp(error) => error.params(),
             Self::Store(error) => error.params(),

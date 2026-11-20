@@ -266,19 +266,46 @@ fn entry_hash(entry: &LossEntry) -> Result<Vec<u8>, MirrorError> {
 }
 
 /// The scope a loss entry belongs to: the scope holding the first address its location's
-/// column names (`ScopeId=192.0.2.0`, `IPAddress=192.0.2.198`); none when it names none, and
-/// such an entry belongs to every scope.
-fn entry_scope(entry: &LossEntry, scopes: &[MirroredScope]) -> Option<IpNet> {
+/// column names, as the exporter writes it (`192.0.2.198`, `192.0.2.0:81` for an option of
+/// a scope) or as `Key=address` (`ScopeId=192.0.2.0`); none when it names none, and such an
+/// entry belongs to every scope.
+pub(crate) fn entry_scope(entry: &LossEntry, scopes: &[MirroredScope]) -> Option<IpNet> {
     let column = entry.location.column.as_deref()?;
     column
         .split(',')
-        .filter_map(|part| part.split_once('=')?.1.trim().parse::<IpAddr>().ok())
+        .filter_map(|part| {
+            let value = part.split_once('=').map_or(part, |(_, value)| value).trim();
+            value.parse::<IpAddr>().ok().or_else(|| {
+                // An address followed by `:<code>`; an IPv6 address takes the last colon.
+                [value.split_once(':'), value.rsplit_once(':')]
+                    .into_iter()
+                    .find_map(|split| split?.0.parse().ok())
+            })
+        })
         .find_map(|ip| {
             scopes
                 .iter()
                 .find(|scope| scope.cidr.contains(&ip))
                 .map(|scope| scope.cidr)
         })
+}
+
+/// Binds the mirror to the server a push names when it is bound to none, and says so; a
+/// push naming another server than the bound one is refused (plan section 2.15: a mirror is
+/// the one server's of its token's first accepted push). Host names compare without case.
+fn bind(mirror: &mut Mirror, server: &str) -> Result<bool, MirrorError> {
+    match &mirror.server {
+        Some(bound) if !bound.eq_ignore_ascii_case(server) => Err(MirrorError::Source {
+            id: mirror.id,
+            bound: bound.clone(),
+            server: server.to_owned(),
+        }),
+        Some(_) => Ok(false),
+        None => {
+            mirror.server = Some(server.to_owned());
+            Ok(true)
+        }
+    }
 }
 
 /// A health finding of the mirrors (plan section 2.12): the code and the mirrors it holds
@@ -624,6 +651,8 @@ impl MirrorService {
             last_push: None,
             last_change: None,
             stored_at: None,
+            server: None,
+            partner: None,
             created: stamp.clone(),
             updated: stamp,
         };
@@ -699,13 +728,64 @@ impl MirrorService {
         Err(MirrorError::Conflict(id))
     }
 
-    /// Changes a mirror; audited as `migrate.mirror.update`.
+    /// Stages the pairing of `mirror` with `partner` (or the end of its pair for `None`) on
+    /// both rows, each expected at the revision it was read at (plan section 2.15): the
+    /// partner's row is written beside the mirror's, which the caller writes. A pair is what
+    /// an administrator chose; nothing compares server names.
+    fn pair(
+        view: &dyn ReadView,
+        mirror: &mut Mirror,
+        partner: Option<MirrorId>,
+        batch: &mut WriteBatch,
+        stamp: &Stamp,
+    ) -> Result<(), MirrorError> {
+        let refuse = |partner, reason| MirrorError::Partner {
+            id: mirror.id,
+            partner,
+            reason,
+        };
+        let other = match partner {
+            None => mirror.partner,
+            Some(partner) if partner == mirror.id => {
+                return Err(refuse(partner, "a mirror cannot be its own partner"));
+            }
+            Some(partner) if mirror.partner.is_some_and(|paired| paired != partner) => {
+                return Err(refuse(partner, "the mirror is paired with another mirror"));
+            }
+            Some(partner) => Some(partner),
+        };
+        if let Some(other) = other {
+            match view.get_typed(&tables::MIRRORS, &other)? {
+                Some((mut row, revision)) => {
+                    let wanted = partner.map(|_| mirror.id);
+                    if partner.is_some() && row.partner.is_some_and(|paired| paired != mirror.id) {
+                        return Err(refuse(other, "the partner is paired with another mirror"));
+                    }
+                    if row.partner != wanted {
+                        row.partner = wanted;
+                        row.updated = stamp.clone();
+                        batch.expect_typed(&tables::MIRRORS, &other, Some(revision));
+                        batch.put_typed(&tables::MIRRORS, &other, &row)?;
+                    }
+                }
+                None if partner.is_some() => {
+                    return Err(refuse(other, "no mirror of that id exists"));
+                }
+                None => {}
+            }
+        }
+        mirror.partner = partner;
+        Ok(())
+    }
+
+    /// Changes a mirror; audited as `migrate.mirror.update` (one record naming both mirrors
+    /// when the pair changes).
     ///
     /// # Errors
     ///
     /// [`MirrorError::NotFound`], [`MirrorError::Settings`] (also for enabling a mirror whose
-    /// token has no source prefix under the Hardened profile), [`MirrorError::Conflict`], a
-    /// store error.
+    /// token has no source prefix under the Hardened profile), [`MirrorError::Partner`],
+    /// [`MirrorError::Conflict`], a store error.
     pub async fn update(
         &self,
         ctx: &RequestCtx,
@@ -714,12 +794,28 @@ impl MirrorService {
     ) -> Result<MirrorItem, MirrorError> {
         let (mirror, ()) = self
             .rewrite(ctx, id, |view, mirror, batch| {
+                let stamp = Stamp::new(ctx.now, ctx.principal.clone());
+                let mut objects = vec![mirror_object(id)];
+                if let Some(partner) = patch.partner {
+                    if let Some(other) = partner.or(mirror.partner)
+                        && other != id
+                    {
+                        objects.push(mirror_object(other));
+                    }
+                    Self::pair(view, mirror, partner, batch, &stamp)?;
+                }
                 if patch.enabled == Some(true) {
                     let token = AuthService::scoped_token(view, mirror.account, mirror.token)?;
                     self.sources_required(token.map_or(0, |token| token.source_prefixes.len()))?;
                 }
-                let mut draft = AuditDraft::success(audit::MIRROR_UPDATE, vec![mirror_object(id)])
+                let mut draft = AuditDraft::success(audit::MIRROR_UPDATE, objects)
                     .with_source_ip(ctx.source_ip);
+                if let Some(partner) = patch.partner {
+                    draft = draft.with_context(
+                        "partner",
+                        partner.map_or_else(|| "none".to_owned(), |partner| partner.to_string()),
+                    );
+                }
                 if let Some(name) = &patch.name {
                     draft = draft.with_context("name", name.clone());
                     mirror.name.clone_from(name);
@@ -733,7 +829,7 @@ impl MirrorService {
                     mirror.interval_secs = interval;
                 }
                 Self::settings(mirror)?;
-                mirror.updated = Stamp::new(ctx.now, ctx.principal.clone());
+                mirror.updated = stamp;
                 batch.put_typed(&tables::MIRRORS, &id, mirror)?;
                 batch.audit(draft);
                 Ok(())
@@ -760,6 +856,14 @@ impl MirrorService {
     /// [`MirrorError::NotFound`], [`MirrorError::Conflict`], a store error.
     pub async fn delete(&self, ctx: &RequestCtx, id: MirrorId) -> Result<(), MirrorError> {
         self.rewrite(ctx, id, |view, mirror, batch| {
+            // The partner's row forgets the pair in the same batch.
+            Self::pair(
+                view,
+                mirror,
+                None,
+                batch,
+                &Stamp::new(ctx.now, ctx.principal.clone()),
+            )?;
             batch.delete_typed(&tables::MIRRORS, &id);
             batch.delete_typed(&tables::SNAPSHOTS, &id);
             for key in Self::acks(view, id)?.into_keys() {
@@ -814,6 +918,8 @@ impl MirrorService {
                 .await?;
             mirror.token = token.info.id;
             mirror.last_sequence = None;
+            // The new token binds the mirror anew with its first push.
+            mirror.server = None;
             mirror.updated = Stamp::new(ctx.now, ctx.principal.clone());
             batch.expect_typed(&tables::MIRRORS, &id, Some(revision));
             batch.put_typed(&tables::MIRRORS, &id, &mirror)?;
@@ -951,6 +1057,7 @@ impl MirrorService {
             {
                 return Err(MirrorError::Sequence { sequence, last });
             }
+            let bind = bind(&mut mirror, &summary.source.server)?;
             let since = |at: Option<Timestamp>| {
                 at.map_or(u64::MAX, |at| now.saturating_since(at).as_secs())
             };
@@ -964,7 +1071,7 @@ impl MirrorService {
                 .is_none_or(|stored| stored.0 != leases_hash)
                 && since(mirror.stored_at) >= u64::from(LEASES_WRITE_SECS);
             let stored = changed || leases_due;
-            if stored || since(mirror.last_push) >= mirror.freshness_write_secs() {
+            if stored || bind || since(mirror.last_push) >= mirror.freshness_write_secs() {
                 mirror.last_sequence = Some(sequence);
                 mirror.last_push = Some(now);
                 let mut batch = WriteBatch::for_request(ctx);
@@ -1210,12 +1317,25 @@ impl MirrorService {
         let open = self
             .summary_of(&snapshot)?
             .open(&Self::acks(view.as_ref(), id)?, Some(scope));
-        super::diff::diff(view.as_ref(), &snapshot, scope, open)
+        let partner = match Self::row(view.as_ref(), id)?.0.partner {
+            Some(partner) => Some((
+                partner,
+                view.get_typed(&tables::SNAPSHOTS, &partner)?
+                    .map(|(snapshot, _)| snapshot),
+            )),
+            None => None,
+        };
+        let partner = partner
+            .as_ref()
+            .map(|(partner, snapshot)| (*partner, snapshot.as_ref()));
+        super::diff::diff(view.as_ref(), &snapshot, scope, open, partner)
     }
 
-    /// The health findings of the mirrors (plan section 2.12): stale mirrors, tokens that
-    /// expire within [`TOKEN_EXPIRING_DAYS`] days, taken-over scopes the source serves
-    /// again, and under Hardened the enabled mirrors whose token has no source prefix.
+    /// The health findings of the mirrors (plan section 2.12): stale mirrors (an error once a
+    /// scope of the mirror or of its partner is taken over), tokens that expire within
+    /// [`TOKEN_EXPIRING_DAYS`] days, taken-over scopes the source serves again (on either
+    /// mirror of a pair), and under Hardened the enabled mirrors whose token has no source
+    /// prefix.
     ///
     /// # Errors
     ///
@@ -1223,17 +1343,29 @@ impl MirrorService {
     pub async fn findings(&self) -> Result<Vec<Finding>, MirrorError> {
         let now = self.now();
         let view = self.view().await?;
+        // A scope taken over from a pair is taken over from both of its mirrors.
         let takeovers: Vec<(MirrorId, IpNet)> = view
             .scan_typed(&tables::TAKEOVERS, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .filter(|(_, takeover, _)| takeover.state == TakeoverState::Done)
-            .map(|(_, takeover, _)| (takeover.mirror, takeover.scope))
+            .flat_map(|(_, takeover, _)| {
+                let partner = takeover
+                    .partner
+                    .map(|partner| (partner.mirror, takeover.scope));
+                std::iter::once((takeover.mirror, takeover.scope)).chain(partner)
+            })
             .collect();
         let mut found: BTreeMap<&'static str, Vec<(MirrorId, String)>> = BTreeMap::new();
         let soon = Duration::from_secs(u64::from(TOKEN_EXPIRING_DAYS) * 86_400);
         let hardened = self.hardened();
         for mirror in Self::rows(view.as_ref())? {
             let mirror = self.fresh(mirror);
+            // Its own takeovers and its partner's: either mirror of a pair answers for both.
+            let taken_over: Vec<IpNet> = takeovers
+                .iter()
+                .filter(|(of, _)| *of == mirror.id || Some(*of) == mirror.partner)
+                .map(|(_, scope)| *scope)
+                .collect();
             let mut raise = |code| {
                 found
                     .entry(code)
@@ -1241,7 +1373,11 @@ impl MirrorService {
                     .push((mirror.id, mirror.name.clone()));
             };
             if mirror.is_stale(now) {
-                raise(findings::MIRROR_STALE);
+                raise(if taken_over.is_empty() {
+                    findings::MIRROR_STALE
+                } else {
+                    findings::MIRROR_STALE_AFTER_TAKEOVER
+                });
             }
             let token = AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?;
             if token
@@ -1258,13 +1394,10 @@ impl MirrorService {
                 raise(findings::MIRROR_UNBOUND);
             }
             if let Some(summary) = self.summary(view.as_ref(), &mirror)?
-                && takeovers.iter().any(|(of, scope)| {
-                    *of == mirror.id
-                        && summary
-                            .scopes
-                            .iter()
-                            .any(|mirrored| mirrored.cidr == *scope && mirrored.active)
-                })
+                && summary
+                    .scopes
+                    .iter()
+                    .any(|mirrored| mirrored.active && taken_over.contains(&mirrored.cidr))
             {
                 raise(findings::MIRROR_SCOPE_ACTIVE);
             }
