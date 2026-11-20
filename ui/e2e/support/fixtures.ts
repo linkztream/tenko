@@ -8,6 +8,7 @@
 // - `server`: the running server, set up by nobody yet; its log is attached to a failing
 //   test.
 // - `baseURL`: the server's origin, so `page.goto("/ipam")` works.
+// - `page`: the browser page; at its end the route handlers still running no longer count.
 // - `api`: the API over the page's request context (shares the browser's cookies).
 // - `signedIn`: first-run setup done through the API with the server's bootstrap profile;
 //   the browser is signed in as the administrator and shows the dashboard.
@@ -49,6 +50,14 @@ export const test = base.extend<Options & Fixtures>({
 
   baseURL: async ({ server }, use) => {
     await use(server.url);
+  },
+
+  page: async ({ page }, use) => {
+    await use(page);
+    // A route handler still running when the test ends (a read the test never waited for) meets
+    // a closed context: its answer goes nowhere, so its error is not the test's. Waiting instead
+    // does not work: the first handler to finish makes Playwright continue the others' requests.
+    if (!page.isClosed()) await page.unrouteAll({ behavior: "ignoreErrors" });
   },
 
   api: async ({ page, server }, use) => {
