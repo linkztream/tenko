@@ -121,10 +121,12 @@ function Invoke-TenkoOk([string[]]$Arguments) {
     Assert-That ($result.Code -eq 0) "tenko $($Arguments -join ' ') exited with status $($result.Code)"
 }
 
-# The next patch version of a plain SemVer version: 0.0.11 -> 0.0.12.
+# The version to update to from $Version: the release of a pre-release (0.0.12-rc.6 -> 0.0.12, which
+# a node is offered without updates.prereleases), else the next patch version (0.0.11 -> 0.0.12).
 function Get-NextPatch([string]$Version) {
-    if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "not a plain SemVer version: $Version" }
-    return '{0}.{1}.{2}' -f $Matches[1], $Matches[2], ([int64]$Matches[3] + 1)
+    if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?$') { throw "not a SemVer version: $Version" }
+    $raise = if ($Matches[4]) { 0 } else { 1 }
+    return '{0}.{1}.{2}' -f $Matches[1], $Matches[2], ([int64]$Matches[3] + $raise)
 }
 
 function Get-FreePort {
