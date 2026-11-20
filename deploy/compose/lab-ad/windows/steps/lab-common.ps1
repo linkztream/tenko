@@ -73,8 +73,11 @@ function Invoke-Native([string]$File, [scriptblock]$Command, [int[]]$Allow = @(0
 # Test-Replication [<file>]: repadmin /replsummary into the file; fails on any failed
 # replication or operational error, as W7 and W14 expect.
 function Test-Replication([string]$File = 'replication.txt') {
+    # Only this summary: the file keeps the earlier attempts of a repeated entry.
+    $path = Join-Path $StepDir $File
+    $before = if (Test-Path $path) { @(Get-Content $path).Count } else { 0 }
     Invoke-Native $File { repadmin /replsummary } -AnyStatus
-    $text = Get-Content (Join-Path $StepDir $File)
+    $text = @(Get-Content $path | Select-Object -Skip $before)
     $counts = @($text | ForEach-Object { if ($_ -match '\s(\d+)\s*/\s*\d+\s+\d+(\s|$)') { [int]$Matches[1] } })
     if ($counts.Count -eq 0) { Fail "repadmin /replsummary listed no replication partner ($File)" }
     if (($counts | Measure-Object -Sum).Sum -gt 0 -or ($text -match 'operational errors')) {

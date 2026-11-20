@@ -19,6 +19,8 @@ Invoke-Step -AsDomainAdmin -Inner:$Inner -Pass 'dc1 and dc2 replicate in both di
     # yet registered, and the next attempt can be a quarter of an hour away: rebuild the
     # links and replicate now, so the verdict is of the lab and not of that schedule.
     foreach ($dc in 'dc1', 'dc2') { Invoke-Native "kcc-$dc.txt" { repadmin /kcc "$dc.corp.example.test" } }
+    # A repeated entry judges this attempt's synchronizations, not an earlier one's.
+    Remove-Item (Join-Path $StepDir 'syncall-*.txt') -ErrorAction SilentlyContinue
     foreach ($way in '/Ade', '/AdeP') {
         $file = "syncall$($way.Replace('/', '-')).txt"
         Invoke-Native $file { repadmin /syncall $way }
