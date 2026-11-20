@@ -63,7 +63,7 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::{
-    ca::{CertSource, InternalCa, NodeCert, TlsMaterial},
+    ca::{CertSource, InternalCa, NodeCert, TlsMaterial, tables::SERVER_CERTS},
     error::ClusterError,
     model::{
         CertificateRef, ClusterHealth, ConnectionRecord, ConnectionView, ControllerCertRecord,
@@ -659,10 +659,10 @@ impl NodeRegistry {
             .map_or(PortDemand::Idle, PortDemand::Until))
     }
 
-    /// Removes expired revocations, and used or expired tokens older than
-    /// [`TOKEN_RETENTION`], and cuts a node record that names more than two certificates
-    /// back to the newest and the one that ends last beside it. Returns how many rows went
-    /// or were cut back.
+    /// Removes expired revocations, used or expired tokens older than [`TOKEN_RETENTION`],
+    /// and the certificate rows and vault keys that a revoked node still has, and cuts a
+    /// node record that names more than two certificates back to the newest and the one
+    /// that ends last beside it. Returns how many rows went or were cut back.
     ///
     /// # Errors
     ///
@@ -711,6 +711,20 @@ impl NodeRegistry {
                 batch.expect_typed(&tables::ENROLLMENTS, &id, Some(revision));
                 batch.delete_typed(&tables::ENROLLMENTS, &id);
                 removed += 1;
+            }
+        }
+        // The certificates a removal of an earlier version left behind with their keys: those
+        // of a revoked node (a revocation names it, no record does; the cluster port refuses
+        // it), never this controller's. A controller that stays enrolled keeps its record
+        // beside a revocation of one of its keys, and the first controller before its first
+        // join, which has no record, is this one.
+        for node in revoked_nodes(view.as_ref())? {
+            if node != self.config.local_node {
+                let rows = stage_certificate_removal(view.as_ref(), &mut batch, &ctx, node)?;
+                if rows > 0 {
+                    batch.expect_typed(&tables::NODES, &node.0, None);
+                }
+                removed += rows;
             }
         }
         // A record with more than the two certificates a renewal keeps (from before
@@ -1876,8 +1890,9 @@ impl NodeRegistry {
         Ok(view.get_typed(&tables::NODES, &node.0)?)
     }
 
-    /// Revokes a node: removes it, revokes every certificate it holds, tells its sessions
-    /// and closes its connections. Returns the revoked serials.
+    /// Revokes a node: one write removes it, revokes every certificate it holds and removes
+    /// the certificates a controller keeps in the store with their keys in the vault; then
+    /// its sessions are told and its connections closed. Returns the revoked serials.
     ///
     /// The node's own bookkeeping writes the same record (the last sighting when it
     /// connects, disconnects and every five minutes, the agreed protocol), so a revocation
@@ -1923,13 +1938,17 @@ impl NodeRegistry {
     ) -> Result<Vec<String>, ClusterError> {
         let mut attempt = 1;
         let (record, serial_list) = loop {
-            let (record, revision) = self
-                .record_for_edit(node, attempt)
-                .await?
-                .ok_or_else(|| not_found(node))?;
+            let view = self
+                .store
+                .read(if attempt == 1 {
+                    ReadConsistency::Local
+                } else {
+                    ReadConsistency::Linearizable
+                })
+                .await?;
             let mut batch = WriteBatch::for_request(cx);
-            batch.expect_typed(&tables::NODES, &node.0, Some(revision));
-            let serial_list = revocation(&mut batch, node, &record, cx.now)?;
+            let (record, serial_list) = revocation(view.as_ref(), &mut batch, cx, node)?;
+            drop(view);
             batch.audit(
                 AuditDraft::success(actions::NODE_REVOKE, vec![ObjectRef::node(node)])
                     .with_source_ip(cx.source_ip)
@@ -2876,15 +2895,20 @@ fn leaf_of(record: &ControllerCertRecord) -> Result<crate::ca::CertInfo, Cluster
     Ok(crate::ca::CertInfo::from_der(leaf)?)
 }
 
-/// Stages the revocation of `node` in `batch`: its node record and name go, and every
-/// certificate the record names is put on `cluster.revocations` until it would expire.
-/// Returns the revoked serials.
+/// Stages the revocation of `node` as `view` holds it in `batch`: its node record and name
+/// go, every certificate the record names is put on `cluster.revocations` until it would
+/// expire, and the certificate rows of a controller go with their keys
+/// ([`stage_certificate_removal`]). Returns the record and the revoked serials.
 fn revocation(
+    view: &dyn ReadView,
     batch: &mut WriteBatch,
+    cx: &RequestCtx,
     node: NodeId,
-    record: &NodeRecord,
-    now: Timestamp,
-) -> Result<Vec<String>, ClusterError> {
+) -> Result<(NodeRecord, Vec<String>), ClusterError> {
+    let (record, revision) = view
+        .get_typed(&tables::NODES, &node.0)?
+        .ok_or_else(|| not_found(node))?;
+    batch.expect_typed(&tables::NODES, &node.0, Some(revision));
     // Every certificate the record names. One that a renewal retired has its end in the
     // record moved forward but may be valid for longer: its row lives until the newest
     // certificate expires (an older one never ends later unless the CA's lifetime was
@@ -2899,13 +2923,13 @@ fn revocation(
         } else {
             cert.not_after.max(newest)
         };
-        if until > now {
+        if until > cx.now {
             batch.put_typed(
                 &tables::REVOCATIONS,
                 &cert.serial,
                 &Revocation {
                     node,
-                    revoked_at: now,
+                    revoked_at: cx.now,
                     not_after: until,
                     controller: record.roles.contains(&Role::Controller),
                 },
@@ -2913,7 +2937,43 @@ fn revocation(
             serials.push(cert.serial.clone());
         }
     }
-    Ok(serials)
+    stage_certificate_removal(view, batch, cx, node)?;
+    Ok((record, serials))
+}
+
+/// Stages the removal of the certificates `node` keeps in the store into `batch`: its
+/// cluster-port row (`cluster.controller_certs`) and its server certificate row
+/// (`cluster.server_certs`), each with its key in the vault. The batch expects both rows as
+/// `view` holds them, so a row written meanwhile fails the write instead of leaving a key
+/// behind. A node without either row (a `dns` or `dhcp` node, or one removed before)
+/// stages nothing but the expectations. Returns how many rows go.
+fn stage_certificate_removal(
+    view: &dyn ReadView,
+    batch: &mut WriteBatch,
+    cx: &RequestCtx,
+    node: NodeId,
+) -> Result<usize, ClusterError> {
+    let port = view.get_typed(&tables::CONTROLLER_CERTS, &node.0)?;
+    let server = view.get_typed(&SERVER_CERTS, &node.0)?;
+    batch.expect_typed(
+        &tables::CONTROLLER_CERTS,
+        &node.0,
+        port.as_ref().map(|(_, at)| *at),
+    );
+    batch.expect_typed(&SERVER_CERTS, &node.0, server.as_ref().map(|(_, at)| *at));
+    let mut keys = Vec::new();
+    if let Some((row, _)) = port {
+        batch.delete_typed(&tables::CONTROLLER_CERTS, &node.0);
+        keys.push(row.key);
+    }
+    if let Some((row, _)) = server {
+        batch.delete_typed(&SERVER_CERTS, &node.0);
+        keys.push(row.key);
+    }
+    for key in &keys {
+        tenko_vault::stage_delete(batch, cx, *key);
+    }
+    Ok(keys.len())
 }
 
 /// Stages the revocation of `node` as `view` holds it in `batch`, for a write that is not
@@ -2924,21 +2984,17 @@ fn revocation(
 ///
 /// `cluster.node.not_found` (404) when `view` has no record of `node`; a store error.
 pub fn stage_revocation(
-    view: &dyn tenko_store::ReadView,
+    view: &dyn ReadView,
     batch: &mut WriteBatch,
+    cx: &RequestCtx,
     node: NodeId,
-    now: Timestamp,
 ) -> Result<Vec<String>, ClusterError> {
-    let (record, revision) = view
-        .get_typed(&tables::NODES, &node.0)?
-        .ok_or_else(|| not_found(node))?;
-    batch.expect_typed(&tables::NODES, &node.0, Some(revision));
-    revocation(batch, node, &record, now)
+    Ok(revocation(view, batch, cx, node)?.1)
 }
 
 #[cfg(test)]
 mod tests {
-    use tenko_core::testing::wait_until_async;
+    use tenko_core::{secret::SecretRef, testing::wait_until_async};
 
     use super::*;
 
@@ -3246,6 +3302,227 @@ mod tests {
             registry.revoked.is_revoked(&old),
             "the running set refuses it at once"
         );
+    }
+
+    /// Records `node` with `role` and a certificate that is valid for a day.
+    async fn record_node(store: &tenko_store::mem::MemStore, node: NodeId, role: Role) {
+        let now = Timestamp::now();
+        let certificate = CertificateRef {
+            serial: format!("{:x}", node.0),
+            sha256: String::new(),
+            not_before: now,
+            not_after: now.checked_add(Duration::from_secs(86_400)).expect("a day"),
+        };
+        let record = NodeRecord {
+            id: node,
+            name: format!("node-{}", node.0),
+            roles: vec![role],
+            address: None,
+            vrf: None,
+            certificate: certificate.clone(),
+            serials: vec![certificate],
+            enrolled_at: now,
+            enrollment: Uuid::nil(),
+            enrolled_by: None,
+            renewed_at: None,
+            last_seen: None,
+            version: None,
+            protocol: crate::model::ProtocolState::default(),
+        };
+        let mut batch = WriteBatch::for_request(&RequestCtx::system(SystemComponent::Cluster));
+        batch
+            .put_typed(&tables::NODES, &node.0, &record)
+            .expect("record");
+        store.propose(batch).await.expect("write");
+    }
+
+    /// Stores the certificates a controller that ran keeps for `node`: a cluster-port row
+    /// and a server certificate row, each with its key in the vault. Returns both keys.
+    async fn store_certificates(
+        store: &tenko_store::mem::MemStore,
+        vault: &tenko_vault::MemVault,
+        registry: &NodeRegistry,
+        node: NodeId,
+    ) -> Vec<SecretRef> {
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let identity = crate::ca::ServerIdentity::new(format!("controller-{}.example.net", node.0));
+        registry
+            .ca()
+            .server_material(store, vault, &ctx, node, &identity)
+            .await
+            .expect("server certificate");
+        let mut batch = WriteBatch::for_request(&ctx);
+        let key = vault
+            .stage_put(
+                &mut batch,
+                &ctx,
+                SecretClass::System,
+                SecretSpec::new(NODE_KEY_PURPOSE),
+                &tenko_vault::SecretBytes::from_slice(b"a cluster-port key"),
+            )
+            .expect("key");
+        let row = ControllerCertRecord {
+            chain_pem: String::new(),
+            key,
+            issued_at: ctx.now,
+        };
+        batch
+            .put_typed(&tables::CONTROLLER_CERTS, &node.0, &row)
+            .expect("row");
+        store.propose(batch).await.expect("write");
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        let (server, _) = view
+            .get_typed(&SERVER_CERTS, &node.0)
+            .expect("read")
+            .expect("a server certificate row");
+        vec![key, server.key]
+    }
+
+    /// How many rows of `node`'s certificates are left: its rows in both tables and the
+    /// rows of `keys` in the vault's tables.
+    async fn rows_left(
+        store: &tenko_store::mem::MemStore,
+        node: NodeId,
+        keys: &[SecretRef],
+    ) -> usize {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        let mut rows = usize::from(
+            view.get_typed(&tables::CONTROLLER_CERTS, &node.0)
+                .expect("read")
+                .is_some(),
+        ) + usize::from(
+            view.get_typed(&SERVER_CERTS, &node.0)
+                .expect("read")
+                .is_some(),
+        );
+        for key in keys {
+            let secret = tenko_core::codec::encode_key(&key.secret);
+            rows += usize::from(
+                view.get(&tenko_vault::tables::SECRETS, &secret)
+                    .expect("read")
+                    .is_some(),
+            );
+            rows += usize::from(
+                view.get_typed(&tenko_vault::tables::META, &key.secret)
+                    .expect("read")
+                    .is_some(),
+            );
+        }
+        rows
+    }
+
+    /// Each path that removes a controller (`revoke` of the API, `revoke_member` of the
+    /// cluster's removal, `stage_revocation` of the recovery's forced step) takes its
+    /// certificate rows and both keys, with their rows in the vault's tables, in the one
+    /// write that deletes its node record. A node with neither row (a `dns` node, or a
+    /// controller whose rows went before) is removed all the same.
+    #[tokio::test]
+    async fn a_removed_controller_leaves_no_certificate_and_no_key() {
+        let (store, vault, registry) = registry_with_vault().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        for path in 0..3_u64 {
+            let node = NodeId(1002 + path);
+            record_node(&store, node, Role::Controller).await;
+            let keys = store_certificates(&store, &vault, &registry, node).await;
+            assert_eq!(rows_left(&store, node, &keys).await, 6);
+            let before = store
+                .read(ReadConsistency::Local)
+                .await
+                .expect("view")
+                .revision();
+            let removed: Result<(), ClusterError> = match path {
+                0 => registry.revoke(&cx, node).await.map(drop),
+                1 => registry.revoke_member(&cx, node).await.map(drop),
+                _ => {
+                    let view = store.read(ReadConsistency::Local).await.expect("view");
+                    let mut batch = WriteBatch::for_request(&cx);
+                    stage_revocation(view.as_ref(), &mut batch, &cx, node).expect("staged");
+                    drop(view);
+                    store.propose(batch).await.map(drop).map_err(Into::into)
+                }
+            };
+            removed.expect("removed");
+            let view = store.read(ReadConsistency::Local).await.expect("view");
+            assert_eq!(view.revision(), before.next(), "one write, path {path}");
+            assert!(
+                view.get_typed(&tables::NODES, &node.0)
+                    .expect("read")
+                    .is_none()
+            );
+            drop(view);
+            assert_eq!(rows_left(&store, node, &keys).await, 0, "path {path}");
+            for key in keys {
+                let gone = vault
+                    .get_system(&cx, key)
+                    .await
+                    .expect_err("the key is gone");
+                assert!(matches!(gone, VaultError::NotFound { .. }), "{gone:?}");
+            }
+        }
+        for (node, role) in [(NodeId(1010), Role::Dns), (NodeId(1011), Role::Controller)] {
+            record_node(&store, node, role).await;
+            registry
+                .revoke(&cx, node)
+                .await
+                .expect("a node without certificate rows");
+            let again = registry
+                .revoke(&cx, node)
+                .await
+                .expect_err("removed before");
+            assert_eq!(again.code(), NODE_NOT_FOUND);
+        }
+    }
+
+    /// The prune takes the certificate rows and keys that a removal of an earlier version
+    /// left with a revoked controller (a revocation names it, no record does), and nothing
+    /// of a controller that runs: this one before its first join (no record, even beside a
+    /// revocation), one with a record beside a revocation of a retired key, and a first
+    /// controller of an earlier version that has no record and that no revocation names.
+    #[tokio::test]
+    async fn the_prune_takes_the_certificates_of_removed_controllers_only() {
+        let (store, vault, registry) = registry_with_vault().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        let (own, enrolled, unrecorded, removed) =
+            (NodeId(1), NodeId(1002), NodeId(1003), NodeId(1004));
+        record_node(&store, enrolled, Role::Controller).await;
+        record_node(&store, removed, Role::Controller).await;
+        let mut keys = BTreeMap::new();
+        for node in [own, enrolled, unrecorded, removed] {
+            keys.insert(
+                node,
+                store_certificates(&store, &vault, &registry, node).await,
+            );
+        }
+        // A removal of an earlier version: the record went, the revocation came, the rows
+        // and keys stayed.
+        let later = cx
+            .now
+            .checked_add(Duration::from_secs(86_400))
+            .expect("a day");
+        let mut batch = WriteBatch::for_request(&cx);
+        batch.delete_typed(&tables::NODES, &removed.0);
+        for node in [own, enrolled, removed] {
+            let revocation = Revocation {
+                node,
+                revoked_at: cx.now,
+                not_after: later,
+                controller: true,
+            };
+            batch
+                .put_typed(
+                    &tables::REVOCATIONS,
+                    &format!("retired-{}", node.0),
+                    &revocation,
+                )
+                .expect("revocation");
+        }
+        store.propose(batch).await.expect("write");
+        assert_eq!(registry.prune(cx.now).await.expect("prune"), 2);
+        for (node, keys) in &keys {
+            let left = if *node == removed { 0 } else { 6 };
+            assert_eq!(rows_left(&store, *node, keys).await, left, "node {node}");
+        }
+        assert_eq!(registry.prune(cx.now).await.expect("again"), 0);
     }
 
     /// The failed `cluster.node.enroll` records: their code and context.

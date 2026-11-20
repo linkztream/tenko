@@ -980,6 +980,32 @@ async fn stage_delete_is_atomic_with_the_callers_batch() {
     assert_eq!(canary.revision, committed.revision);
 }
 
+/// The delete staged without a vault is the vault's own: the same rows and the same audit
+/// record, and it commits like it.
+#[tokio::test]
+async fn a_delete_staged_without_the_vault_is_the_vaults_own() {
+    let vault = MemVault::new();
+    let mut ctx = ctx();
+    ctx.source_ip = Some(IpAddr::from([192, 0, 2, 7]));
+    let secret = vault
+        .put_operator(&ctx, spec("connect.proxmox_token"), value("token"))
+        .await
+        .expect("put");
+    let (mut own, mut staged) = (WriteBatch::for_request(&ctx), WriteBatch::for_request(&ctx));
+    vault.stage_delete(&mut own, &ctx, secret);
+    tenko_vault::stage_delete(&mut staged, &ctx, secret);
+    assert_eq!(staged, own);
+    let store = vault.mem_store();
+    store.propose(staged).await.expect("commit");
+    assert!(stored(store.as_ref(), secret).await.is_none());
+    assert_eq!(vault.meta(secret).await.expect("meta"), None);
+    let records = audit_for(store.as_ref(), "vault.secret.delete", secret).await;
+    assert_eq!(records.len(), 1);
+    assert!(is_success(&records[0]));
+    assert_eq!(records[0].draft.objects, vec![object(secret)]);
+    assert_eq!(records[0].draft.source_ip, ctx.source_ip);
+}
+
 // ---------------------------------------------------------------------------------------
 // 6. Tamper detection at store level
 // ---------------------------------------------------------------------------------------

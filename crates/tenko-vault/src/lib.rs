@@ -73,7 +73,9 @@ pub use kek::{
     RefusedKek,
 };
 pub use secret::{RevealAudit, SecretBytes, SecretMeta, SecretPurpose, SecretSpec};
-pub use store_vault::{KEK_EPOCH, KekRotation, Refresh, StoreVault, VaultStart, actions, tables};
+pub use store_vault::{
+    KEK_EPOCH, KekRotation, Refresh, StoreVault, VaultStart, actions, stage_delete, tables,
+};
 pub use tenko_core::secret::{SecretClass, SecretRef, VaultEnvelope};
 #[cfg(any(test, feature = "testing"))]
 pub use testing::{MemPeers, MemVault};

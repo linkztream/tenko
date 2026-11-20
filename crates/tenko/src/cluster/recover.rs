@@ -1360,7 +1360,7 @@ async fn write_batch(
     let mut revoked = Vec::new();
     for node in &args.revoke {
         revoked.extend(
-            registry::stage_revocation(view.as_ref(), &mut batch, NodeId(*node), cx.now)
+            registry::stage_revocation(view.as_ref(), &mut batch, &cx, NodeId(*node))
                 .map_err(|error| failure(error.code(), exit::FAILURE, error.detail()))?,
         );
     }

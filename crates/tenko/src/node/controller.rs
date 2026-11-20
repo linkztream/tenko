@@ -515,7 +515,8 @@ impl Cluster {
     }
 
     /// The leader-only work of the node registry, for the leader supervisor: the hourly
-    /// prune of expired revocations and old enrollment tokens (`cluster.prune`).
+    /// prune of expired revocations, old enrollment tokens and the certificates of revoked
+    /// nodes (`cluster.prune`).
     pub fn leader_services(&self) -> Vec<Arc<dyn LeaderService>> {
         vec![Arc::new(PruneService::new(Arc::clone(&self.registry)))]
     }

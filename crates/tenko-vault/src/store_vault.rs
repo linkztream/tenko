@@ -1088,6 +1088,22 @@ fn class_name(class: SecretClass) -> &'static str {
     }
 }
 
+/// Stages the deletion of `secret` into `batch`: its envelope, its metadata and its row of
+/// the operator index go when the batch commits, with the `vault.secret.delete` audit
+/// record. It deletes without decrypting, so it needs neither the vault nor a key; the
+/// caller owns the decision that the secret goes (a row of its own that names it), and
+/// [`Vault::stage_delete`] of the store's vault is this function.
+pub fn stage_delete(batch: &mut WriteBatch, ctx: &RequestCtx, secret: SecretRef) {
+    let id = secret.secret;
+    batch.delete(tables::SECRETS.clone(), encode_key(&id));
+    batch.delete_typed(&tables::META, &id);
+    batch.delete_typed(&tables::OPERATOR_INDEX, &id);
+    batch.audit(
+        AuditDraft::success(actions::DELETE, vec![ObjectRef::from(id)])
+            .with_source_ip(ctx.source_ip),
+    );
+}
+
 /// Calls `f` for every envelope in `vault.secrets`, page by page.
 fn for_each_envelope(
     view: &dyn ReadView,
@@ -1285,14 +1301,7 @@ impl Vault for StoreVault {
     }
 
     fn stage_delete(&self, batch: &mut WriteBatch, ctx: &RequestCtx, secret: SecretRef) {
-        let id = secret.secret;
-        batch.delete(tables::SECRETS.clone(), encode_key(&id));
-        batch.delete_typed(&tables::META, &id);
-        batch.delete_typed(&tables::OPERATOR_INDEX, &id);
-        batch.audit(
-            AuditDraft::success(actions::DELETE, vec![ObjectRef::from(id)])
-                .with_source_ip(ctx.source_ip),
-        );
+        self::stage_delete(batch, ctx, secret);
     }
 
     async fn stage_replace(
