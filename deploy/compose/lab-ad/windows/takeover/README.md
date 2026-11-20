@@ -43,8 +43,8 @@ to W2 and `07-w03-dc1-account`: `dc1` a controller with Windows DNS and the thre
 zones, `srv1` joined, `TENKO-DNS$` pre-staged, `dc2` and `pc1` neither promoted nor joined, `ns1`
 under Standard with the roles `controller,dns`), builds forward with entries T03 to T10, and is
 thrown away when the counted line rolls back. Switching lines costs about five minutes plus the
-rebuild. Once the hypervisor keeps branches, a kept Windows-first snapshot (T13) replaces T03 to
-T10.
+rebuild. The line's own snapshot `tk-start` (T13) spares the rebuild within the line; the next
+counted run's rollback removes it, and T03 to T10 build it again.
 
 The scope, made on `dc1` and replicated to `dc2` by the relationship:
 
@@ -91,8 +91,8 @@ phase it names.
 | T10 | inside observer | The start-state reading: controllers, operation masters and global catalogs; per controller the zones and their SOA serials; `Get-DhcpServerInDC`; per DHCP server the scope, exclusions, options at server, scope and reservation level, reservations, DNS settings, `Get-DhcpServerDnsCredential` (the user name only), `Get-DhcpServerSetting`, the relationship, and `Get-DhcpServerv4Lease -AllLeases`; `Export-DhcpServer -Leases` of each server to `adm1` | The table above holds on both servers; the export files exist (the backup of the plan's step 1) | `inventory-*.txt`, `export-dc1.xml`, `export-dc2.xml` | now, B |
 | T11 | operator | The DHCP servers' DNS credential as WT-Q13 is answered: a lab user `dhcp-dns` from the secret `dhcp_dns_password`, set on both with `Set-DhcpServerDnsCredential` | `Get-DhcpServerDnsCredential` on both names `CORP\dhcp-dns`; `ipconfig /renew` on `pc1` and the DNS server's audit of the update (`Get-WinEvent` of the DNS server log) show the update under that account | `credential.txt` | now, after WT-Q13 |
 | T12 | operator | Optional: a second Windows client takes a pool lease | A lease in `192.0.2.100` to `.250` on both servers | `client2.txt` | pool |
-| T13 | operator | Snapshot S1 of every guest (the line's own, linear) | The snapshot exists; later entries return to it instead of rebuilding | `snapshot.txt` | now |
-| T13r | operator | Reverse of phase 1: restore the counted line's snapshot or S1 | T03's or T10's readings again | `restore.txt` | now |
+| T13 | operator | Snapshot `tk-start` of every guest (the line's own, linear) | The snapshot exists; later entries return to it instead of rebuilding | `snapshot.txt` | now |
+| T13r | operator | Reverse of phase 1: restore the counted line's snapshot or `tk-start` | T03's or T10's readings again | `restore.txt` | now |
 
 ### Phase 2. Tenko beside Windows, serving nothing
 
@@ -168,4 +168,4 @@ phase it names.
    Without one, the line leaves T28 out, runs phases 3 to 5 under Standard, and the result names
    the deviation.
 4. `pc1` on DHCP with its reservation (T08), and later a pool lease for T42 and T49.
-5. Snapshot S1 within the line (T13); later, a kept Windows-first branch.
+5. Snapshot `tk-start` within the line (T13).
