@@ -88,6 +88,10 @@ const KNOWN: &[(&str, &str)] = &[
          check ends one short: `key65009`, `key9`); the generated corpus leaves such keys out",
     ),
     (
+        "nsap-ptr-mnemonic",
+        "domain does not know the mnemonic NSAP-PTR (type 23) and refuses it as the covered          type of an RRSIG or in a type bit map; Tenko reads the registry's mnemonic",
+    ),
+    (
         "svcb-writer",
         "domain writes SVCB and HTTPS parameters in a form neither reader reads back (`alpn` \
          as wire octets, `nodefaultalpn`); Tenko writes RFC 9460's form",
@@ -946,7 +950,11 @@ proptest! {
             .collect();
         prop_assert_eq!(&read, &expected, "{}", text);
         // TXT and CAA values with raw octets are written escaped, so domain reads them too.
-        let difference = difference(&text);
+        // KNOWN "nsap-ptr-mnemonic": the only type domain lacks, which only an RRSIG covers.
+        let covers_nsap_ptr = records.iter().any(|(.., data, _)| {
+            matches!(data, RecordData::Rrsig { type_covered, .. } if *type_covered == Rtype(23))
+        });
+        let difference = if covers_nsap_ptr { None } else { difference(&text) };
         prop_assert!(difference.is_none(), "{}\n{}", text, difference.unwrap_or_default());
     }
 
@@ -994,5 +1002,23 @@ proptest! {
             Item::Loss(loss) => panic!("{loss:?}"),
         }).collect();
         prop_assert_eq!(ttls, vec![total, total]);
+    }
+}
+
+#[test]
+fn only_tenko_reads_nsap_ptr() {
+    for text in [
+        "x 300 IN RRSIG NSAP-PTR 0 0 0 0 0 0 -. AA==
+",
+        "x 300 IN NSEC a.example.test. A NSAP-PTR
+",
+    ] {
+        let new = read_new(text, &apex(), 1);
+        assert!(
+            new.error.is_none() && new.items.len() == 1,
+            "{text}: {new:?}"
+        );
+        let old = read_old(text, &apex(), 1).expect("no panic");
+        assert!(old.error.is_some(), "{text}: {old:?}");
     }
 }
