@@ -4,12 +4,12 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.12-rc.6] - 2026-11-20
+
 ### Fixed
 
 - A `[dns] listen` address with port 0 no longer fails to start when the port the system gives its UDP socket is already taken for TCP, by another program's connection or, on Windows, by an excluded port range: the address takes another port, eight times at most, and keeps one number for UDP and TCP. A configured port that is taken still fails the start at once.
 - The hourly refreshes of Windows machines' DNS registrations (Netlogon on a domain controller, the DNS client on a member) no longer move the zone's serial or fill the audit log: a dynamic update that sends again the records and TTL of records a dynamic update wrote is answered NOERROR and writes nothing, no serial step, no journal entry, no `dns.update.apply` record, and leaves the name's owner as it was. Before, every refresh rewrote its RRset, stepped the serial, sent the change to the secondaries and wrote an audit record saying 0 records added and 0 removed. An update that changes a record or a TTL is written as before, and so is the first update of a manual or imported record (it becomes dynamic, and the name gets its owner, once) and a refresh by which a computer becomes the owner of a name that has none; refusals are unchanged.
-
-## [0.0.12-rc.5] - 2026-11-19
 
 ### Added
 

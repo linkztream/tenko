@@ -1,6 +1,6 @@
 [package]
 name = "tenko-vault"
-version = "0.0.12-rc.5"
+version = "0.0.12-rc.6"
 description = "Envelope encryption with pluggable KEK providers"
 edition.workspace = true
 rust-version.workspace = true
