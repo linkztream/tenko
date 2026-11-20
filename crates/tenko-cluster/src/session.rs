@@ -165,7 +165,7 @@ impl Sessions {
         }
     }
 
-    /// Tells every session of a revoked node, then closes its connections after
+    /// Tells every session of a revoked node, then closes the connections it has now after
     /// [`REVOKE_GRACE`].
     pub fn revoke(self: &Arc<Self>, node: NodeId, now: Timestamp) {
         let pushes: Vec<_> = self
@@ -182,12 +182,11 @@ impl Sessions {
                 detail: "this node was revoked; enroll it again to reconnect".to_owned(),
             }));
         }
-        let sessions = Arc::clone(self);
+        // The callers update the revocation set first, and a connection reads its revoked
+        // mark from the set after it is tracked: one tracked after this point is marked and
+        // gets every refusal answered, so the grace's end leaves it open.
+        let switches = self.lock_connections().remove(&node).unwrap_or_default();
         let kill = move || {
-            let switches = sessions
-                .lock_connections()
-                .remove(&node)
-                .unwrap_or_default();
             for switch in switches.iter().filter_map(Weak::upgrade) {
                 switch.kill();
             }
@@ -250,10 +249,15 @@ mod tests {
         sessions.track(NodeId(1002), &kill);
         assert_eq!(sessions.connection_count(NodeId(1002)), 1);
         sessions.revoke(NodeId(1002), Timestamp::now());
+        // A connection after the revocation is marked revoked when it is accepted and gets
+        // its refusals answered; the grace's end does not cut it.
+        let late = KillSwitch::new();
+        sessions.track(NodeId(1002), &late);
         let directive = rx.recv().await.expect("directive").expect("ok");
         assert!(directive.revoked);
         tokio::time::sleep(REVOKE_GRACE * 2).await;
         assert!(kill.is_killed());
-        assert_eq!(sessions.connection_count(NodeId(1002)), 0);
+        assert!(!late.is_killed());
+        assert_eq!(sessions.connection_count(NodeId(1002)), 1);
     }
 }
