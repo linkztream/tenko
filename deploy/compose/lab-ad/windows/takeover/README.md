@@ -67,7 +67,7 @@ Under Hardened an administrator signs in with a passkey only and no script acts 
 "When" says whether an entry runs with the first package as built (**now**: the exporter, the
 mirror, the freshness, the diff, the loss report) or waits for a package of the plan (WP14.1a,
 WP14.2, WP14.4) or for the operator's dynamic-lease tooling (**pool**). **B** marks the basic
-set of the first run (fifteen entries). An entry ending in `r` is the reverse of the entry or
+set of the first run (sixteen entries). An entry ending in `r` is the reverse of the entry or
 phase it names.
 
 ### Phase 0. Preconditions
@@ -89,7 +89,7 @@ phase it names.
 | T08 | operator | On `pc1`: DHCP on (`Set-NetIPInterface -Dhcp Enabled`, the static address and gateway removed, `Set-DnsClientServerAddress -ResetServerAddresses`), `ipconfig /renew`, a capture of the exchange with `pktmon`; then `Add-Computer -DomainName corp.example.test`, restart | `ipconfig /all`: DHCP enabled, `192.0.2.30`, DHCP server `192.0.2.5` or `.6`, DNS servers `.5` and `.6`; after the restart `nltest /sc_query:corp.example.test` succeeds; `Get-DhcpServerv4Lease -IPAddress 192.0.2.30` on both: `ActiveReservation`; on `dc1` `pc1` has an A, a PTR and a DHCID record, and which of `pc1` and the DHCP server wrote the A record is noted | `ipconfig.txt`, `dora.pcapng`, `leases.txt`, `records.txt` | now, B |
 | T09 | operator | On `adm1`: the repeatable domain join, the lab adapter up, and the name resolution policy for `corp.example.test` and `2.0.192.in-addr.arpa` (`Add-DnsClientNrptRule`) pointing at the phase's DNS target: `192.0.2.5, 192.0.2.6` until T34, `192.0.2.53` from then on (the parameter of this entry) | `Resolve-DnsName dc2.corp.example.test` answers `192.0.2.6` through the target | `nrpt.txt` | now, B |
 | T10 | inside observer | The start-state reading: controllers, operation masters and global catalogs; per controller the zones and their SOA serials; `Get-DhcpServerInDC`; per DHCP server the scope, exclusions, options at server, scope and reservation level, reservations, DNS settings, `Get-DhcpServerDnsCredential` (the user name only), `Get-DhcpServerSetting`, the relationship, and `Get-DhcpServerv4Lease -AllLeases`; `Export-DhcpServer -Leases` of each server to `adm1` | The table above holds on both servers; the export files exist (the backup of the plan's step 1) | `inventory-*.txt`, `export-dc1.xml`, `export-dc2.xml` | now, B |
-| T11 | operator | The DHCP servers' DNS credential as WT-Q13 is answered: a lab user `dhcp-dns` from the secret `dhcp_dns_password`, set on both with `Set-DhcpServerDnsCredential` | `Get-DhcpServerDnsCredential` on both names `CORP\dhcp-dns`; `ipconfig /renew` on `pc1` and the DNS server's audit of the update (`Get-WinEvent` of the DNS server log) show the update under that account | `credential.txt` | now, after WT-Q13 |
+| T11 | operator | The DHCP servers' DNS credential as the plan's WT-Q13 decides: a dedicated lab user `dhcp-dns` as the DNS credential on both servers, from the secret `dhcp_dns_password`, set with `Set-DhcpServerDnsCredential` | `Get-DhcpServerDnsCredential` on both names `CORP\dhcp-dns`; `ipconfig /renew` on `pc1` and the DNS server's audit of the update (`Get-WinEvent` of the DNS server log) show the update under that account | `credential.txt` | now, B |
 | T12 | operator | Optional: a second Windows client takes a pool lease | A lease in `192.0.2.100` to `.250` on both servers | `client2.txt` | pool |
 | T13 | operator | Snapshot `tk-start` of every guest (the line's own, linear) | The snapshot exists; later entries return to it instead of rebuilding | `snapshot.txt` | now |
 | T13r | operator | Reverse of phase 1: restore the counted line's snapshot or `tk-start` | T03's or T10's readings again | `restore.txt` | now |
@@ -162,7 +162,7 @@ phase it names.
    mirror's token, T17 and T18: `mirror_token_dc1` to `dc1` and `mirror_token_dc2` to `dc2`) without
    passing through any channel the lead or the observer reads.
 2. New secret files: `dhcp_mirror_password` on both controllers (T18), `dhcp_dns_password` on both
-   once WT-Q13 is answered (T11).
+   (T11).
 3. Under Hardened (from T28), an administrator's passkey session on `ns1` for the writing entries
    (a transfer on demand, the flip, the acknowledgments, the prepare, the takeover, the revert).
    Without one, the line leaves T28 out, runs phases 3 to 5 under Standard, and the result names
