@@ -612,8 +612,16 @@ repadmin /replsummary > C:\lab\w14-repl.txt
 
 **Expect:** `dcdiag /test:dns` passes its registration and delegation tests; any failure of a
 test that needs the DNS Server role on a controller is listed by name in RESULTS.md as known.
-The default tests and the replication summary show no error. **Keep:** the three files of
-each controller in `results/w14/`.
+The default tests and the replication summary show no error, two tests apart: `SystemLog`
+and `DFSREvent` read the event logs of the last day and fail on what every start of a
+controller leaves there, and on the error of dcdiag's own call to a name server that is not
+Windows. List what they flag in RESULTS.md, and read the state of SYSVOL instead:
+
+```powershell
+(Get-CimInstance -Namespace root\microsoftdfs -ClassName DfsrReplicatedFolderInfo -Filter "ReplicatedFolderName='SYSVOL Share'").State   # 4 is normal
+```
+
+**Keep:** the three files of each controller in `results/w14/`.
 
 ## W15. Optional extensions
 
