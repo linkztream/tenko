@@ -33,7 +33,7 @@ use tenko_dns::{
     tsig::{self, GSS_TSIG, MacKey, Signer, TsigKey, Verifier},
     update::{
         UpdatePath, UpdateSettings,
-        message::{CLASS_ANY, CLASS_IN, TYPE_ANY, push_record, write_request},
+        message::{CLASS_ANY, CLASS_IN, CLASS_NONE, TYPE_ANY, push_record, write_request},
         policy::{ProfileCell, UpdateProfile},
     },
     wire::{self, MAX_MESSAGE_LEN},
@@ -260,10 +260,37 @@ async fn lab() -> Lab {
 /// An update under construction.
 #[derive(Default)]
 struct Msg {
+    prereq: (u16, Vec<u8>),
     update: (u16, Vec<u8>),
 }
 
 impl Msg {
+    fn pre(mut self, owner: &str, rtype: u16, class: u16) -> Self {
+        push_record(
+            &mut self.prereq.1,
+            &name(owner).to_wire(),
+            rtype,
+            class,
+            0,
+            &[],
+        );
+        self.prereq.0 += 1;
+        self
+    }
+
+    fn rr(mut self, owner: &str, rtype: u16, class: u16, ttl: u32, data: &[u8]) -> Self {
+        push_record(
+            &mut self.update.1,
+            &name(owner).to_wire(),
+            rtype,
+            class,
+            ttl,
+            data,
+        );
+        self.update.0 += 1;
+        self
+    }
+
     fn add_a(mut self, owner: &str, last: u8) -> Self {
         push_record(
             &mut self.update.1,
@@ -311,7 +338,7 @@ impl Msg {
             &mut out,
             0x2136,
             &name(ZONE).to_wire(),
-            (0, &[]),
+            (self.prereq.0, &self.prereq.1),
             (self.update.0, &self.update.1),
         );
         out
@@ -1793,7 +1820,267 @@ async fn dns_28_an_owned_service_name_stays_with_its_owner_until_released() {
     assert_eq!(lab.owner(wpad).await.expect("owned").sid, Some(sid(1000)));
 }
 
+/// DNS-28, identity plan section 3.8: the hourly refreshes of Windows re-send what the zone
+/// holds; they are answered NOERROR and write nothing (no serial step, no `dns.update.apply`,
+/// no RRset or owner row rewritten), in a group beside a real change too, while a TTL
+/// change is written and another principal's refresh is still refused. The shapes are
+/// Netlogon's (an add of a record held, alone or in a set of two; delete the record or the
+/// RRset, then add it; with the prerequisite "no CNAME") and the DNS client's PTR refresh,
+/// here at a name of the forward zone.
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "the refresh shapes in one sequence")]
+async fn dns_28_a_windows_refresh_writes_nothing() {
+    let lab = lab().await;
+    let dc1 = lab.who(
+        "dc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1000)),
+        vec![sid(516)],
+        "192.0.2.2",
+    );
+    let dc2 = lab.who(
+        "dc02$@CORP.EXAMPLE.TEST",
+        Some(sid(1006)),
+        vec![sid(516)],
+        "192.0.2.3",
+    );
+    let alice = lab.who(
+        "pc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1001)),
+        vec![sid(515)],
+        "192.0.2.21",
+    );
+    let bob = lab.who(
+        "pc02$@CORP.EXAMPLE.TEST",
+        Some(sid(1002)),
+        vec![sid(515)],
+        "192.0.2.22",
+    );
+    let target = |host: &str| name(host).to_wire();
+    let srv = |host: &str| [&[0, 0, 0, 100, 1, 133][..], &target(host)].concat();
+    let (dc1_name, dc2_name) = ("dc01.corp.example.test", "dc02.corp.example.test");
+    let (ldap, guid) = (
+        "_ldap._tcp.corp.example.test",
+        "guid._msdcs.corp.example.test",
+    );
+    let (pdc, ptr) = (
+        "_ldap._tcp.pdc._msdcs.corp.example.test",
+        "ptr21.corp.example.test",
+    );
+    let apex_a = || Msg::default().rr(ZONE, 1, CLASS_IN, 600, &[192, 0, 2, 5]);
+    let ldap_dc1 = || Msg::default().rr(ldap, 33, CLASS_IN, 600, &srv(dc1_name));
+    let cname = || Msg::default().rr(guid, 5, CLASS_IN, 600, &target(dc1_name));
+    let pdc_srv = || Msg::default().rr(pdc, 33, CLASS_IN, 600, &srv(dc1_name));
+    let ptr_add = || Msg::default().rr(ptr, 12, CLASS_IN, 1200, &target("pc01.corp.example.test"));
+    let ptr_refresh = || {
+        Msg::default()
+            .pre(ptr, 5, CLASS_NONE)
+            .rr(ptr, 12, CLASS_ANY, 0, &[])
+            .rr(ptr, 12, CLASS_IN, 1200, &target("pc01.corp.example.test"))
+    };
+    for (who, msg) in [
+        (&dc1, &apex_a()),
+        (&dc1, &ldap_dc1()),
+        (
+            &dc2,
+            &Msg::default().rr(ldap, 33, CLASS_IN, 600, &srv(dc2_name)),
+        ),
+        (&dc1, &cname()),
+        (&dc1, &pdc_srv()),
+        (&alice, &ptr_add()),
+    ] {
+        assert_eq!(lab.gss(who, msg).await, NOERROR);
+    }
+    // A manual name without an owner: the first identical update makes it dynamic, owned by
+    // the controller, and is written; from then on it is a refresh.
+    let (serial_first, applied_first) = (lab.serial().await, lab.applied().await);
+    let www = || Msg::default().add_a("www.corp.example.test", 1);
+    assert_eq!(lab.gss(&dc1, &www()).await, NOERROR);
+    assert_eq!(
+        (lab.serial().await, lab.applied().await),
+        (serial_first + 1, applied_first + 1)
+    );
+    let owned = lab.owner("www.corp.example.test").await.expect("owned");
+    assert_eq!(
+        (owned.sid, owned.how),
+        (Some(sid(1000)), OwnerSource::Created)
+    );
+    let held = [
+        (ZONE, Rtype::A),
+        (ldap, Rtype::SRV),
+        (guid, Rtype::CNAME),
+        (pdc, Rtype::SRV),
+        (ptr, Rtype::PTR),
+        ("www.corp.example.test", Rtype::A),
+    ];
+    let rrsets = async || {
+        let mut all = Vec::new();
+        for (owner, rtype) in held {
+            all.push(lab.rrset(owner, rtype).await.expect("held"));
+        }
+        all
+    };
+    let (serial_before, applied_before, rrsets_before) =
+        (lab.serial().await, lab.applied().await, rrsets().await);
+    let owner_before = lab.owner(ptr).await.expect("the creator owns it");
+    let refreshes = [
+        (&dc1, apex_a()),
+        (&dc1, ldap_dc1()),
+        (
+            &dc1,
+            Msg::default()
+                .rr(ldap, 33, CLASS_NONE, 0, &srv(dc1_name))
+                .rr(ldap, 33, CLASS_IN, 600, &srv(dc1_name)),
+        ),
+        (
+            &dc1,
+            Msg::default().rr(guid, 5, CLASS_ANY, 0, &[]).rr(
+                guid,
+                5,
+                CLASS_IN,
+                600,
+                &target(dc1_name),
+            ),
+        ),
+        (
+            &dc1,
+            Msg::default()
+                .pre(pdc, 5, CLASS_NONE)
+                .rr(pdc, 33, CLASS_ANY, 0, &[])
+                .rr(pdc, 33, CLASS_IN, 600, &srv(dc1_name)),
+        ),
+        (&alice, ptr_refresh()),
+        (&dc1, www()),
+    ];
+    for (who, msg) in &refreshes {
+        assert_eq!(lab.gss(who, msg).await, NOERROR);
+    }
+    assert_eq!(lab.serial().await, serial_before, "the serial stays");
+    assert_eq!(lab.applied().await, applied_before, "no apply record");
+    assert_eq!(rrsets().await, rrsets_before, "no RRset rewritten");
+    assert_eq!(
+        lab.owner(ptr).await,
+        Some(owner_before),
+        "the owner row stays"
+    );
+    // Another principal's refresh is refused as before.
+    assert_eq!(lab.gss(&bob, &ptr_refresh()).await, REFUSED);
+    // In one group beside refreshes, a TTL change steps the serial once and is the only
+    // update audited.
+    let ttl = Msg::default().rr(ZONE, 1, CLASS_IN, 900, &[192, 0, 2, 5]);
+    let (srv_again, ptr_again) = (ldap_dc1(), ptr_refresh());
+    let (a, b, c) = tokio::join!(
+        lab.gss(&dc1, &srv_again),
+        lab.gss(&alice, &ptr_again),
+        lab.gss(&dc1, &ttl)
+    );
+    assert_eq!([a, b, c], [NOERROR, NOERROR, NOERROR]);
+    assert_eq!(lab.serial().await, serial_before + 1);
+    assert_eq!(lab.applied().await, applied_before + 1);
+    assert_eq!(lab.rrset(ZONE, Rtype::A).await.expect("apex").ttl, 900);
+    // A refresh that makes its signer the first owner of a dynamic name is written.
+    let old = "old.corp.example.test";
+    assert_eq!(lab.gss(&bob, &Msg::default().add_a(old, 70)).await, NOERROR);
+    assert_eq!(lab.owner(old).await.expect("owned").sid, Some(sid(1002)));
+    assert_eq!(lab.serial().await, serial_before + 2);
+}
+
+/// DNS-28, identity plan section 3.8: after a takeover the zone holds what the controllers
+/// register, imported with the origin `ad`. A controller's first registration of the same
+/// data is written: the RRsets become `dynamic`, its host name gets the controller as owner,
+/// the locator name none; its next registration writes nothing.
+#[tokio::test]
+async fn dns_28_a_controller_first_registration_of_imported_records_is_written() {
+    let lab = lab().await;
+    let dc1 = lab.who(
+        "dc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1000)),
+        vec![sid(516)],
+        "192.0.2.2",
+    );
+    let (host, kerberos) = ("dc01.corp.example.test", "_kerberos._tcp.corp.example.test");
+    let imported = |owner: &str, rtype: Rtype, ttl: u32, record: RecordData| Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype,
+        ttl: Some(ttl),
+        records: vec![record],
+        take_over: false,
+        origin: Origin::Ad,
+    };
+    let address = RecordData::A {
+        address: std::net::Ipv4Addr::new(192, 0, 2, 2),
+    };
+    let srv = RecordData::Srv {
+        priority: 0,
+        weight: 100,
+        port: 88,
+        target: name(host),
+    };
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.zone.id,
+            &[
+                imported(host, Rtype::A, 1200, address),
+                imported(kerberos, Rtype::SRV, 600, srv),
+            ],
+            false,
+        )
+        .await
+        .expect("imported");
+    let srv_wire = [&[0, 0, 0, 100, 0, 88][..], &name(host).to_wire()].concat();
+    let register = Msg::default()
+        .rr(host, 1, CLASS_IN, 1200, &[192, 0, 2, 2])
+        .rr(kerberos, 33, CLASS_IN, 600, &srv_wire);
+    let (serial, applied) = (lab.serial().await, lab.applied().await);
+    assert_eq!(lab.gss(&dc1, &register).await, NOERROR);
+    assert_eq!(
+        (lab.serial().await, lab.applied().await),
+        (serial + 1, applied + 1)
+    );
+    for (owner, rtype) in [(host, Rtype::A), (kerberos, Rtype::SRV)] {
+        let rrset = lab.rrset(owner, rtype).await.expect("held");
+        assert_eq!(rrset.origin, Origin::Dynamic, "{owner}");
+    }
+    let owner = lab.owner(host).await.expect("owned");
+    assert_eq!(
+        (owner.sid, owner.how),
+        (Some(sid(1000)), OwnerSource::Created)
+    );
+    assert_eq!(
+        lab.owner(kerberos).await,
+        None,
+        "a locator name keeps no owner"
+    );
+    assert_eq!(lab.gss(&dc1, &register).await, NOERROR);
+    assert_eq!(
+        (lab.serial().await, lab.applied().await),
+        (serial + 1, applied + 1),
+        "the next registration writes nothing"
+    );
+}
+
 impl Lab {
+    async fn serial(&self) -> u32 {
+        match self.rrset(ZONE, Rtype::SOA).await.expect("soa").records() {
+            Ok(records) => match records.first() {
+                Some(RecordData::Soa { serial, .. }) => *serial,
+                _ => 0,
+            },
+            Err(_) => 0,
+        }
+    }
+
+    /// The number of `dns.update.apply` records.
+    async fn applied(&self) -> usize {
+        self.audit()
+            .await
+            .iter()
+            .filter(|draft| draft.action.as_str() == "dns.update.apply")
+            .count()
+    }
+
     async fn put_owner(&self, owner: &str, row: NameOwner) {
         let mut batch = WriteBatch::for_request(&cx());
         batch

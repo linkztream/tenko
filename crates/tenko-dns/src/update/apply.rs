@@ -20,7 +20,13 @@
 //!   (3.4.2.4); an RRset left empty is deleted.
 //!
 //! Every RRset an update changes carries the origin `dynamic` and the name of the update's
-//! TSIG key. Origins (2.5): an RRset of origin `ipam` is changed only when the zone's
+//! TSIG key. A refresh of a `dynamic` RRset, which leaves it with the same records and TTL
+//! as the hourly registrations of Windows do, is no change, unless the signer becomes the
+//! name's owner by it; an RRset of another origin becomes `dynamic` at its first update, the
+//! same data or not. When no RRset of the group changes, nothing is written, and an update
+//! that changed nothing neither changes an owner nor is audited.
+//!
+//! Origins (2.5): an RRset of origin `ipam` is changed only when the zone's
 //! `may_replace_ipam` allows it, an RRset of origin `transfer` or `dnssec` never, and in a
 //! zone signed online the types the signer writes are refused; such an update is REFUSED
 //! with `dns.update.refused`, its extended error naming the first RRset. A model rule the
@@ -320,6 +326,17 @@ impl From<ZoneError> for Stop {
     }
 }
 
+/// Whether `new` only refreshes `old`: `old` is dynamic, and `new` holds its TTL and its
+/// records in any order. An RRset of another origin becomes dynamic at its first update.
+fn refreshes(old: &RrSet, new: &RrSet) -> bool {
+    fn sorted(rrset: &RrSet) -> Vec<&Rdata> {
+        let mut records: Vec<&Rdata> = rrset.rdata.iter().collect();
+        records.sort_unstable();
+        records
+    }
+    old.origin == Origin::Dynamic && old.ttl == new.ttl && sorted(old) == sorted(new)
+}
+
 fn is_dnssec_type(rtype: Rtype) -> bool {
     matches!(rtype, Rtype::RRSIG | Rtype::NSEC)
 }
@@ -587,6 +604,18 @@ impl Planner<'_> {
         Ok(Decision::Owner)
     }
 
+    /// Whether `decision` makes its signer the owner of `name` when the name has none.
+    fn owns_now(&self, name: &DnsName, decision: Decision) -> bool {
+        // WP13.4: a privileged principal that writes a name without an owner owns it, as the
+        // creator of a name does on Windows; only the names that keep no owner (locator and
+        // wildcard names) stay without one.
+        match decision {
+            Decision::Owner | Decision::Claimed => true,
+            Decision::Privileged => !keeps_no_owner(&self.zone.name, name),
+            Decision::Unowned | Decision::Proxy => false,
+        }
+    }
+
     /// The owners after an update that passed: the creator or claimant owns the name, the
     /// hold starts when the last record went and ends when a record came back, an owner
     /// whose hold passed goes.
@@ -607,18 +636,11 @@ impl Planner<'_> {
                     .values()
                     .any(|rrset| rrset.origin != Origin::Dnssec)
             });
+            let owns_now = self.owns_now(&key.1, *decision);
             let Some(state) = self.owners.get_mut(key) else {
                 continue;
             };
             let live = state.after.take().filter(|owner| !owner.hold_passed(now));
-            // WP13.4: a privileged principal that writes a name without an owner owns it,
-            // as the creator of a name does on Windows; only the names that keep no owner
-            // (locator and wildcard names) stay without one.
-            let owns_now = match decision {
-                Decision::Owner | Decision::Claimed => true,
-                Decision::Privileged => !keeps_no_owner(&self.zone.name, &key.1),
-                Decision::Unowned | Decision::Proxy => false,
-            };
             state.after = match (owns_now, live, signer.gss()) {
                 (true, None, Some(identity)) if has_records => Some(NameOwner {
                     sid: identity.sid.clone(),
@@ -883,9 +905,33 @@ impl Planner<'_> {
                 }
             }
         }
+        // A refresh re-sends what a dynamic update wrote (identity plan section 3.8): such an
+        // RRset stays as stored, stamp and signer too, so it is no change; unless the signer
+        // becomes the name's owner by it, as `settle` decides.
+        let now = self.now();
+        for (key, before) in &undo {
+            let takes = decided
+                .get(key)
+                .is_some_and(|decision| self.owns_now(&key.1, *decision))
+                && self
+                    .owners
+                    .get(key)
+                    .and_then(|state| state.after.as_ref())
+                    .is_none_or(|owner| owner.hold_passed(now));
+            if let Some(node) = self.nodes.get_mut(key).filter(|_| !takes) {
+                for (rtype, old) in before {
+                    if node.after.get(rtype).is_some_and(|new| refreshes(old, new)) {
+                        node.after.insert(*rtype, old.clone());
+                    }
+                }
+            }
+        }
         match self.counts(&undo) {
             Ok((added, removed, rrsets)) => {
-                self.settle(&item.signer, &decided);
+                // An update that changed nothing leaves the owners as they were.
+                if rrsets > 0 {
+                    self.settle(&item.signer, &decided);
+                }
                 self.decision = decided.values().copied().max();
                 Ok(Outcome::Applied {
                     added,
