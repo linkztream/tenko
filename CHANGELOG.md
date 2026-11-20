@@ -4,6 +4,8 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ## [Unreleased]
 
+## [0.0.12-rc.7] - 2026-11-20
+
 ### Fixed
 
 - In a cluster of controllers with the internal CA (`tls.mode = "internal_ca"`), each controller keeps its own server certificate (`cluster.server_certs`, by node id). Before, the cluster stored one, and controllers with different host names or addresses replaced each other's at every daily check and every change of the installation record, with a `cluster.tls.issue` audit record each time and the other controller's key deleted; a controller whose names were not the stored ones could not restart while it was cut off from the others, since the new certificate needed a write. Now a controller issues once and restarts with its stored certificate without a write. After the upgrade, the controller whose names the cluster's stored certificate carries takes it over with its key; the others issue their own once. The `cluster.tls.issue` audit record names the controller.
@@ -14,8 +16,6 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 ### Security
 
 - Removing a controller (`DELETE /api/v1/cluster/members/{id}`, `DELETE /api/v1/nodes/{id}`, or `tenko cluster recover --revoke` for the controllers it names) also removes its certificates and their keys from the vault: its cluster-port certificate (`cluster.controller_certs`) and its server certificate (`cluster.server_certs`) go with their keys in the same write that removes its node record and revokes its certificates, so the replicated store no longer holds them. Certificates and keys that a removal by an earlier version left behind go at the leader's next hourly prune (`cluster.prune`); a controller that is still enrolled keeps its own. A removed host still holds the server certificate it presented until that certificate expires.
-
-## [0.0.12-rc.6] - 2026-11-20
 
 ### Fixed
 
