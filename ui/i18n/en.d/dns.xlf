@@ -2846,7 +2846,7 @@
         <segment><source>Release the frozen names of {name}?</source></segment>
       </unit>
       <unit id="dns.zone.release.body">
-        <segment><source>{count, plural, one {One name is frozen with no lease or reservation behind it} other {{names} names are frozen with no lease or reservation behind them}}. Released, they become manual records.</source></segment>
+        <segment><source>{count, plural, one {One name keeps} other {{names} names keep}} the records a zone transfer brought, frozen until a takeover adopts them. Released, they become manual records; deleted, they are gone.</source></segment>
       </unit>
       <unit id="dns.zone.release.delete">
         <segment><source>Delete them instead</source></segment>
@@ -2855,7 +2855,13 @@
         <segment><source>Release</source></segment>
       </unit>
       <unit id="dns.zone.release.done">
-        <segment><source>The frozen names of {name} were released</source></segment>
+        <segment><source>The frozen names of {name} are now manual records</source></segment>
+      </unit>
+      <unit id="dns.zone.release.deleted">
+        <segment><source>The frozen names of {name} were deleted</source></segment>
+      </unit>
+      <unit id="dns.zone.release.more">
+        <segment><source>and {count, plural, one {one more} other {{more} more}}</source></segment>
       </unit>
     </group>
   </file>

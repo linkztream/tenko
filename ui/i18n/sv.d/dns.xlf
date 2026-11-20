@@ -2846,7 +2846,7 @@
         <segment><source>Release the frozen names of {name}?</source><target>Frigöra de frysta namnen i {name}?</target></segment>
       </unit>
       <unit id="dns.zone.release.body">
-        <segment><source>{count, plural, one {One name is frozen with no lease or reservation behind it} other {{names} names are frozen with no lease or reservation behind them}}. Released, they become manual records.</source><target>{count, plural, one {Ett namn är fryst utan lån eller reservation bakom sig} other {{names} namn är frysta utan lån eller reservation bakom sig}}. När de frigörs blir de manuella poster.</target></segment>
+        <segment><source>{count, plural, one {One name keeps} other {{names} names keep}} the records a zone transfer brought, frozen until a takeover adopts them. Released, they become manual records; deleted, they are gone.</source><target>{count, plural, one {Ett namn behåller} other {{names} namn behåller}} posterna som en zonöverföring gav, frysta tills ett övertagande tar över dem. Frigjorda blir de manuella poster; raderade försvinner de.</target></segment>
       </unit>
       <unit id="dns.zone.release.delete">
         <segment><source>Delete them instead</source><target>Radera dem i stället</target></segment>
@@ -2855,7 +2855,13 @@
         <segment><source>Release</source><target>Frigör</target></segment>
       </unit>
       <unit id="dns.zone.release.done">
-        <segment><source>The frozen names of {name} were released</source><target>De frysta namnen i {name} frigjordes</target></segment>
+        <segment><source>The frozen names of {name} are now manual records</source><target>De frysta namnen i {name} är nu manuella poster</target></segment>
+      </unit>
+      <unit id="dns.zone.release.deleted">
+        <segment><source>The frozen names of {name} were deleted</source><target>De frysta namnen i {name} raderades</target></segment>
+      </unit>
+      <unit id="dns.zone.release.more">
+        <segment><source>and {count, plural, one {one more} other {{more} more}}</source><target>och {count, plural, one {ett till} other {{more} till}}</target></segment>
       </unit>
     </group>
   </file>

@@ -14,6 +14,9 @@ import { describedBy, Field, fieldErrors } from "./Parts";
 
 type S = components["schemas"];
 
+/** The frozen names the release dialog lists; the rest are counted. */
+const LISTED = 20;
+
 /** Whether the zone page offers the flip: a secondary zone that is not a catalog zone. */
 export function mayFlip(zone: Zone): boolean {
   return zone.kind === "secondary" && !zone.catalog;
@@ -121,7 +124,7 @@ export function ReleaseZoneDialog(props: { zone: Zone; onClose: () => void; onDo
     setError(undefined);
     try {
       await releaseZone(props.zone.id, { delete: remove() });
-      toast({ kind: "ok", title: t("dns.zone.release.done", { name: props.zone.name }) });
+      toast({ kind: "ok", title: t(remove() ? "dns.zone.release.deleted" : "dns.zone.release.done", { name: props.zone.name }) });
       props.onDone();
     } catch (err) {
       setError(err);
@@ -146,8 +149,13 @@ export function ReleaseZoneDialog(props: { zone: Zone; onClose: () => void; onDo
               <>
                 <p data-testid="release-count">{t("dns.zone.release.body", { count: names().length, names: formatNumber(names().length) })}</p>
                 <ul class="mono" data-testid="release-names">
-                  <For each={names()}>{(name) => <li>{name}</li>}</For>
+                  <For each={names().slice(0, LISTED)}>{(name) => <li>{name}</li>}</For>
                 </ul>
+                <Show when={names().length > LISTED}>
+                  <p class="muted" data-testid="release-more">
+                    {t("dns.zone.release.more", { count: names().length - LISTED, more: formatNumber(names().length - LISTED) })}
+                  </p>
+                </Show>
               </>
             )}
           </Show>

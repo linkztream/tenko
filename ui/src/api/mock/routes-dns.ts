@@ -15,7 +15,10 @@
 // five view routes on dns-views-model.ts, and the view side of the in-use rules on the zone
 // change, the zone deletion and the access list deletion. The zone transfers (WP6.1): the state
 // of a zone (`GET .../transfer`) and "Transfer now" (`POST`, secondary zones only) are answered
-// here, with a state per zone kept beside the DNS state.
+// here, with a state per zone kept beside the DNS state. The flip of a zone and the release of
+// its frozen names (docs/dns.md sections 10.6 and 10.7), in short: a flip to primary keeps the
+// A, AAAA and DHCID RRsets of the names with a DHCID frozen (`transfer`) and makes the other
+// transferred RRsets `ad`; the release makes the frozen ones `manual` or deletes them.
 // DNSSEC (WP6.3): the signing state of a zone and the key rollover, kept in this file.
 import { http, type HttpHandler } from "msw";
 import { encodeImportReport, type TransferStatus } from "../../dns/api";
@@ -318,6 +321,64 @@ const transfer = [
       return new Reply(202, running) as never;
     }),
   ),
+];
+
+// ---------------------------------------------------------------------------------
+// The flip and the release
+
+/** The RRsets of a zone by origin, as a zone read carries them. */
+function originsOf(sets: readonly { origin: components["schemas"]["Origin"] }[]): { origin: components["schemas"]["Origin"]; rrsets: number }[] {
+  const counts = new Map<components["schemas"]["Origin"], number>();
+  for (const set of sets) counts.set(set.origin, (counts.get(set.origin) ?? 0) + 1);
+  return [...counts.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([origin, rrsets]) => ({ origin, rrsets }));
+}
+
+const flips = [
+  route("post", "/api/v1/dns/zones/{id}/flip", async (ctx) => {
+    const body = (await ctx.body()) as { to?: string; soa?: unknown; primaries?: unknown };
+    return guard("dns.write", () => {
+      const zone = findZone(state, ctx.params.id);
+      const toPrimary = body.to === "primary";
+      if (zone.catalog) throw new DnsFailure(409, "dns.zone.flip.catalog", { zone: zone.name });
+      if (zone.kind !== (toPrimary ? "secondary" : "primary")) {
+        throw new DnsFailure(409, toPrimary ? "dns.zone.flip.not_secondary" : "dns.zone.flip.not_primary", { zone: zone.name, kind: zone.kind });
+      }
+      const sets = state.rrsets.get(zone.id) ?? [];
+      if (toPrimary) {
+        const dhcp = new Set(sets.filter((set) => set.type === "DHCID").map((set) => set.name));
+        for (const set of sets) {
+          if (set.origin === "transfer" && !(dhcp.has(set.name) && ["A", "AAAA", "DHCID"].includes(set.type))) set.origin = "ad";
+        }
+      }
+      zone.kind = toPrimary ? "primary" : "secondary";
+      const next = updateZone(state, context, zone.id, toPrimary ? { soa: body.soa } : { source: { primaries: body.primaries } }, null);
+      if (toPrimary) {
+        next.source = null;
+        next.soa_serial += 1;
+      }
+      next.origins = originsOf(sets);
+      write("dns.zone.flip", [zoneRef(zone.id)], "dns.zone.changed", ["dns.zones", "dns.rrsets"]);
+      return ok({ zone: zone.id, kind: next.kind, serial: next.soa_serial, origins: next.origins, revision: next.revision }) as never;
+    });
+  }),
+  route("post", "/api/v1/dns/zones/{id}/release", async (ctx) => {
+    const body = (await ctx.body()) as { delete?: boolean; dry_run?: boolean };
+    return guard("dns.write", () => {
+      const zone = findZone(state, ctx.params.id);
+      if (zone.catalog) throw new DnsFailure(409, "dns.zone.flip.catalog", { zone: zone.name });
+      if (zone.kind !== "primary") throw new DnsFailure(409, "dns.zone.flip.not_primary", { zone: zone.name, kind: zone.kind });
+      const sets = state.rrsets.get(zone.id) ?? [];
+      const frozen = sets.filter((set) => set.origin === "transfer");
+      const names = [...new Set(frozen.map((set) => set.name))];
+      const report = { zone: zone.id, deleted: !!body.delete, dry_run: !!body.dry_run, names, rrsets: frozen.length };
+      if (body.dry_run || frozen.length === 0) return ok(report) as never;
+      if (body.delete) state.rrsets.set(zone.id, sets.filter((set) => set.origin !== "transfer"));
+      else for (const set of frozen) set.origin = "manual";
+      zone.origins = originsOf(state.rrsets.get(zone.id) ?? []);
+      write("dns.zone.release", [zoneRef(zone.id)], "dns.zone.changed", ["dns.rrsets"]);
+      return ok({ ...report, revision: db.revision }) as never;
+    });
+  }),
 ];
 
 // ---------------------------------------------------------------------------------
@@ -1108,7 +1169,7 @@ const anchorRoutes = [
 ];
 // WP10.4: end.
 
-export const dnsRoutes: HttpHandler[] = [...zones, ...owners, ...transfer, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking, ...anchorRoutes];
+export const dnsRoutes: HttpHandler[] = [...zones, ...owners, ...transfer, ...flips, ...records, ...acls, ...keys, ...forwarders, ...lists, ...node, ...viewRoutes, ...dnssec, ...blocking, ...anchorRoutes];
 
 /** Every DNS operation answering 501, as the server does until WP4.2 lands (for `server.use`). */
 export const dnsStubs: HttpHandler[] = apiOperations

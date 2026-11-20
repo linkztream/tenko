@@ -4314,7 +4314,9 @@ export type MessageKey =
   | "dns.zone.release.body"
   | "dns.zone.release.confirm"
   | "dns.zone.release.delete"
+  | "dns.zone.release.deleted"
   | "dns.zone.release.done"
+  | "dns.zone.release.more"
   | "dns.zone.release.title"
   | "dns.zone.reverse"
   | "dns.zone.serial"
@@ -9392,7 +9394,9 @@ export interface MessageArgs {
   "dns.zone.flip.done": { name: string | number; serial: string | number };
   "dns.zone.flip.title": { name: string | number };
   "dns.zone.release.body": { count: number; names: string | number };
+  "dns.zone.release.deleted": { name: string | number };
   "dns.zone.release.done": { name: string | number };
+  "dns.zone.release.more": { count: number; more: string | number };
   "dns.zone.release.title": { name: string | number };
   "dns.zone.serial": { serial: string | number };
   "errors.auth.password.too_long": { max: string | number };
@@ -14603,7 +14607,9 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.release.body",
   "dns.zone.release.confirm",
   "dns.zone.release.delete",
+  "dns.zone.release.deleted",
   "dns.zone.release.done",
+  "dns.zone.release.more",
   "dns.zone.release.title",
   "dns.zone.reverse",
   "dns.zone.serial",

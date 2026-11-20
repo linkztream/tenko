@@ -318,11 +318,6 @@ describe("the flip and the release", () => {
 
   it("flips a secondary zone to primary with the SOA names and the name servers given", async () => {
     const writes = recordWrites();
-    server.use(
-      http.post("/api/v1/dns/zones/:id/flip", () =>
-        HttpResponse.json({ zone: LAB, kind: "primary", serial: 8, origins: [{ origin: "manual", rrsets: 2 }], revision: 9 }),
-      ),
-    );
     const view = renderRoute(ZonePage, { url: `/dns/zones/${LAB}`, path: "/dns/zones/:id/:tab?" });
     fireEvent.click(await screen.findByTestId("dns-zone-flip"));
     const dialog = await screen.findByTestId("dialog-zone-flip");
@@ -336,6 +331,8 @@ describe("the flip and the release", () => {
     const sent = writes().filter((w) => w.url.includes("/flip"));
     expect(sent).toHaveLength(1);
     expect(sent[0]?.body).toMatchObject({ to: "primary", ns: ["ns1.lab.example.test"] });
+    expect(dnsState().zones.find((z) => z.id === LAB)?.kind).toBe("primary");
+    await waitFor(() => expect(screen.queryByTestId("dns-zone-flip")).toBeNull());
   });
 
   it("offers neither on a primary zone without frozen names", async () => {
@@ -346,23 +343,20 @@ describe("the flip and the release", () => {
   });
 
   it("lists the frozen names of a primary zone and deletes them when asked", async () => {
+    const frozen = setOf("www.example.test", "A");
+    if (frozen) frozen.origin = "transfer";
     const zone = dnsState().zones.find((z) => z.id === ZONE);
-    if (zone) zone.origins = [...zone.origins, { origin: "transfer", rrsets: 2 }];
+    if (zone) zone.origins = [...zone.origins, { origin: "transfer", rrsets: 1 }];
     const writes = recordWrites();
-    server.use(
-      http.post("/api/v1/dns/zones/:id/release", async ({ request }) => {
-        const body = (await request.json()) as { dry_run?: boolean; delete?: boolean };
-        const written = body.dry_run ? {} : { revision: 12 };
-        return HttpResponse.json({ zone: ZONE, deleted: !!body.delete, dry_run: !!body.dry_run, names: ["old-laptop-01.example.test"], rrsets: 2, ...written });
-      }),
-    );
     open();
     fireEvent.click(await screen.findByTestId("dns-zone-release"));
     const dialog = await screen.findByTestId("dialog-zone-release");
-    await waitFor(() => expect(within(dialog).getByTestId("release-names").textContent).toBe("old-laptop-01.example.test"));
+    await waitFor(() => expect(within(dialog).getByTestId("release-names").textContent).toBe("www.example.test"));
+    expect(within(dialog).queryByTestId("release-more")).toBeNull();
     fireEvent.click(within(dialog).getByTestId("release-delete"));
     fireEvent.click(within(dialog).getByTestId("confirm-ok"));
     await waitFor(() => expect(screen.queryByTestId("dialog-zone-release")).toBeNull());
     expect(writes().filter((w) => w.url.includes("/release")).map((w) => w.body)).toEqual([{ dry_run: true }, { delete: true }]);
+    expect(setOf("www.example.test", "A")).toBeUndefined();
   });
 });
