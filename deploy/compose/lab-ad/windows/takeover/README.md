@@ -159,7 +159,8 @@ phase it names.
 ## What the line needs from the operator's tooling
 
 1. A file carried from `ns1`'s root-only directory to a controller's `C:\lab\secrets\` (each
-   mirror's token, T17 and T18) without passing through any channel the lead or the observer reads.
+   mirror's token, T17 and T18: `mirror_token_dc1` to `dc1` and `mirror_token_dc2` to `dc2`) without
+   passing through any channel the lead or the observer reads.
 2. New secret files: `dhcp_mirror_password` on both controllers (T18), `dhcp_dns_password` on both
    once WT-Q13 is answered (T11).
 3. Under Hardened (from T28), an administrator's passkey session on `ns1` for the writing entries
