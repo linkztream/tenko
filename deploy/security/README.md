@@ -141,7 +141,9 @@ with a reason in the file, as narrow as the tool allows.
   proof in the headers is the credential), the internal CA's root, the root of the
   integration listener and the OpenAPI document; and, outside the API, the web interface's
   static files. `web.unauth` fails when the document's public operations and this list
-  differ in either direction.
+  differ in either direction; `scripts/security-public-operations.test.mjs` checks the same
+  against the committed document without a lab, so a new public operation without its entry
+  fails in CI.
 - `rules/zap-baseline.tsv`: ZAP's rule file (rule id, action, name, separated by tabs). `FAIL`
   for what the node's response headers and session cookie rule out, `WARN` for findings the
   triage reads, `IGNORE` only with the reason in the comment above it. Today's ignores:
