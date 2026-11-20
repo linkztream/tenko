@@ -6,7 +6,7 @@ use std::{fmt, net::IpAddr};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    NodeId, RequestCtx, RoleSet, Timestamp,
+    NodeId, ObjectRef, RequestCtx, RoleSet, Timestamp,
     audit::{AuditAction, AuditDraft},
     secret::{SecretClass, SecretRef},
     table::TableDef,
@@ -27,8 +27,11 @@ pub mod tables {
 
     /// The CA record (singleton).
     pub const CA: TableDef<(), CaRecord> = TableDef::new("cluster.ca");
-    /// The server certificate of TLS mode a (singleton).
+    /// The server certificate of TLS mode a of versions that kept one for the whole
+    /// cluster; the controller whose names it carries moves it to [`SERVER_CERTS`].
     pub const SERVER_CERT: TableDef<(), ServerCertRecord> = TableDef::new("cluster.server_cert");
+    /// The server certificate of TLS mode a of each controller, by node id.
+    pub const SERVER_CERTS: TableDef<u64, ServerCertRecord> = TableDef::new("cluster.server_certs");
     /// The integration CA record (singleton, ADR 0035).
     pub const INTEGRATION_CA: TableDef<(), CaRecord> = TableDef::new("cluster.integration_ca");
 }
@@ -579,11 +582,14 @@ impl InternalCa {
         (info.not_after.0 - now.0).whole_days() < i64::from(self.policy.renew_before_days)
     }
 
-    /// The server certificate of TLS mode a: the stored one while it matches `identity`,
-    /// was issued by this root and is not due for renewal; otherwise a new one, stored
-    /// (certificate in `cluster.server_cert`, key in the vault, the old key deleted) with
-    /// a `cluster.tls.issue` audit record. Call at start and periodically (daily), and
-    /// after the host name changes; install the result in the TLS service.
+    /// The server certificate of TLS mode a of controller `node`: its stored one while it
+    /// matches `identity`, was issued by this root and is not due for renewal (read
+    /// without a write, so an isolated controller restarts with it); otherwise a new one,
+    /// stored (certificate in `cluster.server_certs` under `node`, key in the vault, the
+    /// old key deleted) with a `cluster.tls.issue` audit record. A controller without a
+    /// record takes over `cluster.server_cert` of earlier versions when it carries its
+    /// names. Call at start and periodically (daily), and after the host name changes;
+    /// install the result in the TLS service.
     ///
     /// # Errors
     ///
@@ -593,22 +599,43 @@ impl InternalCa {
         store: &dyn Store,
         vault: &dyn Vault,
         ctx: &RequestCtx,
+        node: NodeId,
         identity: &ServerIdentity,
     ) -> Result<TlsMaterial, CaError> {
         let view = store.read(ReadConsistency::Local).await?;
-        let current = view.get_typed(&tables::SERVER_CERT, &())?;
-        if let Some((record, _)) = &current
+        let own = view.get_typed(&tables::SERVER_CERTS, &node.0)?;
+        // The record of earlier versions belongs to the controller whose names it carries;
+        // it leaves with its key in one write, so an older controller never deletes a key
+        // that a record of this table holds.
+        let legacy = match own {
+            None => view
+                .get_typed(&tables::SERVER_CERT, &())?
+                .filter(|(record, _)| record.identity == *identity),
+            Some(_) => None,
+        };
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.expect_typed(
+            &tables::SERVER_CERTS,
+            &node.0,
+            own.as_ref().map(|(_, revision)| *revision),
+        );
+        if let Some((_, revision)) = &legacy {
+            batch.expect_typed(&tables::SERVER_CERT, &(), Some(*revision));
+            batch.delete_typed(&tables::SERVER_CERT, &());
+        }
+        let current = own.as_ref().or(legacy.as_ref()).map(|(record, _)| record);
+        if let Some(record) = current
             && let Some(material) = self.reusable(vault, ctx, record, identity).await?
         {
+            if legacy.is_some() {
+                batch.put_typed(&tables::SERVER_CERTS, &node.0, record)?;
+                if let Err(error) = store.propose(batch).await {
+                    tracing::warn!(%error, "the server certificate of an earlier version is served; it moves to this controller's record at the next check");
+                }
+            }
             return Ok(material);
         }
         let issued = self.issue_server_cert(identity, ctx.now)?;
-        let mut batch = WriteBatch::for_request(ctx);
-        batch.expect_typed(
-            &tables::SERVER_CERT,
-            &(),
-            current.as_ref().map(|(_, revision)| *revision),
-        );
         let key = vault.stage_put(
             &mut batch,
             ctx,
@@ -616,7 +643,7 @@ impl InternalCa {
             SecretSpec::new(TLS_KEY_PURPOSE).labeled(identity.host_name.clone()),
             &issued.key,
         )?;
-        if let Some((old, _)) = &current {
+        if let Some(old) = current {
             vault.stage_delete(&mut batch, ctx, old.key);
         }
         let record = ServerCertRecord {
@@ -625,9 +652,9 @@ impl InternalCa {
             identity: identity.clone(),
             issued_at: ctx.now,
         };
-        batch.put_typed(&tables::SERVER_CERT, &(), &record)?;
+        batch.put_typed(&tables::SERVER_CERTS, &node.0, &record)?;
         batch.audit(
-            AuditDraft::success(SERVER_CERT_ISSUE, Vec::new())
+            AuditDraft::success(SERVER_CERT_ISSUE, vec![ObjectRef::node(node)])
                 .with_source_ip(ctx.source_ip)
                 .with_context("host_name", identity.host_name.clone())
                 .with_context("not_after", issued.info.not_after.to_rfc3339())

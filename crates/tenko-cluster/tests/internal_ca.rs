@@ -26,7 +26,7 @@ use tenko_cluster::ca::{
     SERVER_CERT_ISSUE, ServerCertRecord, ServerIdentity, TLS_KEY_PURPOSE, TlsMaterial, TlsPolicy,
     TlsResolver, node_id_of, node_uri, tables,
 };
-use tenko_core::{NodeId, RequestCtx, SystemComponent, Timestamp, secret::SecretClass};
+use tenko_core::{NodeId, ObjectRef, RequestCtx, SystemComponent, Timestamp, secret::SecretClass};
 use tenko_store::{
     KeyRange, ReadConsistency, ReadViewExt, Store, TableName, WriteBatch, mem::MemStore,
     tables as store_tables,
@@ -62,21 +62,61 @@ impl Env {
         InternalCa::load(&*self.store, &self.vault, ctx, CaPolicy::default()).await
     }
 
+    /// The server material of controller 1.
     async fn material(
         &self,
         ca: &InternalCa,
         ctx: &RequestCtx,
         identity: &ServerIdentity,
     ) -> Result<TlsMaterial, CaError> {
-        ca.server_material(&*self.store, &self.vault, ctx, identity)
+        self.material_of(NodeId(1), ca, ctx, identity).await
+    }
+
+    async fn material_of(
+        &self,
+        node: NodeId,
+        ca: &InternalCa,
+        ctx: &RequestCtx,
+        identity: &ServerIdentity,
+    ) -> Result<TlsMaterial, CaError> {
+        ca.server_material(&*self.store, &self.vault, ctx, node, identity)
             .await
     }
 
+    /// The record of controller 1.
     async fn server_record(&self) -> Option<ServerCertRecord> {
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        view.get_typed(&tables::SERVER_CERTS, &1)
+            .expect("read")
+            .map(|(record, _)| record)
+    }
+
+    /// Moves controller 1's record to where an earlier version kept the one record of the
+    /// cluster, and returns it.
+    async fn as_an_earlier_version_left_it(&self, ctx: &RequestCtx) -> ServerCertRecord {
+        let record = self.server_record().await.expect("stored");
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.delete_typed(&tables::SERVER_CERTS, &1);
+        batch
+            .put_typed(&tables::SERVER_CERT, &(), &record)
+            .expect("put");
+        self.store.propose(batch).await.expect("write");
+        record
+    }
+
+    async fn legacy_record(&self) -> Option<ServerCertRecord> {
         let view = self.store.read(ReadConsistency::Local).await.expect("view");
         view.get_typed(&tables::SERVER_CERT, &())
             .expect("read")
             .map(|(record, _)| record)
+    }
+
+    async fn revision(&self) -> tenko_core::Revision {
+        self.store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .revision()
     }
 
     /// The audit actions of the CA (the vault audits its own secret writes as well).
@@ -987,7 +1027,7 @@ async fn no_store_table_contains_a_private_key() {
     let tables: BTreeSet<&str> = rows.iter().map(|(name, _)| name.as_str()).collect();
     for expected in [
         "cluster.ca",
-        "cluster.server_cert",
+        "cluster.server_certs",
         "sys.audit",
         "sys.journal",
     ] {
@@ -1056,4 +1096,105 @@ async fn server_material_recovers_from_a_lost_key() {
     let new = env.server_record().await.expect("stored");
     assert_ne!(new.key, old.key);
     assert!(env.vault.meta(new.key).await.expect("meta").is_some());
+}
+
+#[tokio::test]
+async fn controllers_with_different_names_keep_their_own_certificates() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    let one = identity();
+    let two = ServerIdentity::new("two.example.net").with_address(IpAddr::V4(ADDRESS_V4));
+    let first_one = env.material_of(NodeId(1), &ca, &ctx, &one).await;
+    let first_two = env.material_of(NodeId(2), &ca, &ctx, &two).await;
+    let (first_one, first_two) = (first_one.expect("one"), first_two.expect("two"));
+    // Every later check reads its own record and writes nothing, as on an isolated restart.
+    let revision = env.revision().await;
+    for day in 1..4 {
+        let later = ctx_at(after(t0(), day));
+        let again_one = env.material_of(NodeId(1), &ca, &later, &one).await;
+        let again_two = env.material_of(NodeId(2), &ca, &later, &two).await;
+        assert_eq!(
+            again_one.expect("one").info().sha256,
+            first_one.info().sha256
+        );
+        assert_eq!(
+            again_two.expect("two").info().sha256,
+            first_two.info().sha256
+        );
+    }
+    assert_eq!(
+        env.revision().await,
+        revision,
+        "no write after the first issue"
+    );
+    let keys = env.vault.list().await.expect("list");
+    let tls_keys = keys.iter().filter(|meta| meta.purpose == TLS_KEY_PURPOSE);
+    assert_eq!(tls_keys.count(), 2, "neither deletes the other's key");
+    let actions = env.audit_actions().await;
+    let issues = actions.iter().filter(|a| *a == SERVER_CERT_ISSUE.as_str());
+    assert_eq!(issues.count(), 2, "one issue per controller");
+}
+
+#[tokio::test]
+async fn the_record_of_an_earlier_version_moves_to_the_controller_it_names() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    let one = identity();
+    let first = env.material(&ca, &ctx, &one).await.expect("one");
+    let record = env.as_an_earlier_version_left_it(&ctx).await;
+
+    // Another controller's names: it issues its own and leaves the record and its key.
+    let two = ServerIdentity::new("two.example.net");
+    let later = ctx_at(after(t0(), 1));
+    env.material_of(NodeId(2), &ca, &later, &two)
+        .await
+        .expect("two");
+    assert!(env.legacy_record().await.is_some());
+    assert!(env.vault.meta(record.key).await.expect("meta").is_some());
+
+    // The controller it names takes it over with its key, without a new issue.
+    let adopted = env.material(&ca, &later, &one).await.expect("adopted");
+    assert_eq!(adopted.info().sha256, first.info().sha256);
+    assert!(env.legacy_record().await.is_none());
+    assert_eq!(env.server_record().await.expect("own"), record);
+    let actions = env.audit_actions().await;
+    let issues = actions.iter().filter(|a| *a == SERVER_CERT_ISSUE.as_str());
+    assert_eq!(issues.count(), 2);
+}
+
+#[tokio::test]
+async fn the_record_of_an_earlier_version_is_renewed_into_the_controllers_own() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    let first = env.material(&ca, &ctx, &identity()).await.expect("first");
+    let old = env.as_an_earlier_version_left_it(&ctx).await;
+
+    // 29 days before it ends: one write issues the controller's own and takes the old out.
+    let soon = after(t0(), 370);
+    let before = env.revision().await;
+    let renewed = env
+        .material(&ca, &ctx_at(soon), &identity())
+        .await
+        .expect("renewed");
+    assert_eq!(env.revision().await.0, before.0 + 1, "one write");
+    assert_ne!(renewed.info().sha256, first.info().sha256);
+    let own = env.server_record().await.expect("own");
+    assert_eq!(own.issued_at, soon);
+    assert_ne!(own.key, old.key);
+    assert!(env.legacy_record().await.is_none());
+    assert!(env.vault.meta(old.key).await.expect("meta").is_none());
+
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let issues: Vec<_> = view
+        .scan_typed(&store_tables::AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit")
+        .into_iter()
+        .map(|(_, record, _)| record.draft)
+        .filter(|draft| draft.action == SERVER_CERT_ISSUE)
+        .collect();
+    assert_eq!(issues.len(), 2);
+    assert_eq!(issues[1].objects, [ObjectRef::node(NodeId(1))]);
 }

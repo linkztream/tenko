@@ -178,7 +178,13 @@ async fn integration_certificate(
     match identity(resolved, store.as_ref()).await {
         Ok(identity) => {
             let material = ca
-                .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
+                .server_material(
+                    store.as_ref(),
+                    vault.as_ref(),
+                    &ctx,
+                    resolved.node_id,
+                    &identity,
+                )
                 .await
                 .map_err(|error| StartError::coded("tls", &error))?;
             setup.integration.set(Some(material));
@@ -235,7 +241,13 @@ async fn internal_ca(
     write_root(&root, &root_pem)?;
     let identity = identity(resolved, store.as_ref()).await?;
     let material = ca
-        .server_material(store.as_ref(), vault.as_ref(), &ctx, &identity)
+        .server_material(
+            store.as_ref(),
+            vault.as_ref(),
+            &ctx,
+            resolved.node_id,
+            &identity,
+        )
         .await
         .map_err(|error| StartError::coded("tls", &error))?;
     let not_after = material.info().not_after;
@@ -459,6 +471,7 @@ async fn refresh(renewal: &Renewal) {
             renewal.store.as_ref(),
             renewal.vault.as_ref(),
             &ctx,
+            renewal.resolved.node_id,
             &identity,
         )
         .await
