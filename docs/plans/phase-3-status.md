@@ -18,6 +18,8 @@ ADR 0030 (`docs/adr/0030-durability-classes-of-the-lease-path.md`, Accepted, 202
 
 The UI plan's eight packages were all merged by 2026-10-29 (U1 `203ca03a`, U2 `255775a8`, U3 `71510c27`, U8 `2857e645`, U4 `ef3933e0`, U7 `d8b3b47e`, U5 `3b1947dd`, U6 `11aee047`; the rows are in `phase-2-status.md`). The first load ended at 77.9 KB gzip against the 76.9 KB it started from, within the +1 KB per merge rule, without the one-time raise the owner allowed. Left open from the packages: a class and a role field in place of U7's tags, a per-prefix SSID panel, a column chooser on the zones and leases pages, a Playwright spec for the topology and the SSID view.
 
+On 2026-11-20 the owner changed exit criterion E23: for the Phase 3 exit, and so for 0.1.0, one network of the reference home-lab environment without Active Directory clients (an IoT network) gets DHCPv4 from Tenko through the gateway's relay; the cut-over of all four networks became check E80a of the Windows takeover plan, because the DHCP and DNS there are integrated with Active Directory. E23 stays waiting for the owner (deviation 182 of [phase-3-exit.md](phase-3-exit.md)).
+
 ## Slice 7 work packages
 
 | Package | State | Commit | Notes |

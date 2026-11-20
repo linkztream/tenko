@@ -1000,7 +1000,7 @@ proxy_port = 4011
 
 ## 17. The home cut-over
 
-The procedure of exit criterion E23 (WP8.7, decisions P3-Q5 and P3-Q18): the reference home network runs DHCPv4 through one Tenko node for all four of its networks. The gateway relays each network to the node's address, giaddr (and option 82 where the gateway adds it) selects the scope, the clients keep their addresses across the switch, options 6 and 42 reach them, and the rollback is one setting per network on the gateway with the old server's scopes activated again (DHCP-01, DHCP-02, DHCP-04, DHCP-15). Until the gateway relays to the node, nothing in the network changes; the old DHCP server stays installed with its scopes deactivated until the cut-over has held for a while.
+The procedure of exit criterion E23 (WP8.7, decisions P3-Q5 and P3-Q18) and of check E80a of the Windows takeover: the reference home network runs DHCPv4 through one Tenko node for all four of its networks. For E23 and so for the Phase 3 exit, one network without clients that depend on Active Directory (an IoT network) is enough (the owner's decision of 2026-11-20); the four networks are the cut-over of the takeover, E80a of [windows-takeover-plan.md](plans/windows-takeover-plan.md). The gateway relays each network to the node's address, giaddr (and option 82 where the gateway adds it) selects the scope, the clients keep their addresses across the switch, options 6 and 42 reach them, and the rollback is one setting per network on the gateway with the old server's scopes activated again (DHCP-01, DHCP-02, DHCP-04, DHCP-15). Until the gateway relays to the node, nothing in the network changes; the old DHCP server stays installed with its scopes deactivated until the cut-over has held for a while.
 
 Every name and address below is a placeholder. Put in your own:
 
@@ -1080,7 +1080,7 @@ Roll back when a network's clients get no address, when the role stops answering
 
 ### 17.7 Verification rows of E23
 
-E23 is met when every row holds; tick each with the date.
+E23 is met when every row holds for the one network; E80a asks for every network. Tick each with the date.
 
 | Done | Requirement | Command | Expected |
 |---|---|---|---|

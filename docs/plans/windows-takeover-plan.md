@@ -48,6 +48,7 @@ Contents:
 | E78 | The security rows `ad.*` of the round `security` ([security-audit-plan.md](security-audit-plan.md) section 4.2) pass on the release binary: spoofed and unlisted updates, a transfer from a disallowed address, a DHCID takeover from the wrong client, the mirror token's scope | TGL-09, IAM-10 | WP14.4 |
 | E79 | The runbook: [active-directory.md](../active-directory.md) rewritten around the mirror and followed end to end in the rehearsal; [dns.md](../dns.md) section 13.9 states the profiles correctly; [MIGRATION.md](../MIGRATION.md) says that the Windows DHCP source is the pushed mirror | MIG-17 | WP14.3 |
 | E80 | M69 and M70 measured on the musl binary and recorded in `bench/phase4-takeover/results/` | API-17 | WP14.2 |
+| E80a | The cut-over of all four networks of the reference home-lab environment (owner-run, the real cutover of section 1.3, on the first 0.1 release that carries Slice 14 complete): the gateway relays each network to one Tenko node, giaddr and option 82 select the scope, clients keep their addresses across the switch, option 6 and option 42 reach them, and the rollback is one setting on the gateway; the runbook is [dhcp.md](../dhcp.md) section 17, whose rows are ticked for each network. Moved here from the Phase 3 exit (E23 of [phase-3-exit.md](phase-3-exit.md)) by the owner's decision of 2026-11-20: the networks' DHCP and DNS are integrated with Active Directory, so the cut-over needs this slice | DHCP-01, DHCP-02, DHCP-04, DHCP-15 | Owner-run |
 
 ### 1.3 The slice
 

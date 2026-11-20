@@ -57,7 +57,7 @@ The released versions and what each carried are in [CHANGELOG.md](../CHANGELOG.m
 | 0.3.0 | Slice 12 complete | The failover pair and its chaos test |
 | 1.0 | Signing, re-measurement and support | The first release recommended outside a lab |
 
-The versions follow the owner's order. On 2026-10-25 identity (Slice 13) was placed before high availability (Slice 12) where the two compete, because it is smaller, well specified and unblocks the Active Directory take-over. On 2026-11-06 the owner tied 0.1.0 to the Kerberos line: the first minor release is the one the Windows takeover runs on, so it waits for GSS-TSIG verified against Windows in the owner's lab (E44 of [identity-plan.md](plans/identity-plan.md)) and not only for the Phase 3 exit. The real cutover of [windows-takeover-plan.md](plans/windows-takeover-plan.md) runs on the first 0.1 release that also carries Slice 14 complete. Before the 0.1.0 tag the release candidate is checked for whether the update flow takes the backup of ADR 0023 before it replaces the binary, which the paragraph above promises from 0.1.0 on.
+The versions follow the owner's order. On 2026-10-25 identity (Slice 13) was placed before high availability (Slice 12) where the two compete, because it is smaller, well specified and unblocks the Active Directory take-over. On 2026-11-06 the owner tied 0.1.0 to the Kerberos line: the first minor release is the one the Windows takeover runs on, so it waits for GSS-TSIG verified against Windows in the owner's lab (E44 of [identity-plan.md](plans/identity-plan.md)) and not only for the Phase 3 exit. The Phase 3 exit asks of the home one network without Active Directory clients (an IoT network) on Tenko's DHCP (the owner's decision of 2026-11-20). The real cutover of [windows-takeover-plan.md](plans/windows-takeover-plan.md), with DHCP for all four networks as its check E80a, runs on the first 0.1 release that also carries Slice 14 complete. Before the 0.1.0 tag the release candidate is checked for whether the update flow takes the backup of ADR 0023 before it replaces the binary, which the paragraph above promises from 0.1.0 on.
 
 ## Overview
 
@@ -233,7 +233,7 @@ The move job becomes fully automatic for `reserved` hosts (the DNS step was alre
 
 - kea perfdhcp numbers are documented.
 - The failover pair passes the chaos test: a partner is killed mid-load and no duplicate leases result (DHCP-18).
-- The reference home-lab environment runs DHCP through Tenko for all four networks via relay.
+- One network of the reference home-lab environment without Active Directory clients (an IoT network) gets DHCP through Tenko via relay; the cut-over of all four networks is a check of the Windows takeover.
 - The reference home-lab environment resolves through Tenko alone, with no upstream resolver, with DNSSEC validation on (the recursion plan's Internet smoke).
 
 ## Phase 4: AD integration and migration
