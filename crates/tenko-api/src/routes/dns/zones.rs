@@ -87,7 +87,7 @@ fn named_keys<'a>(
 
 /// Checks the primaries of a source against the egress policy (`dns.zone.invalid`, field
 /// `source.primaries`).
-fn check_primaries(
+pub(super) fn check_primaries(
     policy: &EgressPolicy,
     source: Option<&SecondarySource>,
 ) -> Result<(), ApiError> {
