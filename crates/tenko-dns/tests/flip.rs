@@ -592,31 +592,34 @@ fn count_origin(rrsets: &[RrSet], origin: Origin) -> usize {
     rrsets.iter().filter(|rrset| rrset.origin == origin).count()
 }
 
-/// A catalog zone keeps its own rule: neither flipped nor released.
+/// A primary catalog zone.
+fn catalog_zone() -> NewZone {
+    NewZone {
+        name: name("catalog.example.test"),
+        kind: ZoneKind::Primary,
+        tenant: None,
+        scopes: Vec::new(),
+        serial: SerialPolicy::default(),
+        soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
+        name_servers: vec![name("ns1.example.test")],
+        transfer: tenko_core::dns::TransferPolicy::default(),
+        update: UpdatePolicy::default(),
+        dnssec: tenko_core::dns::DnssecPolicy::default(),
+        source: None,
+        description: None,
+        reverse_of: None,
+        catalog: true,
+    }
+}
+
+/// A catalog zone keeps its own rule: neither flipped nor released; a secondary zone that
+/// holds no copy yet has nothing to keep.
 #[tokio::test]
-async fn a_catalog_zone_is_refused() {
+async fn a_catalog_zone_and_a_zone_without_a_copy_are_refused() {
     let zones =
         ZoneService::with_direct_jobs(Arc::new(MemStore::default()), None, ZoneConfig::default());
     let catalog = zones
-        .create(
-            &cx(),
-            NewZone {
-                name: name("catalog.example.test"),
-                kind: ZoneKind::Primary,
-                tenant: None,
-                scopes: Vec::new(),
-                serial: SerialPolicy::default(),
-                soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
-                name_servers: vec![name("ns1.example.test")],
-                transfer: tenko_core::dns::TransferPolicy::default(),
-                update: UpdatePolicy::default(),
-                dnssec: tenko_core::dns::DnssecPolicy::default(),
-                source: None,
-                description: None,
-                reverse_of: None,
-                catalog: true,
-            },
-        )
+        .create(&cx(), catalog_zone())
         .await
         .expect("catalog zone")
         .zone;
@@ -642,4 +645,39 @@ async fn a_catalog_zone_is_refused() {
         .await
         .expect_err("refused");
     assert!(release.is(codes::ZONE_FLIP_CATALOG), "{release:?}");
+    let empty = zones
+        .create(
+            &cx(),
+            NewZone {
+                name: name("copy.example.test"),
+                kind: ZoneKind::Secondary,
+                source: Some(SecondarySource {
+                    primaries: vec![PrimaryServer {
+                        address: "192.0.2.5".parse().expect("address"),
+                        port: 53,
+                        key: None,
+                        xot: false,
+                        tls_name: None,
+                    }],
+                }),
+                name_servers: Vec::new(),
+                catalog: false,
+                ..catalog_zone()
+            },
+        )
+        .await
+        .expect("secondary zone")
+        .zone;
+    let flip = zones
+        .flip(
+            &cx(),
+            empty.id,
+            &ZoneFlip::Primary {
+                soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
+                ns: vec![name("ns1.example.test")],
+            },
+        )
+        .await
+        .expect_err("refused");
+    assert!(flip.is(codes::ZONE_INVALID), "{flip:?}");
 }

@@ -212,6 +212,12 @@ impl ZoneService {
                 match flip {
                     ZoneFlip::Primary { soa, ns } => {
                         check_kind(&before, ZoneKind::Secondary)?;
+                        if !rrsets.iter().any(|(rrset, _)| rrset.rtype == Rtype::SOA) {
+                            return Err(ZoneError::zone_invalid(
+                                "kind",
+                                "the zone holds no copy yet; a flip keeps the records of a transfer",
+                            ));
+                        }
                         zone.source = None;
                         zone.soa = soa.clone();
                         zone.validate()?;
