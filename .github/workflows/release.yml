@@ -481,6 +481,23 @@ jobs:
           set -euo pipefail
           [[ "$EXPECTED" =~ ^[0-9a-f]{64}$ ]]
           echo "${EXPECTED}  dist/tenko-${VERSION}-linux-x86_64" | sha256sum --check --strict -
+      # The binary must start on the x86-64 baseline, not only on the runner's CPU: QEMU's
+      # qemu64 model (no SSSE3, SSE4 or AVX) in user mode. A C compiler that defaults to
+      # x86-64-v3 made binaries that died with SIGILL before main on CPUs without AVX.
+      - name: Run the binary on a CPU without AVX
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-user
+          if ! out="$(qemu-x86_64 -cpu qemu64 "dist/tenko-${VERSION}-linux-x86_64" --version)"; then
+            echo "::error::The Linux binary does not run on a CPU without AVX (QEMU, -cpu qemu64)."
+            exit 1
+          fi
+          echo "$out"
+          case "$out" in
+            *"$VERSION"*) ;;
+            *) echo "::error::On a CPU without AVX the binary reports '$out', expected version $VERSION."; exit 1 ;;
+          esac
       - name: Run the binary in ${{ matrix.name }}
         run: |
           set -euo pipefail

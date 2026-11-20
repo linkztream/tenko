@@ -8,3 +8,9 @@
 # name overrides this for an experiment; other builds ignore it.
 [env]
 JEMALLOC_SYS_WITH_MALLOC_CONF = "background_thread:true,max_background_threads:1,dirty_decay_ms:0,muzzy_decay_ms:0,narenas:1,tcache_max:1024"
+# The CPU baseline of the C code in the musl binary (aws-lc-sys, ring and jemalloc, which cc-rs
+# compiles with these flags), stated rather than left to the C compiler's default: the GCC of
+# an amd64v3 Ubuntu (GitHub's ubuntu-26.04 runner) defaults to x86-64-v3, and a binary built
+# there dies with SIGILL before main on a CPU without AVX. x86-64 is the baseline the Rust
+# target itself has; the libraries choose their faster code at run time.
+CFLAGS_x86_64_unknown_linux_musl = "-march=x86-64 -mtune=generic"
