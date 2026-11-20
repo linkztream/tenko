@@ -147,6 +147,11 @@ Describe 'The answers' {
         $result.detail | Should -Not -Match '[\r\n]'
     }
 
+    It 'reads the detail as written: format characters that reorder or hide text become spaces' {
+        $result = Send-Test -Status 422 -Answer '{"status":422,"code":"migrate.mirror.invalid","detail":"a\u202eb\u2066c\u200bd\ufeffe\udb40\udc41f"}'
+        $result.detail | Should -Be 'a b c d e f'
+    }
+
     It '413: the body is above the bound' {
         $result = Send-Test -Status 413 -Answer '{"status":413,"code":"migrate.mirror.too_large","detail":"the body is above 8 MiB"}'
         $result.status | Should -Be 413
@@ -228,6 +233,24 @@ Describe 'A whole run' {
         $state.body = '{"sequence":4000000001,"changed":true}'
         Invoke-Run | Should -Be 0
         ($state.last.body | ConvertFrom-Json).sequence | Should -Be 4000000001
+    }
+
+    It 'adopts no last sequence that nothing can follow, and says in the log what to do' {
+        $state.status = 409
+        $state.body = '{"status":409,"code":"migrate.mirror.sequence","detail":"replay","params":{"sequence":"5","last":"18446744073709551615"}}'
+        Invoke-Run | Should -Be 5
+        $kept = (Get-Content -LiteralPath (Join-Path $stateDir 'state.json') -Raw | ConvertFrom-Json).last_sequence
+        $kept | Should -Be ($state.last.body | ConvertFrom-Json).sequence
+        Get-LastLogLine | Should -Match 'replace the mirror''s token in Tenko, then run Install-TenkoDhcpMirror\.ps1 again'
+        $state.status = 200
+        $state.body = '{"sequence":1,"changed":true}'
+        Invoke-Run | Should -Be 0 -Because 'the next run still computes a sequence'
+    }
+
+    It 'treats the largest sequence in its state as none' {
+        $now = [datetime]::new(2026, 11, 20, 8, 0, 0, [System.DateTimeKind]::Utc)
+        Get-NextSequence -LastSequence ([uint64]::MaxValue) -Now $now | Should -Be 1795161600
+        Get-NextSequence -LastSequence 1795161600 -Now $now | Should -Be 1795161601
     }
 
     It 'logs a refusal and a server failure with their codes' {

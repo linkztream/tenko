@@ -91,7 +91,14 @@ server can decrypt it, administrators included. If the first run does not store 
 
 To replace the token, run the install again with `-PromptToken` (the other parameters as
 before). The token never appears in the log, in the task's arguments or in the
-configuration file.
+configuration file. The run that stores a new token also resets `state.json`: a new token
+starts a new series of sequences, on the controller and here.
+
+**A mirror stuck on 409.** If every run logs `answer=409 code=migrate.mirror.sequence`
+followed by `the controller holds the largest sequence there is`, the token pushed a
+sequence no push can follow, by mistake or because someone else has the token. Replace the
+token on the mirror's Settings tab in Tenko (the old one stops at once), then run the install
+again with `-PromptToken` and the new token. Nothing else needs to be deleted.
 
 ## The fingerprint
 

@@ -79,9 +79,11 @@ Describe 'What the install writes' {
         . (Join-Path -Path (Join-Path -Path $PSScriptRoot -ChildPath '..') -ChildPath 'Tenko-DhcpMirror.ps1')
         $dir = Join-Path $TestDrive 'dpapi'
         [void](New-Item -ItemType Directory -Path $dir -Force)
+        Write-MirrorState -Dir $dir -LastSequence ([uint64]::MaxValue)
         [void](Write-PendingToken -StateDir $dir -Token (ConvertTo-SecureString -String 'tnk-mirror-token' -AsPlainText -Force))
         Save-PendingToken -Dir $dir | Should -BeTrue
         Test-Path -LiteralPath (Join-Path $dir 'token.pending') | Should -BeFalse
+        (Read-MirrorState -Dir $dir).last_sequence | Should -Be 0 -Because 'a new token starts a new series'
         $stored = Get-Content -LiteralPath (Join-Path $dir 'token.dpapi') -Raw
         $stored | Should -Not -Match 'tnk-mirror-token'
         ConvertFrom-SecureToken (Read-MirrorToken -Dir $dir) | Should -Be 'tnk-mirror-token'

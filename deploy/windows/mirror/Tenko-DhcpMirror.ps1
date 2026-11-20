@@ -1009,10 +1009,15 @@ function Read-ResponseBody {
 }
 
 function ConvertTo-LogText {
-    # The server's text as one line of the log: every control character, line breaks among
-    # them, becomes a space, and at most 200 characters are kept.
+    # The server's text as one line of the log that reads as written: every control
+    # character (line breaks among them) and every format character that hides or reorders
+    # text becomes a space, and at most 200 characters are kept. The list is the one of
+    # tenko_core::text: U+061C, U+200B to U+200F, U+202A to U+202E, U+2060 to U+2064, U+2066
+    # to U+2069, U+FEFF, U+FFF9 to U+FFFB, and the tag characters U+E0001 and U+E0020 to
+    # U+E007F (one surrogate pair each in .NET's strings).
     param([string]$Text)
-    $line = [regex]::Replace($Text, '\p{Cc}', ' ').Trim()
+    $hidden = '\p{Cc}|[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF\uFFF9-\uFFFB]|\uDB40[\uDC01\uDC20-\uDC7F]'
+    $line = [regex]::Replace($Text, $hidden, ' ').Trim()
     if ($line.Length -gt 200) { $line = $line.Substring(0, 200) }
     return $line
 }
@@ -1177,6 +1182,9 @@ function Save-PendingToken {
     $protected = ConvertFrom-SecureString -SecureString $secure
     Set-Content -LiteralPath (Join-Path $Dir 'token.dpapi') -Value $protected -Encoding ASCII
     Remove-Item -LiteralPath $pending -Force
+    # A new token starts a new series of sequences; the controller cleared its side when it
+    # issued the token.
+    Write-MirrorState -Dir $Dir -LastSequence 0
     return $true
 }
 
@@ -1212,10 +1220,10 @@ function Write-MirrorState {
 
 function Get-NextSequence {
     # Strictly increasing per mirror: the Unix time of the run, or one more than the last
-    # push when the clock went back.
+    # push when the clock went back. The largest value has no next one and counts as none.
     param([uint64]$LastSequence, [datetime]$Now)
     $unix = [uint64][math]::Floor(($Now.ToUniversalTime() - [datetime]::new(1970, 1, 1, 0, 0, 0, [System.DateTimeKind]::Utc)).TotalSeconds)
-    if ($unix -gt $LastSequence) { return $unix }
+    if ($unix -gt $LastSequence -or $LastSequence -eq [uint64]::MaxValue) { return $unix }
     return $LastSequence + 1
 }
 
@@ -1343,11 +1351,16 @@ function Invoke-MirrorRun {
             $script:ExitCode = 0
         }
         409 {
-            # A replay: the controller is ahead of our state. Next run continues above it.
+            # A replay: the controller is ahead of our state. Next run continues above it,
+            # unless no sequence can follow the controller's last one.
             $ahead = $sequence
-            if ($null -ne $answer.last -and $answer.last -gt $ahead) { $ahead = $answer.last }
+            $locked = $null -ne $answer.last -and $answer.last -eq [uint64]::MaxValue
+            if ($null -ne $answer.last -and $answer.last -gt $ahead -and -not $locked) { $ahead = $answer.last }
             Write-MirrorState -Dir $StateDir -LastSequence $ahead
             Write-MirrorLog $logDir "$line code=$($answer.code) detail=$($answer.detail) duration_ms=$duration"
+            if ($locked) {
+                Write-MirrorLog $logDir 'the controller holds the largest sequence there is, so no push can follow it: replace the mirror''s token in Tenko, then run Install-TenkoDhcpMirror.ps1 again with the new token'
+            }
             $script:ExitCode = 5
         }
         default {
