@@ -11,11 +11,23 @@ export function mirrorState(mirror: Pick<MirrorItem, "enabled" | "age_secs" | "s
   return mirror.stale ? "stale" : "fresh";
 }
 
-/** The digest check and the install command an administrator runs on the DHCP server. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SHA256 = /^[0-9a-f]{64}$/i;
+const ORIGIN = /^https?:\/\/[A-Za-z0-9.\-[\]:]+$/;
+
+/**
+ * The digest check and the install command an administrator runs on the DHCP server. Only
+ * values of a checked shape go into the command (a UUID, 64 hexadecimal digits, a scheme with
+ * a host and a port); anything else shows as a placeholder for the operator to fill in.
+ */
 export function installCommands(mirror: Pick<MirrorItem, "id" | "ca_fingerprint">, origin: string): [string, string] {
-  const fingerprint = mirror.ca_fingerprint ?? "<fingerprint>";
+  const checked = (value: string | null | undefined, shape: RegExp, placeholder: string) =>
+    value && shape.test(value) ? value : placeholder;
+  const url = checked(origin, ORIGIN, "<https://tenko:8443>");
+  const id = checked(mirror.id, UUID, "<mirror id>");
+  const fingerprint = checked(mirror.ca_fingerprint, SHA256, "<fingerprint>");
   return [
     "Get-FileHash .\\Tenko-DhcpMirror.ps1, .\\Install-TenkoDhcpMirror.ps1 -Algorithm SHA256",
-    `.\\Install-TenkoDhcpMirror.ps1 -Url '${origin}' -MirrorId '${mirror.id}' -Fingerprint '${fingerprint}' -Account 'DOMAIN\\account' -PromptToken`,
+    `.\\Install-TenkoDhcpMirror.ps1 -Url '${url}' -MirrorId '${id}' -Fingerprint '${fingerprint}' -Account 'DOMAIN\\account' -PromptToken`,
   ];
 }

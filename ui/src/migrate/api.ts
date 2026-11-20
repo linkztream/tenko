@@ -49,8 +49,9 @@ export function getLosses(id: string, signal?: AbortSignal): Promise<MirrorLosse
   return api.get("/api/v1/migrate/mirrors/{id}/losses", { path: { id }, signal });
 }
 
-export function ackLosses(id: string, keys: string[]): Promise<unknown> {
-  return api.post("/api/v1/migrate/mirrors/{id}/losses/ack", { path: { id }, body: { keys } });
+/** Acknowledges entries of the loss report at `sequence`, the one that was shown. */
+export function ackLosses(id: string, sequence: number, keys: string[]): Promise<unknown> {
+  return api.post("/api/v1/migrate/mirrors/{id}/losses/ack", { path: { id }, body: { sequence, keys } });
 }
 
 export function getDiff(id: string, cidr: string, signal?: AbortSignal): Promise<ScopeDiff> {

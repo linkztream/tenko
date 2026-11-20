@@ -126,6 +126,10 @@ const ack = route("post", "/api/v1/migrate/mirrors/{id}/losses/ack", async (ctx)
   const body = await ctx.body();
   const keys = Array.isArray(body.keys) ? body.keys.filter((key): key is string => typeof key === "string") : [];
   const entries = seed.losses ?? [];
+  const latest = seed.item.last_sequence ?? 0;
+  if (body.sequence !== latest) {
+    throw new Problem("migrate.mirror.snapshot_moved", { status: 409, params: { sequence: String(body.sequence), latest: String(latest) } });
+  }
   if (keys.length === 0 || keys.some((key) => !entries.some((item) => item.key === key))) {
     throw new Problem("sys.invalid_request", { status: 400, detail: "a key names no entry of the latest snapshot" });
   }

@@ -91,10 +91,16 @@ describe("the mirror model", () => {
     expect(mirrorState({ enabled: true, age_secs: null, stale: false })).toBe("waiting");
     expect(mirrorState({ enabled: true, age_secs: 200, stale: true })).toBe("stale");
     expect(mirrorState({ enabled: true, age_secs: 20, stale: false })).toBe("fresh");
-    const [hash, install] = installCommands({ id: MIRROR, ca_fingerprint: "ab" }, "https://tenko.example.test:8443");
+    const fingerprint = "ab".repeat(32);
+    const [hash, install] = installCommands({ id: MIRROR, ca_fingerprint: fingerprint }, "https://tenko.example.test:8443");
     expect(hash).toContain("Get-FileHash");
     expect(install).toBe(
-      `.\\Install-TenkoDhcpMirror.ps1 -Url 'https://tenko.example.test:8443' -MirrorId '${MIRROR}' -Fingerprint 'ab' -Account 'DOMAIN\\account' -PromptToken`,
+      `.\\Install-TenkoDhcpMirror.ps1 -Url 'https://tenko.example.test:8443' -MirrorId '${MIRROR}' -Fingerprint '${fingerprint}' -Account 'DOMAIN\\account' -PromptToken`,
+    );
+    // A value of another shape never reaches the command.
+    const [, forged] = installCommands({ id: "x'; Remove-Item C:\\ -Recurse; '", ca_fingerprint: "ab'" }, "https://tenko.example.test:8443'");
+    expect(forged).toBe(
+      ".\\Install-TenkoDhcpMirror.ps1 -Url '<https://tenko:8443>' -MirrorId '<mirror id>' -Fingerprint '<fingerprint>' -Account 'DOMAIN\\account' -PromptToken",
     );
   });
 });

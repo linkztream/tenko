@@ -105,7 +105,7 @@ export function LossesTab(props: { mirror: MirrorItem; onChange: () => void }) {
   const acknowledge = () =>
     action.run(
       // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
-      () => ackLosses(props.mirror.id, [...picked()]),
+      () => ackLosses(props.mirror.id, losses.latest?.sequence ?? 0, [...picked()]),
       // eslint-disable-next-line solid/reactivity -- an action of a click, like an event handler
       () => {
         setPicked(new Set<string>());
