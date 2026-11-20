@@ -15,6 +15,9 @@
 #   W0), never the installed command line, which the service account can write
 #   (docs/adr/0023-no-root-after-installation.md). It talks to the node's API on
 #   https://localhost:8443 with root's copy of the node's CA root.
+# - The lab reader is an integration (docs/integrations.md): its client certificate and a token
+#   bound to it, both made by W0, on the integration listener https://localhost:8445. The
+#   command line cannot present a client certificate, so the reader reads through the API only.
 
 set -Eeuo pipefail
 # A failing command inside $(...) stops the substitution, and so the step.
@@ -28,6 +31,7 @@ STEP_DIR="$LAB/$ID"
 MEDIA="$LAB/media"
 CA="$LAB/ca-root.pem"
 TENKO_URL=https://localhost:8443
+READER_URL=https://localhost:8445
 export TENKO_URL TENKO_CA_FILE="$CA" TENKO_CREDENTIALS="$SECRETS/tenko-credentials.json"
 START_EPOCH="$(date +%s)"
 STARTED="$(date -u -d "@$START_EPOCH" +%Y-%m-%dT%H:%M:%SZ)"
@@ -120,12 +124,19 @@ auth_config() {
 }
 
 # api <auth> <method> <path> [<body file>]: one API request; the answer's body on standard
-# output. An HTTP error prints the problem to the log and fails.
+# output. An HTTP error prints the problem to the log and fails. The reader calls the
+# integration listener with its client certificate, the others the API listener.
 api() {
-  local auth="$1" method="$2" path="$3" body="${4:-}" out
-  local args=(-sS --fail-with-body --cacert "$CA" -K - -X "$method" -H "Origin: $TENKO_URL")
+  local auth="$1" method="$2" path="$3" body="${4:-}" out url="$TENKO_URL" ca="$CA"
+  local args=(-sS --fail-with-body -K - -X "$method")
+  if [[ "$auth" == reader ]]; then
+    url="$READER_URL"
+    ca="$(secret tenko_reader_ca.pem)"
+    args+=(--cert "$(secret tenko_reader_client.pem)")
+  fi
+  args+=(--cacert "$ca" -H "Origin: $url")
   [[ -z "$body" ]] || args+=(-H 'Content-Type: application/json' --data-binary "@$body")
-  if ! out="$(auth_config "$auth" | curl "${args[@]}" "$TENKO_URL/api/v1$path")"; then
+  if ! out="$(auth_config "$auth" | curl "${args[@]}" "$url/api/v1$path")"; then
     printf 'API %s %s failed: %s\n' "$method" "$path" "$out" >&2
     return 1
   fi
@@ -170,16 +181,28 @@ print(json.dumps({"user_name":"admin","password":open(sys.argv[1]).read().rstrip
   [[ "$(py 'v["status"]' <<<"$answer")" == authenticated ]] || fail "the TOTP code was not accepted"
 }
 
-# tenko_read ...: a tenko command with the lab reader's token (a viewer service account with
-# the metrics and audit:read scopes, created in W0), which still acts under Hardened.
-tenko_read() {
-  local token
-  token="$(<"$(secret tenko_reader_token)")"
-  TENKO_TOKEN="$token" tenko "$@"
+# The lab reader's reads: a viewer service account with the metrics and audit:read scopes,
+# enrolled in W0, which still acts under Hardened because its token is bound to its
+# certificate.
+
+# zone_table: the zones as `tenko dns zone list` shows them: name, kind, serial, RRsets, id.
+zone_table() {
+  api reader GET '/dns/zones?limit=1000' |
+    py '"\n".join("%s %s %s %s %s" % (z["name"], z["kind"], z["soa_serial"], z["rrsets"], z["id"]) for z in v["items"])'
+}
+
+# zone_json <zone>: the zone as `tenko dns zone get <zone> --json` prints it.
+zone_json() {
+  api reader GET '/dns/zones?limit=1000' | python3 -c 'import json,sys
+print(json.dumps(next(z for z in json.load(sys.stdin)["items"] if z["name"].rstrip(".") == sys.argv[1]), indent=1))' "$1"
 }
 
 # zone_id <zone>: the zone's identifier.
-zone_id() { tenko_read dns zone get "$1" --json | py 'v["id"]'; }
+zone_id() { zone_json "$1" | py 'v["id"]'; }
+
+# records <zone> <name>: the zone's RRsets whose names start with the name, as JSON
+# (`tenko dns record list <zone> --name <name> --json`).
+records() { api reader GET "/dns/zones/$(zone_id "$1")/records?name=$2&limit=1000"; }
 
 # audit <action> <since> <file>: the audit records of one action since a time, newest first,
 # written to the file.

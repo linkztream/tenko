@@ -6,7 +6,7 @@
 # Expects ("-after"): the "-before" entry's zones.txt and started.txt in its step directory
 # on this machine.
 # Leaves: nothing changed.
-# Keeps: zones.txt (`tenko dns zone list`: name, kind, serial, RRsets), started.txt
+# Keeps: zones.txt (as `tenko dns zone list`: name, kind, serial, RRsets, id), started.txt
 # ("-before"); w8.txt and audit-apply.json ("-after").
 # Checks ("-after"): the serials did not move and no dns.update.apply was written since the
 # "-before" entry: a pure refresh writes nothing. That every update was answered NOERROR is
@@ -14,7 +14,7 @@
 
 . /root/lab/run/lab-common.sh || { echo "FAIL: /root/lab/run/lab-common.sh is missing"; exit 1; }
 assert_clock
-tenko_read dns zone list >"$STEP_DIR/zones.txt"
+zone_table >"$STEP_DIR/zones.txt"
 
 case "$ID" in
   *-before)

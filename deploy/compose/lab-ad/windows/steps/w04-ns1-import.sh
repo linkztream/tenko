@@ -87,7 +87,7 @@ print(json.dumps({"update": {"allowed": [acl], "require_tsig": True, "may_replac
     "update_proxy": sids["dnsupdateproxy"]}}}))
 EOF
   ) >/dev/null
-  tenko_read dns zone get "$zone" --json >"$STEP_DIR/zone-$zone.json"
+  zone_json "$zone" >"$STEP_DIR/zone-$zone.json"
   owners "$zone" "$STEP_DIR/owners-$zone.json"
   [[ "$(py 'str(len(v["items"]))' <"$STEP_DIR/owners-$zone.json")" == 0 ]] || fail "$zone has owners before any secure update"
 done

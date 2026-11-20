@@ -13,7 +13,7 @@ expect. A step that fails stops the lab until the lead has read it with you.
 
 | Step | What it shows | Pass or fail | Kept | Notes |
 |---|---|---|---|---|
-| W0 | The node: version, profile Standard, the DNS role answers | | `results/w0-node.txt` | |
+| W0 | The node: version, profile Standard, the DNS role answers; the reader enrolled, its token bound | | `results/w0-node.txt` | |
 | W1 | The domain with the DNS Server role on `dc1`, aging on, `printer1` static, `srv1` joined | | | |
 | W2 | The starting state: records with and without timestamps, the zone exports with `[AGE:n]` | | `results/w2/` | |
 | W3 | The block of section 4.1 creates `TENKO-DNS$`; Tenko adopts it; versions agree; no finding | | `results/w3-account.txt` | |
@@ -22,7 +22,7 @@ expect. A step that fails stops the lab until the lead has read it with you.
 | W6 | The DNS Server role removed from `dc1`; registration still succeeds; dcdiag | | `results/w6-dcdiag.txt` | |
 | W7 | `dc2` promoted without the role through Tenko; registers every record; replication clean | | `captures/w7-dc2.pcapng`, `results/w7/` | |
 | W8 | The hourly registration: answered NOERROR; a pure refresh writes nothing | | `captures/w8-dc1.pcapng`, `results/w8.txt` | |
-| W9 | `UpdateSecurityLevel` 256 by group policy and the Hardened profile: registrations succeed | | `results/w9.txt` | |
+| W9 | `UpdateSecurityLevel` 256 by group policy and the Hardened profile: registrations succeed; unbound service-account tokens removed, the reader still reads | | `results/w9.txt` | |
 | W10 | `pc1` (Windows 11) joins through Tenko and registers its A (and PTR) as `PC1$` | | `captures/w10-pc1*.pcapng`, `results/w10.txt` | |
 | W11 | `srv1` claims its imported A and PTR names (`claimed`) and refreshes them | | `results/w11.txt` | |
 | W12 | `pc1` cannot overwrite the PTR name `srv1` owns: refused, record unchanged | | `results/w12.txt` | |
@@ -49,6 +49,12 @@ expect. A step that fails stops the lab until the lead has read it with you.
 | Do the controllers register their own host records (`dc1`, `dc2`) through Netlogon or through the DNS client, and under which principal? | |
 | Does the DNS client register the PTR record itself, and under which principal? | |
 | Which event does the DNS client log when an update is refused for ownership (8012, 8018, 8020, other)? | |
+
+## The service-account tokens at the switch to Hardened (W9)
+
+| Question | Answer |
+|---|---|
+| What happens to service-account tokens at the switch to Hardened? | Every token not bound to a client certificate is removed at once, audited as `auth.token.revoke` and named in `unbound_tokens_removed`; a removed token answers 401 `auth.unauthenticated`. The first unattended run met it: the reader's plain token was refused after the switch, which is why the reader is now an integration with a bound token (W0). Fill in from `27-w09-ns1-hardened`: whether the dry run and the switch named the same token, and the reader's read after it. |
 
 ## The dcdiag tests that need the DNS Server role (W6, W14)
 

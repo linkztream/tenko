@@ -50,7 +50,8 @@ systemd-timesyncd accepts by default: set `RootDistanceMaxSec=30` beside `NTP=19
 - The Tenko node built from the commit under test (its version is the first line of
   RESULTS.md), set up with an administrator account, the `dns` module on, the profile
   **Standard** to begin with (step W9 moves it to Hardened). On the node, `tenko` on the
-  PATH and a terminal with an administrator's session (`tenko login`).
+  PATH, a terminal with an administrator's session (`tenko login`), and `openssl`, `curl`
+  and `python3` for the reader's enrollment of W0 (all three are in a stock Ubuntu Server).
 - `pktmon` on the Windows machines (in the box); Wireshark on any machine where you read the
   captures (optional; the lead reads them too).
 - A folder `C:\lab` on each Windows machine for what you keep.
@@ -77,6 +78,42 @@ dig @192.0.2.53 ns1.corp.example.test A
 `standard`, the roles `controller,dns` and the module `dns`, and no health finding; `dig`
 answers (REFUSED or NXDOMAIN is fine before W4: the server answers). **Keep:** the outputs in
 `results/w0-node.txt`.
+
+Then the lab's reader: a service account that reads the records, the owners, the audit and
+the metrics for the later steps, and keeps reading under Hardened (W9), which removes every
+service-account token that is not bound to a client certificate. It is enrolled as an
+integration ([integrations.md](../../../../docs/integrations.md) sections 4 to 7). In the web
+UI, **Settings, Access, Service accounts**: create `lab-reader` with the role `viewer`. Then
+**Integration certificates, Enroll a host** for `lab-reader`: the code is shown once. On the
+node, as root, save the script `tenko-enroll.sh` of section 5.1 of the documentation of the
+commit under test, put the code in `/root/lab/secrets/enroll.code`, and enroll with the label
+`ns1`:
+
+```
+install -d -m 700 /root/lab/secrets
+TENKO_API=https://localhost:8443 TENKO_LABEL=ns1 TENKO_DIR=/root/lab/secrets sh tenko-enroll.sh
+cd /root/lab/secrets && mv client.pem tenko_reader_client.pem && mv tenko-ca.pem tenko_reader_ca.pem
+```
+
+In the token dialog of `lab-reader`, create a token `lab-reader` for 30 days with the role
+`viewer` and the scopes `metrics` and `audit:read`, bound to the certificate `ns1`; save it as
+`/root/lab/secrets/tenko_reader_token`. It is read on the integration listener, port 8445,
+with the certificate:
+
+```
+cd /root/lab/secrets
+printf 'Authorization: Bearer %s\n' "$(cat tenko_reader_token)" >call.headers
+curl -fsS --cacert tenko_reader_ca.pem --cert tenko_reader_client.pem -H @call.headers \
+  https://localhost:8445/api/v1/dns/zones
+rm call.headers
+```
+
+The installer leaves `[integrations] listen` unset, so the listener opens by itself on port
+8445 of the API's addresses while a code waits or a certificate is valid; nothing is
+configured for it. **Expect:** the token starts with `tnkb_`; the read answers the zones (none
+before W4). The certificate lasts 30 days under Standard; Hardened's 7 days apply only at its
+next renewal, which starts in the last third of its lifetime, so the lab needs none. Nothing
+of this is kept: the key, the certificate and the token stay on the node.
 
 ## W1. The domain, as an operator has it before the takeover
 
@@ -468,7 +505,21 @@ Invoke-GPUpdate -Computer srv1 -Force
 ```
 
 On the node, the profile moves to **Hardened** (Settings, Security profile; read what it
-changes first). Then on each controller and on `srv1`:
+changes first). Among what it changes: service-account tokens must be bound to a client
+certificate (TGL-47), and the switch removes every unbound one at once, each audited as
+`auth.token.revoke` ([integrations.md](../../../../docs/integrations.md) section 9). The
+profile dialog first shows how many tokens of which accounts it removes, from a dry run of the
+same change, which the API answers too (with an interactive session of an administrator):
+
+```
+PATCH /api/v1/settings/security?dry_run=true
+{"profile": "hardened"}
+```
+
+Here `unbound_tokens_removed` names no token of `lab-reader`, whose token is bound (W0).
+After the switch the reader still reads on port 8445 with its certificate (the `curl` of W0),
+and an unbound service-account token, if one was left, answers 401 `auth.unauthenticated`.
+Then on each controller and on `srv1`:
 
 ```powershell
 gpresult /r /scope computer | Select-String 'Lab DNS secure only'
@@ -477,9 +528,12 @@ nltest /dsregdns
 nltest /dsquerydns
 ```
 
-**Expect:** the policy is applied; every registration succeeds, as GSS-TSIG is what they use
+**Expect:** the dry run and the switch name the same tokens, none of `lab-reader`; the reader
+still reads; the policy is applied; every registration succeeds, as GSS-TSIG is what they use
 already; under Hardened the zones' ownership is on whatever the zone says, and an unsigned
 update is refused. **Keep:** `results/w9.txt`.
+
+**Answer in RESULTS.md:** what happens to service-account tokens at the switch to Hardened.
 
 ## W10. A Windows 11 client joins the domain through Tenko
 
@@ -727,10 +781,14 @@ directory services restore password of both controllers), `tenko_admin_password`
 `admin`) and `kerberos_onetime_password` (the one-time password of W3, on `dc1` and `ns1`). A
 script checks that the files it needs are there and refuses to start without them; a secret
 reaches a cmdlet as a SecureString or a credential object, or a program through a pipe or
-its standard input, never as an argument or an environment variable. W0 writes three more on
+its standard input, never as an argument or an environment variable. W0 writes more on
 `ns1`, in the same directory: `tenko_admin_totp` and `tenko_admin_recovery_codes` (the
-administrator's second factor) and `tenko_reader_token` (below), and root's API token goes to
-`/root/lab/secrets/tenko-credentials.json`.
+administrator's second factor), and the reader's `tenko_reader_client.pem` (its key and
+certificate), `tenko_reader_ca.pem` (the root of the integration listener) and
+`tenko_reader_token` (below); root's API token goes to
+`/root/lab/secrets/tenko-credentials.json`. W9 writes `tenko_unbound_token`, the throwaway
+token its check removes. These are made on the node and never leave it, so the manifest does
+not list them: its `secrets` are what the job writes.
 
 **Who acts.** Most Windows steps run as SYSTEM: the promotions and the joins take a
 credential object built from the secret file, and the registrations, captures and checks
@@ -752,10 +810,19 @@ at enrollment). The Kerberos adoption (W3), the audit export and the profile (W9
 interactive session, which the scripts open with the password and a TOTP code; the other
 writes use the API token of `tenko login`. The Hardened profile of W9 then requires a
 passkey of an administrator (TGL-03), which no script has, so from W9 on no script acts as
-`admin`: the later reads (records, owners, the audit, the metrics) use the token of a
-service account `lab-reader` that W0 creates with the `viewer` role and the scopes `metrics`
-and `audit:read`, and the restart of W13 needs no sign-in. W9 also adds an audit export file
-sink before the switch, because Hardened refuses to start without one (TGL-21). Nothing of
+`admin`; and it removes every service-account token that is not bound to a client
+certificate (TGL-47). The reads of every step (records, owners, the audit, the metrics) are
+therefore those of an integration: a service account `lab-reader` with the `viewer` role,
+which W0 enrolls as the runbook's W0 does (an enrollment code from the administrator's session,
+the key and the request made with `openssl`, the proof with `python3`), and a token bound to
+its certificate with the scopes `metrics` and `audit:read`, sent with the certificate to the
+integration listener `https://localhost:8445`. The command line cannot present a client
+certificate, so the scripts read through the API where the runbook shows a `tenko` command,
+and keep the same content (the zones as `tenko dns zone list` shows them, JSON for the
+others). The restart of W13 needs no sign-in. W9 also adds an audit export file sink before
+the switch, because Hardened refuses to start without one (TGL-21), and checks the rule of
+TGL-47 with a throwaway unbound token: the dry run names it and nothing of `lab-reader`, the
+switch removes it with its `auth.token.revoke` record, and it then answers 401. Nothing of
 the product's sign-in rules is relaxed for the lab.
 
 **The order.** The entries follow the runbook with one exception: W11 (`srv1` points its DNS

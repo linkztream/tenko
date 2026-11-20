@@ -2,7 +2,7 @@
   {
     "id": "01-w00-ns1-install",
     "step": "W0",
-    "title": "Install Tenko on ns1, its second factor, its tokens; check the node",
+    "title": "Install Tenko on ns1, its second factor, its token, the reader's certificate and bound token; check the node",
     "target": "ns1",
     "script": "deploy/compose/lab-ad/windows/steps/w00-ns1-install.sh",
     "timeout_minutes": 30,
@@ -586,7 +586,7 @@
   {
     "id": "27-w09-ns1-hardened",
     "step": "W9",
-    "title": "The audit export sink and the Hardened profile",
+    "title": "The audit export sink and the Hardened profile; unbound service-account tokens removed, the reader still reads",
     "target": "ns1",
     "script": "deploy/compose/lab-ad/windows/steps/w09-ns1-hardened.sh",
     "timeout_minutes": 15,

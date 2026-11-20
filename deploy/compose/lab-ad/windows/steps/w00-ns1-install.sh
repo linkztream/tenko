@@ -13,10 +13,16 @@
 #     TOTP through the API as a person would in the UI and keeps the seed and the recovery
 #     codes in /root/lab/secrets/ (tenko_admin_totp, tenko_admin_recovery_codes);
 #   - root's API token from `tenko login` (/root/lab/secrets/tenko-credentials.json);
-#   - a service account `lab-reader` with the viewer role and a token with the scopes
-#     `metrics` and `audit:read` (/root/lab/secrets/tenko_reader_token): the reads of the
-#     later steps, which keep working after W9 moves the profile to Hardened, where an
-#     administrator signs in with a passkey only.
+#   - a service account `lab-reader` with the viewer role, enrolled as an integration by
+#     docs/integrations.md section 5.1 (label ns1): its key and certificate in
+#     /root/lab/secrets/tenko_reader_client.pem, the root of the integration listener in
+#     tenko_reader_ca.pem, and a token bound to the certificate with the scopes `metrics` and
+#     `audit:read` in tenko_reader_token. These are the reads of the later steps, on the
+#     integration listener (port 8445 by default, open while a certificate is valid). They
+#     keep working after W9 moves the profile to Hardened, where an administrator signs in
+#     with a passkey only and every unbound service-account token is removed. The
+#     certificate lasts 30 days (Standard; Hardened's 7 days apply at its next renewal), as
+#     long as the token: a run of hours needs no renewal.
 # Keeps: w0-node.txt (version, diagnostics, dig), install.txt (the installer's output, the
 # setup token line removed), release-name.txt (the release file name the binary's hash has in
 # SHA256SUMS), ca-root.pem and ca-root-sha256.txt.
@@ -86,12 +92,41 @@ py 'v.get("recovery_codes") or []' <<<"$answer" >"$SECRETS/tenko_admin_recovery_
 unset answer
 session_login
 
-say "the lab reader"
+say "the lab reader's enrollment"
 account="$(api session POST /access/service-accounts \
   <(printf '{"name":"lab-reader","display_name":"Lab reader","roles":["viewer"]}') | py 'v["id"]')"
+# The code is a credential: from the answer to a root-only file, never to the log.
+api session POST /integrations/enrollments <(printf '{"account":"%s","lifetime_secs":600}' "$account") |
+  py 'v["code"]' >"$SECRETS/reader-enroll.code"
+IFS=. read -r prefix code_id code_account code_secret fingerprint <"$SECRETS/reader-enroll.code"
+[[ "$prefix" == tnki && "$code_account" == "$account" ]] || fail "the enrollment answered no code for lab-reader"
+cd "$SECRETS"
+curl -fsS --cacert "$CA" "$TENKO_URL/api/v1/integrations/ca" -o tenko_reader_ca.pem
+[[ "$(openssl x509 -in tenko_reader_ca.pem -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f')" == "$fingerprint" ]] ||
+  fail "the root of the integration listener does not match the enrollment code"
+openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out reader.key
+openssl req -new -key reader.key -subj /CN=tenko-integration -outform DER -out reader.csr
+openssl req -in reader.csr -inform DER -noout -pubkey | openssl pkey -pubin -outform DER -out reader.spki
+# The secret reaches Python on standard input, never as an argument.
+proof="$(printf '%s\n' "$code_secret" | python3 -c 'import hashlib,hmac,sys
+key=bytes.fromhex(sys.stdin.readline().strip())
+head=("tenko-integration-enroll-v1\n%s\n%s\n%s\n" % tuple(sys.argv[1:4])).encode()
+print(hmac.new(key, head + open(sys.argv[4], "rb").read(), hashlib.sha256).hexdigest())' "$code_id" "$account" ns1 reader.spki)"
+unset code_secret
+status="$(printf 'header = "Content-Type: application/pkcs10"\nheader = "Tenko-Enrollment-Code: %s"\nheader = "Tenko-Enrollment-Proof: %s"\n' "$code_id" "$proof" |
+  curl -sS --cacert tenko_reader_ca.pem -K - --data-binary @reader.csr -o reader.crt -w '%{http_code}' \
+    "$TENKO_URL/api/v1/integrations/enroll?label=ns1")"
+[[ "$status" == 201 ]] || fail "the enrollment was refused ($status): $(cat reader.crt)"
+cat reader.key reader.crt >tenko_reader_client.pem
+rm -f reader.key reader.csr reader.spki reader.crt reader-enroll.code
+cd - >/dev/null
+
+say "the lab reader's bound token"
+lineage="$(api session GET "/integrations/certificates?account=$account" | py 'v["items"][0]["lineage"]')"
 api session POST "/access/service-accounts/$account/tokens" \
-  <(printf '{"name":"lab-reader","expires_in_days":30,"grants":[{"role":"viewer"}],"scopes":["metrics","audit:read"]}') |
+  <(printf '{"name":"lab-reader","expires_in_days":30,"grants":[{"role":"viewer"}],"scopes":["metrics","audit:read"],"lineage":"%s"}' "$lineage") |
   py 'v["token"]' >"$SECRETS/tenko_reader_token"
+[[ "$(<"$SECRETS/tenko_reader_token")" == tnkb_* ]] || fail "the lab reader's token is not bound to its certificate"
 
 say "the administrator's token for the command line"
 # The code is ready before the login starts: a login of 0.0.12-rc.4 that waits for it longer
@@ -111,6 +146,6 @@ say "the node"
 grep -q -- "$version" "$STEP_DIR/w0-node.txt" || fail "tenko --version does not name $version"
 grep -qi standard "$STEP_DIR/w0-node.txt" || fail "the diagnostics do not name the profile standard"
 grep -q 'status: \(NOERROR\|NXDOMAIN\|REFUSED\)' "$STEP_DIR/w0-node.txt" || fail "dig got no answer from 192.0.2.53"
-tenko_read dns zone list >/dev/null || fail "the lab reader's token cannot list the zones"
+zone_table >/dev/null || fail "the lab reader cannot list the zones through the integration listener"
 
-step "Tenko $version installed with profile standard, roles controller,dns; the DNS role answers"
+step "Tenko $version installed with profile standard, roles controller,dns; the DNS role answers; the lab reader reads with its certificate and bound token"
