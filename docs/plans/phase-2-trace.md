@@ -41,7 +41,7 @@ This file is generated. It lists every Phase 2 requirement of `docs/REQUIREMENTS
 | OPS-06 | Must | - | - | `docs/ARCHITECTURE.md`<br>`docs/CONFORMANCE.md`<br>`docs/MIGRATION.md`<br>`docs/ROADMAP.md`<br>`docs/SECURITY-PROFILES.md`<br>and 5 more |
 | OPS-09 | Should | `crates/tenko-dns/src/zone/kerberos/tests.rs::ops_09_clock_skew_above_60_s_is_a_finding`<br>`crates/tenko/tests/acceptance_dnssec.rs` | - | `crates/tenko-api/src/routes/dns/kerberos.rs`<br>`crates/tenko-api/src/routes/dns/model.rs`<br>`crates/tenko-api/src/routes/dns/recursion.rs`<br>`crates/tenko-core/src/dns.rs`<br>`crates/tenko-dns/src/dnssec/health.rs`<br>and 20 more |
 | OPS-25 | Must | `crates/tenko/tests/upgrade_modules.rs` | - | `crates/tenko-api/src/dto/system.rs`<br>`crates/tenko-api/src/lib.rs`<br>`crates/tenko-api/src/modules.rs`<br>`crates/tenko-api/src/routes/dhcp.rs`<br>`crates/tenko-api/src/routes/dns.rs`<br>and 21 more |
-| OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>`crates/tenko-cluster/src/node_sync/mod.rs`<br>and 21 more |
+| OPS-28 | Must | `ui/e2e/nodes.spec.ts` | `bench/phase1-node-sync/results/2026-10-11-m15-config-sync.md` | `crates/tenko-api/src/middleware/body_deadline.rs`<br>`crates/tenko-api/src/routes/scans.rs`<br>`crates/tenko-cluster/src/buffer.rs`<br>`crates/tenko-cluster/src/client.rs`<br>`crates/tenko-cluster/src/lib.rs`<br>and 22 more |
 
 ## Exit criteria
 
