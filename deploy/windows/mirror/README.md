@@ -21,7 +21,13 @@ the `DhcpServer` module and nothing else, and download nothing.
 - A Tenko controller with a mirror of kind `windows-dhcp` (created on the connectors
   page). The mirror card shows the three values the install needs: the mirror id, the
   token (shown once) and the SHA-256 fingerprint of the controller's certificate
-  authority.
+  authority. Give the mirror the server's address as a source address when you create it
+  (one address, or the network the server is in): the token is then accepted from there
+  only, and a push from anywhere else is refused like an unknown token (`answer=401` in the
+  log). The Hardened profile requires it.
+- At most 1,000 scopes, 10,000 reservations and 20,000 leases per server. Above them the
+  exporter warns before it pushes and the controller refuses the push with 422
+  `migrate.mirror.invalid`, naming the count.
 - An account for the task: a member of `DHCP Users` and of **no** privileged group. A group
   managed service account where the domain has a KDS root key (`CORP\gmsa-mirror$`, no
   password to keep), otherwise a user account with a long random password. The exporter
@@ -80,7 +86,10 @@ the `DhcpServer` module and nothing else, and download nothing.
 The token is shown once on the mirror card. It can write this one mirror and nothing
 else: every other operation of the API answers 403 to it, including reads of its own
 mirror. It expires within the lifetime the profile allows and is replaced from the mirror
-card; the old one stops at once.
+card; the old one stops at once. A token bound to source addresses starts with `tnkc_`
+instead of `tnk_`; the new token of a replacement has the source addresses given with the
+replacement, not the old token's. If the server's address changes, replace the token with
+the new address and run the install again.
 
 The install never stores the token itself: it leaves it as `token.pending` in the state
 directory, readable by the account and administrators only, and the exporter's first run

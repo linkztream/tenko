@@ -85,7 +85,7 @@ $script:HttpTimeoutMs = 30000
 # Plan section 2.1, point 6: the controller refuses more; the log says so before it does.
 $script:MaxScopes = 1000
 $script:MaxReservations = 10000
-$script:MaxLeases = 100000
+$script:MaxLeases = 20000
 
 # Plan section 2.1, point 4: a member of one of these does not push.
 $script:PrivilegedSids = @(
@@ -1321,7 +1321,8 @@ function Invoke-MirrorRun {
     foreach ($scope in $snapshot.dhcp.scopes) { $reservationCount += $scope.reservations.Count }
     $counts = "scopes=$($snapshot.dhcp.scopes.Count) reservations=$reservationCount leases=$($snapshot.dhcp.leases.Count) losses=$($snapshot.losses.entries.Count)"
     if ($snapshot.dhcp.scopes.Count -gt $script:MaxScopes -or $reservationCount -gt $script:MaxReservations -or $snapshot.dhcp.leases.Count -gt $script:MaxLeases) {
-        Write-Warning "the snapshot is above the controller's bounds ($counts); the push will be refused with 413"
+        $bounds = "at most $($script:MaxScopes) scopes, $($script:MaxReservations) reservations and $($script:MaxLeases) leases"
+        Write-Warning "the snapshot is above the controller's bounds ($counts; $bounds); the controller refuses it with 422 migrate.mirror.invalid, naming the count"
     }
 
     # 5. The dry run prints and stops.
