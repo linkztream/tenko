@@ -984,11 +984,18 @@ pub fn render_roles() -> String {
     out
 }
 
-/// A string of the server's answer made safe for a terminal: every control character, the
-/// escape that starts a terminal sequence among them, becomes `?`.
+/// A string of the server's answer made safe for a terminal: every control character (the
+/// escape that starts a terminal sequence among them) and every format character that hides
+/// or reorders text ([`tenko_core::text::is_hidden`]) becomes `?`.
 pub(crate) fn clean(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { '?' } else { c })
+        .map(|c| {
+            if tenko_core::text::is_hidden(c) {
+                '?'
+            } else {
+                c
+            }
+        })
         .collect()
 }
 

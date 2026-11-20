@@ -185,6 +185,44 @@ async fn a_push_answers_with_its_status_and_code() {
 }
 
 #[tokio::test]
+async fn a_node_decodes_one_push_at_a_time() {
+    let (harness, admin) = harness().await;
+    let (first, first_token) = mirror(&harness, &admin, "dc1").await;
+    let (second, second_token) = mirror(&harness, &admin, "dc2").await;
+    // The first body arrives in two parts; the second push comes while the first is read.
+    let (part, parts) = tokio::sync::mpsc::channel::<Vec<u8>>(1);
+    let reading = Arc::new(tokio::sync::Notify::new());
+    let body = futures::stream::unfold(
+        (parts, Arc::clone(&reading)),
+        |(mut parts, reading)| async move {
+            reading.notify_one();
+            let chunk = parts.recv().await?;
+            Some((Ok::<_, std::io::Error>(chunk), (parts, reading)))
+        },
+    );
+    let text = snapshot(1);
+    let (start, rest) = text.split_at(10);
+    let harness = &harness;
+    let (slow, busy) = tokio::join!(
+        push(harness, &first, &first_token, Body::from_stream(body), &[]),
+        async move {
+            reading.notified().await;
+            let busy = push(harness, &second, &second_token, snapshot(1), &[]).await;
+            part.send(start.as_bytes().to_vec()).await.expect("sent");
+            part.send(rest.as_bytes().to_vec()).await.expect("sent");
+            (busy, second, second_token)
+        }
+    );
+    let (busy, second, second_token) = busy;
+    busy.assert_problem(429, "migrate.mirror.rate");
+    assert_eq!(busy.header("retry-after"), Some("2"));
+    slow.assert_status(200);
+    push(harness, &second, &second_token, snapshot(1), &[])
+        .await
+        .assert_status(200);
+}
+
+#[tokio::test]
 async fn only_the_mirror_s_own_token_pushes() {
     let (harness, admin) = harness().await;
     let (id, token) = mirror(&harness, &admin, "dc1").await;

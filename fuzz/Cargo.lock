@@ -3393,6 +3393,7 @@ dependencies = [
  "tenko-dhcp",
  "tenko-ipam",
  "tenko-store",
+ "tokio",
  "tracing",
  "utoipa",
 ]

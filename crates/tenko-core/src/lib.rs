@@ -83,6 +83,7 @@ pub mod serde_util;
 pub mod table;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
+pub mod text;
 pub mod timestamp;
 
 pub use auth::{AuthFailure, AuthFlags, Authenticated, Authenticator, Credentials};

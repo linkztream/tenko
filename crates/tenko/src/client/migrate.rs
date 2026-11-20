@@ -218,7 +218,7 @@ fn usage(message: impl std::fmt::Display) -> Failure {
 }
 
 /// A text field of a JSON object, `-` when absent; a source's text never reaches the
-/// terminal with a control character.
+/// terminal with a control character or a format character that hides or reorders text.
 fn field(value: &Value, key: &str) -> String {
     match value.get(key) {
         Some(Value::String(text)) => clean(text),
@@ -619,10 +619,14 @@ mod tests {
 
     #[test]
     fn a_pushed_text_reaches_the_terminal_without_control_characters() {
-        let row =
-            json!({ "item": "scope:1@vendor\u{1b}]52;c;Y2FsYw==\u{7}", "mirror": "a\u{1b}[2K\nb" });
+        let row = json!({
+            "item": "scope:1@vendor\u{1b}]52;c;Y2FsYw==\u{7}",
+            "mirror": "a\u{1b}[2K\nb",
+            "name": "192.0.2.\u{202E}01\u{2066}\u{200B}\u{E0041}",
+        });
         assert_eq!(field(&row, "item"), "scope:1@vendor?]52;c;Y2FsYw==?");
         assert_eq!(field(&row, "mirror"), "a?[2K?b");
+        assert_eq!(field(&row, "name"), "192.0.2.?01???");
     }
 
     #[test]

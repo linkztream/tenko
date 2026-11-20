@@ -3923,7 +3923,7 @@ export interface paths {
         get: operations["get_mirror_snapshot"];
         /**
          * Push a snapshot of a mirrored source
-         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,144 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,000 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
          */
         put: operations["push_mirror_snapshot"];
         post?: never;
@@ -45071,7 +45071,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A push came faster than the floor (`migrate.mirror.rate`) */
+            /** @description A push came faster than the floor, or another push held the node's decode for 2 s (`migrate.mirror.rate`) */
             429: {
                 headers: {
                     [name: string]: unknown;

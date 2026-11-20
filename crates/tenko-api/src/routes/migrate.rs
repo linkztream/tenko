@@ -355,7 +355,7 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,144 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,000 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A node decodes one push at a time; a push that waits 2 s for it is answered 429 as well. A push whose token is replaced while its body arrives is refused 401. A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
@@ -368,7 +368,7 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
         (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is above the bound (`migrate.mirror.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 429, description = "A push came faster than the floor (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 429, description = "A push came faster than the floor, or another push held the node's decode for 2 s (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn push_mirror_snapshot(
@@ -398,13 +398,14 @@ async fn push_mirror_snapshot(
         }
         .into());
     }
-    let outcome = match service.admit(id).await {
-        Ok(()) => match decoded(&headers, raw).await {
-            Ok(snapshot) => service.push(&cx, id, snapshot).await,
-            Err(error) => Err(error),
-        },
-        Err(error) => Err(error),
-    };
+    // One push at a time on this node, from the admission to the write.
+    let outcome = async {
+        let _decoding = service.decoding().await?;
+        service.admit(id).await?;
+        let snapshot = decoded(&headers, raw).await?;
+        service.push(&cx, id, snapshot).await
+    }
+    .await;
     let error = match outcome {
         Ok(accepted) => return Ok(Json(accepted).into_response()),
         Err(error) => error,

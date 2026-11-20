@@ -136,7 +136,7 @@ const fn default_interval() -> u32 {
 impl Mirror {
     /// Checks the row: a name that makes the service account's name, `mirror-<name>` of at
     /// most [`MAX_NAME_LEN`] characters (so the name has at most 57) without a space or a
-    /// control character, and an interval within [`MIN_INTERVAL_SECS`] and
+    /// character [`crate::text::is_hidden`] holds for, and an interval within [`MIN_INTERVAL_SECS`] and
     /// [`MAX_INTERVAL_SECS`].
     ///
     /// # Errors
@@ -150,11 +150,11 @@ impl Mirror {
         if self
             .name
             .chars()
-            .any(|c| c.is_whitespace() || c.is_control())
+            .any(|c| c.is_whitespace() || crate::text::is_hidden(c))
         {
             return Err(MigrateError::invalid(
                 "name",
-                "no space and no control character: the name is part of the service account's",
+                "no space and no control or format character: the name is part of the service account's",
             ));
         }
         if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&self.interval_secs) {
@@ -866,7 +866,7 @@ mod tests {
 
         mirror.name = String::new();
         assert!(mirror.validate().is_err());
-        for name in [" lab", "dc 1", &"x".repeat(58)] {
+        for name in [" lab", "dc 1", "dc\u{202E}1", &"x".repeat(58)] {
             mirror.name = name.to_owned();
             let refused = mirror.validate().expect_err(name);
             assert_eq!(crate::Coded::code(&refused), codes::MIRROR_INVALID_SETTINGS);

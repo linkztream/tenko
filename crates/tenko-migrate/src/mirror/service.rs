@@ -28,12 +28,12 @@ use std::{
 use ipnet::IpNet;
 use serde::Serialize;
 use tenko_auth::{
-    AuthService,
+    AuthError, AuthService,
     clock::{Clock, SystemClock},
     service::types::CreatedToken,
 };
 use tenko_core::{
-    ApiTokenId, MirrorId, RequestCtx, Revision, Timestamp, UserId,
+    ApiTokenId, MirrorId, Principal, RequestCtx, Revision, Timestamp, UserId,
     audit::AuditDraft,
     codec::{canonical_sha256, encode_key},
     ipam::Stamp,
@@ -63,6 +63,10 @@ const REFUSAL_AUDIT_SECS: u64 = 60;
 
 /// How often a write that met a concurrent change of its row is read and tried again.
 pub const ATTEMPTS: usize = 3;
+
+/// How long a push waits for the node's one decode before it is answered 429; also its
+/// `Retry-After`.
+pub const DECODE_WAIT_SECS: u64 = 2;
 
 /// The index of each outcome in [`metrics::PUSH_OUTCOMES`].
 const CHANGED: usize = 0;
@@ -237,6 +241,7 @@ pub struct MirrorService {
     auth: Arc<AuthService>,
     memory: Mutex<HashMap<MirrorId, Memory>>,
     clock: Arc<dyn Clock>,
+    decoding: tokio::sync::Semaphore,
 }
 
 impl std::fmt::Debug for MirrorService {
@@ -259,6 +264,7 @@ impl MirrorService {
             auth,
             memory: Mutex::new(HashMap::new()),
             clock: Arc::new(SystemClock),
+            decoding: tokio::sync::Semaphore::new(1),
         }
     }
 
@@ -486,7 +492,7 @@ impl MirrorService {
                 )
                 .await
                 .map_err(|error| match error {
-                    tenko_auth::AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
+                    AuthError::UserNameTaken => MirrorError::Exists(account.clone()),
                     other => other.into(),
                 })?;
             mirror.account = credentials.account;
@@ -667,6 +673,27 @@ impl MirrorService {
         ))
     }
 
+    /// The node's one decode of a push body: the route holds it from the admission through
+    /// the read, the decode and the write, so that the memory a decode may take
+    /// (`body::DECODE_ALLOCATION_BOUND`) is taken once on a node, however many mirrors and
+    /// controllers push.
+    ///
+    /// # Errors
+    ///
+    /// [`MirrorError::Rate`] when another push held it for [`DECODE_WAIT_SECS`].
+    pub async fn decoding(&self) -> Result<tokio::sync::SemaphorePermit<'_>, MirrorError> {
+        tokio::time::timeout(
+            Duration::from_secs(DECODE_WAIT_SECS),
+            self.decoding.acquire(),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .ok_or(MirrorError::Rate {
+            retry_after: DECODE_WAIT_SECS,
+        })
+    }
+
     /// Lets a push of `id` through before its body is read: the mirror exists, is enabled,
     /// and its last admitted push is at least [`MIN_PUSH_INTERVAL_SECS`] old.
     ///
@@ -695,13 +722,15 @@ impl MirrorService {
         Ok(())
     }
 
-    /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4): a sequence
-    /// above the last accepted one of the current token; an unchanged content writes nothing
-    /// (but the row's freshness every [`FRESHNESS_WRITE_SECS`]); a changed one writes the
-    /// snapshot, the row and `migrate.mirror.push`.
+    /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4) from the
+    /// mirror's current token, as each attempt reads it: a sequence above the last accepted
+    /// one of that token; an unchanged content writes nothing (but the row's freshness every
+    /// [`FRESHNESS_WRITE_SECS`]); a changed one writes the snapshot, the row and
+    /// `migrate.mirror.push`.
     ///
     /// # Errors
     ///
+    /// [`MirrorError::Auth`] when the request's token is no longer the mirror's,
     /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Sequence`] with
     /// the last accepted sequence, [`MirrorError::TooLarge`] for a snapshot the store's batch
     /// cannot hold, [`MirrorError::Conflict`], a store error.
@@ -719,6 +748,12 @@ impl MirrorService {
         for _ in 0..ATTEMPTS {
             let view = self.view().await?;
             let (mut mirror, revision) = Self::row(view.as_ref(), id)?;
+            // The token that authenticated the request must still be the row's: a push whose
+            // body was still arriving when the token was replaced is a revoked token's.
+            if !matches!(ctx.principal, Principal::Token { id: token, .. } if token == mirror.token)
+            {
+                return Err(MirrorError::Auth(AuthError::Unauthenticated));
+            }
             if !mirror.enabled {
                 return Err(MirrorError::Disabled(id));
             }
@@ -891,7 +926,7 @@ impl MirrorService {
         let by = ctx
             .principal
             .user()
-            .ok_or(MirrorError::Auth(tenko_auth::AuthError::Unauthenticated))?;
+            .ok_or(MirrorError::Auth(AuthError::Unauthenticated))?;
         let (view, snapshot) = self.stored(id).await?;
         if snapshot.sequence != sequence {
             return Err(MirrorError::SnapshotMoved {

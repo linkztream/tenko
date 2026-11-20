@@ -9,7 +9,8 @@ publish = false
 
 # WP14.1: the mirrored sources (src/mirror). Every crate is already in the graph through the
 # server: the store, the mirror account's minting in `tenko-auth`, the DHCP and IPAM rows the
-# diff reads, and `flate2` for a gzip push body (as `tenko-cluster` and `tenko-dns` inflate).
+# diff reads, `flate2` for a gzip push body (as `tenko-cluster` and `tenko-dns` inflate), and
+# `tokio` for the one decode at a time.
 [dependencies]
 flate2 = "1.1.10"
 ipnet = { workspace = true }
@@ -20,15 +21,17 @@ tenko-core = { workspace = true }
 tenko-dhcp = { path = "../tenko-dhcp" }
 tenko-ipam = { workspace = true }
 tenko-store = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 utoipa = { workspace = true }
 
 [dev-dependencies]
+# The store of tests/mirror_service.rs that lets a write wait for the test.
+async-trait = { workspace = true }
 proptest = { workspace = true }
 # The counting allocator of tests/decode_alloc.rs (the bound of what decoding allocates).
 stats_alloc = { workspace = true }
 tenko-auth = { workspace = true, features = ["testing"] }
-tokio = { workspace = true }
 
 # The allocation test is its own harness: the counting allocator counts every thread.
 [[test]]

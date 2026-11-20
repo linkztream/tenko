@@ -83,10 +83,14 @@ pub const MAX_FILTERS: usize = 10_000;
 pub const MAX_LOCATION_LEN: usize = 256;
 
 /// The most array elements one push body holds over every list, counted before it is parsed
-/// (`tenko_migrate::mirror::body`): the bounds above summed with room for the options and
-/// values of every level, so that no list of the body is allocated past what this bound
-/// allows.
-pub const MAX_ELEMENTS: usize = 262_144;
+/// (`tenko_migrate::mirror::body`), so that no list of the body is allocated past it: the
+/// counted lists at their bounds (scopes, reservations, leases, loss entries, MAC filters),
+/// and as many items again for what the contract does not count in all (the options and
+/// their values on every level, the ranges, the conditions and the smaller lists). It
+/// follows the counts; their sum alone would refuse a snapshot at the bounds that carries
+/// options.
+pub const MAX_ELEMENTS: usize =
+    2 * (MAX_SCOPES + MAX_RESERVATIONS + MAX_LEASES + MAX_LOSSES + MAX_FILTERS);
 
 /// The label of a source kind: `[a-z0-9-]{1,32}`, never an enumeration of products, so that
 /// an exporter for any server can push the same IR under its own label (`windows-dhcp` for
@@ -283,8 +287,9 @@ impl Coded for SnapshotInvalid {
     }
 }
 
-/// Checks a free text: at most `max` characters and no control character, so that it is one
-/// line wherever it is shown, logged or printed in a terminal; empty only with `empty`.
+/// Checks a free text: at most `max` characters and none that [`crate::text::is_hidden`]
+/// holds for, so that it is one line that reads as written wherever it is shown, logged or
+/// printed in a terminal; empty only with `empty`. A refusal names the character.
 fn check_line(
     path: &str,
     text: &str,
@@ -301,10 +306,13 @@ fn check_line(
             format!("{what} is longer than {max} characters"),
         ));
     }
-    if text.chars().any(char::is_control) {
+    if let Some(c) = crate::text::first_hidden(text) {
         return Err(SnapshotInvalid::new(
             path,
-            format!("{what} holds a control character"),
+            format!(
+                "{what} holds U+{:04X}, a control or format character that can hide or reorder what is shown",
+                u32::from(c)
+            ),
         ));
     }
     Ok(())
@@ -451,7 +459,8 @@ fn check_members(
 impl MirrorSnapshot {
     /// Checks the envelope beyond what parsing checks: the format, the sequence, the bounds
     /// of section 2.1 and a bound on every other list ([`MAX_ITEMS`], [`MAX_FILTERS`]),
-    /// every free text one line of bounded length without a control character, and the
+    /// every free text one line of bounded length without a control character or a format
+    /// character that hides or reorders text ([`crate::text::is_hidden`]), and the
     /// content of the IR (scopes that are networks named once, ranges and exclusions inside
     /// their scope, reservations and leases inside their scope with a client identity,
     /// leases of a scope the snapshot holds in a state the mirror carries, options with a

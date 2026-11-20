@@ -3,7 +3,10 @@
 //! sequence, the losses and their acknowledgment, the freshness and the findings, the
 //! metrics, and a second service over the same store. Time comes from the environment's clock.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use proptest::prelude::*;
 use tenko_auth::{
@@ -12,7 +15,8 @@ use tenko_auth::{
     testing::TestEnv,
 };
 use tenko_core::{
-    Coded, Credentials, JobId, MirrorId, RequestCtx, TakeoverId, Timestamp, UserId,
+    Coded, Credentials, JobId, MirrorId, Principal, RequestCtx, Revision, TakeoverId, Timestamp,
+    UserId,
     ir::{MirrorSnapshot, SourceKindLabel},
     metrics::{Registry, encode},
     migrate::{Takeover, TakeoverState, tables},
@@ -22,9 +26,11 @@ use tenko_migrate::mirror::{
     service::{NewMirror, content_hash, register_metrics},
 };
 use tenko_store::{
-    CoalescerConfig, KeyRange, MemStore, MemStoreConfig, ReadConsistency, ReadViewExt, Store,
-    WriteBatch, tables as store_tables,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, KeyRange, Leadership, MemStore,
+    MemStoreConfig, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, StoreStatus,
+    WatchFilter, WriteBatch, tables as store_tables,
 };
+use tokio::sync::oneshot;
 
 const FIXTURE: &str = include_str!("../../tenko-core/tests/fixtures/mirror/snapshot.json");
 const INACTIVE: &str =
@@ -39,6 +45,66 @@ struct Lab {
     start: Timestamp,
 }
 
+/// A store that, once armed, holds its next write until the test lets it go, so that the
+/// test can write between a read and the write that follows it.
+struct Gate {
+    inner: Arc<dyn Store>,
+    held: Mutex<Option<(oneshot::Sender<()>, oneshot::Receiver<()>)>>,
+}
+
+impl Gate {
+    fn new(inner: Arc<dyn Store>) -> Self {
+        Self {
+            inner,
+            held: Mutex::new(None),
+        }
+    }
+
+    /// Holds the next write: the first receiver hears when it arrived, the sender lets it go.
+    fn arm(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (arrived, heard) = oneshot::channel();
+        let (go, gone) = oneshot::channel();
+        *self.held.lock().expect("the gate") = Some((arrived, gone));
+        (heard, go)
+    }
+}
+
+#[async_trait::async_trait]
+impl Store for Gate {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let held = self.held.lock().expect("the gate").take();
+        if let Some((arrived, go)) = held {
+            let _ = arrived.send(());
+            let _ = go.await;
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        self.inner.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<Revision>,
+        filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>> {
+        self.inner.leadership()
+    }
+}
+
 fn service_on(store: Arc<dyn Store>, env: &TestEnv) -> MirrorService {
     let clock: Arc<dyn Clock> = env.clock.clone();
     MirrorService::new(store, Arc::clone(&env.service)).with_clock(clock)
@@ -46,15 +112,16 @@ fn service_on(store: Arc<dyn Store>, env: &TestEnv) -> MirrorService {
 
 impl Lab {
     async fn new() -> Self {
-        Self::over(None).await
+        Self::over(|store| store).await
     }
 
-    /// A lab whose mirror service writes to `store` instead of the environment's.
-    async fn over(store: Option<Arc<dyn Store>>) -> Self {
+    /// A lab whose mirror service writes to the store `store` makes of the environment's.
+    async fn over(store: impl FnOnce(Arc<dyn Store>) -> Arc<dyn Store>) -> Self {
         let (env, session) = TestEnv::installed(Profile::Home).await;
         let admin = env.session_ctx(&session).await.expect("a session");
-        let service = service_on(store.unwrap_or_else(|| env.store.clone()), &env);
-        let (item, token) = service
+        let base: Arc<dyn Store> = env.store.clone();
+        let service = service_on(store(base), &env);
+        let (item, _) = service
             .create(
                 &admin,
                 NewMirror {
@@ -66,10 +133,11 @@ impl Lab {
             )
             .await
             .expect("created");
-        let pusher = env
-            .ctx_for(&Credentials::Bearer(token.token.expose().to_owned()))
-            .await
-            .unwrap_or_else(|_| admin.clone());
+        // What the route hands the service for the token's request, once it checked the token.
+        let pusher = RequestCtx::new(Principal::Token {
+            id: item.mirror.token,
+            owner: item.mirror.account,
+        });
         let start = env.now();
         Self {
             env,
@@ -249,6 +317,48 @@ async fn a_new_token_starts_a_new_series_of_sequences() {
         .await
         .expect("accepted");
     assert_eq!(accepted.sequence, 1);
+}
+
+#[tokio::test]
+async fn a_push_whose_token_is_replaced_before_its_write_is_a_revoked_token_s() {
+    let mut gate = None;
+    let lab = Lab::over(|store| {
+        let held = Arc::new(Gate::new(store));
+        gate = Some(Arc::clone(&held));
+        held
+    })
+    .await;
+    let gate = gate.expect("the gate");
+    lab.at(0);
+    lab.service.admit(lab.id).await.expect("admitted");
+    // The push has read the row and waits at its write while the token is replaced; the
+    // write then meets the new row, and the next attempt reads it again.
+    let (arrived, go) = gate.arm();
+    let (pushed, replaced) = tokio::join!(
+        lab.service.push(&lab.pusher, lab.id, fixture(u64::MAX)),
+        async {
+            arrived.await.expect("the push reached its write");
+            let replaced = lab.service.replace_token(&lab.admin, lab.id, None).await;
+            go.send(()).expect("let go");
+            replaced
+        }
+    );
+    replaced.expect("replaced");
+    let refused = pushed.expect_err("the old token's push");
+    assert_eq!(
+        (refused.code(), refused.http_status()),
+        ("auth.unauthenticated", 401)
+    );
+    let item = lab.service.get(lab.id).await.expect("item");
+    assert_eq!(
+        (item.mirror.last_sequence, item.mirror.last_hash),
+        (None, None)
+    );
+    // The same refusal for a push that arrives after the replacement.
+    lab.at(10);
+    lab.service.admit(lab.id).await.expect("admitted");
+    let late = lab.service.push(&lab.pusher, lab.id, fixture(2)).await;
+    assert_eq!(late.expect_err("refused").code(), "auth.unauthenticated");
 }
 
 #[tokio::test]
@@ -468,11 +578,8 @@ async fn a_snapshot_the_store_cannot_hold_is_too_large() {
         },
         ..MemStoreConfig::default()
     }));
-    let lab = Lab::over(Some(small)).await;
-    lab.at(0);
-    lab.service.admit(lab.id).await.expect("admitted");
-    let error = lab.service.push(&lab.admin, lab.id, fixture(1)).await;
-    let error = error.expect_err("too large");
+    let lab = Lab::over(|_| small).await;
+    let error = lab.push(0, fixture(1)).await.expect_err("too large");
     assert_eq!(
         (error.code(), error.http_status()),
         ("migrate.mirror.too_large", 413)

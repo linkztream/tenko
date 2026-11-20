@@ -2,36 +2,102 @@
 //!
 //! The order is the defense: the route reads at most [`MAX_BODY_BYTES`] of the body, a gzip
 //! body inflates into at most [`MAX_INFLATED_BYTES`] and stops there, one pass over the JSON
-//! counts its array elements and refuses more than [`MAX_ELEMENTS`] before anything is
-//! parsed, the JSON parses into the strict types of `tenko-core` (`deny_unknown_fields` on the
-//! envelope), and the parsed snapshot is checked whole ([`MirrorSnapshot::validate`]). A body
-//! that fails any step is refused whole, with the JSON path of the first error, and nothing
-//! of it is kept.
+//! refuses more than [`MAX_ELEMENTS`] array elements, a nesting deeper than [`MAX_DEPTH`] and
+//! a string longer than [`MAX_STRING_OCTETS`] before anything is parsed, the JSON parses into
+//! the strict types of `tenko-core` (`deny_unknown_fields` on the envelope), and the parsed
+//! snapshot is checked whole ([`MirrorSnapshot::validate`]). A body that fails any step is
+//! refused whole, with the JSON path of the first error, and nothing of it is kept.
 //!
-//! What decoding may allocate: the inflated text (at most [`MAX_INFLATED_BYTES`], twice that
-//! while its buffer grows), the strings of the snapshot (no more octets than the text holds),
-//! and at most [`MAX_ELEMENTS`] list items of at most a few hundred octets each, which their
-//! vectors may hold twice while they grow. [`DECODE_ALLOCATION_BOUND`] is the sum, and
-//! `tests/decode_alloc.rs` holds the most element-dense body the bounds let through to it.
+//! What decoding allocates, [`DECODE_ALLOCATION_BOUND`] at most, counted over every
+//! allocation and every growth of one: the inflated text (its buffer doubles up to
+//! [`MAX_INFLATED_BYTES`] and no further); the snapshot's strings (no more octets than the
+//! text holds); the parser's scratch for a string with escapes (twice the longest string);
+//! and the list items. A vector of `n` items holds at most `2n + 2` slots, so an item costs
+//! at most two slots in a list of the envelope's top level and four in a list inside an item
+//! (where a list may hold one); [`ELEMENT_BYTES`] is the most that comes to for any item
+//! type, which the assertions below hold at compile time. `tests/decode_alloc.rs` measures
+//! the most element-dense bodies of each kind against the bound.
 
-use std::{fmt::Write as _, io::Read};
+use std::{fmt::Write as _, io::Read, mem::size_of};
 
+use ipnet::IpNet;
 use tenko_core::ir::{
-    MirrorSnapshot,
-    mirror::{MAX_ELEMENTS, MAX_INFLATED_BYTES},
+    LossEntry, MirrorSnapshot,
+    dhcp::{
+        IrClass, IrCondition, IrFailover, IrFilter, IrLease, IrOption, IrOptionDef, IrPolicy,
+        IrRange, IrReservation, IrScope, IrSuperscope,
+    },
+    mirror::{MAX_ELEMENTS, MAX_INFLATED_BYTES, MAX_LOSS_DETAIL_LEN, MAX_OPTION_VALUE_LEN},
 };
 
 use super::MirrorError;
 
 pub use tenko_core::ir::mirror::MAX_BODY_BYTES;
 
-/// The octets decoding one push may allocate in all, counted over every allocation it
-/// makes (so also over every growth of a vector): the inflated text and its growth, the
-/// text's strings, and [`MAX_ELEMENTS`] items of up to 512 octets, twice. 224 MiB.
-pub const DECODE_ALLOCATION_BOUND: usize = 3 * MAX_INFLATED_BYTES + 2 * 512 * MAX_ELEMENTS;
-
 /// The deepest nesting of a push body; the envelope needs six levels.
-const MAX_DEPTH: usize = 32;
+pub const MAX_DEPTH: usize = 32;
+
+/// The longest string of a push body as it stands in the JSON: twelve octets (a surrogate
+/// pair as `\uXXXX\uXXXX`) for each character of the longest text the snapshot may hold,
+/// so that nothing longer can pass [`MirrorSnapshot::validate`]. 48 KiB.
+pub const MAX_STRING_OCTETS: usize = 12
+    * if MAX_OPTION_VALUE_LEN > MAX_LOSS_DETAIL_LEN {
+        MAX_OPTION_VALUE_LEN
+    } else {
+        MAX_LOSS_DETAIL_LEN
+    };
+
+/// The most one list item may cost with the slots its vector holds for it: two slots of the
+/// largest item of a top-level list ([`IrScope`]), four of the largest item that sits in a
+/// list inside another item ([`IrReservation`]).
+pub const ELEMENT_BYTES: usize = 832;
+
+// Every list item type of the envelope, with the slots its list may hold for it.
+const _: () = {
+    let top = [
+        size_of::<IrOption>(),
+        size_of::<IrOptionDef>(),
+        size_of::<IrClass>(),
+        size_of::<IrScope>(),
+        size_of::<IrSuperscope>(),
+        size_of::<IrPolicy>(),
+        size_of::<IrFilter>(),
+        size_of::<IrFailover>(),
+        size_of::<IrLease>(),
+        size_of::<LossEntry>(),
+    ];
+    let nested = [
+        size_of::<IrReservation>(),
+        size_of::<IrOption>(),
+        size_of::<IrRange>(),
+        size_of::<IrCondition>(),
+        size_of::<IpNet>(),
+        size_of::<String>(),
+    ];
+    let mut at = 0;
+    while at < top.len() {
+        assert!(2 * top[at] <= ELEMENT_BYTES);
+        at += 1;
+    }
+    at = 0;
+    while at < nested.len() {
+        assert!(4 * nested[at] <= ELEMENT_BYTES);
+        at += 1;
+    }
+};
+
+/// What the bound adds besides the text and the items: the scratch of a string with escapes
+/// (twice [`MAX_STRING_OCTETS`]), the first slots of the ten top-level lists, and the path and
+/// reason of a refusal.
+const SLACK_BYTES: usize = 1 << 20;
+
+/// The octets decoding one push may allocate in all, counted over every allocation and every
+/// growth of one: the inflated text and the strings parsed from it, each at most
+/// [`MAX_INFLATED_BYTES`], [`MAX_ELEMENTS`] items of [`ELEMENT_BYTES`], and [`SLACK_BYTES`].
+/// 286,141,440 octets (273 MiB). One push decodes at a time on a node
+/// (`MirrorService::decoding`).
+pub const DECODE_ALLOCATION_BOUND: usize =
+    2 * MAX_INFLATED_BYTES + ELEMENT_BYTES * MAX_ELEMENTS + SLACK_BYTES;
 
 /// Decodes a push body that the caller read within [`MAX_BODY_BYTES`]: `gzip` when the
 /// request says `Content-Encoding: gzip`.
@@ -59,24 +125,37 @@ pub fn decode(body: &[u8], gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
     Ok(snapshot)
 }
 
-/// Inflates a gzip body into at most [`MAX_INFLATED_BYTES`].
+/// Inflates a gzip body into at most [`MAX_INFLATED_BYTES`]. The buffer doubles, but never
+/// past the bound (`read_to_end` would double it once more to find the end).
 fn inflate(body: &[u8]) -> Result<Vec<u8>, MirrorError> {
+    let mut decoder = flate2::read::GzDecoder::new(body);
     let mut out = Vec::new();
-    flate2::read::GzDecoder::new(body)
-        .take(MAX_INFLATED_BYTES as u64 + 1)
-        .read_to_end(&mut out)
-        .map_err(|_| MirrorError::invalid("", "the gzip body does not inflate"))?;
-    if out.len() > MAX_INFLATED_BYTES {
-        return Err(MirrorError::TooLarge {
-            limit: MAX_INFLATED_BYTES,
-        });
+    let mut chunk = [0u8; 8 << 10];
+    loop {
+        let read = decoder
+            .read(&mut chunk)
+            .map_err(|_| MirrorError::invalid("", "the gzip body does not inflate"))?;
+        if read == 0 {
+            return Ok(out);
+        }
+        if out.len() + read > MAX_INFLATED_BYTES {
+            return Err(MirrorError::TooLarge {
+                limit: MAX_INFLATED_BYTES,
+            });
+        }
+        if out.capacity() - out.len() < read {
+            let capacity = (2 * out.capacity())
+                .max(out.len() + read)
+                .min(MAX_INFLATED_BYTES);
+            out.reserve_exact(capacity - out.len());
+        }
+        out.extend_from_slice(&chunk[..read]);
     }
-    Ok(out)
 }
 
 /// Counts the array elements of a JSON text without parsing it, and refuses more than
-/// [`MAX_ELEMENTS`] or a nesting deeper than [`MAX_DEPTH`]. Text that is not JSON passes:
-/// the parser refuses it with its path.
+/// [`MAX_ELEMENTS`], a nesting deeper than [`MAX_DEPTH`] or a string longer than
+/// [`MAX_STRING_OCTETS`]. Text that is not JSON passes: the parser refuses it with its path.
 fn count_elements(json: &[u8]) -> Result<(), MirrorError> {
     // Per open container: whether it is an array, and whether an element has started in it.
     let mut stack: Vec<(bool, bool)> = Vec::new();
@@ -104,9 +183,16 @@ fn count_elements(json: &[u8]) -> Result<(), MirrorError> {
             }
             b',' if matches!(stack.last(), Some((true, _))) => elements += 1,
             b'"' => {
+                let from = at;
                 at += 1;
                 while at < json.len() && json[at] != b'"' {
                     at += if json[at] == b'\\' { 2 } else { 1 };
+                }
+                if at - from - 1 > MAX_STRING_OCTETS {
+                    return Err(MirrorError::invalid(
+                        "",
+                        format!("a string of the body is longer than {MAX_STRING_OCTETS} octets"),
+                    ));
                 }
             }
             _ => {}
@@ -287,6 +373,20 @@ mod tests {
         text.push_str(&"1,".repeat(MAX_ELEMENTS - 1));
         text.push_str("1]");
         count_elements(text.as_bytes()).expect("exactly the bound");
+        // A string longer than any text the snapshot may hold, escapes counted as written.
+        let long = format!("[\"{}\"]", "\\n".repeat(MAX_STRING_OCTETS / 2 + 1));
+        assert_eq!(
+            refused(long.as_bytes(), false).params()["reason"],
+            format!("a string of the body is longer than {MAX_STRING_OCTETS} octets")
+        );
+        count_elements(format!("[\"{}\"]", "x".repeat(MAX_STRING_OCTETS)).as_bytes())
+            .expect("the longest string");
+    }
+
+    #[test]
+    fn the_bound_is_the_one_the_documentation_states() {
+        assert_eq!(MAX_ELEMENTS, 262_000);
+        assert_eq!(DECODE_ALLOCATION_BOUND, 286_141_440);
     }
 
     #[test]
@@ -318,11 +418,27 @@ mod tests {
                 "\"name\": \"Off\\rice\"".to_owned(),
                 "dhcp.scopes[0].name",
             ),
+            (
+                "\"192.0.2.254\"",
+                "\"192.0.2.\\u202e452\"".to_owned(),
+                "dhcp.scopes[0].reservations[0].options[0].values[0]",
+            ),
+            (
+                "\"name\": \"Office\"",
+                "\"name\": \"Off\\u200bice\"".to_owned(),
+                "dhcp.scopes[0].name",
+            ),
         ] {
             let body = FIXTURE.replacen(from, &to, 1);
             assert_ne!(body, FIXTURE, "{path}");
             assert_eq!(refused(body.as_bytes(), false).params()["path"], path);
         }
+        // The refusal names the character, so that an operator can find it in the source.
+        let body = FIXTURE.replacen("\"name\": \"Office\"", "\"name\": \"\\u2066Office\"", 1);
+        assert!(
+            refused(body.as_bytes(), false).params()["reason"].contains("U+2066"),
+            "the character is named"
+        );
     }
 
     #[test]
