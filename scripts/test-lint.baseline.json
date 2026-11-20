@@ -1057,7 +1057,6 @@
     {"rule":"ignore","file":"crates/tenko/tests/cluster_membership.rs","scope":"a_revoked_controller_leaves_and_cannot_come_back","text":"#[ignore]"},
     {"rule":"ignore","file":"crates/tenko/tests/cluster_membership.rs","scope":"the_leader_steps_down_under_load","text":"#[ignore]"},
     {"rule":"sleep","file":"crates/tenko/tests/cluster_membership.rs","scope":"a_member_rejoins_with_an_empty_data_directory","text":"thread::sleep(Duration::from_secs(3))"},
-    {"rule":"sleep","file":"crates/tenko/tests/cluster_membership.rs","scope":"a_revoked_controller_leaves_and_cannot_come_back","text":"thread::sleep(Duration::from_secs(5))"},
     {"rule":"sleep","file":"crates/tenko/tests/cluster_membership.rs","scope":"the_leader_steps_down_under_load","text":"thread::sleep(Duration::from_secs(3))"},
     {"rule":"sleep","file":"crates/tenko/tests/cluster_membership.rs","scope":"the_leader_steps_down_under_load","text":"thread::sleep(Duration::from_secs(5))"},
     {"rule":"early-return","file":"crates/tenko/tests/cluster_mixed_versions.rs","scope":"mixed_versions_needs_a_second_binary","text":"return;"},

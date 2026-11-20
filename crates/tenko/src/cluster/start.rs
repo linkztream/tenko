@@ -37,7 +37,7 @@ use tenko_cluster::{
 use tenko_cluster::generation::FenceFile;
 use tenko_core::{NodeId, Role};
 use tenko_store::{
-    KeyRange, ReadConsistency, ReadViewExt as _, Store as _,
+    KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store as _,
     raft::{RaftStore, clear_joining},
 };
 use tenko_vault::{KekRing, distribution};
@@ -193,6 +193,33 @@ fn check_entry_limit(store: &RaftStore) -> Result<(), StartError> {
     Ok(())
 }
 
+/// Refuses to start a controller that its own store holds as removed: a revocation names
+/// it and no node record does, so every other controller refuses it and it has no
+/// certificate to serve with. A controller that was out of contact and never received its
+/// removal still has its record, starts and stays cut off.
+fn refuse_removed(
+    view: &dyn ReadView,
+    node: NodeId,
+    data_dir: &std::path::Path,
+) -> Result<(), StartError> {
+    let Some(at) =
+        tenko_cluster::registry::removed_at(view, node).map_err(|error| cluster_failed(&error))?
+    else {
+        return Ok(());
+    };
+    Err(start_error(
+        "cluster.member.removed",
+        format!(
+            "this controller (node {node}) was removed from the cluster at {}: the other \
+             controllers refuse its certificates, and it does not come back with this data \
+             directory. To make this host a controller again, move {} aside and join with a \
+             new controller token (`tenko cluster join`), which gives it a new node id",
+            at.to_rfc3339(),
+            data_dir.display()
+        ),
+    ))
+}
+
 /// Whether a controller starts as a member, presenting its identity under
 /// `<data_dir>/node/`, rather than as a single controller with the vault's certificate (the
 /// states of `tenko_cluster::peers::identity`): a group of several nodes, or a controller
@@ -246,6 +273,7 @@ pub async fn start_peers(
             .read(ReadConsistency::Local)
             .await
             .map_err(|error| StartError::coded("cluster", &error))?;
+        refuse_removed(view.as_ref(), resolved.node_id, &resolved.data_dir)?;
         let forced = !view
             .scan_typed(
                 &tenko_cluster::generation::GENERATION,
@@ -679,6 +707,86 @@ mod tests {
                 member,
                 "{members} members, identity {identity}, forced {forced}, recorded {recorded}"
             );
+        }
+    }
+
+    /// A controller starts unless its own store holds its removal: the first controller
+    /// before its first join (no record, no revocation) and one whose record stands beside
+    /// the revocation of a retired key start; one that a revocation names and no record
+    /// does is refused with `cluster.member.removed`, the time and what to do.
+    #[tokio::test]
+    async fn a_controller_that_its_store_holds_as_removed_does_not_start() {
+        use tenko_cluster::model::{NodeRecord, ProtocolState, Revocation, tables};
+        use tenko_core::{RequestCtx, SystemComponent, Timestamp};
+        use tenko_store::{Store, WriteBatch, mem::MemStore};
+
+        let store = MemStore::default();
+        let node = NodeId(1002);
+        let data = std::path::Path::new("/var/lib/tenko");
+        let check = async || {
+            let view = store.read(ReadConsistency::Local).await.expect("view");
+            refuse_removed(view.as_ref(), node, data)
+        };
+        check()
+            .await
+            .expect("the first controller before its first join");
+
+        let ctx = RequestCtx::system(SystemComponent::Cluster);
+        let revoked_at = Timestamp::from_unix_nanos(1_700_000_000_000_000_000).expect("time");
+        let certificate = tenko_cluster::model::CertificateRef {
+            serial: "0a".to_owned(),
+            sha256: String::new(),
+            not_before: revoked_at,
+            not_after: revoked_at,
+        };
+        let record = NodeRecord {
+            id: node,
+            name: "controller-1002".to_owned(),
+            roles: vec![Role::Controller],
+            address: None,
+            vrf: None,
+            certificate: certificate.clone(),
+            serials: vec![certificate],
+            enrolled_at: revoked_at,
+            enrollment: uuid::Uuid::nil(),
+            enrolled_by: None,
+            renewed_at: None,
+            last_seen: None,
+            version: None,
+            protocol: ProtocolState::default(),
+        };
+        let revocation = Revocation {
+            node,
+            revoked_at,
+            not_after: revoked_at,
+            controller: true,
+        };
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch
+            .put_typed(&tables::NODES, &node.0, &record)
+            .expect("record");
+        batch
+            .put_typed(&tables::REVOCATIONS, &"retired".to_owned(), &revocation)
+            .expect("revocation");
+        store.propose(batch).await.expect("write");
+        check()
+            .await
+            .expect("a record beside the revocation of a retired key");
+
+        let mut batch = WriteBatch::for_request(&ctx);
+        batch.delete_typed(&tables::NODES, &node.0);
+        store.propose(batch).await.expect("write");
+        let refused = check().await.expect_err("removed");
+        assert_eq!(
+            (refused.step, refused.code.as_str()),
+            ("cluster", "cluster.member.removed")
+        );
+        for part in [
+            revoked_at.to_rfc3339().as_str(),
+            "tenko cluster join",
+            "/var/lib/tenko",
+        ] {
+            assert!(refused.message.contains(part), "{}", refused.message);
         }
     }
 

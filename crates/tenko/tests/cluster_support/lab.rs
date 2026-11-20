@@ -695,6 +695,33 @@ impl ClusterLab {
         self.launch(index);
     }
 
+    /// Starts a stopped controller again and waits until it is ready or has ended: `None`
+    /// when it runs, else the outcome of the start it refused.
+    #[track_caller]
+    pub fn start_or_refusal(&mut self, id: u64) -> Option<Outcome> {
+        let index = self.slot_of(id);
+        assert_eq!(self.slots[index].state, State::Stopped, "controller {id}");
+        self.spawn_slot(index);
+        let slot = &mut self.slots[index];
+        let proc = slot.proc.as_mut().expect("the process");
+        if proc
+            .wait_stdout_line(START_LIMIT, |line| line.contains(" ready at "))
+            .is_some()
+        {
+            return None;
+        }
+        assert!(
+            proc.stdout_closed(),
+            "controller {id} neither ready nor ended within {START_LIMIT:?}\n{}",
+            proc.diagnostics()
+        );
+        let mut proc = slot.proc.take().expect("the process");
+        let outcome = proc.finish(START_LIMIT);
+        slot.ended = Some(proc);
+        slot.state = State::Stopped;
+        Some(outcome)
+    }
+
     /// Starts several stopped or killed controllers at the same time (each waits for a
     /// quorum while it starts) and waits until every one is ready.
     #[track_caller]

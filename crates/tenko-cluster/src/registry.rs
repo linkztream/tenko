@@ -2838,6 +2838,25 @@ pub fn revoked_nodes(view: &dyn ReadView) -> Result<HashSet<NodeId>, ClusterErro
     Ok(nodes)
 }
 
+/// When `node` was removed as `view` holds it: the latest revocation that names it, when no
+/// node record does ([`revoked_nodes`]); `None` for a node that is enrolled or that no
+/// revocation names (the first controller before its first join).
+///
+/// # Errors
+///
+/// A store error.
+pub fn removed_at(view: &dyn ReadView, node: NodeId) -> Result<Option<Timestamp>, ClusterError> {
+    if view.get_typed(&tables::NODES, &node.0)?.is_some() {
+        return Ok(None);
+    }
+    Ok(view
+        .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .filter(|(_, revocation, _)| revocation.node == node)
+        .map(|(_, revocation, _)| revocation.revoked_at)
+        .max())
+}
+
 /// Stages the retirement of `node`'s cluster-port key in the vault into `batch`: the row and
 /// its vault secret go and the certificate is revoked (a controller's revocation is kept for
 /// good), with its audit record. The node record is not touched: the caller writes it in

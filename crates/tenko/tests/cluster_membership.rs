@@ -176,28 +176,82 @@ fn a_revoked_controller_leaves_and_cannot_come_back() {
         load.summary()
     );
 
-    // With its old identity it does not come back: after a restart it is still cut off,
-    // its writes are refused, and the others do not list it.
+    // With its old identity it does not come back. The leader stops sending to it once the
+    // revocation commits, so whether its own store holds the revocation is a race; that
+    // store decides what a restart does, and the outcome must match it. Holding its removal,
+    // it refuses to start and says why; without it, it still holds its record, starts, stays
+    // cut off and refuses writes. Either way the others do not list it.
     lab.stop(revoked);
-    lab.restart(revoked);
-    thread::sleep(Duration::from_secs(5));
-    assert_ne!(lab.quorum(revoked).as_deref(), Some("healthy"));
-    let refused = lab.api(revoked).post(
-        "/prefixes",
-        &json!({ "cidr": "203.0.113.0/24", "description": "from a revoked controller" }),
-    );
-    assert_eq!(refused.status, 503, "{}", refused.text);
+    if let Some(refused) = lab.start_or_refusal(revoked) {
+        refused
+            .assert_code(4)
+            .assert_stderr_contains("cluster.member.removed");
+        println!("the removed controller held its removal and refused to start");
+    } else {
+        runs_cut_off(&mut lab, revoked);
+        println!("the removal never reached the removed controller; it started cut off");
+    }
     let view = lab.members(leader).expect("the leader's view");
     assert_eq!(
         view["members"].as_array().map(Vec::len),
         Some(2),
         "the revoked controller came back: {view}"
     );
-    lab.stop(revoked);
     lab.mark_removed(revoked);
     assert_eq!(lab.state(revoked), State::Removed);
     lab.digests_agree(load.committed_revision());
     assert!(lab.elapsed() < SCENARIO_LIMIT, "took {:?}", lab.elapsed());
+}
+
+/// A controller removed while it was stopped never receives its removal: it starts with its
+/// record, stays cut off and refuses writes, and the others do not list it.
+#[test]
+#[ignore = "slow lab scenario; runner: ci.yml#cluster-lab"]
+fn a_controller_removed_while_stopped_starts_cut_off() {
+    let mut lab = ClusterLab::start(3);
+    let leader = lab.leader();
+    let removed = lab.followers()[0];
+    lab.stop(removed);
+    lab.cli(
+        leader,
+        &["cluster", "remove", &removed.to_string(), "--yes"],
+    )
+    .assert_code(0);
+    assert!(
+        lab.start_or_refusal(removed).is_none(),
+        "a controller without its removal starts"
+    );
+    runs_cut_off(&mut lab, removed);
+    let view = lab.members(leader).expect("the leader's view");
+    assert!(
+        !voters(&view).contains(&removed) && view["members"].as_array().map(Vec::len) == Some(2),
+        "the removed controller came back: {view}"
+    );
+    lab.mark_removed(removed);
+    assert!(lab.elapsed() < SCENARIO_LIMIT, "took {:?}", lab.elapsed());
+}
+
+/// A removed controller that started without its removal in its store: it still holds its
+/// own record, is cut off and answers a write with 503. Stops it.
+#[track_caller]
+fn runs_cut_off(lab: &mut ClusterLab, id: u64) {
+    let own = lab.get(id, &format!("/nodes/{id}")).expect("an answer");
+    assert_eq!(
+        own.status, 200,
+        "it started without its record: {}",
+        own.text
+    );
+    lab.wait_for(
+        "the removed controller cut off",
+        Duration::from_secs(60),
+        || lab.quorum(id).as_deref() == Some("isolated"),
+    );
+    let refused = lab.api(id).post(
+        "/prefixes",
+        &json!({ "cidr": "203.0.113.0/24", "description": "from a removed controller" }),
+    );
+    assert_eq!(refused.status, 503, "{}", refused.text);
+    lab.stop(id);
 }
 
 /// A probe connected to one controller and revoked through another loses its connection

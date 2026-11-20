@@ -2365,11 +2365,7 @@ fn revoked_in(view: &dyn ReadView, node: NodeId, serial: &str) -> Result<bool, C
 /// Whether `node` is revoked: a row of `cluster.revocations` names it and it has no node
 /// record (`crate::registry::revoked_nodes`).
 fn revoked_node(view: &dyn ReadView, node: NodeId) -> Result<bool, ClusterError> {
-    Ok(view.get_typed(&tables::NODES, &node.0)?.is_none()
-        && view
-            .scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
-            .iter()
-            .any(|(_, revocation, _)| revocation.node == node))
+    Ok(crate::registry::removed_at(view, node)?.is_some())
 }
 
 #[cfg(test)]
