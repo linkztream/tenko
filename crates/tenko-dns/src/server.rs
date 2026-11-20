@@ -456,7 +456,9 @@ mod tests {
             taken_for(1, &calls),
         )
         .expect("bound on another port");
-        assert_eq!(calls.get(), 2);
+        // At least the refused call and one more: the second number can be taken for real on
+        // a busy machine, and the bind then goes on to a third.
+        assert!(calls.get() >= 2, "{} calls", calls.get());
         let tcp = listener
             .expect("a TCP listener")
             .local_addr()
