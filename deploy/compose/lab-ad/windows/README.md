@@ -422,7 +422,11 @@ After the restart, sign in as `CORP\Administrator` on `dc2` and run the capture 
 **Expect:** the promotion succeeds through Tenko (it finds `dc1` by its SRV records);
 `records not in Tenko: 0` for `dc2`; the audit has `DC2$@CORP.EXAMPLE.TEST`, decision
 `privileged`; `dc2.corp.example.test` owned by `DC2$`. `nltest /dsgetdc:corp.example.test
-/force` on `srv1` finds either controller. `repadmin /replsummary` on `dc1` shows no error.
+/force` on `srv1` finds either controller. `repadmin /replsummary` on `dc1` shows no error
+once the controllers have replicated again: the first attempts right after the promotion
+fail (errors 8524 and 1908) while the records of `dc2` are not yet registered, and Windows
+tries again within a quarter of an hour. To have it at once, run `repadmin /kcc` for both
+controllers and `repadmin /syncall /Ade` and `repadmin /syncall /AdeP` on `dc1` first.
 **Keep:** `captures/w7-dc2.pcapng`, the outputs in `results/w7/`.
 
 ## W8. The hourly registration

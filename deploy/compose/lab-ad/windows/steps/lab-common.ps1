@@ -75,7 +75,7 @@ function Invoke-Native([string]$File, [scriptblock]$Command, [int[]]$Allow = @(0
 function Test-Replication([string]$File = 'replication.txt') {
     Invoke-Native $File { repadmin /replsummary } -AnyStatus
     $text = Get-Content (Join-Path $StepDir $File)
-    $counts = @($text | ForEach-Object { if ($_ -match '\s(\d+)\s*/\s*\d+\s+\d+\s*$') { [int]$Matches[1] } })
+    $counts = @($text | ForEach-Object { if ($_ -match '\s(\d+)\s*/\s*\d+\s+\d+(\s|$)') { [int]$Matches[1] } })
     if ($counts.Count -eq 0) { Fail "repadmin /replsummary listed no replication partner ($File)" }
     if (($counts | Measure-Object -Sum).Sum -gt 0 -or ($text -match 'operational errors')) {
         Fail "repadmin /replsummary reports failed replications ($File)"
