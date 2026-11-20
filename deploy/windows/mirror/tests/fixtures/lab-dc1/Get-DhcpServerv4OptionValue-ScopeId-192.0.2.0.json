@@ -1,0 +1,7 @@
+[
+  { "Name": "Router", "OptionId": 3, "PolicyName": null, "Type": "IPv4Address", "UserClass": "", "Value": ["192.0.2.1"], "VendorClass": "" },
+  { "Name": "DNS Servers", "OptionId": 6, "PolicyName": null, "Type": "IPv4Address", "UserClass": "", "Value": ["192.0.2.53"], "VendorClass": "" },
+  { "Name": "DNS Domain Name", "OptionId": 15, "PolicyName": null, "Type": "String", "UserClass": "", "Value": ["corp.example.test"], "VendorClass": "" },
+  { "Name": "Lease", "OptionId": 51, "PolicyName": null, "Type": "DWord", "UserClass": "", "Value": ["28800"], "VendorClass": "" },
+  { "Name": "", "OptionId": 81, "PolicyName": null, "Type": "DWord", "UserClass": "", "Value": ["4"], "VendorClass": "" }
+]

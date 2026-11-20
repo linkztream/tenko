@@ -1,0 +1,5 @@
+[
+  { "IPAddress": { "Address": 1711407296, "AddressFamily": 2, "IPAddressToString": "192.0.2.102" }, "ScopeId": { "Address": 131264, "AddressFamily": 2, "IPAddressToString": "192.0.2.0" }, "AddressState": "InactiveReservation", "ClientId": "00-00-5e-00-53-03", "Description": "", "Name": "lab-res102", "Type": "Both" },
+  { "IPAddress": { "Address": 1677852864, "AddressFamily": 2, "IPAddressToString": "192.0.2.100" }, "ScopeId": { "Address": 131264, "AddressFamily": 2, "IPAddressToString": "192.0.2.0" }, "AddressState": "InactiveReservation", "ClientId": "00-00-5e-00-53-01", "Description": "plain host name", "Name": "lab-res100", "Type": "Both" },
+  { "IPAddress": { "Address": 1694630080, "AddressFamily": 2, "IPAddressToString": "192.0.2.101" }, "ScopeId": { "Address": 131264, "AddressFamily": 2, "IPAddressToString": "192.0.2.0" }, "AddressState": "InactiveReservation", "ClientId": "00-00-5e-00-53-02", "Description": "invalid host name", "Name": "Living Room TV", "Type": "Both" }
+]

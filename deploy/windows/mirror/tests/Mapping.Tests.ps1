@@ -57,24 +57,24 @@ Describe 'The snapshot of corp.example.test' {
         @($snapshot.dhcp.leases | Where-Object { $_.state -eq 'active_reservation' -and $_.Contains('expires') }).Count | Should -Be 0
     }
 
-    It 'puts the policy, the filter, the superscope and the other losses in the report with their source location' {
+    It 'puts the policy, the superscope and the other losses in the report with their source location, and carries the deny list' {
         $codes = @($snapshot.losses.entries | ForEach-Object { $_.code })
-        $codes | Should -Contain 'mirror.policy'
-        $codes | Should -Contain 'mirror.filter'
-        $codes | Should -Contain 'mirror.superscope'
-        $codes | Should -Contain 'mirror.option.policy'
-        $codes | Should -Contain 'mirror.option.managed'
-        $codes | Should -Contain 'mirror.reservation.name'
-        $codes | Should -Contain 'mirror.reservation.bootp'
-        $codes | Should -Contain 'mirror.lease.state'
-        $codes | Should -Contain 'mirror.option_def.default'
+        $codes | Should -Contain 'migrate.loss.policy'
+        $codes | Should -Contain 'migrate.loss.superscope'
+        $codes | Should -Contain 'migrate.loss.option_policy'
+        $codes | Should -Contain 'migrate.loss.option_managed'
+        $codes | Should -Contain 'migrate.loss.reservation_name'
+        $codes | Should -Contain 'migrate.loss.reservation_bootp'
+        $codes | Should -Contain 'migrate.loss.lease_state'
+        $codes | Should -Contain 'migrate.loss.option_def_default'
         foreach ($entry in $snapshot.losses.entries) {
             $entry.location.sheet | Should -Match '^Get-DhcpServerv4'
             $entry.location.column | Should -Not -BeNullOrEmpty
             $entry.detail | Should -Not -BeNullOrEmpty
         }
         $snapshot.dhcp.policies.Count | Should -Be 0
-        $snapshot.dhcp.filters.Count | Should -Be 0
+        @($snapshot.dhcp.filters | ForEach-Object { "$($_.kind) $($_.mac)" }) | Should -Be @('deny 00:00:5e:00:53:ff')
+        $snapshot.dhcp.scopes[0].restricted | Should -BeFalse
         $snapshot.dhcp.superscopes.Count | Should -Be 0
     }
 
@@ -89,7 +89,7 @@ Describe 'The snapshot of corp.example.test' {
         $names['192.0.2.19'] | Should -Be 'backup.other.example'
         $names.ContainsKey('192.0.2.17') | Should -BeFalse
         $names.ContainsKey('192.0.2.20') | Should -BeFalse
-        $reported = @($snapshot.losses.entries | Where-Object { $_.code -eq 'mirror.reservation.name' } | ForEach-Object { $_.location.column })
+        $reported = @($snapshot.losses.entries | Where-Object { $_.code -eq 'migrate.loss.reservation_name' } | ForEach-Object { $_.location.column })
         $reported | Should -Be @('192.0.2.17', '192.0.2.18', '192.0.2.21', '192.0.2.38', '192.0.2.39')
     }
 
@@ -116,7 +116,7 @@ Describe 'The snapshot of corp.example.test' {
         foreach ($cmdlet in $cmdlets) { $cmdlet | Should -Match '^Get-DhcpServerv4' }
         $cmdlets | Should -Be @(
             'Get-DhcpServerv4Class', 'Get-DhcpServerv4DnsSetting', 'Get-DhcpServerv4ExclusionRange', 'Get-DhcpServerv4Failover',
-            'Get-DhcpServerv4Filter', 'Get-DhcpServerv4Lease', 'Get-DhcpServerv4OptionDefinition', 'Get-DhcpServerv4OptionValue',
+            'Get-DhcpServerv4Filter', 'Get-DhcpServerv4FilterList', 'Get-DhcpServerv4Lease', 'Get-DhcpServerv4OptionDefinition', 'Get-DhcpServerv4OptionValue',
             'Get-DhcpServerv4Policy', 'Get-DhcpServerv4Reservation', 'Get-DhcpServerv4Scope', 'Get-DhcpServerv4Superscope'
         )
     }
@@ -130,7 +130,7 @@ Describe 'The dry run' {
         $snapshot = ($output -join "`n") | ConvertFrom-Json
         $snapshot.format | Should -Be 1
         $snapshot.dhcp.leases.Count | Should -Be 60
-        $snapshot.losses.entries.Count | Should -Be 13
+        $snapshot.losses.entries.Count | Should -Be 12
         $snapshot.sequence | Should -BeGreaterThan 1700000000
         Should -Invoke Invoke-MirrorPush -Times 0
         Should -Invoke Read-MirrorToken -Times 0
@@ -212,7 +212,7 @@ Describe 'The mapping rules' {
         It 'reports a failover relationship without reading its secret' {
             $failover = [pscustomobject]@{ Name = 'pair'; PartnerServer = 'dc2.corp.example.test'; Mode = 'LoadBalance'; ScopeId = @('192.0.2.0'); SharedSecret = 'swordfish' }
             Add-FailoverLoss -Failover $failover -Losses $losses
-            $losses[0].code | Should -Be 'mirror.failover'
+            $losses[0].code | Should -Be 'migrate.loss.failover'
             $losses[0].location.sheet | Should -Be 'Get-DhcpServerv4Failover'
             $losses[0].location.column | Should -Be 'pair'
             $losses[0].detail | Should -Match 'dc2\.corp\.example\.test'
@@ -227,8 +227,8 @@ Describe 'The mapping rules' {
             $ir.delay_ms | Should -Be 500
             $ir.lease_secs | Should -Be 86400
             $ir.Contains('ddns') | Should -BeFalse
-            @($losses | Where-Object { $_.code -eq 'mirror.scope.delay' }).Count | Should -Be 1
-            @($losses | Where-Object { $_.code -eq 'mirror.scope.bootp' }).Count | Should -Be 1
+            @($losses | Where-Object { $_.code -eq 'migrate.loss.scope_delay' }).Count | Should -Be 1
+            @($losses | Where-Object { $_.code -eq 'migrate.loss.bootp_only' }).Count | Should -Be 1
         }
 
         It 'reports a lease state the mirror does not carry, and leaves expired ones out silently' {
@@ -236,7 +236,7 @@ Describe 'The mapping rules' {
             ConvertTo-IrLease -Lease ([pscustomobject]@{ IPAddress = '192.0.2.50'; AddressState = 'Expired'; ClientId = '00-00-5e-00-53-50' }) -Cidr '192.0.2.0/24' -Losses $losses | Should -BeNullOrEmpty
             $losses.Count | Should -Be $before
             ConvertTo-IrLease -Lease ([pscustomobject]@{ IPAddress = '192.0.2.51'; AddressState = 'ActivePending'; ClientId = '00-00-5e-00-53-51' }) -Cidr '192.0.2.0/24' -Losses $losses | Should -BeNullOrEmpty
-            $losses[$losses.Count - 1].code | Should -Be 'mirror.lease.state'
+            $losses[$losses.Count - 1].code | Should -Be 'migrate.loss.lease_state'
             $losses[$losses.Count - 1].location.column | Should -Be '192.0.2.51'
         }
 
@@ -247,8 +247,8 @@ Describe 'The mapping rules' {
             $never.reverse | Should -BeFalse
             $never.legacy_clients | Should -BeFalse
             @($never.Keys) | Should -Be @('enabled', 'reverse', 'conflict', 'client_may_update_a', 'legacy_clients', 'refuse_foreign')
-            @($losses | Where-Object { $_.code -eq 'mirror.ddns.keep_on_expiry' }).Count | Should -Be 1
-            @($losses | Where-Object { $_.code -eq 'mirror.ddns.suffix' }).Count | Should -Be 1
+            @($losses | Where-Object { $_.code -eq 'migrate.loss.ddns_keep_on_expiry' }).Count | Should -Be 1
+            @($losses | Where-Object { $_.code -eq 'migrate.loss.ddns_suffix' }).Count | Should -Be 1
             $always = ConvertTo-DdnsPolicy -Setting ([pscustomobject]@{ DynamicUpdates = 'Always'; NameProtection = $true; DisableDnsPtrRRUpdate = $false; UpdateDnsRRForOlderClients = $true; DeleteDnsRROnLeaseExpiry = $true }) -Scope '192.0.2.0' -Losses $losses
             $always.enabled | Should -BeTrue
             $always.client_may_update_a | Should -BeFalse
@@ -260,7 +260,7 @@ Describe 'The mapping rules' {
             $def.array | Should -BeTrue
             $def.Contains('description') | Should -BeFalse
             ConvertTo-IrOptionDef -Definition ([pscustomobject]@{ OptionId = 131; Name = 'y'; Type = 'Mystery'; MultiValued = $false; VendorClass = ''; Description = ''; DefaultValue = $null }) -Losses $losses | Should -BeNullOrEmpty
-            $losses[$losses.Count - 1].code | Should -Be 'mirror.option_def.type'
+            $losses[$losses.Count - 1].code | Should -Be 'migrate.loss.option_def_type'
             Test-CustomOptionDefinition ([pscustomobject]@{ OptionId = 6; VendorClass = '' }) | Should -BeFalse
             Test-CustomOptionDefinition ([pscustomobject]@{ OptionId = 1; VendorClass = 'Microsoft Windows 2000 Options' }) | Should -BeFalse
             Test-CustomOptionDefinition ([pscustomobject]@{ OptionId = 1; VendorClass = 'Example Phones' }) | Should -BeTrue

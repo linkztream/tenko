@@ -48,33 +48,34 @@ the `DhcpServer` module and nothing else, and download nothing.
 
 ## Installing
 
-1. **Check the digests.** The two scripts are release assets, listed in `SHA256SUMS`
-   of the release, which the owner's key signs ([SECURITY.md](../../../SECURITY.md),
-   "Verifying a release"). Compare before copying:
+1. **Take the scripts from the repository** at the tag of the Tenko release your
+   controller runs (a checkout of the tag, or the tag's source archive on GitHub), and read
+   them. The release does not ship them as assets, and its `SHA256SUMS` does not list them.
+   Note their digests where you took them and compare after copying them to the server, so
+   that what runs there is the file you read:
 
    ```powershell
    Get-FileHash .\Tenko-DhcpMirror.ps1, .\Install-TenkoDhcpMirror.ps1 -Algorithm SHA256
-   Select-String -Path .\SHA256SUMS -Pattern 'TenkoDhcpMirror|Tenko-DhcpMirror'
    ```
 
    Tenko never serves, generates or updates these files: what runs on the server is what
    you copied there (ADR 0023, the privilege boundary).
 
-2. **Read the fingerprint from the mirror card**, not from anything sent over the network
-   path the exporter will use. The install pins it; the exporter then accepts only a
-   certificate chain that ends in that certificate authority, and adds nothing to the
-   server's trust store.
+2. **Check the fingerprint.** The mirror's Settings tab shows the controller URL, the
+   mirror id and the SHA-256 fingerprint of the controller's certificate authority as text.
+   Compare the fingerprint with the one the Tenko node printed when it started (its console
+   and its log), not only with the page, since the page is served by the node you are about
+   to pin. The install pins it; the exporter then accepts only a certificate chain that ends
+   in that certificate authority, and adds nothing to the server's trust store.
 
-3. **Install**, in an elevated PowerShell, from the directory holding both scripts:
+3. **Install**, in an elevated PowerShell, from the directory holding both scripts. Type
+   the command yourself with the three values in place of the placeholders; Tenko shows no
+   command line to copy, so that nothing a node produced runs in an administrator's shell:
 
    ```powershell
-   .\Install-TenkoDhcpMirror.ps1 -Url https://tenko1.corp.example.test:8443 `
-     -MirrorId 01JC3V9Q7E -Fingerprint 'AB:CD:...' -Account 'CORP\gmsa-mirror$' -PromptToken
+   .\Install-TenkoDhcpMirror.ps1 -Url <controller URL> -MirrorId <mirror id> `
+     -Fingerprint <fingerprint> -Account 'CORP\gmsa-mirror$' -PromptToken
    ```
-
-   The mirror's Settings tab in Tenko shows this command filled in. Treat it as a template:
-   check the URL, the mirror id and the fingerprint against what you know before you run it,
-   since the page that shows it is served by the node you are pinning.
 
    For a user account add `-Credential (Get-Credential CORP\svc-tenko-mirror)`. The
    install copies the exporter to `%ProgramFiles%\Tenko\mirror\` (administrators write,
@@ -161,12 +162,16 @@ is never read):
 | `Get-DhcpServerv4Scope` | `dhcp.scopes[]`: the network from `ScopeId` and `SubnetMask`, the name, the description, `active` from `State`, the lease time, the pool from `StartRange` and `EndRange`, `delay_ms` |
 | `Get-DhcpServerv4ExclusionRange -ScopeId` | `exclusions[]` of the scope |
 | `Get-DhcpServerv4Reservation -ScopeId` | `reservations[]`: the address, the client (a MAC address when `ClientId` is six octets, else the identifier octets), the name when it is a host name, the description, `bootp` |
-| `Get-DhcpServerv4OptionValue -All`, `-ScopeId -All`, `-ReservedIP -All` | `server_options[]`, the scope's `options[]`, the reservation's `options[]`: code, vendor class, user class, the values as Windows writes them |
+| `Get-DhcpServerv4OptionValue -All`, `-ScopeId -All`, `-ReservedIP -All` | `server_options[]`, the scope's `options[]`, the reservation's `options[]`: code, vendor class, user class, the values as Windows writes them. Two codes are settings Windows stores as options and are never carried as options: 51 (carried as the lease time) and 81, where Windows keeps the DNS update settings as a bit field that holds bits of earlier settings (carried as `ddns`, read from `Get-DhcpServerv4DnsSetting`) |
 | `Get-DhcpServerv4OptionDefinition -All` | `option_defs[]`: the definitions of codes 128 to 254 and of vendor classes other than Microsoft's (the standard ones are Tenko's catalog) |
 | `Get-DhcpServerv4Class` | `classes[]`, with `builtin` for the Microsoft and Default classes |
 | `Get-DhcpServerv4DnsSetting -ScopeId` | `ddns` of the scope, by the table of [active-directory.md](../../../docs/active-directory.md) step 10 |
-| `Get-DhcpServerv4Lease -ScopeId` | `leases[]` in the states `Active`, `ActiveReservation` and `Declined`, the expiry in UTC; `Expired` and `InactiveReservation` rows are left out |
-| `Get-DhcpServerv4Policy`, `Get-DhcpServerv4Filter`, `Get-DhcpServerv4Superscope`, `Get-DhcpServerv4Failover` | The loss report only |
+| `Get-DhcpServerv4Lease -ScopeId -AllLeases` | `leases[]` in the states `Active`, `ActiveReservation` and `Declined`, the expiry in UTC; `Expired` and `InactiveReservation` rows are left out. The script asks for every lease and leaves the expired ones out itself, so that it behaves the same on every Windows version: Microsoft's page says the call without `-AllLeases` returns active leases only, while Windows Server 2025 returns active and declined leases and the reservations and omits only expired ones |
+| `Get-DhcpServerv4FilterList`, `Get-DhcpServerv4Filter` | `filters[]`: the entries of the lists that are on, the address lowercase with colons (`00:00:5e:00:53:20`), allow or deny. With the allow list on, every scope is `restricted`: Tenko then serves only the clients an allow entry matches, as Windows does, and with an empty allow list nobody. Entries of a list that is off filter nothing and are not carried. A run that cannot read the state of the lists fails instead of pushing a server as open |
+| `Get-DhcpServerv4Policy`, `Get-DhcpServerv4Superscope`, `Get-DhcpServerv4Failover` | The loss report only; the scopes in no superscope come as one row without a name, which is no loss |
+
+Every read keeps the properties it uses by name (a whole object carries about 69 KB of
+metadata) and treats no object, one object and many alike.
 
 The envelope is `{format, sequence, taken_at, source, dhcp, losses}` (plan section 3.1).
 `sequence` is the Unix time of the run, or one more than the last push when the clock went
@@ -180,21 +185,41 @@ object key it came from (`{sheet, column}`), so that nothing is dropped silently
 mirror card shows it; an entry has to be acknowledged before a scope is prepared or taken
 over, and the acknowledgment holds while the entry recurs unchanged.
 
+The codes are the server's (`tenko_core::migrate::losses`). The column of an entry names
+the scope it belongs to by an address first (`192.0.2.101`, `192.0.2.0:81` for an option of
+the scope, `192.0.2.0:guests` for a policy of the scope); an entry without an address belongs
+to every scope.
+
 | Code | Entry |
 |---|---|
-| `mirror.policy` | A policy, with its scope, order and conditions |
-| `mirror.filter` | An allow or deny filter entry |
-| `mirror.superscope` | A superscope and its member scopes; each scope is prepared alone |
-| `mirror.failover` | A failover relationship (name, partner, mode, scopes); the shared secret is never read |
-| `mirror.scope.delay` | A scope with an offer delay; Tenko has no offer delay |
-| `mirror.scope.bootp`, `mirror.reservation.bootp` | A BOOTP-only scope or reservation |
-| `mirror.reservation.name` | A reservation whose name is not a host name (a space, an apostrophe, a leading hyphen, a label above 63 characters); the name is kept as it is in the entry and the reservation is carried without one |
-| `mirror.option.policy` | An option value a policy sets |
-| `mirror.option.managed` | Option 58 or 59; Tenko computes T1 and T2 from the lease time (option 51 is carried as the lease time, not as an option) |
-| `mirror.option_def.default`, `mirror.option_def.type` | A default value of a custom definition; a definition type Tenko has no kind for |
-| `mirror.ddns.keep_on_expiry` | `DeleteDnsRROnLeaseExpiry` off; Tenko removes the records it wrote when the lease ends |
-| `mirror.ddns.suffix` | A scope `DnsSuffix`; the IR carries none, set the forward zone in Tenko |
-| `mirror.lease.state` | A lease in a state other than the three carried and the two left out |
+| `migrate.loss.policy` | A policy, with its scope, order and conditions |
+| `migrate.loss.filter` | An entry of an enabled filter list that is not a MAC address pattern Tenko can match; the entry says which way the restriction is not carried |
+| `migrate.loss.filter_reservation` | With the allow list on, a reservation no allow entry lists: Windows does not serve it, and Tenko serves a reservation on a restricted scope whatever the allow list says |
+| `migrate.loss.superscope` | A superscope and its member scopes; each scope is prepared alone |
+| `migrate.loss.failover` | A failover relationship (name, partner, mode, scopes); the shared secret is never read |
+| `migrate.loss.scope_delay` | A scope with an offer delay; Tenko has no offer delay |
+| `migrate.loss.bootp_only`, `migrate.loss.reservation_bootp` | A BOOTP-only scope or reservation |
+| `migrate.loss.reservation_name` | A reservation whose name is not a host name (a space, an apostrophe, a leading hyphen, a label above 63 characters); the name is kept as it is in the entry and the reservation is carried without one |
+| `migrate.loss.option_policy` | An option value a policy sets |
+| `migrate.loss.option_managed` | Option 58 or 59; Tenko computes T1 and T2 from the lease time |
+| `migrate.loss.option_def_default`, `migrate.loss.option_def_type` | A default value of a custom definition; a definition type Tenko has no kind for |
+| `migrate.loss.ddns_keep_on_expiry` | `DeleteDnsRROnLeaseExpiry` off; Tenko removes the records it wrote when the lease ends |
+| `migrate.loss.ddns_suffix` | A scope `DnsSuffix`; the IR carries none, set the forward zone in Tenko |
+| `migrate.loss.lease_state` | A lease in a state other than the three carried and the two left out |
+
+A reservation of the Windows type `Both` (the default) is carried with `bootp: true`, as
+Windows holds it; Tenko serves no BOOTP, and the flag changes nothing it serves.
+
+## Two servers in a failover relationship
+
+Install the exporter on each server with a mirror of its own, then pair the two mirrors on
+either mirror's Settings tab. A mirror is bound to the server its first push names: a push
+from another server is refused (`answer=409 code=migrate.mirror.source`) until the mirror's
+token is replaced, so that two exporters cannot share one mirror. The two servers name each
+other differently in their relationship (one by its full name, the other by its short name),
+so the pair is what you choose, never a match of names. Windows copies neither a scope's
+state nor a new reservation to the partner by itself, so the two mirrors differ as a rule;
+the diff of a paired mirror lists every difference with the partner as a row to decide.
 
 ## The dry run and the log
 
@@ -238,11 +263,17 @@ log). Deleting the mirror in Tenko deletes its service account and token.
 The Pester 5 suites under `tests/` run on any host with PowerShell 5.1 or 7 and need no
 DHCP server: the cmdlets are replaced by mocks that answer with the recorded output under
 `tests/fixtures/` (one file per cmdlet and level, as `ConvertTo-Json -Depth 6` wrote it)
-of the fictitious domain `corp.example.test` of plan section 3.4, with documentation
-addresses only. The suites hold the mapping to `tests/fixtures/expected-snapshot.json`,
-written from the types of `crates/tenko-core/src/ir.rs` and `ir/dhcp.rs`, push against a
-local HTTP listener for every answer of the route, and check the account guard and the
-certificate pin with certificates made in memory.
+of the fictitious domain `corp.example.test` of plan section 3.4, and under
+`tests/fixtures/lab-dc1/` in the shapes a Windows Server 2025 lab server returned (one
+object where many are possible, no file where the cmdlet returns no object), with
+documentation addresses only. The suites hold the mapping to the `expected-snapshot.json`
+of each set, push against a local HTTP listener for every answer of the route, and check
+the account guard and the certificate pin with certificates made in memory. The server's
+tests (`crates/tenko-migrate/tests/mirror_service.rs`) decode, store and diff the same two
+expected snapshots and fail on a loss code the server does not know or an entry it cannot
+place in its scope, so that the script and the server read one contract. After a change of
+the mapping, write each `expected-snapshot.json` anew from what the script produces for its
+set, review the diff, and run both suites.
 
 ```powershell
 Invoke-Pester -Path deploy/windows/mirror/tests -Output Detailed

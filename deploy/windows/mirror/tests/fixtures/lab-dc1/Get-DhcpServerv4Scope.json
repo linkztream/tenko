@@ -1,0 +1,17 @@
+{
+  "ScopeId": { "Address": 131264, "AddressFamily": 2, "IPAddressToString": "192.0.2.0" },
+  "SubnetMask": { "Address": 16777215, "AddressFamily": 2, "IPAddressToString": "255.255.255.0" },
+  "Name": "Lab test 192.0.2.0/24",
+  "Description": "",
+  "StartRange": { "Address": 1677852864, "AddressFamily": 2, "IPAddressToString": "192.0.2.100" },
+  "EndRange": { "Address": 4194435264, "AddressFamily": 2, "IPAddressToString": "192.0.2.250" },
+  "LeaseDuration": { "Ticks": 288000000000, "Days": 0, "Hours": 8, "Milliseconds": 0, "Minutes": 0, "Seconds": 0, "TotalDays": 0.3333333333333333, "TotalHours": 8.0, "TotalMilliseconds": 28800000.0, "TotalMinutes": 480.0, "TotalSeconds": 28800.0 },
+  "State": "Active",
+  "Type": "Dhcp",
+  "Delay": 0,
+  "SuperscopeName": "",
+  "ActivatePolicies": true,
+  "NapEnable": false,
+  "NapProfile": "",
+  "MaxBootpClients": 4294967295
+}

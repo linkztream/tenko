@@ -1,0 +1,272 @@
+{
+  "format": 1,
+  "sequence": 1795204515,
+  "taken_at": "2026-11-20T19:55:15Z",
+  "source": {
+    "kind": "windows-dhcp",
+    "server": "dc1.corp.example.test",
+    "adapter": "Tenko-DhcpMirror.ps1",
+    "adapter_version": "0.0.12"
+  },
+  "dhcp": {
+    "server_options": [],
+    "option_defs": [],
+    "classes": [
+      {
+        "name": "Default Routing and Remote Access Class",
+        "kind": "user",
+        "data": "525241532e4d6963726f736f6674",
+        "builtin": true,
+        "description": "User class for remote access clients",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Class",
+          "row": null,
+          "column": "Default Routing and Remote Access Class"
+        }
+      },
+      {
+        "name": "Default BOOTP Class",
+        "kind": "user",
+        "data": "424f4f54502e4d6963726f736f6674",
+        "builtin": true,
+        "description": "User class for BOOTP Clients",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Class",
+          "row": null,
+          "column": "Default BOOTP Class"
+        }
+      },
+      {
+        "name": "Microsoft Windows 2000 Options",
+        "kind": "vendor",
+        "data": "4d53465420352e30",
+        "builtin": true,
+        "description": "Microsoft vendor-specific options for Windows 2000 and above Clients",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Class",
+          "row": null,
+          "column": "Microsoft Windows 2000 Options"
+        }
+      },
+      {
+        "name": "Microsoft Windows 98 Options",
+        "kind": "vendor",
+        "data": "4d534654203938",
+        "builtin": true,
+        "description": "Microsoft vendor-specific options for Windows 98 Clients",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Class",
+          "row": null,
+          "column": "Microsoft Windows 98 Options"
+        }
+      },
+      {
+        "name": "Microsoft Options",
+        "kind": "vendor",
+        "data": "4d534654",
+        "builtin": true,
+        "description": "Microsoft vendor-specific options applicable to all Windows Clients",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Class",
+          "row": null,
+          "column": "Microsoft Options"
+        }
+      }
+    ],
+    "scopes": [
+      {
+        "cidr": "192.0.2.0/24",
+        "name": "Lab test 192.0.2.0/24",
+        "active": true,
+        "lease_secs": 28800,
+        "ranges": [
+          {
+            "first": "192.0.2.100",
+            "last": "192.0.2.250"
+          }
+        ],
+        "exclusions": [],
+        "reservations": [
+          {
+            "ip": "192.0.2.102",
+            "client": {
+              "mac": "00:00:5e:00:53:03"
+            },
+            "name": "lab-res102",
+            "bootp": true,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "row": null,
+              "column": "192.0.2.102"
+            }
+          },
+          {
+            "ip": "192.0.2.100",
+            "client": {
+              "mac": "00:00:5e:00:53:01"
+            },
+            "name": "lab-res100",
+            "description": "plain host name",
+            "bootp": true,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "row": null,
+              "column": "192.0.2.100"
+            }
+          },
+          {
+            "ip": "192.0.2.101",
+            "client": {
+              "mac": "00:00:5e:00:53:02"
+            },
+            "description": "invalid host name",
+            "bootp": true,
+            "options": [],
+            "origin": {
+              "sheet": "Get-DhcpServerv4Reservation",
+              "row": null,
+              "column": "192.0.2.101"
+            }
+          }
+        ],
+        "options": [
+          {
+            "code": 3,
+            "values": [
+              "192.0.2.1"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "row": null,
+              "column": "192.0.2.0:3"
+            }
+          },
+          {
+            "code": 6,
+            "values": [
+              "192.0.2.53"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "row": null,
+              "column": "192.0.2.0:6"
+            }
+          },
+          {
+            "code": 15,
+            "values": [
+              "corp.example.test"
+            ],
+            "origin": {
+              "sheet": "Get-DhcpServerv4OptionValue",
+              "row": null,
+              "column": "192.0.2.0:15"
+            }
+          }
+        ],
+        "ddns": {
+          "enabled": false,
+          "reverse": true,
+          "conflict": "replace",
+          "client_may_update_a": false,
+          "legacy_clients": false,
+          "refuse_foreign": false
+        },
+        "restricted": true,
+        "delay_ms": 0,
+        "origin": {
+          "sheet": "Get-DhcpServerv4Scope",
+          "row": null,
+          "column": "192.0.2.0"
+        }
+      }
+    ],
+    "superscopes": [],
+    "policies": [],
+    "filters": [],
+    "failover": [],
+    "leases": [
+      {
+        "ip": "192.0.2.110",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:10"
+        },
+        "hostname": "lab-lease-active",
+        "expires": "2026-11-21T03:52:29Z",
+        "state": "active",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "row": null,
+          "column": "192.0.2.110"
+        }
+      },
+      {
+        "ip": "192.0.2.111",
+        "scope": "192.0.2.0/24",
+        "client": {
+          "mac": "00:00:5e:00:53:11"
+        },
+        "hostname": "lab-lease-declined",
+        "expires": "2026-11-21T03:52:29Z",
+        "state": "declined",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Lease",
+          "row": null,
+          "column": "192.0.2.111"
+        }
+      }
+    ]
+  },
+  "losses": {
+    "entries": [
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Reservation",
+          "row": null,
+          "column": "192.0.2.101"
+        },
+        "code": "migrate.loss.reservation_name",
+        "detail": "the name `Living Room TV` of reservation 192.0.2.101 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Filter",
+          "row": null,
+          "column": "192.0.2.102"
+        },
+        "code": "migrate.loss.filter_reservation",
+        "detail": "the allow list is on and no entry lists reservation 192.0.2.102 (00:00:5e:00:53:03), so the server does not serve it; Tenko serves a reservation on a restricted scope whatever the allow list says, so this restriction is not carried"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Filter",
+          "row": null,
+          "column": "192.0.2.100"
+        },
+        "code": "migrate.loss.filter_reservation",
+        "detail": "the allow list is on and no entry lists reservation 192.0.2.100 (00:00:5e:00:53:01), so the server does not serve it; Tenko serves a reservation on a restricted scope whatever the allow list says, so this restriction is not carried"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Filter",
+          "row": null,
+          "column": "192.0.2.101"
+        },
+        "code": "migrate.loss.filter_reservation",
+        "detail": "the allow list is on and no entry lists reservation 192.0.2.101 (00:00:5e:00:53:02), so the server does not serve it; Tenko serves a reservation on a restricted scope whatever the allow list says, so this restriction is not carried"
+      },
+      {
+        "location": {
+          "sheet": "Get-DhcpServerv4Failover",
+          "row": null,
+          "column": "dc1-dc2"
+        },
+        "code": "migrate.loss.failover",
+        "detail": "failover relationship `dc1-dc2` with dc2.corp.example.test (LoadBalance) over the scopes 192.0.2.0; Windows failover is not interoperable (CON-05) and the shared secret is never read"
+      }
+    ]
+  }
+}

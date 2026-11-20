@@ -206,11 +206,11 @@ Describe 'A whole run' {
         $sent.format | Should -Be 1
         $sent.source.server | Should -Be 'dc1.corp.example.test'
         $sent.dhcp.leases.Count | Should -Be 60
-        $sent.losses.entries.Count | Should -Be 13
+        $sent.losses.entries.Count | Should -Be 12
         $sequence = (Get-Content -LiteralPath (Join-Path $stateDir 'state.json') -Raw | ConvertFrom-Json).last_sequence
         $sequence | Should -Be $sent.sequence
         $line = Get-LastLogLine
-        $line | Should -Match "seq=$sequence scopes=1 reservations=30 leases=60 losses=13 hash=[0-9a-f]{16} answer=200 changed=true duration_ms=\d+"
+        $line | Should -Match "seq=$sequence scopes=1 reservations=30 leases=60 losses=12 hash=[0-9a-f]{16} answer=200 changed=true duration_ms=\d+"
         $line | Should -Not -Match 'tnk-mirror-test-token'
     }
 

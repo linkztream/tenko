@@ -1,0 +1,7 @@
+[
+  { "Name": "Default Routing and Remote Access Class", "Type": "User", "Data": [82, 82, 65, 83, 46, 77, 105, 99, 114, 111, 115, 111, 102, 116], "AsciiData": "RRAS.Microsoft", "Description": "User class for remote access clients" },
+  { "Name": "Default BOOTP Class", "Type": "User", "Data": [66, 79, 79, 84, 80, 46, 77, 105, 99, 114, 111, 115, 111, 102, 116], "AsciiData": "BOOTP.Microsoft", "Description": "User class for BOOTP Clients" },
+  { "Name": "Microsoft Windows 2000 Options", "Type": "Vendor", "Data": [77, 83, 70, 84, 32, 53, 46, 48], "AsciiData": "MSFT 5.0", "Description": "Microsoft vendor-specific options for Windows 2000 and above Clients" },
+  { "Name": "Microsoft Windows 98 Options", "Type": "Vendor", "Data": [77, 83, 70, 84, 32, 57, 56], "AsciiData": "MSFT 98", "Description": "Microsoft vendor-specific options for Windows 98 Clients" },
+  { "Name": "Microsoft Options", "Type": "Vendor", "Data": [77, 83, 70, 84], "AsciiData": "MSFT", "Description": "Microsoft vendor-specific options applicable to all Windows Clients" }
+]

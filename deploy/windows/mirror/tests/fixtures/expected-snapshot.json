@@ -707,7 +707,18 @@
     ],
     "superscopes": [],
     "policies": [],
-    "filters": [],
+    "filters": [
+      {
+        "mac": "00:00:5e:00:53:ff",
+        "kind": "deny",
+        "description": "Stolen laptop",
+        "origin": {
+          "sheet": "Get-DhcpServerv4Filter",
+          "row": null,
+          "column": "00-00-5E-00-53-FF"
+        }
+      }
+    ],
     "failover": [],
     "leases": [
       {
@@ -1614,7 +1625,7 @@
           "row": null,
           "column": "150"
         },
-        "code": "mirror.option_def.default",
+        "code": "migrate.loss.option_def_default",
         "detail": "the default value `192.0.2.7` of option definition 150 is not carried; Tenko has no option defaults"
       },
       {
@@ -1623,7 +1634,7 @@
           "row": null,
           "column": "192.0.2.17"
         },
-        "code": "mirror.reservation.name",
+        "code": "migrate.loss.reservation_name",
         "detail": "the name `living room tv` of reservation 192.0.2.17 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
       },
       {
@@ -1632,7 +1643,7 @@
           "row": null,
           "column": "192.0.2.18"
         },
-        "code": "mirror.reservation.name",
+        "code": "migrate.loss.reservation_name",
         "detail": "the name `Anna's iPad` of reservation 192.0.2.18 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
       },
       {
@@ -1641,7 +1652,7 @@
           "row": null,
           "column": "192.0.2.21"
         },
-        "code": "mirror.reservation.name",
+        "code": "migrate.loss.reservation_name",
         "detail": "the name `-switch01` of reservation 192.0.2.21 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
       },
       {
@@ -1650,7 +1661,7 @@
           "row": null,
           "column": "192.0.2.23"
         },
-        "code": "mirror.reservation.bootp",
+        "code": "migrate.loss.reservation_bootp",
         "detail": "reservation 192.0.2.23 answers BOOTP only; Tenko serves it as a DHCP reservation"
       },
       {
@@ -1659,7 +1670,7 @@
           "row": null,
           "column": "192.0.2.38"
         },
-        "code": "mirror.reservation.name",
+        "code": "migrate.loss.reservation_name",
         "detail": "the name `Küche-TV` of reservation 192.0.2.38 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
       },
       {
@@ -1668,7 +1679,7 @@
           "row": null,
           "column": "192.0.2.39"
         },
-        "code": "mirror.reservation.name",
+        "code": "migrate.loss.reservation_name",
         "detail": "the name `aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa` of reservation 192.0.2.39 is not a host name and is not tidied (WT-Q10); the reservation is carried without a name"
       },
       {
@@ -1677,7 +1688,7 @@
           "row": null,
           "column": "192.0.2.0:6"
         },
-        "code": "mirror.option.policy",
+        "code": "migrate.loss.option_policy",
         "detail": "option 6 is set by the policy `guests`; policies are not taken over (WT-Q2)"
       },
       {
@@ -1686,7 +1697,7 @@
           "row": null,
           "column": "192.0.2.0:58"
         },
-        "code": "mirror.option.managed",
+        "code": "migrate.loss.option_managed",
         "detail": "option 58 (`345600`) is computed by Tenko from the lease time and is not carried"
       },
       {
@@ -1695,26 +1706,17 @@
           "row": null,
           "column": "192.0.2.182"
         },
-        "code": "mirror.lease.state",
+        "code": "migrate.loss.lease_state",
         "detail": "lease 192.0.2.182 is in the state `Offered`, which the mirror does not carry"
       },
       {
         "location": {
           "sheet": "Get-DhcpServerv4Policy",
           "row": null,
-          "column": "guests"
+          "column": "192.0.2.0:guests"
         },
-        "code": "mirror.policy",
+        "code": "migrate.loss.policy",
         "detail": "policy `guests` on scope 192.0.2.0 (enabled, order 1): UserClass guests; policies are not taken over (WT-Q2)"
-      },
-      {
-        "location": {
-          "sheet": "Get-DhcpServerv4Filter",
-          "row": null,
-          "column": "00-00-5E-00-53-FF"
-        },
-        "code": "mirror.filter",
-        "detail": "deny filter entry `00-00-5E-00-53-FF` (Stolen laptop); filters are not taken over (WT-Q2)"
       },
       {
         "location": {
@@ -1722,7 +1724,7 @@
           "row": null,
           "column": "campus"
         },
-        "code": "mirror.superscope",
+        "code": "migrate.loss.superscope",
         "detail": "superscope `campus` joins the scopes 192.0.2.0; superscopes are not taken over (WT-Q2), each scope is prepared alone"
       }
     ]

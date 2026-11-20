@@ -1,0 +1,11 @@
+{
+  "Name": "dc1-dc2",
+  "PartnerServer": "dc2.corp.example.test",
+  "Mode": "LoadBalance",
+  "ScopeId": { "Address": 131264, "AddressFamily": 2, "IPAddressToString": "192.0.2.0" },
+  "State": "Normal",
+  "AutoStateTransition": false,
+  "EnableAuth": false,
+  "ServerRole": null,
+  "StateSwitchInterval": null
+}
