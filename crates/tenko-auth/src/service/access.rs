@@ -156,11 +156,12 @@ fn token_lineage(
     view: &dyn ReadView,
     owner: &UserRecord,
     request: &TokenRequest,
+    scopes: &[TokenScope],
     settings: &crate::settings::SecuritySettings,
 ) -> Result<Option<uuid::Uuid>, AuthError> {
     use crate::client_cert::model::{CLIENT_CERTS, CertState};
     let Some(lineage) = request.lineage else {
-        if binding_required(owner, &request.scopes, settings) {
+        if binding_required(owner, scopes, settings) {
             return Err(AuthError::invalid(
                 "lineage",
                 "this profile binds every service-account token to a certificate of the account (TGL-47)",
@@ -840,6 +841,32 @@ impl AuthService {
         strength: AuthStrength,
         request: &TokenRequest,
     ) -> Result<CreatedToken, AuthError> {
+        let mut batch = WriteBatch::for_request(ctx);
+        let created = self.stage_scoped_token(
+            ctx, view, &mut batch, owner, creator, strength, request, None,
+        )?;
+        self.commit(batch).await?;
+        Ok(created)
+    }
+
+    /// Stages the scoped token of [`AuthService::issue_scoped_token`] into `batch`. With
+    /// `minted`, the token carries that scope and no grant instead of what `request` asks
+    /// for: the mirror service mints its token this way (ADR 0033), never a request.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the parts of one token, each checked here"
+    )]
+    pub(super) fn stage_scoped_token(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        owner: &UserRecord,
+        creator: UserId,
+        strength: AuthStrength,
+        request: &TokenRequest,
+        minted: Option<TokenScope>,
+    ) -> Result<CreatedToken, AuthError> {
         let image = self.index.image();
         let required = image
             .required_strength(creator, Action::Read)
@@ -857,7 +884,10 @@ impl AuthService {
             ));
         }
         let name: String = name.chars().take(64).collect();
-        let (grants, scopes) = self.validate_token_grants(view, owner, request)?;
+        let (grants, scopes) = match minted {
+            Some(scope) => (Vec::new(), vec![scope]),
+            None => self.validate_token_grants(view, owner, request)?,
+        };
         super::renewal::check_token_room(view, owner.id)?;
         let settings = self.settings();
         let expires_at = token_expiry(&settings, request.expires_in_days, ctx.now)?;
@@ -865,7 +895,7 @@ impl AuthService {
         let lifetime = expires_at.map(|end| end.saturating_since(ctx.now));
         let (renewal, source_prefixes) =
             super::renewal::creation_terms(owner, request, &settings, id, lifetime)?;
-        let lineage = token_lineage(view, owner, request, &settings)?;
+        let lineage = token_lineage(view, owner, request, &scopes, &settings)?;
         let mut record = ScopedTokenRecord {
             id,
             owner: owner.id,
@@ -887,7 +917,6 @@ impl AuthService {
         let token = crate::secret::new_token_of(record.form())?;
         record.prefix = token.expose().chars().take(12).collect();
         let hash = token.hash();
-        let mut batch = WriteBatch::for_request(ctx);
         batch.put_typed(&SCOPED_TOKENS, &hash, &record)?;
         batch.put_typed(&USER_SCOPED_TOKENS, &(owner.id, record.id), &hash)?;
         let mut draft = Self::audit(
@@ -931,7 +960,6 @@ impl AuthService {
             draft = draft.with_context("lineage", lineage.to_string());
         }
         batch.audit(draft);
-        self.commit(batch).await?;
         Ok(CreatedToken {
             token: SecretString::new(token.expose()),
             renewal_secret: renewal.map(|(_, secret)| SecretString::new(secret.expose())),

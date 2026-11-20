@@ -2291,3 +2291,118 @@ async fn a_scoped_token_reads_grants_and_subjects_only_with_a_grant_that_reads_u
         2
     );
 }
+
+#[tokio::test]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the life of one mirror's credentials"
+)]
+async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
+    let lab = &Lab::new().await;
+    let admin = lab.admin().await;
+    let mirror = tenko_core::MirrorId::generate();
+    let own = tenko_core::migrate::mirror_object(mirror);
+    let view = || async {
+        lab.env
+            .store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("a view")
+    };
+    let stage = |name: &'static str| {
+        let admin = admin.clone();
+        async move {
+            let view = view().await;
+            let mut batch = WriteBatch::for_request(&admin);
+            let staged = lab
+                .env
+                .service
+                .stage_mirror_account(&admin, view.as_ref(), &mut batch, mirror, name, Some(30))
+                .await;
+            (staged, batch)
+        }
+    };
+    let (credentials, batch) = stage("dc1").await;
+    let credentials = credentials.expect("staged");
+    lab.env.store.propose(batch).await.expect("committed");
+    let pusher = lab
+        .token_ctx(credentials.token.token.expose())
+        .await
+        .principal;
+    assert_eq!(lab.code(&pusher, Action::Execute, own), "ok");
+    for (action, object) in [
+        (Action::Read, own),
+        (Action::Update, own),
+        (Action::Delete, own),
+        (
+            Action::Execute,
+            tenko_core::migrate::mirror_object(tenko_core::MirrorId::generate()),
+        ),
+        (Action::Read, METRICS_OBJECT),
+        (Action::Read, anywhere(ObjectKind::Prefix)),
+        (Action::Read, anywhere(ObjectKind::Mirror)),
+    ] {
+        assert_eq!(
+            lab.code(&pusher, action, object),
+            "auth.forbidden",
+            "{action:?} {object}"
+        );
+    }
+    let info = &credentials.token.info;
+    assert_eq!(
+        (info.scopes.as_slice(), info.grants.len()),
+        ([TokenScope::Mirror(mirror)].as_slice(), 0)
+    );
+
+    // The account's name is taken now, and a name with a space makes no account.
+    let (taken, _) = stage("dc1").await;
+    assert!(matches!(taken, Err(AuthError::UserNameTaken)), "{taken:?}");
+    let (spaced, _) = stage("dc 1").await;
+    assert!(
+        matches!(spaced, Err(AuthError::Invalid { .. })),
+        "{spaced:?}"
+    );
+
+    // A new token stops the old one at its commit.
+    let mut batch = WriteBatch::for_request(&admin);
+    let renewed = lab
+        .env
+        .service
+        .stage_mirror_token(
+            &admin,
+            view().await.as_ref(),
+            &mut batch,
+            credentials.account,
+            mirror,
+            credentials.token.info.id,
+            None,
+        )
+        .await
+        .expect("staged");
+    lab.env.store.propose(batch).await.expect("committed");
+    let old = Credentials::Bearer(credentials.token.token.expose().to_owned());
+    assert!(
+        lab.env.ctx_for(&old).await.is_err(),
+        "the old token stopped"
+    );
+    let pusher = lab.token_ctx(renewed.token.expose()).await.principal;
+    assert_eq!(lab.code(&pusher, Action::Execute, own), "ok");
+
+    // The removal takes the account and its token.
+    let mut batch = WriteBatch::for_request(&admin);
+    lab.env
+        .service
+        .stage_mirror_account_removal(
+            &admin,
+            view().await.as_ref(),
+            &mut batch,
+            credentials.account,
+        )
+        .expect("staged");
+    lab.env.store.propose(batch).await.expect("committed");
+    let renewed = Credentials::Bearer(renewed.token.expose().to_owned());
+    assert!(
+        lab.env.ctx_for(&renewed).await.is_err(),
+        "the account's token went with it"
+    );
+}

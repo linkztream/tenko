@@ -1,0 +1,216 @@
+//! The service account and the token of a mirrored source (ADR 0033 decision 3, Windows
+//! takeover plan section 2.1 rule 2).
+//!
+//! The mirror service of `tenko-migrate` stages these into the batch that writes the mirror's
+//! row, so a mirror, its account and its token appear and go together. The account
+//! `mirror-<name>` holds no role and no grant; its one token carries the scope `mirror:<id>`
+//! and no grant, which `crate::authz` lets reach the push of that mirror and nothing else.
+//! Minting needs an interactive session that signed in within the last five minutes, as every
+//! scoped token of a service account does: the token outlives the session.
+
+use tenko_core::{ApiTokenId, MirrorId, ObjectRef, RequestCtx, Timestamp, UserId};
+use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
+
+use super::{
+    AuthService, LIST_LIMIT, actions,
+    admin::valid_user_name,
+    types::{CreatedToken, TokenRequest},
+};
+use crate::{
+    error::AuthError,
+    model::{
+        SCOPED_TOKENS, TokenScope, USER_NAMES, USER_SCOPED_TOKENS, USERS, UserKind, UserRecord,
+    },
+};
+
+/// What the creation of a mirror's credentials returns: the account and the token, shown
+/// once.
+#[derive(Debug)]
+pub struct MirrorCredentials {
+    /// The service account `mirror-<name>`.
+    pub account: UserId,
+    /// The token with the scope `mirror:<id>`.
+    pub token: CreatedToken,
+}
+
+impl AuthService {
+    /// Stages the service account `mirror-<name>` and its token into `batch`.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::Unauthenticated`] without a session, [`AuthError::StepUpRequired`] for a
+    /// session older than five minutes, [`AuthError::Invalid`] for a name that makes no
+    /// account name, [`AuthError::UserNameTaken`], and the token's errors (TGL-05).
+    pub async fn stage_mirror_account(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        mirror: MirrorId,
+        name: &str,
+        expires_in_days: Option<u32>,
+    ) -> Result<MirrorCredentials, AuthError> {
+        let (creator, _, strength) = Self::session_principal(ctx)?;
+        self.require_fresh_session(ctx).await?;
+        let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(name))?;
+        let key = UserRecord::name_key(&name);
+        if view.get_typed(&USER_NAMES, &key)?.is_some() {
+            return Err(AuthError::UserNameTaken);
+        }
+        let account = UserRecord {
+            kind: UserKind::Service,
+            owner: Some(creator),
+            ..UserRecord::new(name.clone(), name, Vec::new(), ctx.now)
+        };
+        batch.expect_typed(&USER_NAMES, &key, None);
+        batch.put_typed(&USER_NAMES, &key, &account.id)?;
+        batch.put_typed(&USERS, &account.id, &account)?;
+        batch.audit(
+            Self::audit(
+                actions::SERVICE_ACCOUNT_CREATE,
+                vec![ObjectRef::from(account.id)],
+                ctx,
+            )
+            .with_context("name", account.name.clone())
+            .with_context("mirror", mirror.to_string()),
+        );
+        let token = self.stage_mirror_token_of(
+            ctx,
+            view,
+            batch,
+            &account,
+            (creator, strength),
+            mirror,
+            expires_in_days,
+        )?;
+        Ok(MirrorCredentials {
+            account: account.id,
+            token,
+        })
+    }
+
+    /// Stages a new token of the mirror's account and the removal of `old`, which stops at
+    /// the commit.
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::stage_mirror_account`], and [`AuthError::NotFound`] when the account
+    /// is gone.
+    pub async fn stage_mirror_token(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        account: UserId,
+        mirror: MirrorId,
+        old: ApiTokenId,
+        expires_in_days: Option<u32>,
+    ) -> Result<CreatedToken, AuthError> {
+        let (creator, _, strength) = Self::session_principal(ctx)?;
+        self.require_fresh_session(ctx).await?;
+        let (account, _) = view
+            .get_typed(&USERS, &account)?
+            .filter(|(user, _)| user.is_service())
+            .ok_or(AuthError::NotFound {
+                kind: "service_account",
+            })?;
+        if let Some(key) = Self::scoped_token_hash(view, account.id, old)? {
+            Self::stage_token_removal(view, batch, account.id, old, key)?;
+            batch.audit(Self::audit(
+                actions::TOKEN_REVOKE,
+                vec![ObjectRef::from(account.id), ObjectRef::from(old)],
+                ctx,
+            ));
+        }
+        self.stage_mirror_token_of(
+            ctx,
+            view,
+            batch,
+            &account,
+            (creator, strength),
+            mirror,
+            expires_in_days,
+        )
+    }
+
+    fn stage_mirror_token_of(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        account: &UserRecord,
+        (creator, strength): (UserId, tenko_core::AuthStrength),
+        mirror: MirrorId,
+        expires_in_days: Option<u32>,
+    ) -> Result<CreatedToken, AuthError> {
+        let request = TokenRequest {
+            name: format!("mirror {mirror}"),
+            expires_in_days,
+            ..TokenRequest::default()
+        };
+        self.stage_scoped_token(
+            ctx,
+            view,
+            batch,
+            account,
+            creator,
+            strength,
+            &request,
+            Some(TokenScope::Mirror(mirror)),
+        )
+    }
+
+    /// Stages the removal of the mirror's account with every token and grant it holds; an
+    /// account that is gone already stages nothing.
+    ///
+    /// # Errors
+    ///
+    /// A store or codec error.
+    pub fn stage_mirror_account_removal(
+        &self,
+        ctx: &RequestCtx,
+        view: &dyn ReadView,
+        batch: &mut WriteBatch,
+        account: UserId,
+    ) -> Result<(), AuthError> {
+        let Some((user, revision)) = view.get_typed(&USERS, &account)? else {
+            return Ok(());
+        };
+        batch.expect_typed(&USERS, &account, Some(revision));
+        batch.delete_typed(&USERS, &account);
+        batch.delete_typed(&USER_NAMES, &UserRecord::name_key(&user.name));
+        for ((_, token), key, _) in view.scan_typed(
+            &USER_SCOPED_TOKENS,
+            KeyRange::prefix(tenko_core::codec::encode_key(&(account,))),
+            LIST_LIMIT,
+            false,
+        )? {
+            Self::stage_token_removal(view, batch, account, token, key)?;
+        }
+        Self::stage_grant_removal(view, batch, account)?;
+        batch.audit(
+            Self::audit(actions::USER_DELETE, vec![ObjectRef::from(account)], ctx)
+                .with_context("name", user.name),
+        );
+        Ok(())
+    }
+
+    /// When the scoped token `token` of `account` expires; `None` for a token that never
+    /// expires or is gone.
+    ///
+    /// # Errors
+    ///
+    /// A store or codec error.
+    pub fn scoped_token_expiry(
+        view: &dyn ReadView,
+        account: UserId,
+        token: ApiTokenId,
+    ) -> Result<Option<Timestamp>, AuthError> {
+        let Some(key) = Self::scoped_token_hash(view, account, token)? else {
+            return Ok(None);
+        };
+        Ok(view
+            .get_typed(&SCOPED_TOKENS, &key)?
+            .and_then(|(record, _)| record.expires_at))
+    }
+}

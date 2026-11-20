@@ -919,6 +919,12 @@ impl RbacAuthorizer {
                         {
                             return Ok(Reach::Global);
                         }
+                        // ADR 0033: a mirror scope reaches the push of its own mirror and
+                        // nothing else; a mirror token carries no grants, so every other
+                        // check below is denied.
+                        if mirror_push(action, object, scopes) && user.kind == UserKind::Service {
+                            return Ok(Reach::Global);
+                        }
                         token_grants_reach(grants, action, kind).intersect(owner_reach)
                     }
                 };
@@ -993,6 +999,16 @@ fn special_scope(object: &ObjectRef) -> Option<TokenScope> {
     } else {
         None
     }
+}
+
+/// Whether `action` on `object` is the push of a mirror that one of `scopes` names
+/// (`Action::Execute` on that mirror, ADR 0033 decision 3).
+fn mirror_push(action: Action, object: &ObjectRef, scopes: &[TokenScope]) -> bool {
+    action == Action::Execute
+        && object.kind == ObjectKind::Mirror
+        && scopes
+            .iter()
+            .any(|scope| scope.mirror().is_some_and(|mirror| mirror.0 == object.id))
 }
 
 impl Authorizer for RbacAuthorizer {
@@ -1291,6 +1307,34 @@ mod tests {
             special_scope(&ObjectRef::singleton(ObjectKind::System)),
             None
         );
+    }
+
+    #[test]
+    fn a_mirror_scope_names_the_push_of_its_own_mirror_only() {
+        let mirror = tenko_core::MirrorId::generate();
+        let scopes = [TokenScope::Mirror(mirror)];
+        let own = tenko_core::migrate::mirror_object(mirror);
+        let other = tenko_core::migrate::mirror_object(tenko_core::MirrorId::generate());
+        assert!(mirror_push(Action::Execute, &own, &scopes));
+        assert!(!mirror_push(Action::Execute, &other, &scopes));
+        for action in [
+            Action::Read,
+            Action::Update,
+            Action::Delete,
+            Action::Administer,
+        ] {
+            assert!(!mirror_push(action, &own, &scopes), "{action:?}");
+        }
+        assert!(!mirror_push(
+            Action::Execute,
+            &ObjectRef::new(ObjectKind::Connector, mirror.0),
+            &scopes
+        ));
+        assert!(!mirror_push(
+            Action::Execute,
+            &own,
+            &[TokenScope::Metrics, TokenScope::AuditRead]
+        ));
     }
 
     #[test]
