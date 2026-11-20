@@ -301,8 +301,12 @@ at Tenko only, capture, and register:
 
 ```powershell
 $adapter = (Get-NetIPAddress -IPAddress 192.0.2.5).InterfaceAlias
+# Both address families: the promotion left ::1 as the IPv6 server, and a controller that
+# still asks itself sends its updates to itself.
+Set-DnsClientServerAddress -InterfaceAlias $adapter -ResetServerAddresses
 Set-DnsClientServerAddress -InterfaceAlias $adapter -ServerAddresses 192.0.2.53
 Clear-DnsClientCache
+(Resolve-DnsName corp.example.test -Type SOA -DnsOnly).PrimaryServer   # must be ns1.corp.example.test
 pktmon filter remove
 pktmon filter add -p 53
 pktmon filter add -p 88

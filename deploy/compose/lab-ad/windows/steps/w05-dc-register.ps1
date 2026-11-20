@@ -18,6 +18,7 @@ if (-not (Test-Path $common)) { "FAIL: $common is missing (the entry's needs_fil
 Invoke-Step -Pass "$Computer registered every record of its Netlogon.dns with Tenko" {
     if ((Get-CimInstance Win32_ComputerSystem).DomainRole -lt 4) { Fail "$Computer is not a domain controller" }
     Set-DnsServerOfLab $Tenko
+    Assert-ZonePrimary 'ns1.corp.example.test'
     Start-Capture $Computer 53, 88
     Invoke-Native 'nltest.txt' { ipconfig /registerdns }
     Invoke-Native 'nltest.txt' { nltest /dsregdns }

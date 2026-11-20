@@ -102,8 +102,23 @@ function Wait-Until([scriptblock]$Condition, [int]$Seconds, [string]$What) {
 # Set-DnsServerOfLab <address>: the DNS client of the lab adapter asks this server only.
 function Set-DnsServerOfLab([string]$Server) {
     $adapter = (Get-NetIPAddress -IPAddress $Address).InterfaceAlias
+    # Both address families: a controller promoted with the DNS role has ::1 as its IPv6
+    # server and would go on asking, and updating, itself.
+    Set-DnsClientServerAddress -InterfaceAlias $adapter -ResetServerAddresses
     Set-DnsClientServerAddress -InterfaceAlias $adapter -ServerAddresses $Server
     Clear-DnsClientCache
+    $left = @(Get-DnsClientServerAddress -InterfaceAlias $adapter | ForEach-Object { $_.ServerAddresses } | Where-Object { $_ -ne $Server })
+    if ($left.Count -gt 0) { Fail "the DNS client of $adapter still lists $($left -join ', ') beside $Server" }
+}
+
+# Assert-ZonePrimary: the primary the DNS client itself finds for the domain, which is where
+# its updates go; anything but the expected server means the registration would go elsewhere.
+function Assert-ZonePrimary([string]$Primary) {
+    $soa = @(Resolve-DnsName corp.example.test -Type SOA -DnsOnly -ErrorAction Stop |
+            Where-Object { $_.Section -eq 'Answer' -and "$($_.Type)" -eq 'SOA' })
+    if ($soa.Count -ne 1) { Fail "the DNS client found $($soa.Count) SOA records for corp.example.test" }
+    $found = "$($soa[0].PrimaryServer)".TrimEnd('.')
+    if ($found -ne $Primary) { Fail "the DNS client finds $found as the primary of corp.example.test, not $($Primary): its updates would go there" }
 }
 
 # Start-Capture <name> <ports> and Stop-Capture <name>: the runbook's pktmon capture, into
