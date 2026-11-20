@@ -145,6 +145,20 @@ compose_run() {
     docker compose -f "$here/compose.yml" run --rm --no-TTY "$@"
 }
 
+# Pulls the scanners before any row: the first use would otherwise pull inside a row, and a
+# slow or failed pull would count as that row's time or finding. A failure here is not
+# fatal: the row that needs the image pulls it again and reports.
+pull_scanners() {
+  local attempt
+  for attempt in 1 2 3; do
+    SEC_OUT="$EVIDENCE/scan" SEC_IN="$WORK/in" \
+      docker compose -f "$here/compose.yml" pull --quiet && return 0
+    echo "round: pulling the scanner images failed (attempt $attempt of 3)"
+    sleep 10
+  done
+  return 0
+}
+
 # ── net.* : the network surface as a scanner on the link sees it ────────────────────────────
 # Scans run against the host address the compose gateway gives, before and after the install,
 # so the rows attribute the ports the install added.
@@ -612,6 +626,7 @@ row_unit_account() {
 main() {
   echo "round: binary under test $("$BINARY" --version 2>/dev/null || echo "$BINARY")"
   echo "round: bundle $BUNDLE, groups ${ROWS:-all}"
+  if [[ -z "${ROWS:-}" || "${ROWS}" =~ (^|[[:space:]])(net|tls|web) ]]; then pull_scanners; fi
   # The net rows compare the ports before and after the install, so the baseline scan runs
   # first, while nothing of the node is up (systemd-resolved's stub is on 127.0.0.53, not on
   # the scan address, so it is not attributed to the install).
