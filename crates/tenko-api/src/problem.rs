@@ -68,6 +68,9 @@ pub mod codes {
     pub const UNKNOWN_TOPIC: &str = "sys.events.unknown_topic";
     /// 429: the principal, or the server in all, holds the most event streams it may.
     pub const TOO_MANY_STREAMS: &str = "sys.events.too_many_streams";
+    /// 408: the request body arrived too slowly (`middleware::body_deadline`); the
+    /// connection is closed.
+    pub const BODY_TIMEOUT: &str = "sys.body_timeout";
 }
 
 /// Body sent when a problem document cannot be serialized, which should never happen.

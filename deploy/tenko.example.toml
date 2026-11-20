@@ -64,7 +64,8 @@ max_connections = 20000
 shutdown_grace_secs = 10
 # Seconds for a TLS handshake or a PROXY protocol header.
 handshake_timeout_secs = 10
-# Seconds for reading the head of an HTTP/1.1 request.
+# Seconds for reading the head of an HTTP/1.1 request, and for an idle HTTP/1.1 connection.
+# (A request body has a fixed deadline: 30 seconds, then 8 KiB/s or faster; slower is 408.)
 header_read_timeout_secs = 30
 # Origins the CSRF guard accepts besides the request's own (development: vite dev).
 allowed_origins = []

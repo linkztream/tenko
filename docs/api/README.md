@@ -35,6 +35,10 @@ A failed request (any status but 2xx) is not kept, so it can be retried with the
 
 **Ceremonies take no part.** First-run setup, the sign-in ceremonies (`/auth/login/*`, `/auth/webauthn/login/*`), the live password check and the enrollment of a node go straight to their handler whatever the key: they are safe to repeat.
 
+## Slow request bodies
+
+Every operation that takes a body, on the API listener and on the integration listener, reads it against a deadline: the server waits for the body at most 30 seconds plus one second for every 8 KiB that arrived, so a body must keep up 8 KiB/s (64 kbit/s) once the first 30 seconds are spent, and a route that admits n MiB has its whole body within 30 seconds plus n times 128 seconds. Only the time the server waits for the client counts. A body that falls behind is answered 408 `sys.body_timeout` with `Connection: close`, and what arrived of it is dropped. The constants are `GRACE` and `MIN_RATE` in `crates/tenko-api/src/middleware/body_deadline.rs`; a route can be stricter (the zone file import allows ten minutes in all, 408 `sys.invalid_request`). The request head has its own limit, `[server] header_read_timeout_secs` (30 seconds), which over HTTP/1.1 also ends a connection that sits idle between requests.
+
 ## Through a reverse proxy
 
 With the TLS mode `reverse_proxy` ([certificates.md](../certificates.md) section 7) the server believes forwarded headers only from `[tls] trusted_proxies`, and reads `X-Forwarded-Proto` and `X-Forwarded-Host` from their **last** value: the one the nearest proxy set or appended. A proxy should set these headers, not append to what the client sent. `X-Forwarded-For` is walked from the right over the trusted proxies. A proxy that sends no `X-Forwarded-Proto` (and no PROXY protocol version 2 SSL record) leaves the scheme unstated: the API assumes HTTPS for its security headers and the CSRF origin check, but `POST /nodes/enroll` refuses it outside the Lab profile with 403 `cluster.enrollment.scheme_unknown` (the token is kept).

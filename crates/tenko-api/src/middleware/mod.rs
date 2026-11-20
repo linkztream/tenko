@@ -3,8 +3,9 @@
 //! Two layers wrap the router:
 //!
 //! - **Every request** (`outer`): a [`RequestId`] (also sent back as `X-Request-Id`), the
-//!   [`ClientInfo`] under the trusted proxy rules, the request counters, and the security
-//!   headers of ADR 0008 (`Strict-Transport-Security` on HTTPS responses).
+//!   [`ClientInfo`] under the trusted proxy rules, the deadline of the request body
+//!   ([`body_deadline`]), the request counters, and the security headers of ADR 0008
+//!   (`Strict-Transport-Security` on HTTPS responses).
 //! - **API routes** (`api`, a route layer, so it sees the matched route template), in
 //!   this order: the `Origin` CSRF guard (`csrf`), the per-address rate limit (before
 //!   authentication, so it shields the login path), authentication through the
@@ -15,11 +16,13 @@
 //!   ([`idempotency`]), `Cache-Control: no-store` on API responses that set no caching
 //!   themselves, and `Tenko-Staleness` on every answer of a controller without quorum.
 //!
-//! Refusals are problem details: 403 `sys.csrf_rejected`, 429 `sys.rate_limited` with
+//! Refusals are problem details: 408 `sys.body_timeout` (with `Connection: close`), 403
+//! `sys.csrf_rejected`, 429 `sys.rate_limited` with
 //! `Retry-After`, 422 `sys.idempotency_mismatch`, 409 `sys.idempotency_in_flight`, 409
 //! `sys.idempotency_not_replayable` (a secret-bearing response is never stored, see
 //! [`idempotency`]), 503 `cluster.no_quorum` with `Retry-After` ([`quorum`]).
 
+pub(crate) mod body_deadline;
 pub(crate) mod csrf;
 pub mod headers;
 pub mod idempotency;
@@ -130,6 +133,7 @@ pub(crate) async fn outer(
     if !scheme_stated {
         request.extensions_mut().insert(UnstatedScheme);
     }
+    let expired = body_deadline::wrap(&mut request);
     let started = Instant::now();
     let method = request.method().clone();
     let api_path = is_api_path(request.uri().path());
@@ -144,6 +148,12 @@ pub(crate) async fn outer(
         None if api_path => layers.routes.other_row(&method),
         None => layers.routes.ui_row(&method),
     };
+    // A handler that failed on its expired body answered whatever its reader said.
+    if expired.is_some_and(|expired| expired.load(std::sync::atomic::Ordering::Relaxed))
+        && !response.status().is_success()
+    {
+        response = body_deadline::refusal();
+    }
     layers
         .routes
         .record(row, response.status().as_u16(), started.elapsed());

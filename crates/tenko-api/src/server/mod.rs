@@ -727,7 +727,15 @@ fn spawn_housekeeping(layers: Arc<Layers>, mut stop: watch::Receiver<bool>) {
 
 #[cfg(test)]
 mod tests {
+    use axum::{
+        body::{Body, Bytes, to_bytes},
+        http::header,
+    };
+    use futures::StreamExt as _;
+    use tenko_store::MemStore;
+
     use super::*;
+    use crate::middleware::body_deadline::{GRACE, MIN_RATE};
 
     #[tokio::test]
     async fn an_ipv4_and_an_ipv6_wildcard_bind_the_same_port() {
@@ -741,5 +749,105 @@ mod tests {
         let v6 = bind(SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, port)))
             .expect("the IPv6 wildcard binds next to the IPv4 one");
         assert_eq!(v6.local_addr().expect("local address").port(), port);
+    }
+
+    /// The routers of the API listener and of the integration listener, over one store.
+    fn routers() -> [(&'static str, Router); 2] {
+        routers_over(AppState::new(Arc::new(MemStore::default())))
+    }
+
+    fn routers_over(state: AppState) -> [(&'static str, Router); 2] {
+        let mut extensions = axum::http::Extensions::new();
+        extensions.insert(
+            tenko_ipam::IpamService::with_direct_jobs(Arc::clone(&state.store))
+                .expect("IPAM service"),
+        );
+        let (api, layers) = build_app(
+            state.clone(),
+            &HttpConfig::default(),
+            &UiSource::Embedded,
+            extensions.clone(),
+        )
+        .expect("app");
+        [
+            ("api", api),
+            ("integration", integration_app(state, &layers, extensions)),
+        ]
+    }
+
+    async fn post_prefix(router: Router, body: Body) -> Response {
+        let request = axum::http::Request::post("https://ddi.example.org/api/v1/prefixes")
+            .header(header::ORIGIN, "https://ddi.example.org")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(body)
+            .expect("request");
+        router.oneshot(request).await.expect("response")
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_body_that_stops_arriving_is_answered_408_and_the_connection_closed() {
+        for (listener, router) in routers() {
+            let stalled = futures::stream::iter([Ok::<_, io::Error>(Bytes::from_static(b"{"))])
+                .chain(futures::stream::pending());
+            let response = post_prefix(router, Body::from_stream(stalled)).await;
+            assert_eq!(response.status(), 408, "{listener}");
+            assert_eq!(
+                response.headers()[header::CONNECTION],
+                "close",
+                "{listener}"
+            );
+            let body = to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("body");
+            let problem: serde_json::Value = serde_json::from_slice(&body).expect("problem");
+            assert_eq!(problem["code"], codes::BODY_TIMEOUT, "{listener}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_upload_at_the_minimum_rate_passes_past_the_grace() {
+        let chunk = usize::try_from(MIN_RATE).expect("chunk");
+        // One store behind both routers: a prefix each.
+        for ((listener, router), cidr) in routers()
+            .into_iter()
+            .zip(["192.0.2.0/24", "198.51.100.0/24"])
+        {
+            // Four times the grace at one chunk a second: valid JSON padded with spaces.
+            let mut payload = format!(r#"{{"cidr": "{cidr}""#).into_bytes();
+            payload.resize(
+                4 * usize::try_from(GRACE.as_secs()).expect("grace") * chunk,
+                b' ',
+            );
+            payload.push(b'}');
+            let chunks: Vec<Bytes> = payload.chunks(chunk).map(Bytes::copy_from_slice).collect();
+            let slow = futures::stream::iter(chunks).then(|chunk| async move {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                Ok::<_, io::Error>(chunk)
+            });
+            let response = post_prefix(router, Body::from_stream(slow)).await;
+            assert_eq!(response.status(), 201, "{listener}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn the_event_stream_outlives_the_body_deadline() {
+        let state = AppState::new(Arc::new(MemStore::default()));
+        // The hub's tasks send the keep-alive comment every 15 seconds.
+        let (_running, stop) = watch::channel(false);
+        state.events().spawn_tasks(Arc::clone(&state.store), stop);
+        let [(_, router), _] = routers_over(state);
+        let request = axum::http::Request::get("https://ddi.example.org/api/v1/events")
+            .body(Body::empty())
+            .expect("request");
+        let response = router.oneshot(request).await.expect("response");
+        assert_eq!(response.status(), 200);
+        let mut body = response.into_body().into_data_stream();
+        let started = tokio::time::Instant::now();
+        while started.elapsed() <= GRACE * 4 {
+            body.next()
+                .await
+                .expect("the stream goes on")
+                .expect("a frame");
+        }
     }
 }
