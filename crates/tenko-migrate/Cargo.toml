@@ -7,5 +7,26 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+# WP14.1: the mirrored sources (src/mirror). Every crate is already in the graph through the
+# server: the store, the mirror account's minting in `tenko-auth`, the DHCP and IPAM rows the
+# diff reads, and `flate2` for a gzip push body (as `tenko-cluster` and `tenko-dns` inflate).
+[dependencies]
+flate2 = "1.1.10"
+ipnet = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tenko-auth = { workspace = true }
+tenko-core = { workspace = true }
+tenko-dhcp = { path = "../tenko-dhcp" }
+tenko-ipam = { workspace = true }
+tenko-store = { workspace = true }
+tracing = { workspace = true }
+utoipa = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+tenko-auth = { workspace = true, features = ["testing"] }
+tokio = { workspace = true }
+
 [lints]
 workspace = true
