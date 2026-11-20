@@ -92,6 +92,9 @@ pub struct AuthFlags {
     pub mfa_enrollment_required: bool,
     /// The request is authenticated through the break-glass account.
     pub break_glass: bool,
+    /// The request is authenticated with the token of this mirrored source, which reaches
+    /// that mirror's push and nothing else (ADR 0033 decision 3).
+    pub mirror: Option<crate::MirrorId>,
 }
 
 /// The outcome of a successful authentication.

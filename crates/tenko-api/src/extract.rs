@@ -97,11 +97,9 @@ where
                 }
                 let principal = authenticated.principal.clone();
                 // ADR 0033: a mirror's token reaches the push of its mirror and nothing else,
-                // also where a route reads no right of its own.
-                if let Some(mirror) = parts
-                    .extensions
-                    .get::<std::sync::Arc<tenko_auth::AuthService>>()
-                    .and_then(|service| service.token_mirror(&principal))
+                // also where a route reads no right of its own. The authenticator, which every
+                // request passes, says whose token it is.
+                if let Some(mirror) = authenticated.flags.mirror
                     && !is_mirror_push(&parts.method, parts.uri.path(), mirror)
                 {
                     return Err(tenko_core::Denied {

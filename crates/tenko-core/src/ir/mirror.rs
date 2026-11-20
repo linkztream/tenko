@@ -25,7 +25,7 @@ use utoipa::{
 };
 
 use super::{
-    LossReport,
+    LossReport, SourceLocation,
     dhcp::{DhcpIr, IrClientId, IrLeaseState, IrOption, IrRange},
 };
 use crate::{Coded, codec::key::KeyCodec, error::InvalidValue, timestamp::Timestamp};
@@ -68,6 +68,25 @@ pub const MAX_LOSS_DETAIL_LEN: usize = 4_096;
 
 /// The longest label of a source kind.
 pub const MAX_KIND_LEN: usize = 32;
+
+/// The most items of each smaller list of a snapshot: custom option definitions, classes,
+/// policies, superscopes, failover relationships, the options of one level, the ranges and
+/// exclusions of one scope, the conditions of a policy and the values of one option or
+/// condition.
+pub const MAX_ITEMS: usize = 1_000;
+
+/// The most MAC filter entries one snapshot carries.
+pub const MAX_FILTERS: usize = 10_000;
+
+/// The longest sheet or column of a source location: the location of a loss entry is its key,
+/// which an acknowledgment stores.
+pub const MAX_LOCATION_LEN: usize = 256;
+
+/// The most array elements one push body holds over every list, counted before it is parsed
+/// (`tenko_migrate::mirror::body`): the bounds above summed with room for the options and
+/// values of every level, so that no list of the body is allocated past what this bound
+/// allows.
+pub const MAX_ELEMENTS: usize = 262_144;
 
 /// The label of a source kind: `[a-z0-9-]{1,32}`, never an enumeration of products, so that
 /// an exporter for any server can push the same IR under its own label (`windows-dhcp` for
@@ -264,18 +283,16 @@ impl Coded for SnapshotInvalid {
     }
 }
 
-/// Whether `text` is one line of printable text (no control character).
-fn is_plain(text: &str) -> bool {
-    !text.chars().any(char::is_control)
-}
-
-fn check_text(
+/// Checks a free text: at most `max` characters and no control character, so that it is one
+/// line wherever it is shown, logged or printed in a terminal; empty only with `empty`.
+fn check_line(
     path: &str,
     text: &str,
     max: usize,
     what: &'static str,
+    empty: bool,
 ) -> Result<(), SnapshotInvalid> {
-    if text.is_empty() {
+    if text.is_empty() && !empty {
         return Err(SnapshotInvalid::new(path, format!("{what} is empty")));
     }
     if text.chars().count() > max {
@@ -284,11 +301,54 @@ fn check_text(
             format!("{what} is longer than {max} characters"),
         ));
     }
-    if !is_plain(text) {
+    if text.chars().any(char::is_control) {
         return Err(SnapshotInvalid::new(
             path,
             format!("{what} holds a control character"),
         ));
+    }
+    Ok(())
+}
+
+/// A text that must not be empty.
+fn check_text(
+    path: &str,
+    text: &str,
+    max: usize,
+    what: &'static str,
+) -> Result<(), SnapshotInvalid> {
+    check_line(path, text, max, what, false)
+}
+
+/// An optional free text of at most [`MAX_OPTION_VALUE_LEN`] characters.
+fn check_free(
+    path: &str,
+    text: Option<&String>,
+    what: &'static str,
+) -> Result<(), SnapshotInvalid> {
+    text.map_or(Ok(()), |text| {
+        check_line(path, text, MAX_OPTION_VALUE_LEN, what, true)
+    })
+}
+
+fn check_count(path: &str, len: usize, max: usize) -> Result<(), SnapshotInvalid> {
+    if len > max {
+        return Err(SnapshotInvalid::new(path, format!("more than {max} items")));
+    }
+    Ok(())
+}
+
+fn check_location(path: &str, location: &SourceLocation) -> Result<(), SnapshotInvalid> {
+    for (field, text) in [("sheet", &location.sheet), ("column", &location.column)] {
+        if let Some(text) = text {
+            check_line(
+                &format!("{path}.{field}"),
+                text,
+                MAX_LOCATION_LEN,
+                "a location",
+                true,
+            )?;
+        }
     }
     Ok(())
 }
@@ -314,6 +374,7 @@ fn check_client(path: &str, client: &IrClientId) -> Result<(), SnapshotInvalid> 
 }
 
 fn check_options(path: &str, options: &[IrOption]) -> Result<(), SnapshotInvalid> {
+    check_count(path, options.len(), MAX_ITEMS)?;
     for (index, option) in options.iter().enumerate() {
         let path = format!("{path}[{index}]");
         if option.code == 0 || option.code > 254 {
@@ -328,40 +389,75 @@ fn check_options(path: &str, options: &[IrOption]) -> Result<(), SnapshotInvalid
                 "an option carries at least one value",
             ));
         }
+        check_count(&format!("{path}.values"), option.values.len(), MAX_ITEMS)?;
         for (position, value) in option.values.iter().enumerate() {
-            if value.chars().count() > MAX_OPTION_VALUE_LEN {
-                return Err(SnapshotInvalid::new(
-                    format!("{path}.values[{position}]"),
-                    "an option value is at most 4,096 characters",
-                ));
-            }
+            check_line(
+                &format!("{path}.values[{position}]"),
+                value,
+                MAX_OPTION_VALUE_LEN,
+                "an option value",
+                true,
+            )?;
+        }
+        check_free(
+            &format!("{path}.vendor_class"),
+            option.vendor_class.as_ref(),
+            "a class",
+        )?;
+        check_free(
+            &format!("{path}.user_class"),
+            option.user_class.as_ref(),
+            "a class",
+        )?;
+        check_location(&format!("{path}.origin"), &option.origin)?;
+    }
+    Ok(())
+}
+
+fn check_ranges(path: &str, ranges: &[IrRange], scope: &IpNet) -> Result<(), SnapshotInvalid> {
+    check_count(path, ranges.len(), MAX_ITEMS)?;
+    for (position, range) in ranges.iter().enumerate() {
+        let path = format!("{path}[{position}]");
+        if !scope.contains(&range.first) || !scope.contains(&range.last) {
+            return Err(SnapshotInvalid::new(path, "the range is outside the scope"));
+        }
+        if range.first > range.last {
+            return Err(SnapshotInvalid::new(
+                path,
+                "the first address is after the last",
+            ));
         }
     }
     Ok(())
 }
 
-fn check_range(path: &str, range: &IrRange, scope: &IpNet) -> Result<(), SnapshotInvalid> {
-    if !scope.contains(&range.first) || !scope.contains(&range.last) {
-        return Err(SnapshotInvalid::new(path, "the range is outside the scope"));
-    }
-    if range.first > range.last {
-        return Err(SnapshotInvalid::new(
-            path,
-            "the first address is after the last",
-        ));
+fn check_members(
+    path: &str,
+    members: &[IpNet],
+    scopes: &BTreeMap<IpNet, usize>,
+) -> Result<(), SnapshotInvalid> {
+    check_count(path, members.len(), MAX_SCOPES)?;
+    for (position, member) in members.iter().enumerate() {
+        if !scopes.contains_key(member) {
+            return Err(SnapshotInvalid::new(
+                format!("{path}[{position}]"),
+                "the snapshot holds no such scope",
+            ));
+        }
     }
     Ok(())
 }
 
 impl MirrorSnapshot {
     /// Checks the envelope beyond what parsing checks: the format, the sequence, the bounds
-    /// of section 2.1, the texts of the origin, and the content of the IR (scopes that are
-    /// networks named once, ranges and exclusions inside their scope, reservations and
-    /// leases inside their scope with a client identity, leases of a scope the snapshot
-    /// holds in a state the mirror carries, options with a code and a value, superscopes,
-    /// policies and failover relationships that name scopes the snapshot holds, bounded
-    /// loss entries). Values that have a Tenko type (addresses, networks, MAC addresses,
-    /// host names, times) were checked when they parsed.
+    /// of section 2.1 and a bound on every other list ([`MAX_ITEMS`], [`MAX_FILTERS`]),
+    /// every free text one line of bounded length without a control character, and the
+    /// content of the IR (scopes that are networks named once, ranges and exclusions inside
+    /// their scope, reservations and leases inside their scope with a client identity,
+    /// leases of a scope the snapshot holds in a state the mirror carries, options with a
+    /// code and a value, superscopes, policies and failover relationships that name scopes
+    /// the snapshot holds, bounded loss entries). Values that have a Tenko type (addresses,
+    /// networks, MAC addresses, host names, times) were checked when they parsed.
     ///
     /// # Errors
     ///
@@ -400,34 +496,50 @@ impl MirrorSnapshot {
         )?;
 
         let dhcp = &self.dhcp;
-        if dhcp.scopes.len() > MAX_SCOPES {
-            return Err(SnapshotInvalid::new(
-                "dhcp.scopes",
-                format!("more than {MAX_SCOPES} scopes"),
-            ));
-        }
+        check_count("dhcp.scopes", dhcp.scopes.len(), MAX_SCOPES)?;
         check_options("dhcp.server_options", &dhcp.server_options)?;
+        check_count("dhcp.option_defs", dhcp.option_defs.len(), MAX_ITEMS)?;
         for (index, def) in dhcp.option_defs.iter().enumerate() {
+            let path = format!("dhcp.option_defs[{index}]");
             if def.code == 0 || def.code > 254 {
                 return Err(SnapshotInvalid::new(
-                    format!("dhcp.option_defs[{index}].code"),
+                    format!("{path}.code"),
                     "an option code is 1 to 254",
                 ));
             }
             check_text(
-                &format!("dhcp.option_defs[{index}].name"),
+                &format!("{path}.name"),
                 &def.name,
                 MAX_OPTION_VALUE_LEN,
                 "the name",
             )?;
+            check_free(
+                &format!("{path}.vendor_class"),
+                def.vendor_class.as_ref(),
+                "a class",
+            )?;
+            check_free(
+                &format!("{path}.description"),
+                def.description.as_ref(),
+                "a description",
+            )?;
+            check_location(&format!("{path}.origin"), &def.origin)?;
         }
+        check_count("dhcp.classes", dhcp.classes.len(), MAX_ITEMS)?;
         for (index, class) in dhcp.classes.iter().enumerate() {
+            let path = format!("dhcp.classes[{index}]");
             check_text(
-                &format!("dhcp.classes[{index}].name"),
+                &format!("{path}.name"),
                 &class.name,
                 MAX_OPTION_VALUE_LEN,
                 "the name",
             )?;
+            check_free(
+                &format!("{path}.description"),
+                class.description.as_ref(),
+                "a description",
+            )?;
+            check_location(&format!("{path}.origin"), &class.origin)?;
         }
 
         let mut scopes: BTreeMap<IpNet, usize> = BTreeMap::new();
@@ -446,16 +558,24 @@ impl MirrorSnapshot {
                     "the scope appears twice",
                 ));
             }
-            for (position, range) in scope.ranges.iter().enumerate() {
-                check_range(&format!("{path}.ranges[{position}]"), range, &scope.cidr)?;
-            }
-            for (position, range) in scope.exclusions.iter().enumerate() {
-                check_range(
-                    &format!("{path}.exclusions[{position}]"),
-                    range,
-                    &scope.cidr,
-                )?;
-            }
+            check_free(&format!("{path}.name"), scope.name.as_ref(), "a name")?;
+            check_free(
+                &format!("{path}.description"),
+                scope.description.as_ref(),
+                "a description",
+            )?;
+            check_free(
+                &format!("{path}.superscope"),
+                scope.superscope.as_ref(),
+                "a name",
+            )?;
+            check_location(&format!("{path}.origin"), &scope.origin)?;
+            check_ranges(&format!("{path}.ranges"), &scope.ranges, &scope.cidr)?;
+            check_ranges(
+                &format!("{path}.exclusions"),
+                &scope.exclusions,
+                &scope.cidr,
+            )?;
             check_options(&format!("{path}.options"), &scope.options)?;
             reservations += scope.reservations.len();
             if reservations > MAX_RESERVATIONS {
@@ -480,10 +600,22 @@ impl MirrorSnapshot {
                     ));
                 }
                 check_client(&format!("{path}.client"), &reservation.client)?;
+                check_free(
+                    &format!("{path}.source_name"),
+                    reservation.source_name.as_ref(),
+                    "a name",
+                )?;
+                check_free(
+                    &format!("{path}.description"),
+                    reservation.description.as_ref(),
+                    "a description",
+                )?;
+                check_location(&format!("{path}.origin"), &reservation.origin)?;
                 check_options(&format!("{path}.options"), &reservation.options)?;
             }
         }
 
+        check_count("dhcp.superscopes", dhcp.superscopes.len(), MAX_ITEMS)?;
         for (index, superscope) in dhcp.superscopes.iter().enumerate() {
             let path = format!("dhcp.superscopes[{index}]");
             check_text(
@@ -492,15 +624,10 @@ impl MirrorSnapshot {
                 MAX_OPTION_VALUE_LEN,
                 "the name",
             )?;
-            for (position, member) in superscope.scopes.iter().enumerate() {
-                if !scopes.contains_key(member) {
-                    return Err(SnapshotInvalid::new(
-                        format!("{path}.scopes[{position}]"),
-                        "the snapshot holds no such scope",
-                    ));
-                }
-            }
+            check_location(&format!("{path}.origin"), &superscope.origin)?;
+            check_members(&format!("{path}.scopes"), &superscope.scopes, &scopes)?;
         }
+        check_count("dhcp.policies", dhcp.policies.len(), MAX_ITEMS)?;
         for (index, policy) in dhcp.policies.iter().enumerate() {
             let path = format!("dhcp.policies[{index}]");
             check_text(
@@ -517,26 +644,65 @@ impl MirrorSnapshot {
                     "the snapshot holds no such scope",
                 ));
             }
-            check_options(&format!("{path}.options"), &policy.options)?;
-        }
-        for (index, failover) in dhcp.failover.iter().enumerate() {
-            let path = format!("dhcp.failover[{index}]");
-            for (position, member) in failover.scopes.iter().enumerate() {
-                if !scopes.contains_key(member) {
-                    return Err(SnapshotInvalid::new(
-                        format!("{path}.scopes[{position}]"),
-                        "the snapshot holds no such scope",
-                    ));
+            check_count(
+                &format!("{path}.conditions"),
+                policy.conditions.len(),
+                MAX_ITEMS,
+            )?;
+            for (position, condition) in policy.conditions.iter().enumerate() {
+                let path = format!("{path}.conditions[{position}].values");
+                check_count(&path, condition.values.len(), MAX_ITEMS)?;
+                for (at, value) in condition.values.iter().enumerate() {
+                    check_line(
+                        &format!("{path}[{at}]"),
+                        value,
+                        MAX_OPTION_VALUE_LEN,
+                        "a value",
+                        true,
+                    )?;
                 }
             }
+            check_count(&format!("{path}.ranges"), policy.ranges.len(), MAX_ITEMS)?;
+            check_options(&format!("{path}.options"), &policy.options)?;
+            check_free(
+                &format!("{path}.description"),
+                policy.description.as_ref(),
+                "a description",
+            )?;
+            check_location(&format!("{path}.origin"), &policy.origin)?;
+        }
+        check_count("dhcp.filters", dhcp.filters.len(), MAX_FILTERS)?;
+        for (index, filter) in dhcp.filters.iter().enumerate() {
+            let path = format!("dhcp.filters[{index}]");
+            check_free(
+                &format!("{path}.description"),
+                filter.description.as_ref(),
+                "a description",
+            )?;
+            check_location(&format!("{path}.origin"), &filter.origin)?;
+        }
+        check_count("dhcp.failover", dhcp.failover.len(), MAX_ITEMS)?;
+        for (index, failover) in dhcp.failover.iter().enumerate() {
+            let path = format!("dhcp.failover[{index}]");
+            check_line(
+                &format!("{path}.name"),
+                &failover.name,
+                MAX_OPTION_VALUE_LEN,
+                "the name",
+                true,
+            )?;
+            check_line(
+                &format!("{path}.partner"),
+                &failover.partner,
+                MAX_OPTION_VALUE_LEN,
+                "the partner",
+                true,
+            )?;
+            check_location(&format!("{path}.origin"), &failover.origin)?;
+            check_members(&format!("{path}.scopes"), &failover.scopes, &scopes)?;
         }
 
-        if dhcp.leases.len() > MAX_LEASES {
-            return Err(SnapshotInvalid::new(
-                "dhcp.leases",
-                format!("more than {MAX_LEASES} leases"),
-            ));
-        }
+        check_count("dhcp.leases", dhcp.leases.len(), MAX_LEASES)?;
         let mut leased = BTreeMap::new();
         for (index, lease) in dhcp.leases.iter().enumerate() {
             let path = format!("dhcp.leases[{index}]");
@@ -582,14 +748,10 @@ impl MirrorSnapshot {
                     "the host name",
                 )?;
             }
+            check_location(&format!("{path}.origin"), &lease.origin)?;
         }
 
-        if self.losses.entries.len() > MAX_LOSSES {
-            return Err(SnapshotInvalid::new(
-                "losses.entries",
-                format!("more than {MAX_LOSSES} loss entries"),
-            ));
-        }
+        check_count("losses.entries", self.losses.entries.len(), MAX_LOSSES)?;
         for (index, entry) in self.losses.entries.iter().enumerate() {
             let path = format!("losses.entries[{index}]");
             check_text(
@@ -598,12 +760,14 @@ impl MirrorSnapshot {
                 crate::names::MAX_NAME_LEN,
                 "the code",
             )?;
-            if entry.detail.chars().count() > MAX_LOSS_DETAIL_LEN {
-                return Err(SnapshotInvalid::new(
-                    format!("{path}.detail"),
-                    "the detail is longer than 4,096 characters",
-                ));
-            }
+            check_line(
+                &format!("{path}.detail"),
+                &entry.detail,
+                MAX_LOSS_DETAIL_LEN,
+                "the detail",
+                true,
+            )?;
+            check_location(&format!("{path}.location"), &entry.location)?;
         }
         Ok(())
     }

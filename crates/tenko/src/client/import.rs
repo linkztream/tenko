@@ -73,7 +73,7 @@ use serde_json::{Value, json};
 use tenko_api::client::{Client, ClientError};
 use tokio::time::Instant;
 
-use super::{ClientOpts, Failure, Output, Target, read_line, table};
+use super::{ClientOpts, Failure, Output, Target, clean, read_line, table};
 use crate::exit;
 
 /// Largest file `tenko import` uploads (the limit of the API).
@@ -587,13 +587,6 @@ fn find_id(value: &Value, pointers: &[&str]) -> Option<String> {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         })
-}
-
-/// A string of the server's answer made safe for a terminal.
-fn clean(text: &str) -> String {
-    text.chars()
-        .map(|c| if c.is_control() { '?' } else { c })
-        .collect()
 }
 
 fn str_at<'a>(value: &'a Value, key: &str) -> Option<&'a str> {

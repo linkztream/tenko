@@ -25,8 +25,15 @@ utoipa = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+# The counting allocator of tests/decode_alloc.rs (the bound of what decoding allocates).
+stats_alloc = { workspace = true }
 tenko-auth = { workspace = true, features = ["testing"] }
 tokio = { workspace = true }
+
+# The allocation test is its own harness: the counting allocator counts every thread.
+[[test]]
+name = "decode_alloc"
+harness = false
 
 [lints]
 workspace = true

@@ -3798,7 +3798,7 @@ export interface paths {
         };
         /**
          * The loss report of a mirrored source
-         * @description Scope: `migrate.read`. The entries of the latest snapshot's loss report, each with its key, its scope (the scope holding the address its location names; none: every scope) and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.
+         * @description Scope: `migrate.read`. The entries of the latest snapshot's loss report with its sequence, each with its key, its scope (the scope holding the address its location names; none: every scope) and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.
          */
         get: operations["list_mirror_losses"];
         put?: never;
@@ -3820,7 +3820,7 @@ export interface paths {
         put?: never;
         /**
          * Acknowledge loss entries of a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. An acknowledgment holds while the entry recurs unchanged; the prepare and the takeover refuse a scope with an unacknowledged entry. Audited as `migrate.mirror.losses_ack`.
+         * @description Scope: `migrate.write`, an interactive session. Acknowledges entries of the loss report at `sequence`, the one that was read; a newer snapshot refuses it with 409 `migrate.mirror.snapshot_moved`. An acknowledgment holds while the entry recurs unchanged; the prepare and the takeover refuse a scope with an unacknowledged entry. Audited as `migrate.mirror.losses_ack`.
          */
         post: operations["ack_mirror_losses"];
         delete?: never;
@@ -3838,7 +3838,7 @@ export interface paths {
         };
         /**
          * The diff of a mirrored scope against Tenko's scope
-         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network, each row saying what the prepare would do (plan section 2.5); only differences are rows.
+         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision.
          */
         get: operations["get_mirror_scope_diff"];
         put?: never;
@@ -3918,12 +3918,12 @@ export interface paths {
         };
         /**
          * Get the latest snapshot of a mirrored source
-         * @description Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, hash and the time it was accepted.
+         * @description Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change.
          */
         get: operations["get_mirror_snapshot"];
         /**
          * Push a snapshot of a mirrored source
-         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only right it has: `Action::Execute` on the mirror; a session is refused. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 1,000 scopes, 10,000 reservations and 100,000 leases, with a `sequence` above the last accepted one and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored.
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,144 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.
          */
         put: operations["push_mirror_snapshot"];
         post?: never;
@@ -3944,7 +3944,7 @@ export interface paths {
         put?: never;
         /**
          * Replace the token of a mirrored source
-         * @description An administrator's interactive session that signed in within five minutes (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token is shown once. Audited as `migrate.mirror.token`.
+         * @description An administrator's interactive session that signed in within five minutes (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token starts a new series of sequences. The new token is shown once. Audited as `migrate.mirror.token`.
          */
         post: operations["replace_mirror_token"];
         delete?: never;
@@ -13538,8 +13538,14 @@ export interface components {
         };
         /** @description `POST /migrate/mirrors/{id}/losses/ack`. */
         LossAckRequest: {
-            /** @description The keys of the entries to acknowledge, as `GET .../losses` lists them. */
+            /** @description The keys of the entries to acknowledge. */
             keys: string[];
+            /**
+             * Format: int64
+             * @description The sequence of the loss report the keys were read from (`GET .../losses`); a newer
+             *     snapshot refuses the acknowledgment, so that it holds only for what was read.
+             */
+            sequence: number;
         };
         /** @description The answer of an acknowledgment. */
         LossAckResult: {
@@ -14716,7 +14722,7 @@ export interface components {
             kind: components["schemas"]["SourceKindLabel"];
             /**
              * @description The name, unique among mirrors; the service account is `mirror-<name>`, so the name
-             *     holds no space.
+             *     holds no space and at most 57 characters.
              */
             name: string;
             /**
@@ -23037,6 +23043,25 @@ export interface components {
             /** @description The item: an address (`192.0.2.50`) or a name (`laptop.corp.example.test`). */
             item: string;
         };
+        /** @description The latest accepted envelope of a mirror (`migrate.snapshots`, section 2.4). */
+        Snapshot: {
+            /** @description The envelope as pushed. */
+            envelope: components["schemas"]["MirrorSnapshot"];
+            /**
+             * @description The SHA-256 in canonical CBOR of the envelope's content (without its `sequence` and
+             *     `taken_at`), the value the next push is compared with.
+             */
+            hash: components["schemas"]["HexBytes"];
+            /** @description The mirror. */
+            mirror: components["schemas"]["MirrorId"];
+            /** @description When the push was accepted, by the node's clock. */
+            received: components["schemas"]["Timestamp"];
+            /**
+             * Format: int64
+             * @description The envelope's sequence.
+             */
+            sequence: number;
+        };
         /** @description The answer of a push: `200 {"sequence", "changed"}`. */
         SnapshotAccepted: {
             /**
@@ -23072,25 +23097,6 @@ export interface components {
              * @description Scopes.
              */
             scopes: number;
-        };
-        /** @description The stored snapshot of a mirror (`GET /migrate/mirrors/{id}/snapshot`). */
-        SnapshotItem: {
-            /** @description The envelope as pushed. */
-            envelope: components["schemas"]["MirrorSnapshot"];
-            /**
-             * @description The SHA-256 of the content in canonical CBOR: the envelope without its sequence and
-             *     its time.
-             */
-            hash: components["schemas"]["HexBytes"];
-            /** @description The mirror. */
-            mirror: components["schemas"]["MirrorId"];
-            /** @description When the push was accepted. */
-            received: components["schemas"]["Timestamp"];
-            /**
-             * Format: int64
-             * @description The sequence.
-             */
-            sequence: number;
         };
         /**
          * @description SNMPv3 authentication protocols.
@@ -44281,7 +44287,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A mirror or a service account of this name exists (`migrate.mirror.exists`) */
+            /** @description A mirror or a service account of this name exists; `params.name` names it (`migrate.mirror.exists`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -44406,6 +44412,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description The row changed under every attempt (`migrate.mirror.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     update_mirror: {
@@ -44469,7 +44484,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A mirror of the new name exists (`migrate.mirror.exists`) */
+            /** @description A mirror of the new name exists (`migrate.mirror.exists`), or the row changed under every attempt (`migrate.mirror.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -44564,7 +44579,7 @@ export interface operations {
                     "application/json": components["schemas"]["LossAckResult"];
                 };
             };
-            /** @description The request is malformed, names no key, or a key names no entry of the latest snapshot (`sys.invalid_request`) */
+            /** @description The request is malformed, names no key, or a key names no entry of the snapshot (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -44593,6 +44608,15 @@ export interface operations {
             };
             /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A newer snapshot came in after the one that was read (`migrate.mirror.snapshot_moved`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44918,7 +44942,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SnapshotItem"];
+                    "application/json": components["schemas"]["Snapshot"];
                 };
             };
             /** @description The request is malformed (`sys.invalid_request`) */
@@ -45002,7 +45026,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token is not this mirror's, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`) */
+            /** @description The token is not this mirror's own, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45020,7 +45044,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`) */
+            /** @description The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -45112,6 +45136,15 @@ export interface operations {
             };
             /** @description No such mirror (`migrate.mirror.not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The row changed under every attempt (`migrate.mirror.conflict`) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

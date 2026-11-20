@@ -774,7 +774,7 @@ async fn system_status(
     .await;
     status
         .warnings
-        .extend(super::migrate::warnings(mirrors.map(|Extension(m)| m), ctx.now).await);
+        .extend(super::migrate::warnings(mirrors.map(|Extension(m)| m)).await);
     if let Some(Extension(findings)) = findings {
         findings.set_health(&status.warnings, ctx.now);
     }
@@ -835,7 +835,7 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
 impl StatusSources {
     /// The warnings of the status document without the lease conflicts.
     pub(crate) async fn warnings(self, state: &AppState, now: Timestamp) -> Vec<StatusWarning> {
-        let mirrors = super::migrate::warnings(self.mirrors, now).await;
+        let mirrors = super::migrate::warnings(self.mirrors).await;
         let mut warnings = assemble(
             self.auth.map(Extension),
             state,

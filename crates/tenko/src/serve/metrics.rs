@@ -399,7 +399,7 @@ pub(crate) async fn refresh(sources: &Sources, now: Timestamp) {
     }
     // WP14.1: the pushes and the age of the mirrored sources.
     if let Some(mirrors) = &sources.mirrors
-        && let Err(error) = mirrors.refresh_metrics(now).await
+        && let Err(error) = mirrors.refresh_metrics().await
     {
         tracing::warn!(%error, "the metrics of the mirrored sources could not be read");
     }

@@ -820,6 +820,7 @@ impl AuthService {
                 password_change_required: user.password_change_required,
                 mfa_enrollment_required: session.strength < self.required_for(&user),
                 break_glass: session.break_glass,
+                mirror: None,
             },
         })
     }
@@ -841,6 +842,10 @@ impl AuthService {
         }
         let settings = self.settings();
         let (user, expires_at) = Self::token_holds(view.as_ref(), &found, &settings, now)?;
+        let mirror = match &found {
+            FoundToken::Scoped(record, _) => record.scopes.iter().find_map(|scope| scope.mirror()),
+            _ => None,
+        };
         let (id, strength, roles) = match &found {
             FoundToken::Personal(record, _) => (record.id, record.issued_with, user.roles.clone()),
             // The global roles the token acts with: its global grants the owner covers.
@@ -885,7 +890,10 @@ impl AuthService {
             roles: role_names(&roles),
             strength,
             expires_at,
-            flags: AuthFlags::default(),
+            flags: AuthFlags {
+                mirror,
+                ..AuthFlags::default()
+            },
         })
     }
 

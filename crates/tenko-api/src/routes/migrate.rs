@@ -47,33 +47,34 @@ use std::{net::IpAddr, sync::Arc};
 use axum::{
     Extension, Json,
     body::Body,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
 };
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
-use tenko_auth::{authz::anywhere, service::types::SecretString};
+use tenko_auth::{AuthService, authz::anywhere, service::types::SecretString};
 use tenko_core::{
-    Action, CodedError, Denied, DenyReason, JobId, MirrorId, ObjectKind, Principal, Revision,
-    TakeoverId, Timestamp, UserId,
+    Action, CodedError, Denied, DenyReason, JobId, MirrorId, ObjectKind, RequestCtx, TakeoverId,
+    Timestamp, UserId,
     error::codes,
-    ir::{MirrorSnapshot, SourceKindLabel, mirror::MAX_BODY_BYTES},
+    ir::{MirrorSnapshot, SourceKindLabel},
     migrate::{
-        LossAck, SkippedItem, TakeoverCounts, TakeoverState, mirror_object, takeover_object,
+        LossAck, SkippedItem, Snapshot, TakeoverCounts, TakeoverState, mirror_object,
+        takeover_object,
     },
-    serde_util::HexBytes,
 };
 pub use tenko_migrate::mirror::{
     DiffAction, DiffKind, DiffRow, MirrorItem, MirrorLossItem, MirrorLosses, MirrorPatch,
     MirroredScope, ScopeDiff, SnapshotAccepted, SnapshotCounts,
 };
-use tenko_migrate::mirror::{MirrorError, MirrorService, body, service::NewMirror};
-use utoipa::{IntoParams, ToSchema};
-use utoipa_axum::{
-    router::{OpenApiRouter, UtoipaMethodRouterExt},
-    routes,
+use tenko_migrate::mirror::{
+    MirrorError, MirrorService,
+    body::{self, MAX_BODY_BYTES},
+    service::NewMirror,
 };
+use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::{not_implemented, system::CaRootSource};
 use crate::{
@@ -92,7 +93,7 @@ use crate::{
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct MirrorCreate {
     /// The name, unique among mirrors; the service account is `mirror-<name>`, so the name
-    /// holds no space.
+    /// holds no space and at most 57 characters.
     pub name: String,
     /// The kind of source (`windows-dhcp`).
     pub kind: SourceKindLabel,
@@ -130,26 +131,13 @@ pub struct MirrorCreated {
     pub ca_fingerprint: Option<String>,
 }
 
-/// The stored snapshot of a mirror (`GET /migrate/mirrors/{id}/snapshot`).
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SnapshotItem {
-    /// The mirror.
-    pub mirror: MirrorId,
-    /// The sequence.
-    pub sequence: u64,
-    /// The SHA-256 of the content in canonical CBOR: the envelope without its sequence and
-    /// its time.
-    pub hash: HexBytes,
-    /// When the push was accepted.
-    pub received: Timestamp,
-    /// The envelope as pushed.
-    pub envelope: MirrorSnapshot,
-}
-
 /// `POST /migrate/mirrors/{id}/losses/ack`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LossAckRequest {
-    /// The keys of the entries to acknowledge, as `GET .../losses` lists them.
+    /// The sequence of the loss report the keys were read from (`GET .../losses`); a newer
+    /// snapshot refuses the acknowledgment, so that it holds only for what was read.
+    pub sequence: u64,
+    /// The keys of the entries to acknowledge.
     pub keys: Vec<String>,
 }
 
@@ -159,7 +147,7 @@ pub struct LossAckResult {
     /// The acknowledgments written.
     pub acks: Vec<LossAck>,
     /// The revision that committed them.
-    pub revision: Revision,
+    pub revision: tenko_core::Revision,
 }
 
 /// The answer of the prepare, the takeover and the revert: the job that runs it.
@@ -234,11 +222,28 @@ pub struct TakeoverFilters {
 /// The mirror service, which the server adds as a request extension.
 type Mirrors = Option<Extension<Arc<MirrorService>>>;
 
+/// The certificate authority root, which the server adds in its internal-CA mode.
+type CaRoot = Option<Extension<Arc<CaRootSource>>>;
+
 /// The service, or the `501` stub answer when the server did not add one.
 fn service(mirrors: Mirrors, method: &str, path: &str) -> Result<Arc<MirrorService>, ApiError> {
     mirrors
         .map(|Extension(service)| service)
         .ok_or_else(|| not_implemented(method, path))
+}
+
+/// The mirror a path names, after the caller's right on it, and the service.
+fn mirror_op(
+    app: &AppState,
+    mirrors: Mirrors,
+    cx: &RequestCtx,
+    raw: &str,
+    action: Action,
+    (method, path): (&str, &str),
+) -> Result<(MirrorId, Arc<MirrorService>), ApiError> {
+    let id = parse_id::<MirrorId>("id", raw)?;
+    app.authorize(&cx.principal, action, &mirror_object(id))?;
+    Ok((id, service(mirrors, method, path)?))
 }
 
 /// A 400 `sys.invalid_request` for a malformed path segment.
@@ -268,7 +273,7 @@ fn parse_cidr(raw: &str) -> Result<IpNet, ApiError> {
 /// A path of a scope under a mirror: the mirror's id and the scope.
 fn mirror_and_scope(
     app: &AppState,
-    cx: &tenko_core::RequestCtx,
+    cx: &RequestCtx,
     id: &str,
     cidr: &str,
     action: Action,
@@ -284,8 +289,6 @@ fn mirror_and_scope(
     let cidr = parse_cidr(cidr)?;
     Ok((id, cidr))
 }
-
-type CaRoot = Option<Extension<Arc<CaRootSource>>>;
 
 /// The mirror with the fingerprint of the internal authority's root, which the exporter pins.
 fn pinned(mut mirror: MirrorItem, ca_root: &CaRoot) -> MirrorItem {
@@ -320,40 +323,26 @@ fn created(
 // ---------------------------------------------------------------------------------------
 // The push
 
-/// Whether the body is gzip: `Content-Encoding` absent or `identity` is plain, `gzip` is
-/// gzip, anything else is refused.
-fn gzip(headers: &HeaderMap) -> Result<bool, ApiError> {
-    match headers
+/// Reads and decodes the body: the read stops at [`MAX_BODY_BYTES`], with or without a
+/// declared length; `Content-Encoding` is absent, `identity` or `gzip`.
+async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, MirrorError> {
+    let gzip = match headers
         .get(header::CONTENT_ENCODING)
         .map(HeaderValue::as_bytes)
     {
-        None | Some(b"identity") => Ok(false),
-        Some(b"gzip") => Ok(true),
-        Some(_) => Err(invalid(
-            "Content-Encoding",
-            "the body is plain or gzip, nothing else",
-        )),
-    }
-}
-
-/// Reads and decodes the body: a declared length above the bound is refused before the
-/// body is read, and the read stops at the bound.
-async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, MirrorError> {
-    let too_large = MirrorError::TooLarge {
-        limit: MAX_BODY_BYTES,
+        None | Some(b"identity") => false,
+        Some(b"gzip") => true,
+        Some(_) => {
+            return Err(MirrorError::Request(
+                "the body is plain or gzip, nothing else".to_owned(),
+            ));
+        }
     };
-    if headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok()?.parse::<usize>().ok())
-        .is_some_and(|length| length > MAX_BODY_BYTES)
-    {
-        return Err(too_large);
-    }
-    let gzip = gzip(headers)
-        .map_err(|_| MirrorError::Request("unsupported Content-Encoding".to_owned()))?;
     let bytes = axum::body::to_bytes(raw, MAX_BODY_BYTES)
         .await
-        .map_err(|_| too_large)?;
+        .map_err(|_| MirrorError::TooLarge {
+            limit: MAX_BODY_BYTES,
+        })?;
     // Inflating and parsing up to 32 MiB is work for a blocking thread, not the runtime's.
     tokio::task::spawn_blocking(move || body::decode(&bytes, gzip))
         .await
@@ -366,7 +355,7 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
     tag = "migrate",
     operation_id = "push_mirror_snapshot",
     summary = "Push a snapshot of a mirrored source",
-    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only right it has: `Action::Execute` on the mirror; a session is refused. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 1,000 scopes, 10,000 reservations and 100,000 leases, with a `sequence` above the last accepted one and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored.",
+    description = "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 262,144 list items, 1,000 scopes, 10,000 reservations and 100,000 leases, every text one line, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorSnapshot, content_type = "application/json"),
     security(("token" = [])),
@@ -374,9 +363,9 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
         (status = 200, description = "The accepted sequence and whether the snapshot changed", body = SnapshotAccepted),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The token is not this mirror's, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The token is not this mirror's own, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The sequence is not above the last accepted one: a replay (`migrate.mirror.sequence`, `params.last`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is above the bound (`migrate.mirror.too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 422, description = "The envelope does not validate; `path` names the first error (`migrate.mirror.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "A push came faster than the floor (`migrate.mirror.rate`)", body = ProblemDetails, content_type = "application/problem+json")
@@ -385,51 +374,55 @@ async fn decoded(headers: &HeaderMap, raw: Body) -> Result<MirrorSnapshot, Mirro
 async fn push_mirror_snapshot(
     State(app): State<AppState>,
     mirrors: Mirrors,
+    auth: Option<Extension<Arc<AuthService>>>,
     Ctx(cx): Ctx,
     Path(id): Path<String>,
     headers: HeaderMap,
     raw: Body,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    let object = mirror_object(id);
-    app.authorize(&cx.principal, Action::Execute, &object)?;
-    let service = service(mirrors, "PUT", "/migrate/mirrors/{id}/snapshot")?;
-    // Plan section 2.1, rule 2: the push is the token's; an administrator's session that
-    // could execute on the mirror does not push.
-    if !matches!(cx.principal, Principal::Token { .. }) {
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Execute,
+        ("PUT", "/migrate/mirrors/{id}/snapshot"),
+    )?;
+    // Plan section 2.1, rule 2: the push is the mirror's own token's, never another token's
+    // or a session's that could execute on the mirror.
+    if auth.and_then(|Extension(auth)| auth.token_mirror(&cx.principal)) != Some(id) {
         return Err(Denied {
             action: Action::Execute,
-            object,
+            object: mirror_object(id),
             reason: DenyReason::MissingPermission,
         }
         .into());
     }
-    let outcome = match service.admit(id, cx.now).await {
+    let outcome = match service.admit(id).await {
         Ok(()) => match decoded(&headers, raw).await {
             Ok(snapshot) => service.push(&cx, id, snapshot).await,
             Err(error) => Err(error),
         },
         Err(error) => Err(error),
     };
-    match outcome {
-        Ok(accepted) => Ok(Json(accepted).into_response()),
-        Err(error) => {
-            if !matches!(error, MirrorError::NotFound(_) | MirrorError::Store(_)) {
-                service.refused(&cx, id, &error).await;
-            }
-            let retry = match &error {
-                MirrorError::Rate { retry_after } => Some(*retry_after),
-                _ => None,
-            };
-            let mut response = ApiError::from(error).into_response();
-            if let Some(seconds) = retry {
-                response
-                    .headers_mut()
-                    .insert(header::RETRY_AFTER, HeaderValue::from(seconds));
-            }
-            Ok(response)
-        }
+    let error = match outcome {
+        Ok(accepted) => return Ok(Json(accepted).into_response()),
+        Err(error) => error,
+    };
+    if !matches!(error, MirrorError::NotFound(_) | MirrorError::Store(_)) {
+        service.refused(&cx, id, &error).await;
     }
+    let retry = match &error {
+        MirrorError::Rate { retry_after } => Some(*retry_after),
+        _ => None,
+    };
+    let mut response = ApiError::from(error).into_response();
+    if let Some(seconds) = retry {
+        response
+            .headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from(seconds));
+    }
+    Ok(response)
 }
 
 // ---------------------------------------------------------------------------------------
@@ -459,7 +452,7 @@ async fn list_mirrors(
     app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Mirror))?;
     let service = service(mirrors, "GET", "/migrate/mirrors")?;
     let items = service
-        .list(cx.now)
+        .list()
         .await?
         .into_iter()
         .map(|item| pinned(item, &ca_root))
@@ -481,7 +474,7 @@ async fn list_mirrors(
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A mirror or a service account of this name exists (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "A mirror or a service account of this name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn create_mirror(
@@ -525,10 +518,15 @@ async fn get_mirror(
     Ctx(cx): Ctx,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &mirror_object(id))?;
-    let service = service(mirrors, "GET", "/migrate/mirrors/{id}")?;
-    Ok(Json(pinned(service.get(id, cx.now).await?, &ca_root)).into_response())
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Read,
+        ("GET", "/migrate/mirrors/{id}"),
+    )?;
+    Ok(Json(pinned(service.get(id).await?, &ca_root)).into_response())
 }
 
 #[utoipa::path(
@@ -547,7 +545,7 @@ async fn get_mirror(
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A mirror of the new name exists (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "A mirror of the new name exists (`migrate.mirror.exists`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn update_mirror(
@@ -557,9 +555,14 @@ async fn update_mirror(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<MirrorPatch>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &mirror_object(id))?;
-    let service = service(mirrors, "PATCH", "/migrate/mirrors/{id}")?;
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Update,
+        ("PATCH", "/migrate/mirrors/{id}"),
+    )?;
     Ok(Json(service.update(&cx, id, body).await?).into_response())
 }
 
@@ -577,7 +580,8 @@ async fn update_mirror(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn delete_mirror(
@@ -586,9 +590,14 @@ async fn delete_mirror(
     Ctx(cx): Ctx,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Delete, &mirror_object(id))?;
-    let service = service(mirrors, "DELETE", "/migrate/mirrors/{id}")?;
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Delete,
+        ("DELETE", "/migrate/mirrors/{id}"),
+    )?;
     service.delete(&cx, id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -599,7 +608,7 @@ async fn delete_mirror(
     tag = "migrate",
     operation_id = "replace_mirror_token",
     summary = "Replace the token of a mirrored source",
-    description = "An administrator's interactive session that signed in within five minutes (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token is shown once. Audited as `migrate.mirror.token`.",
+    description = "An administrator's interactive session that signed in within five minutes (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token starts a new series of sequences. The new token is shown once. Audited as `migrate.mirror.token`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorTokenRequest, content_type = "application/json"),
     security(("session" = [])),
@@ -608,7 +617,8 @@ async fn delete_mirror(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal is not an administrator, a token was used, or the sign-in is older than five minutes", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn replace_mirror_token(
@@ -619,9 +629,14 @@ async fn replace_mirror_token(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<MirrorTokenRequest>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Administer, &mirror_object(id))?;
-    let service = service(mirrors, "POST", "/migrate/mirrors/{id}/token")?;
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Administer,
+        ("POST", "/migrate/mirrors/{id}/token"),
+    )?;
     Ok(created(
         service.replace_token(&cx, id, body.expires_in_days).await?,
         &ca_root,
@@ -634,10 +649,10 @@ async fn replace_mirror_token(
     tag = "migrate",
     operation_id = "get_mirror_snapshot",
     summary = "Get the latest snapshot of a mirrored source",
-    description = "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, hash and the time it was accepted.",
+    description = "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     responses(
-        (status = 200, description = "The snapshot", body = SnapshotItem),
+        (status = 200, description = "The snapshot", body = Snapshot),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
@@ -650,18 +665,15 @@ async fn get_mirror_snapshot(
     Ctx(cx): Ctx,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &mirror_object(id))?;
-    let service = service(mirrors, "GET", "/migrate/mirrors/{id}/snapshot")?;
-    let row = service.snapshot(id).await?;
-    Ok(Json(SnapshotItem {
-        mirror: row.mirror,
-        sequence: row.sequence,
-        hash: row.hash,
-        received: row.received,
-        envelope: row.envelope,
-    })
-    .into_response())
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Read,
+        ("GET", "/migrate/mirrors/{id}/snapshot"),
+    )?;
+    Ok(Json(service.snapshot(id).await?).into_response())
 }
 
 #[utoipa::path(
@@ -670,7 +682,7 @@ async fn get_mirror_snapshot(
     tag = "migrate",
     operation_id = "list_mirror_losses",
     summary = "The loss report of a mirrored source",
-    description = "Scope: `migrate.read`. The entries of the latest snapshot's loss report, each with its key, its scope (the scope holding the address its location names; none: every scope) and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.",
+    description = "Scope: `migrate.read`. The entries of the latest snapshot's loss report with its sequence, each with its key, its scope (the scope holding the address its location names; none: every scope) and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     responses(
         (status = 200, description = "The loss report", body = MirrorLosses),
@@ -686,9 +698,14 @@ async fn list_mirror_losses(
     Ctx(cx): Ctx,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Read, &mirror_object(id))?;
-    let service = service(mirrors, "GET", "/migrate/mirrors/{id}/losses")?;
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Read,
+        ("GET", "/migrate/mirrors/{id}/losses"),
+    )?;
     Ok(Json(service.losses(id).await?).into_response())
 }
 
@@ -698,16 +715,17 @@ async fn list_mirror_losses(
     tag = "migrate",
     operation_id = "ack_mirror_losses",
     summary = "Acknowledge loss entries of a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session. An acknowledgment holds while the entry recurs unchanged; the prepare and the takeover refuse a scope with an unacknowledged entry. Audited as `migrate.mirror.losses_ack`.",
+    description = "Scope: `migrate.write`, an interactive session. Acknowledges entries of the loss report at `sequence`, the one that was read; a newer snapshot refuses it with 409 `migrate.mirror.snapshot_moved`. An acknowledgment holds while the entry recurs unchanged; the prepare and the takeover refuse a scope with an unacknowledged entry. Audited as `migrate.mirror.losses_ack`.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = LossAckRequest, content_type = "application/json"),
     security(("session" = [])),
     responses(
         (status = 200, description = "The acknowledgments written", body = LossAckResult),
-        (status = 400, description = "The request is malformed, names no key, or a key names no entry of the latest snapshot (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 400, description = "The request is malformed, names no key, or a key names no entry of the snapshot (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A newer snapshot came in after the one that was read (`migrate.mirror.snapshot_moved`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn ack_mirror_losses(
@@ -717,10 +735,15 @@ async fn ack_mirror_losses(
     Path(id): Path<String>,
     ApiJson(body): ApiJson<LossAckRequest>,
 ) -> Result<Response, ApiError> {
-    let id = parse_id::<MirrorId>("id", &id)?;
-    app.authorize(&cx.principal, Action::Update, &mirror_object(id))?;
-    let service = service(mirrors, "POST", "/migrate/mirrors/{id}/losses/ack")?;
-    let (acks, revision) = service.ack(&cx, id, &body.keys).await?;
+    let (id, service) = mirror_op(
+        &app,
+        mirrors,
+        &cx,
+        &id,
+        Action::Update,
+        ("POST", "/migrate/mirrors/{id}/losses/ack"),
+    )?;
+    let (acks, revision) = service.ack(&cx, id, body.sequence, &body.keys).await?;
     Ok(Json(LossAckResult { acks, revision }).into_response())
 }
 
@@ -733,7 +756,7 @@ async fn ack_mirror_losses(
     tag = "migrate",
     operation_id = "get_mirror_scope_diff",
     summary = "The diff of a mirrored scope against Tenko's scope",
-    description = "Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network, each row saying what the prepare would do (plan section 2.5); only differences are rows.",
+    description = "Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network in the default VRF, each row saying what the prepare would do (plan section 2.5); only differences are rows, and what the prepare cannot write is the operator's decision.",
     params(
         ("id" = String, Path, description = "Mirror identifier (UUID)"),
         ("cidr" = String, Path, description = "The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`)")
@@ -917,12 +940,11 @@ async fn get_takeover(
 /// one warning per code, naming its mirrors.
 pub(crate) async fn warnings(
     mirrors: Option<Arc<MirrorService>>,
-    now: Timestamp,
 ) -> Vec<crate::dto::system::StatusWarning> {
     let Some(mirrors) = mirrors else {
         return Vec::new();
     };
-    let found = match mirrors.findings(now).await {
+    let found = match mirrors.findings().await {
         Ok(found) => found,
         Err(error) => {
             tracing::warn!(%error, "the findings of the mirrored sources could not be read");
@@ -957,7 +979,7 @@ pub(crate) async fn warnings(
 // ---------------------------------------------------------------------------------------
 // Registration
 
-/// The routes of the area; the push carries its own body limit.
+/// The routes of the area; the push reads its body within its own bound.
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     mirror_routes().merge(scope_and_takeover_routes())
 }
@@ -969,10 +991,7 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
 #[inline(never)]
 fn mirror_routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(
-            routes!(push_mirror_snapshot, get_mirror_snapshot)
-                .layer(DefaultBodyLimit::max(tenko_core::migrate::MAX_BODY_BYTES)),
-        )
+        .routes(routes!(push_mirror_snapshot, get_mirror_snapshot))
         .routes(routes!(list_mirrors, create_mirror))
         .routes(routes!(get_mirror, update_mirror, delete_mirror))
         .routes(routes!(replace_mirror_token))
@@ -1138,7 +1157,7 @@ mod tests {
             (
                 "POST",
                 format!("/migrate/mirrors/{MIRROR}/losses/ack"),
-                Some(r#"{"keys":[]}"#),
+                Some(r#"{"sequence":1,"keys":[]}"#),
                 Action::Update,
                 ObjectKind::Mirror,
             ),

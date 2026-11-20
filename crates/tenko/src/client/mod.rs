@@ -984,6 +984,14 @@ pub fn render_roles() -> String {
     out
 }
 
+/// A string of the server's answer made safe for a terminal: every control character, the
+/// escape that starts a terminal sequence among them, becomes `?`.
+pub(crate) fn clean(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
 /// A table with left-aligned columns and two spaces between them.
 pub fn table(header: &[&str], rows: &[Vec<String>]) -> String {
     let mut widths: Vec<usize> = header.iter().map(|title| title.chars().count()).collect();

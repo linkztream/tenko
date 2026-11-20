@@ -18,7 +18,7 @@ use serde_json::{Map, Value, json};
 use tenko_api::{client::Client, dto::Page, problem::ProblemDetails};
 use uuid::Uuid;
 
-use super::{ClientOpts, Failure, Output, Target, table};
+use super::{ClientOpts, Failure, Output, Target, clean, table};
 use crate::exit;
 
 /// Subcommands of `tenko migrate`.
@@ -123,6 +123,10 @@ pub struct AckArgs {
     /// The mirror: its identifier or its name.
     #[arg(value_name = "MIRROR")]
     pub mirror: String,
+    /// The sequence `losses` printed: the acknowledgment holds for that report only, and a
+    /// newer snapshot refuses it.
+    #[arg(long, value_name = "SEQUENCE")]
+    pub sequence: u64,
     /// The keys of the entries to acknowledge, as `losses` lists them; at least one.
     #[arg(value_name = "KEY", required = true)]
     pub keys: Vec<String>,
@@ -213,10 +217,11 @@ fn usage(message: impl std::fmt::Display) -> Failure {
     Failure::new(exit::USAGE, message.to_string())
 }
 
-/// A text field of a JSON object, `-` when absent.
+/// A text field of a JSON object, `-` when absent; a source's text never reaches the
+/// terminal with a control character.
 fn field(value: &Value, key: &str) -> String {
     match value.get(key) {
-        Some(Value::String(text)) => text.clone(),
+        Some(Value::String(text)) => clean(text),
         Some(Value::Number(number)) => number.to_string(),
         Some(Value::Bool(flag)) => flag.to_string(),
         _ => "-".to_owned(),
@@ -496,7 +501,7 @@ async fn mirror_ack(target: &Target, args: &AckArgs) -> Result<Output, Failure> 
     let answer: Value = client
         .post(
             &format!("{}/losses/ack", mirror_path(&mirror)),
-            &json!({ "keys": args.keys }),
+            &json!({ "sequence": args.sequence, "keys": args.keys }),
             Some(&key()),
         )
         .await?;
@@ -610,6 +615,14 @@ mod tests {
         let error = scope_path(&mirror, "192.0.2.1/24").expect_err("not a network");
         assert!(error.message.contains("192.0.2.0/24"), "{}", error.message);
         assert!(scope_path(&mirror, "office").is_err());
+    }
+
+    #[test]
+    fn a_pushed_text_reaches_the_terminal_without_control_characters() {
+        let row =
+            json!({ "item": "scope:1@vendor\u{1b}]52;c;Y2FsYw==\u{7}", "mirror": "a\u{1b}[2K\nb" });
+        assert_eq!(field(&row, "item"), "scope:1@vendor?]52;c;Y2FsYw==?");
+        assert_eq!(field(&row, "mirror"), "a?[2K?b");
     }
 
     #[test]

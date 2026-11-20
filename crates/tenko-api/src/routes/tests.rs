@@ -195,15 +195,8 @@ async fn a_mirror_token_is_refused_on_every_operation_but_its_push() {
         let refused = refused_as_unauthenticated(&reply)
             || (reply.status.as_u16() == 403 && reply.body["code"] == "auth.forbidden");
         // A stub, or a service this installation does not wire, answers before it reads
-        // the caller: it tells nothing.
-        let passes = if matches!(reply.status.as_u16(), 501 | 503) && !refused {
-            true
-        } else if operation.get("requestBody").is_some() {
-            !reply.status.is_success()
-        } else {
-            refused
-        };
-        if !passes {
+        // the caller; every other operation, with a body or without, refuses the token.
+        if !refused && !matches!(reply.status.as_u16(), 501 | 503) {
             wrong.push(format!("{key}: {} {}", reply.status, reply.text));
         }
         checked += 1;

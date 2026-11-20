@@ -271,6 +271,15 @@ pub enum MirrorError {
     ScopeNotFound(MirrorId, IpNet),
     /// The request names something the snapshot does not hold (400).
     Request(String),
+    /// The request was made from an older snapshot than the latest (409).
+    SnapshotMoved {
+        /// The snapshot the request was made from.
+        sequence: u64,
+        /// The latest snapshot.
+        latest: u64,
+    },
+    /// The mirror's row changed under every attempt to write it (409).
+    Conflict(MirrorId),
     /// The account and token of the mirror.
     Auth(AuthError),
     /// The rows of the diff.
@@ -310,6 +319,13 @@ impl fmt::Display for MirrorError {
                 write!(f, "the snapshot of mirror {id} holds no scope {scope}")
             }
             Self::Request(detail) => f.write_str(detail),
+            Self::SnapshotMoved { sequence, latest } => write!(
+                f,
+                "the request was made from the snapshot {sequence}, the latest is {latest}"
+            ),
+            Self::Conflict(id) => {
+                write!(f, "the mirror {id} changed under every attempt to write it")
+            }
             Self::Auth(error) => error.fmt(f),
             Self::Dhcp(error) => error.fmt(f),
             Self::Store(error) => error.fmt(f),
@@ -333,6 +349,8 @@ impl Coded for MirrorError {
             Self::NoSnapshot(_) => codes::MIRROR_NO_SNAPSHOT,
             Self::ScopeNotFound(..) => codes::MIRROR_SCOPE_NOT_FOUND,
             Self::Request(_) => INVALID_REQUEST,
+            Self::SnapshotMoved { .. } => codes::MIRROR_SNAPSHOT_MOVED,
+            Self::Conflict(_) => codes::MIRROR_CONFLICT,
             Self::Auth(error) => error.code(),
             Self::Dhcp(error) => error.code(),
             Self::Store(error) => error.code(),
@@ -342,7 +360,10 @@ impl Coded for MirrorError {
     fn http_status(&self) -> u16 {
         match self {
             Self::NotFound(_) | Self::NoSnapshot(_) | Self::ScopeNotFound(..) => 404,
-            Self::Exists(_) | Self::Sequence { .. } => 409,
+            Self::Exists(_)
+            | Self::Sequence { .. }
+            | Self::SnapshotMoved { .. }
+            | Self::Conflict(_) => 409,
             Self::Settings { .. } | Self::Request(_) => 400,
             Self::Disabled(_) => 403,
             Self::TooLarge { .. } => 413,
@@ -357,9 +378,10 @@ impl Coded for MirrorError {
     fn params(&self) -> BTreeMap<&'static str, String> {
         let id = |id: &MirrorId| BTreeMap::from([("id", id.to_string())]);
         match self {
-            Self::NotFound(mirror) | Self::Disabled(mirror) | Self::NoSnapshot(mirror) => {
-                id(mirror)
-            }
+            Self::NotFound(mirror)
+            | Self::Disabled(mirror)
+            | Self::NoSnapshot(mirror)
+            | Self::Conflict(mirror) => id(mirror),
             Self::Exists(name) => BTreeMap::from([("name", name.clone())]),
             Self::Settings { field, reason } => {
                 BTreeMap::from([("field", field.clone()), ("reason", reason.clone())])
@@ -377,6 +399,10 @@ impl Coded for MirrorError {
                 BTreeMap::from([("id", mirror.to_string()), ("scope", scope.to_string())])
             }
             Self::Request(_) => BTreeMap::new(),
+            Self::SnapshotMoved { sequence, latest } => BTreeMap::from([
+                ("sequence", sequence.to_string()),
+                ("latest", latest.to_string()),
+            ]),
             Self::Auth(error) => error.params(),
             Self::Dhcp(error) => error.params(),
             Self::Store(error) => error.params(),
@@ -413,7 +439,6 @@ impl From<tenko_dhcp::config::ConfigError> for MirrorError {
 impl From<AuthError> for MirrorError {
     fn from(error: AuthError) -> Self {
         match error {
-            AuthError::UserNameTaken => Self::Exists("mirror".to_owned()),
             AuthError::Invalid {
                 field: "name",
                 reason,

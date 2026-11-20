@@ -2330,6 +2330,15 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         .await
         .principal;
     assert_eq!(lab.code(&pusher, Action::Execute, own), "ok");
+    // The authenticator itself says whose push the token is for, so the API holds the token to
+    // it without any other service.
+    let bearer = Credentials::Bearer(credentials.token.token.expose().to_owned());
+    let authenticated =
+        tenko_core::Authenticator::authenticate(&lab.env.service, &bearer, None, lab.env.now())
+            .await
+            .expect("authenticated");
+    assert_eq!(authenticated.flags.mirror, Some(mirror));
+    assert_eq!(lab.env.service.token_mirror(&pusher), Some(mirror));
     for (action, object) in [
         (Action::Read, own),
         (Action::Update, own),

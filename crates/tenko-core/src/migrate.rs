@@ -74,8 +74,11 @@ pub const TOKEN_EXPIRING_DAYS: u32 = 14;
 /// writes the freshness lives in the leader's memory (section 2.4).
 pub const FRESHNESS_WRITE_SECS: u32 = 600;
 
-/// The length of the name of a mirror.
+/// The longest name of a mirror's service account (the user name rule of `tenko-auth`).
 pub const MAX_NAME_LEN: usize = 64;
+
+/// The prefix of a mirror's service account name: `mirror-<name>`.
+pub const ACCOUNT_PREFIX: &str = "mirror-";
 
 /// The SSE topic of the module.
 pub const TOPIC: &str = "migrate";
@@ -131,21 +134,27 @@ const fn default_interval() -> u32 {
 }
 
 impl Mirror {
-    /// Checks the row: a name of 1 to [`MAX_NAME_LEN`] printable characters and an interval
-    /// within [`MIN_INTERVAL_SECS`] and [`MAX_INTERVAL_SECS`].
+    /// Checks the row: a name that makes the service account's name, `mirror-<name>` of at
+    /// most [`MAX_NAME_LEN`] characters (so the name has at most 57) without a space or a
+    /// control character, and an interval within [`MIN_INTERVAL_SECS`] and
+    /// [`MAX_INTERVAL_SECS`].
     ///
     /// # Errors
     ///
     /// [`MigrateError::Invalid`] naming the field.
     pub fn validate(&self) -> Result<(), MigrateError> {
-        let name = self.name.trim();
-        if name.is_empty() || name.chars().count() > MAX_NAME_LEN {
-            return Err(MigrateError::invalid("name", "1 to 64 characters"));
+        let longest = MAX_NAME_LEN - ACCOUNT_PREFIX.len();
+        if self.name.is_empty() || self.name.chars().count() > longest {
+            return Err(MigrateError::invalid("name", "1 to 57 characters"));
         }
-        if name != self.name || name.chars().any(char::is_control) {
+        if self
+            .name
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+        {
             return Err(MigrateError::invalid(
                 "name",
-                "no leading or trailing space and no control character",
+                "no space and no control character: the name is part of the service account's",
             ));
         }
         if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&self.interval_secs) {
@@ -159,7 +168,7 @@ impl Mirror {
 
     /// The name of the service account that owns the mirror's token.
     pub fn account_name(name: &str) -> String {
-        format!("mirror-{name}")
+        format!("{ACCOUNT_PREFIX}{name}")
     }
 
     /// After how many seconds without a push the mirror is stale (section 2.4).
@@ -191,8 +200,8 @@ pub struct Snapshot {
     pub mirror: MirrorId,
     /// The envelope's sequence.
     pub sequence: u64,
-    /// The SHA-256 of the envelope in canonical CBOR, the value the next push is compared
-    /// with.
+    /// The SHA-256 in canonical CBOR of the envelope's content (without its `sequence` and
+    /// `taken_at`), the value the next push is compared with.
     pub hash: HexBytes,
     /// When the push was accepted, by the node's clock.
     pub received: Timestamp,
@@ -457,8 +466,15 @@ pub mod codes {
     /// A takeover or a prepare of the scope runs already (409). Params: `scope`, `job`.
     pub const TAKEOVER_RUNNING: &str = "migrate.takeover.running";
 
+    /// The latest snapshot is not the one the request was made from: a newer push came in
+    /// between (409). Params: `sequence`, `latest`.
+    pub const MIRROR_SNAPSHOT_MOVED: &str = "migrate.mirror.snapshot_moved";
+    /// A write of the mirror's row met a concurrent change and could not be repeated (409).
+    /// Params: `id`.
+    pub const MIRROR_CONFLICT: &str = "migrate.mirror.conflict";
+
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 22] = [
+    pub const ALL: [&str; 24] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -481,6 +497,8 @@ pub mod codes {
         TAKEOVER_WAIT_TIMEOUT,
         TAKEOVER_SCOPE_ENABLED,
         TAKEOVER_RUNNING,
+        MIRROR_SNAPSHOT_MOVED,
+        MIRROR_CONFLICT,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -848,8 +866,15 @@ mod tests {
 
         mirror.name = String::new();
         assert!(mirror.validate().is_err());
-        mirror.name = " lab".to_owned();
-        assert!(mirror.validate().is_err());
+        for name in [" lab", "dc 1", &"x".repeat(58)] {
+            mirror.name = name.to_owned();
+            let refused = mirror.validate().expect_err(name);
+            assert_eq!(crate::Coded::code(&refused), codes::MIRROR_INVALID_SETTINGS);
+        }
+        mirror.name = "x".repeat(57);
+        mirror
+            .validate()
+            .expect("57 characters make a 64-character account name");
         mirror.name = "lab".to_owned();
         mirror.interval_secs = 5;
         assert!(mirror.validate().is_err());

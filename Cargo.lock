@@ -3610,6 +3610,7 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+ "stats_alloc",
  "tenko-auth",
  "tenko-core",
  "tenko-dhcp",

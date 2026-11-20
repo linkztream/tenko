@@ -1,17 +1,18 @@
-//! Route tests of the mirrored sources (WP14.1, E73): the push with each refusal it answers,
-//! the management operations a session reaches and a token does not, the losses and the
-//! diff. The service runs over the harness's store and auth service; its floor between two
-//! pushes is zero here (the harness runs on the real clock) except where the floor itself is
-//! tested.
+//! Route tests of the mirrored sources (WP14.1, E73): how the push and the management
+//! operations answer over HTTP, each refusal with its status and code. What the service does
+//! behind them is `crates/tenko-migrate/tests/mirror_service.rs`. The service runs on the
+//! harness's clock, so the floor between pushes and the minute between audited refusals are
+//! the test's, not the machine's.
 
-use std::{io::Write as _, sync::Arc};
+use std::{io::Write as _, sync::Arc, time::Duration};
 
 use axum::{
     Extension,
     body::Body,
     http::{Request, header},
 };
-use serde_json::{Value, json};
+use serde_json::json;
+use tenko_auth::clock::Clock;
 use tenko_migrate::mirror::MirrorService;
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, Store as _, tables};
 
@@ -23,17 +24,23 @@ use crate::{
 
 const FIXTURE: &str = include_str!("../../../tenko-core/tests/fixtures/mirror/snapshot.json");
 
-async fn harness(floor: u64) -> (Harness, String) {
+async fn harness() -> (Harness, String) {
     let (plain, admin) = Harness::installed().await;
     let env = plain.env;
+    let clock: Arc<dyn Clock> = env.clock.clone();
     let service =
-        Arc::new(MirrorService::new(env.store.clone(), Arc::clone(&env.service)).with_floor(floor));
+        Arc::new(MirrorService::new(env.store.clone(), Arc::clone(&env.service)).with_clock(clock));
     let harness = Harness::wired(env, move |state| {
         crate::api_with(state, ModuleSet::ALL)
             .0
             .layer(Extension(service))
     });
     (harness, admin)
+}
+
+/// Moves the service's clock past the floor between two pushes.
+fn later(harness: &Harness, secs: u64) {
+    harness.env.clock.advance(Duration::from_secs(secs));
 }
 
 /// Creates a mirror and returns its id and token.
@@ -65,14 +72,14 @@ fn snapshot(sequence: u64) -> String {
 async fn push(
     harness: &Harness,
     id: &str,
-    token: &str,
+    credential: &str,
     body: impl Into<Body>,
     headers: &[(&str, &str)],
 ) -> Reply {
     let mut request = Request::builder()
         .method("PUT")
         .uri(format!("{API_BASE}/migrate/mirrors/{id}/snapshot"))
-        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::AUTHORIZATION, format!("Bearer {credential}"))
         .header(header::CONTENT_TYPE, "application/json");
     for (name, value) in headers {
         request = request.header(*name, *value);
@@ -88,13 +95,28 @@ fn gzip(text: &str) -> Vec<u8> {
     encoder.finish().expect("gzip")
 }
 
+async fn refusals(harness: &Harness) -> usize {
+    let view = harness
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("a view");
+    view.scan_typed(&tables::AUDIT, KeyRange::all(), 100_000, false)
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str() == "migrate.mirror.refuse")
+        .count()
+}
+
 #[tokio::test]
-async fn a_push_is_accepted_once_per_sequence_and_refused_with_its_code() {
-    let (harness, admin) = harness(0).await;
+async fn a_push_answers_with_its_status_and_code() {
+    let (harness, admin) = harness().await;
     let (id, token) = mirror(&harness, &admin, "dc1").await;
     let accepted = push(&harness, &id, &token, snapshot(1), &[]).await;
     accepted.assert_status(200);
     assert_eq!(accepted.body, json!({ "sequence": 1, "changed": true }));
+    later(&harness, 10);
     let gzipped = push(
         &harness,
         &id,
@@ -103,15 +125,19 @@ async fn a_push_is_accepted_once_per_sequence_and_refused_with_its_code() {
         &[("content-encoding", "gzip")],
     )
     .await;
-    gzipped.assert_status(200);
-    assert_eq!(gzipped.body["changed"], false, "the same content");
+    assert_eq!(gzipped.body, json!({ "sequence": 2, "changed": false }));
 
-    push(&harness, &id, &token, snapshot(2), &[])
-        .await
-        .assert_problem(409, "migrate.mirror.sequence");
-    push(&harness, &id, &token, "", &[("content-length", "9000000")])
-        .await
-        .assert_problem(413, "migrate.mirror.too_large");
+    later(&harness, 10);
+    let replay = push(&harness, &id, &token, snapshot(2), &[]).await;
+    replay.assert_problem(409, "migrate.mirror.sequence");
+    assert_eq!(
+        (
+            &replay.body["params"]["sequence"],
+            &replay.body["params"]["last"]
+        ),
+        (&json!("2"), &json!("2"))
+    );
+    later(&harness, 10);
     let invalid = push(
         &harness,
         &id,
@@ -122,6 +148,7 @@ async fn a_push_is_accepted_once_per_sequence_and_refused_with_its_code() {
     .await;
     invalid.assert_problem(422, "migrate.mirror.invalid");
     assert_eq!(invalid.body["params"]["path"], "dhcp.leases[0].ip");
+    later(&harness, 10);
     push(
         &harness,
         &id,
@@ -131,36 +158,35 @@ async fn a_push_is_accepted_once_per_sequence_and_refused_with_its_code() {
     )
     .await
     .assert_problem(400, "sys.invalid_request");
+    // A body above the bound without a declared length: the read stops at the bound.
+    later(&harness, 10);
+    let chunks = (0..9).map(|_| Ok::<_, std::io::Error>(vec![b' '; 1 << 20]));
+    let streamed = push(
+        &harness,
+        &id,
+        &token,
+        Body::from_stream(futures::stream::iter(chunks)),
+        &[],
+    )
+    .await;
+    streamed.assert_problem(413, "migrate.mirror.too_large");
+    // Within the floor: 429 with the seconds to wait.
+    let fast = push(&harness, &id, &token, snapshot(9), &[]).await;
+    fast.assert_problem(429, "migrate.mirror.rate");
+    assert_eq!(fast.header("retry-after"), Some("10"));
 
-    // Nothing of a refused push is kept, and the refusals are audited once a minute.
-    let stored = harness
-        .call(
-            "GET",
-            &format!("/migrate/mirrors/{id}/snapshot"),
-            Cookie(&admin),
-            None,
-        )
-        .await;
-    stored.assert_status(200);
-    assert_eq!(stored.body["sequence"], 1);
-    let view = harness
-        .env
-        .store
-        .read(ReadConsistency::Local)
+    // Every refusal above came within one minute of the first: one audit record.
+    assert_eq!(refusals(&harness).await, 1);
+    later(&harness, 61);
+    push(&harness, &id, &token, snapshot(2), &[])
         .await
-        .expect("a view");
-    let refusals = view
-        .scan_typed(&tables::AUDIT, KeyRange::all(), 100_000, false)
-        .expect("audit")
-        .into_iter()
-        .filter(|(_, record, _)| record.draft.action.as_str() == "migrate.mirror.refuse")
-        .count();
-    assert_eq!(refusals, 1);
+        .assert_problem(409, "migrate.mirror.sequence");
+    assert_eq!(refusals(&harness).await, 2);
 }
 
 #[tokio::test]
-async fn the_push_is_the_token_s_own_and_the_token_reaches_nothing_else() {
-    let (harness, admin) = harness(0).await;
+async fn only_the_mirror_s_own_token_pushes() {
+    let (harness, admin) = harness().await;
     let (id, token) = mirror(&harness, &admin, "dc1").await;
     let (other, other_token) = mirror(&harness, &admin, "dc2").await;
     push(&harness, &id, &other_token, snapshot(1), &[])
@@ -169,33 +195,28 @@ async fn the_push_is_the_token_s_own_and_the_token_reaches_nothing_else() {
     push(&harness, &other, &token, snapshot(1), &[])
         .await
         .assert_problem(403, "auth.forbidden");
+    let personal = harness
+        .call(
+            "POST",
+            "/auth/tokens",
+            Cookie(&admin),
+            Some(&json!({ "name": "automation", "expires_in_days": 30 })),
+        )
+        .await;
+    personal.assert_status(201);
+    let personal = personal.body["token"].as_str().expect("token").to_owned();
+    push(&harness, &id, &personal, snapshot(1), &[])
+        .await
+        .assert_problem(403, "auth.forbidden");
     let by_session = harness
         .call(
             "PUT",
             &format!("/migrate/mirrors/{id}/snapshot"),
             Cookie(&admin),
-            Some(&serde_json::from_str::<Value>(&snapshot(1)).expect("json")),
+            Some(&serde_json::from_str(&snapshot(1)).expect("json")),
         )
         .await;
     by_session.assert_problem(403, "auth.forbidden");
-    push(&harness, &id, "tnk_not-a-token", snapshot(1), &[])
-        .await
-        .assert_status(401);
-    for (method, path) in [
-        ("GET", format!("/migrate/mirrors/{id}")),
-        ("GET", format!("/migrate/mirrors/{id}/snapshot")),
-        ("GET", format!("/migrate/mirrors/{id}/losses")),
-        ("GET", "/migrate/mirrors".to_owned()),
-        ("DELETE", format!("/migrate/mirrors/{id}")),
-    ] {
-        let reply = harness.call(method, &path, Bearer(&token), None).await;
-        assert_eq!(
-            reply.status.as_u16(),
-            403,
-            "{method} {path}: {}",
-            reply.body
-        );
-    }
 
     harness
         .call(
@@ -209,7 +230,6 @@ async fn the_push_is_the_token_s_own_and_the_token_reaches_nothing_else() {
     push(&harness, &id, &token, snapshot(1), &[])
         .await
         .assert_problem(403, "migrate.mirror.disabled");
-
     let renewed = harness
         .call(
             "POST",
@@ -221,7 +241,7 @@ async fn the_push_is_the_token_s_own_and_the_token_reaches_nothing_else() {
     renewed.assert_status(201);
     push(&harness, &id, &token, snapshot(1), &[])
         .await
-        .assert_status(401);
+        .assert_problem(401, "auth.unauthenticated");
     harness
         .call(
             "DELETE",
@@ -234,30 +254,32 @@ async fn the_push_is_the_token_s_own_and_the_token_reaches_nothing_else() {
     let new_token = renewed.body["token"].as_str().expect("token");
     push(&harness, &id, new_token, snapshot(1), &[])
         .await
-        .assert_status(401);
+        .assert_problem(401, "auth.unauthenticated");
 }
 
 #[tokio::test]
-async fn a_push_faster_than_the_floor_is_refused_with_retry_after() {
-    let (harness, admin) = harness(10).await;
+async fn the_management_operations_answer_with_their_codes() {
+    let (harness, admin) = harness().await;
     let (id, token) = mirror(&harness, &admin, "dc1").await;
-    push(&harness, &id, &token, snapshot(1), &[])
+    let exists = harness
+        .call(
+            "POST",
+            "/migrate/mirrors",
+            Cookie(&admin),
+            Some(&json!({ "name": "dc1", "kind": "windows-dhcp" })),
+        )
+        .await;
+    exists.assert_problem(409, "migrate.mirror.exists");
+    assert_eq!(exists.body["params"]["name"], "dc1");
+    harness
+        .call(
+            "PATCH",
+            &format!("/migrate/mirrors/{id}"),
+            Cookie(&admin),
+            Some(&json!({ "name": "dc 1" })),
+        )
         .await
-        .assert_status(200);
-    let refused = push(&harness, &id, &token, snapshot(2), &[]).await;
-    refused.assert_problem(429, "migrate.mirror.rate");
-    let retry: u64 = refused
-        .header("retry-after")
-        .expect("Retry-After")
-        .parse()
-        .expect("seconds");
-    assert!((1..=10).contains(&retry), "{retry}");
-}
-
-#[tokio::test]
-async fn the_card_the_losses_and_the_diff_read_the_latest_snapshot() {
-    let (harness, admin) = harness(0).await;
-    let (id, token) = mirror(&harness, &admin, "dc1").await;
+        .assert_problem(400, "migrate.mirror.invalid_settings");
     harness
         .call(
             "GET",
@@ -275,18 +297,7 @@ async fn the_card_the_losses_and_the_diff_read_the_latest_snapshot() {
         .call("GET", "/migrate/mirrors", Cookie(&admin), None)
         .await;
     list.assert_status(200);
-    let card = &list.body["items"][0];
-    assert_eq!(
-        (
-            &card["name"],
-            &card["stale"],
-            &card["losses_open"],
-            &card["counts"]["leases"]
-        ),
-        (&json!("dc1"), &json!(false), &json!(4), &json!(60))
-    );
-    assert_eq!(card["source"]["server"], "dc1.corp.example.test");
-
+    assert_eq!(list.body["items"][0]["losses_open"], 4);
     let losses = harness
         .call(
             "GET",
@@ -295,27 +306,39 @@ async fn the_card_the_losses_and_the_diff_read_the_latest_snapshot() {
             None,
         )
         .await;
-    losses.assert_status(200);
     let key = losses.body["entries"][0]["key"].clone();
     harness
         .call(
             "POST",
             &format!("/migrate/mirrors/{id}/losses/ack"),
             Cookie(&admin),
-            Some(&json!({ "keys": [key] })),
+            Some(&json!({ "sequence": 1, "keys": [key] })),
         )
         .await
         .assert_status(200);
+    later(&harness, 10);
+    push(
+        &harness,
+        &id,
+        &token,
+        snapshot(2).replacen(
+            "is not carried; policies",
+            "is not carried now; policies",
+            1,
+        ),
+        &[],
+    )
+    .await
+    .assert_status(200);
     harness
         .call(
             "POST",
             &format!("/migrate/mirrors/{id}/losses/ack"),
             Cookie(&admin),
-            Some(&json!({ "keys": ["no such entry"] })),
+            Some(&json!({ "sequence": 1, "keys": [key] })),
         )
         .await
-        .assert_problem(400, "sys.invalid_request");
-
+        .assert_problem(409, "migrate.mirror.snapshot_moved");
     let diff = harness
         .call(
             "GET",
@@ -325,8 +348,7 @@ async fn the_card_the_losses_and_the_diff_read_the_latest_snapshot() {
         )
         .await;
     diff.assert_status(200);
-    assert_eq!(diff.body["losses_open"], 3);
-    assert_eq!(diff.body["rows"][0]["kind"], "prefix");
+    assert_eq!(diff.body["scope"], "192.0.2.0/24");
     harness
         .call(
             "GET",

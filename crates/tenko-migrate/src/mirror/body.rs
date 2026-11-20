@@ -1,37 +1,46 @@
 //! A push body to a checked snapshot (plan section 2.1, rule 6; ADR 0033 decisions 2 and 5).
 //!
-//! The order is the defense: the size on the wire is bounded before the body is read (the
-//! route reads at most [`MAX_BODY_BYTES`]), a gzip body inflates into at most
-//! [`MAX_INFLATED_BYTES`] and stops there, the JSON parses into the strict types of
-//! `tenko-core` (`deny_unknown_fields` on the envelope), and the parsed snapshot is checked
-//! whole ([`MirrorSnapshot::validate`] and [`check_texts`]). A body that fails any step is
-//! refused whole, with the JSON path of the first error, and nothing of it is kept.
+//! The order is the defense: the route reads at most [`MAX_BODY_BYTES`] of the body, a gzip
+//! body inflates into at most [`MAX_INFLATED_BYTES`] and stops there, one pass over the JSON
+//! counts its array elements and refuses more than [`MAX_ELEMENTS`] before anything is
+//! parsed, the JSON parses into the strict types of `tenko-core` (`deny_unknown_fields` on the
+//! envelope), and the parsed snapshot is checked whole ([`MirrorSnapshot::validate`]). A body
+//! that fails any step is refused whole, with the JSON path of the first error, and nothing
+//! of it is kept.
+//!
+//! What decoding may allocate: the inflated text (at most [`MAX_INFLATED_BYTES`], twice that
+//! while its buffer grows), the strings of the snapshot (no more octets than the text holds),
+//! and at most [`MAX_ELEMENTS`] list items of at most a few hundred octets each, which their
+//! vectors may hold twice while they grow. [`DECODE_ALLOCATION_BOUND`] is the sum, and
+//! `tests/decode_alloc.rs` holds the most element-dense body the bounds let through to it.
 
 use std::{fmt::Write as _, io::Read};
 
 use tenko_core::ir::{
     MirrorSnapshot,
-    mirror::{MAX_BODY_BYTES, MAX_INFLATED_BYTES},
+    mirror::{MAX_ELEMENTS, MAX_INFLATED_BYTES},
 };
 
 use super::MirrorError;
 
-/// The longest sheet or column of a loss entry's location: the location is the entry's key,
-/// which the acknowledgment stores and the audit names.
-pub const MAX_LOCATION_LEN: usize = 256;
+pub use tenko_core::ir::mirror::MAX_BODY_BYTES;
 
-/// Decodes a push body: `gzip` when the request says `Content-Encoding: gzip`.
+/// The octets decoding one push may allocate in all, counted over every allocation it
+/// makes (so also over every growth of a vector): the inflated text and its growth, the
+/// text's strings, and [`MAX_ELEMENTS`] items of up to 512 octets, twice. 224 MiB.
+pub const DECODE_ALLOCATION_BOUND: usize = 3 * MAX_INFLATED_BYTES + 2 * 512 * MAX_ELEMENTS;
+
+/// The deepest nesting of a push body; the envelope needs six levels.
+const MAX_DEPTH: usize = 32;
+
+/// Decodes a push body that the caller read within [`MAX_BODY_BYTES`]: `gzip` when the
+/// request says `Content-Encoding: gzip`.
 ///
 /// # Errors
 ///
 /// [`MirrorError::TooLarge`] above a bound, [`MirrorError::Invalid`] for anything that does
 /// not inflate, parse or validate.
 pub fn decode(body: &[u8], gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
-    if body.len() > MAX_BODY_BYTES {
-        return Err(MirrorError::TooLarge {
-            limit: MAX_BODY_BYTES,
-        });
-    }
     let inflated;
     let json = if gzip {
         inflated = inflate(body)?;
@@ -39,6 +48,7 @@ pub fn decode(body: &[u8], gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
     } else {
         body
     };
+    count_elements(json)?;
     let snapshot: MirrorSnapshot = serde_json::from_slice(json).map_err(|error| {
         MirrorError::invalid(
             json_path(json, error.line(), error.column()),
@@ -46,7 +56,6 @@ pub fn decode(body: &[u8], gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
         )
     })?;
     snapshot.validate().map_err(MirrorError::Invalid)?;
-    check_texts(&snapshot)?;
     Ok(snapshot)
 }
 
@@ -65,36 +74,50 @@ fn inflate(body: &[u8]) -> Result<Vec<u8>, MirrorError> {
     Ok(out)
 }
 
-/// The checks of what the core leaves free and this crate stores or shows: a loss entry's
-/// location is its key, and its detail reaches the audit and the card, so each is one line
-/// and the location is bounded.
-///
-/// # Errors
-///
-/// [`MirrorError::Invalid`] with the path of the first error.
-pub fn check_texts(snapshot: &MirrorSnapshot) -> Result<(), MirrorError> {
-    for (index, entry) in snapshot.losses.entries.iter().enumerate() {
-        let path = format!("losses.entries[{index}]");
-        let parts = [
-            ("location.sheet", entry.location.sheet.as_deref()),
-            ("location.column", entry.location.column.as_deref()),
-        ];
-        for (field, text) in parts {
-            if text.is_some_and(|text| {
-                text.chars().count() > MAX_LOCATION_LEN || text.chars().any(char::is_control)
-            }) {
-                return Err(MirrorError::invalid(
-                    format!("{path}.{field}"),
-                    "a location is one line of at most 256 characters",
-                ));
-            }
+/// Counts the array elements of a JSON text without parsing it, and refuses more than
+/// [`MAX_ELEMENTS`] or a nesting deeper than [`MAX_DEPTH`]. Text that is not JSON passes:
+/// the parser refuses it with its path.
+fn count_elements(json: &[u8]) -> Result<(), MirrorError> {
+    // Per open container: whether it is an array, and whether an element has started in it.
+    let mut stack: Vec<(bool, bool)> = Vec::new();
+    let mut elements = 0usize;
+    let mut at = 0;
+    while at < json.len() {
+        let byte = json[at];
+        if !byte.is_ascii_whitespace()
+            && !matches!(byte, b']' | b'}' | b',' | b':')
+            && let Some((true, started)) = stack.last_mut()
+        {
+            *started = true;
         }
-        if entry.detail.chars().any(char::is_control) {
+        match byte {
+            b'[' | b'{' => {
+                if stack.len() == MAX_DEPTH {
+                    return Err(MirrorError::invalid("", "the body is nested too deeply"));
+                }
+                stack.push((byte == b'[', false));
+            }
+            b']' | b'}' => {
+                if let Some((true, true)) = stack.pop() {
+                    elements += 1;
+                }
+            }
+            b',' if matches!(stack.last(), Some((true, _))) => elements += 1,
+            b'"' => {
+                at += 1;
+                while at < json.len() && json[at] != b'"' {
+                    at += if json[at] == b'\\' { 2 } else { 1 };
+                }
+            }
+            _ => {}
+        }
+        if elements > MAX_ELEMENTS {
             return Err(MirrorError::invalid(
-                format!("{path}.detail"),
-                "the detail holds a control character",
+                "",
+                format!("more than {MAX_ELEMENTS} list items in the body"),
             ));
         }
+        at += 1;
     }
     Ok(())
 }
@@ -236,8 +259,6 @@ mod tests {
 
     #[test]
     fn the_bounds_hold_before_and_after_inflating() {
-        let large = vec![b' '; MAX_BODY_BYTES + 1];
-        assert_eq!(refused(&large, false).code(), "migrate.mirror.too_large");
         let bomb = gzip(&vec![b' '; MAX_INFLATED_BYTES + 1]);
         assert!(bomb.len() < MAX_BODY_BYTES, "a small body on the wire");
         let error = refused(&bomb, true);
@@ -247,8 +268,30 @@ mod tests {
     }
 
     #[test]
-    fn a_loss_location_is_one_bounded_line() {
-        let long = "x".repeat(MAX_LOCATION_LEN + 1);
+    fn list_items_and_nesting_are_counted_before_the_parse() {
+        let many = format!("[{}0]", "0,".repeat(MAX_ELEMENTS));
+        let error = refused(many.as_bytes(), false);
+        assert_eq!(
+            error.params()["reason"],
+            format!("more than {MAX_ELEMENTS} list items in the body")
+        );
+        let deep = format!("{}{}", "[".repeat(MAX_DEPTH + 1), "]".repeat(MAX_DEPTH + 1));
+        assert_eq!(
+            refused(deep.as_bytes(), false).params()["reason"],
+            "the body is nested too deeply"
+        );
+        // Commas inside strings and objects are no list items.
+        count_elements(br#"[{"a": "x,y,z", "b": 1}, [1, 2], []]"#).expect("five items");
+        // Exactly the bound passes.
+        let mut text = String::from("[");
+        text.push_str(&"1,".repeat(MAX_ELEMENTS - 1));
+        text.push_str("1]");
+        count_elements(text.as_bytes()).expect("exactly the bound");
+    }
+
+    #[test]
+    fn every_free_text_is_one_bounded_line() {
+        let long = "x".repeat(tenko_core::ir::mirror::MAX_LOCATION_LEN + 1);
         for (from, to, path) in [
             (
                 "\"column\": \"Name=Printers\"",
@@ -259,6 +302,21 @@ mod tests {
                 "is not carried; policies",
                 "is not carried;\\npolicies".to_owned(),
                 "losses.entries[0].detail",
+            ),
+            (
+                "\"192.0.2.254\"",
+                "\"\\u001b]52;c;Y2FsYw==\\u0007\"".to_owned(),
+                "dhcp.scopes[0].reservations[0].options[0].values[0]",
+            ),
+            (
+                "\"vendor_class\": \"Microsoft Windows 2000 Options\"",
+                "\"vendor_class\": \"Microsoft\\u001b[2K\"".to_owned(),
+                "dhcp.scopes[0].options[4].vendor_class",
+            ),
+            (
+                "\"name\": \"Office\"",
+                "\"name\": \"Off\\rice\"".to_owned(),
+                "dhcp.scopes[0].name",
             ),
         ] {
             let body = FIXTURE.replacen(from, &to, 1);
