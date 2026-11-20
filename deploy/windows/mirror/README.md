@@ -56,6 +56,10 @@ the `DhcpServer` module and nothing else, and download nothing.
      -MirrorId 01JC3V9Q7E -Fingerprint 'AB:CD:...' -Account 'CORP\gmsa-mirror$' -PromptToken
    ```
 
+   The mirror's Settings tab in Tenko shows this command filled in. Treat it as a template:
+   check the URL, the mirror id and the fingerprint against what you know before you run it,
+   since the page that shows it is served by the node you are pinning.
+
    For a user account add `-Credential (Get-Credential CORP\svc-tenko-mirror)`. The
    install copies the exporter to `%ProgramFiles%\Tenko\mirror\` (administrators write,
    the task's account reads), writes `%ProgramData%\Tenko\mirror\config.json` with the URL,

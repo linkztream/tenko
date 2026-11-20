@@ -1008,24 +1008,36 @@ function Read-ResponseBody {
     try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
 }
 
+function ConvertTo-LogText {
+    # The server's text as one line of the log: every control character, line breaks among
+    # them, becomes a space, and at most 200 characters are kept.
+    param([string]$Text)
+    $line = [regex]::Replace($Text, '\p{Cc}', ' ').Trim()
+    if ($line.Length -gt 200) { $line = $line.Substring(0, 200) }
+    return $line
+}
+
 function ConvertFrom-ProblemBody {
-    # RFC 9457 problem details with Tenko's `code`; the body may also be empty or not JSON.
+    # RFC 9457 problem details with Tenko's `code` and its string `params`; the body may also
+    # be empty or not JSON. A 409 `migrate.mirror.sequence` names the last accepted sequence
+    # in `params.last`. The code and the detail go to the log as one line each.
     param([string]$Body)
-    $result = [ordered]@{ code = ''; detail = ''; sequence = $null }
+    $result = [ordered]@{ code = ''; detail = ''; last = $null }
     if (Test-Blank $Body) { return $result }
     try {
         $json = $Body | ConvertFrom-Json
     } catch {
-        $result.detail = $Body.Trim()
-        if ($result.detail.Length -gt 200) { $result.detail = $result.detail.Substring(0, 200) }
+        $result.detail = ConvertTo-LogText $Body
         return $result
     }
     $code = Get-Prop $json 'code'
-    if (-not (Test-Blank $code)) { $result.code = [string]$code }
+    if (-not (Test-Blank $code)) { $result.code = ConvertTo-LogText ([string]$code) }
     $detail = Get-Prop $json 'detail'
-    if (-not (Test-Blank $detail)) { $result.detail = [string]$detail }
-    $sequence = Get-Prop $json 'sequence'
-    if ($null -ne $sequence) { $result.sequence = [uint64]$sequence }
+    if (-not (Test-Blank $detail)) { $result.detail = ConvertTo-LogText ([string]$detail) }
+    $params = Get-Prop $json 'params'
+    $last = $(if ($null -ne $params) { Get-Prop $params 'last' } else { $null })
+    [uint64]$parsed = 0
+    if ($null -ne $last -and [uint64]::TryParse([string]$last, [ref]$parsed)) { $result.last = $parsed }
     return $result
 }
 
@@ -1091,7 +1103,7 @@ function Invoke-MirrorPush {
     }
     $request.ContentLength = $payload.Length
 
-    $result = [ordered]@{ status = 0; sequence = $null; changed = $null; code = ''; detail = '' }
+    $result = [ordered]@{ status = 0; sequence = $null; changed = $null; code = ''; detail = ''; last = $null }
     $response = $null
     try {
         $stream = $request.GetRequestStream()
@@ -1121,7 +1133,7 @@ function Invoke-MirrorPush {
         $problem = ConvertFrom-ProblemBody (Read-ResponseBody $response)
         $result.code = $problem.code
         $result.detail = $problem.detail
-        $result.sequence = $problem.sequence
+        $result.last = $problem.last
     } finally {
         if ($null -ne $response) { $response.Close() }
     }
@@ -1333,7 +1345,7 @@ function Invoke-MirrorRun {
         409 {
             # A replay: the controller is ahead of our state. Next run continues above it.
             $ahead = $sequence
-            if ($null -ne $answer.sequence -and $answer.sequence -gt $ahead) { $ahead = $answer.sequence }
+            if ($null -ne $answer.last -and $answer.last -gt $ahead) { $ahead = $answer.last }
             Write-MirrorState -Dir $StateDir -LastSequence $ahead
             Write-MirrorLog $logDir "$line code=$($answer.code) detail=$($answer.detail) duration_ms=$duration"
             $script:ExitCode = 5

@@ -134,11 +134,17 @@ Describe 'The answers' {
         $result.code | Should -Be 'auth.forbidden'
     }
 
-    It '409: the sequence is a replay, and the answer may carry the accepted one' {
-        $result = Send-Test -Status 409 -Answer '{"status":409,"code":"migrate.mirror.sequence","detail":"sequence 7 is not above 1794130200","sequence":1794130200}'
+    It '409: the sequence is a replay, and the answer names the last accepted one in params.last' {
+        $result = Send-Test -Status 409 -Answer '{"status":409,"code":"migrate.mirror.sequence","detail":"the sequence 7 is not above the last accepted 1794130200","params":{"sequence":"7","last":"1794130200"}}'
         $result.status | Should -Be 409
         $result.code | Should -Be 'migrate.mirror.sequence'
-        $result.sequence | Should -Be 1794130200
+        $result.last | Should -Be 1794130200
+    }
+
+    It 'reads the detail as one line: a line break from the server cannot forge a log line' {
+        $result = Send-Test -Status 422 -Answer '{"status":422,"code":"migrate.mirror.invalid","detail":"bad\nseq=1 answer=200 changed=true\r\u001b[2K"}'
+        $result.detail | Should -Be 'bad seq=1 answer=200 changed=true  [2K'
+        $result.detail | Should -Not -Match '[\r\n]'
     }
 
     It '413: the body is above the bound' {
@@ -214,7 +220,7 @@ Describe 'A whole run' {
 
     It 'moves past the server on a replay and reports the refusal' {
         $state.status = 409
-        $state.body = '{"status":409,"code":"migrate.mirror.sequence","detail":"replay","sequence":4000000000}'
+        $state.body = '{"status":409,"code":"migrate.mirror.sequence","detail":"replay","params":{"sequence":"3","last":"4000000000"}}'
         Invoke-Run | Should -Be 5
         (Get-Content -LiteralPath (Join-Path $stateDir 'state.json') -Raw | ConvertFrom-Json).last_sequence | Should -Be 4000000000
         Get-LastLogLine | Should -Match 'answer=409 code=migrate.mirror.sequence detail=replay'
