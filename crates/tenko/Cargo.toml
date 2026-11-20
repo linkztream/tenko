@@ -58,6 +58,8 @@ tenko-dhcp = { path = "../tenko-dhcp" }
 tenko-dns = { workspace = true }
 tenko-ipam = { workspace = true }
 tenko-jobs = { workspace = true }
+# WP14.1: the mirror service the server adds to the API.
+tenko-migrate = { workspace = true }
 tenko-scan = { workspace = true }
 tenko-store = { workspace = true, features = ["raft"] }
 tenko-vault = { workspace = true }

@@ -85,6 +85,8 @@ const ERRORS: &[&str] = &[
     tenko_connect::host::service::PORT_STUCK,
     // IAM-20: a token family the server revoked waits for an administrator.
     tenko_auth::service::TOKEN_REVOKED,
+    // WP14.1: two DHCP servers would answer one network.
+    tenko_core::migrate::findings::MIRROR_SCOPE_ACTIVE,
     // WP13.3: the self-test findings of the Kerberos account under which secure updates
     // fail (identity plan section 3.10); clock skew above 60 s and a failed rotation stay
     // warnings, since updates still work.

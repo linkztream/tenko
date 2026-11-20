@@ -3746,13 +3746,13 @@ export interface paths {
         };
         /**
          * List mirrored sources
-         * @description Scope: `migrate.read`. Mirrors by name, each with its freshness, the counts of its latest snapshot and its open losses (the card of the connectors page).
+         * @description Scope: `migrate.read`. Mirrors by name, each with its freshness, the counts of its latest snapshot and its open losses (the card of the connectors page); one page holds every mirror.
          */
         get: operations["list_mirrors"];
         put?: never;
         /**
          * Create a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. Creates the mirror, the service account `mirror-<name>` with no grants, and one scoped token whose only scope is `mirror:<id>`, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). Audited as `migrate.mirror.create`.
+         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<name>` with no grants, and one scoped token whose only scope is `mirror:<id>`, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). Audited as `migrate.mirror.create`.
          */
         post: operations["create_mirror"];
         delete?: never;
@@ -3784,7 +3784,7 @@ export interface paths {
         head?: never;
         /**
          * Change a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. The name, whether pushes are accepted, the expected interval. Audited as `migrate.mirror.update`.
+         * @description Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval. Audited as `migrate.mirror.update`.
          */
         patch: operations["update_mirror"];
         trace?: never;
@@ -3798,7 +3798,7 @@ export interface paths {
         };
         /**
          * The loss report of a mirrored source
-         * @description Scope: `migrate.read`. The entries of the latest snapshot's loss report, each with its key and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.
+         * @description Scope: `migrate.read`. The entries of the latest snapshot's loss report, each with its key, its scope (the scope holding the address its location names; none: every scope) and the acknowledgment that holds for it; an acknowledgment lapses when the entry changes.
          */
         get: operations["list_mirror_losses"];
         put?: never;
@@ -3838,7 +3838,7 @@ export interface paths {
         };
         /**
          * The diff of a mirrored scope against Tenko's scope
-         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network, each row saying what the prepare would do (plan section 2.5).
+         * @description Scope: `migrate.read`. The pool ranges, the exclusions, the lease time, the options at each level, the reservations (by MAC address or client identifier and address), the DDNS settings and the IPAM prefix of the network, each row saying what the prepare would do (plan section 2.5); only differences are rows.
          */
         get: operations["get_mirror_scope_diff"];
         put?: never;
@@ -3918,12 +3918,12 @@ export interface paths {
         };
         /**
          * Get the latest snapshot of a mirrored source
-         * @description Scope: `migrate.read`. The envelope as stored, with its sequence, hash and the time it was accepted.
+         * @description Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, hash and the time it was accepted.
          */
         get: operations["get_mirror_snapshot"];
         /**
          * Push a snapshot of a mirrored source
-         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only right it has: `Action::Execute` on the mirror. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 1,000 scopes, 10,000 reservations and 100,000 leases, with a `sequence` above the last accepted one and at most one push per 10 s per mirror. A push whose envelope hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored.
+         * @description The one operation the mirror's own token (`mirror:<id>`) reaches, and the only right it has: `Action::Execute` on the mirror; a session is refused. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 1,000 scopes, 10,000 reservations and 100,000 leases, with a `sequence` above the last accepted one and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A push whose content (the envelope without its sequence and time) hashes like the stored one writes nothing and answers `changed: false`; a changed one writes the snapshot row and the audit record `migrate.mirror.push`. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored.
          */
         put: operations["push_mirror_snapshot"];
         post?: never;
@@ -3944,7 +3944,7 @@ export interface paths {
         put?: never;
         /**
          * Replace the token of a mirrored source
-         * @description An administrator's interactive session (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token is shown once. Audited as `migrate.mirror.token`.
+         * @description An administrator's interactive session that signed in within five minutes (`Action::Administer` on the mirror). Mints a new scoped token with the scope `mirror:<id>` for the mirror's service account and revokes the old one at once; the new token is shown once. Audited as `migrate.mirror.token`.
          */
         post: operations["replace_mirror_token"];
         delete?: never;
@@ -14714,7 +14714,10 @@ export interface components {
             interval_secs?: number | null;
             /** @description The kind of source (`windows-dhcp`). */
             kind: components["schemas"]["SourceKindLabel"];
-            /** @description The name, unique among mirrors; the service account is `mirror-<name>`. */
+            /**
+             * @description The name, unique among mirrors; the service account is `mirror-<name>`, so the name
+             *     holds no space.
+             */
             name: string;
             /**
              * Format: int32
@@ -14729,13 +14732,14 @@ export interface components {
         MirrorCreated: {
             /**
              * @description The SHA-256 fingerprint of this installation's certificate authority root, for the
-             *     exporter's pin (plan section 2.1, rule 5).
+             *     exporter's pin (plan section 2.1, rule 5); absent when the API does not serve a
+             *     certificate of the internal authority.
              */
-            ca_fingerprint: string;
+            ca_fingerprint?: string | null;
             /** @description The mirror. */
             mirror: components["schemas"]["MirrorItem"];
             /** @description The token, for the exporter's `Install-TenkoDhcpMirror.ps1`; never shown again. */
-            token: string;
+            token: components["schemas"]["SecretString"];
             token_expires_at?: components["schemas"]["Timestamp"] | null;
         };
         /** Format: uuid */
@@ -14747,12 +14751,19 @@ export interface components {
              * @description Seconds since the last accepted push; none before the first push.
              */
             age_secs?: number | null;
+            /**
+             * @description The SHA-256 fingerprint of this installation's certificate authority root, which the
+             *     exporter pins; set by the API while it serves a certificate of the internal authority.
+             */
+            ca_fingerprint?: string | null;
             counts?: components["schemas"]["SnapshotCounts"] | null;
             /**
              * Format: int32
              * @description How many loss entries of the latest snapshot are not acknowledged.
              */
             losses_open: number;
+            /** @description The scopes of the latest snapshot, by network. */
+            scopes?: components["schemas"]["MirroredScope"][];
             source?: components["schemas"]["MirrorOrigin"] | null;
             /** @description Whether the mirror is stale: no push for three intervals. */
             stale: boolean;
@@ -14765,7 +14776,10 @@ export interface components {
             entry: components["schemas"]["LossEntry"];
             /** @description The entry's key, for the acknowledgment. */
             key: string;
-            /** @description The scope the entry belongs to, when its location names one. */
+            /**
+             * @description The scope the entry belongs to, when its location names an address of one; an entry
+             *     without one belongs to every scope.
+             */
             scope?: string | null;
         };
         /** @description The loss report of the latest snapshot. */
@@ -14803,7 +14817,7 @@ export interface components {
              * @description The expected interval between pushes, in seconds.
              */
             interval_secs?: number | null;
-            /** @description A new name. */
+            /** @description A new name; the service account keeps the name it was created with. */
             name?: string | null;
         };
         /**
@@ -14842,6 +14856,18 @@ export interface components {
              * @description The token's lifetime in days; the TGL-05 maximum when absent (WT-Q11).
              */
             expires_in_days?: number | null;
+        };
+        /** @description A scope of a mirror's latest snapshot, as the Scopes tab lists it. */
+        MirroredScope: {
+            /** @description Whether the source serves it. */
+            active: boolean;
+            /**
+             * @description The network.
+             * @example 192.0.2.0/24
+             */
+            cidr: string;
+            /** @description The source's name of the scope. */
+            name?: string | null;
         };
         /** @description A refused handshake. */
         MismatchRecord: components["schemas"]["VersionMismatch"] & {
@@ -17786,12 +17812,19 @@ export interface components {
                  * @description Seconds since the last accepted push; none before the first push.
                  */
                 age_secs?: number | null;
+                /**
+                 * @description The SHA-256 fingerprint of this installation's certificate authority root, which the
+                 *     exporter pins; set by the API while it serves a certificate of the internal authority.
+                 */
+                ca_fingerprint?: string | null;
                 counts?: components["schemas"]["SnapshotCounts"] | null;
                 /**
                  * Format: int32
                  * @description How many loss entries of the latest snapshot are not acknowledged.
                  */
                 losses_open: number;
+                /** @description The scopes of the latest snapshot, by network. */
+                scopes?: components["schemas"]["MirroredScope"][];
                 source?: components["schemas"]["MirrorOrigin"] | null;
                 /** @description Whether the mirror is stale: no push for three intervals. */
                 stale: boolean;
@@ -23044,7 +23077,10 @@ export interface components {
         SnapshotItem: {
             /** @description The envelope as pushed. */
             envelope: components["schemas"]["MirrorSnapshot"];
-            /** @description The SHA-256 of the envelope in canonical CBOR. */
+            /**
+             * @description The SHA-256 of the content in canonical CBOR: the envelope without its sequence and
+             *     its time.
+             */
             hash: components["schemas"]["HexBytes"];
             /** @description The mirror. */
             mirror: components["schemas"]["MirrorId"];
@@ -44194,15 +44230,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     create_mirror: {
@@ -44245,7 +44272,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -44254,17 +44281,8 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A mirror of this name exists (`migrate.mirror.exists`) */
+            /** @description A mirror or a service account of this name exists (`migrate.mirror.exists`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44331,15 +44349,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     delete_mirror: {
@@ -44390,15 +44399,6 @@ export interface operations {
             };
             /** @description No such mirror (`migrate.mirror.not_found`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44478,15 +44478,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     list_mirror_losses: {
@@ -44546,15 +44537,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     ack_mirror_losses: {
@@ -44582,7 +44564,7 @@ export interface operations {
                     "application/json": components["schemas"]["LossAckResult"];
                 };
             };
-            /** @description The request is malformed, or a key names no entry of the latest snapshot (`sys.invalid_request`) */
+            /** @description The request is malformed, names no key, or a key names no entry of the latest snapshot (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -44611,15 +44593,6 @@ export interface operations {
             };
             /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44681,15 +44654,6 @@ export interface operations {
             };
             /** @description No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44993,15 +44957,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     push_mirror_snapshot: {
@@ -45038,7 +44993,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No valid session or token */
+            /** @description No valid token */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -45047,7 +45002,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The token is not this mirror's, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`) */
+            /** @description The token is not this mirror's, a session was used, or the mirror is disabled (`auth.forbidden`, `migrate.mirror.disabled`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45101,15 +45056,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
         };
     };
     replace_mirror_token: {
@@ -45155,7 +45101,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal is not an administrator, or a token was used */
+            /** @description The principal is not an administrator, a token was used, or the sign-in is older than five minutes */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45166,15 +45112,6 @@ export interface operations {
             };
             /** @description No such mirror (`migrate.mirror.not_found`) */
             404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -123,7 +123,8 @@ fn every_operation_declares_its_security_requirement() {
         with(Requirement::Token),
         BTreeSet::from([
             "GET /access/token".to_owned(),
-            "POST /access/token/renew".to_owned()
+            "POST /access/token/renew".to_owned(),
+            "PUT /migrate/mirrors/{id}/snapshot".to_owned()
         ]),
         "the token-only operations"
     );
@@ -148,13 +149,67 @@ async fn installation() -> (Harness, String) {
         .expose()
         .to_owned();
     let store: Arc<dyn Store> = env.store.clone();
-    let ipam = IpamService::with_direct_jobs(store).expect("ipam");
+    let ipam = IpamService::with_direct_jobs(Arc::clone(&store)).expect("ipam");
+    let mirrors = Arc::new(tenko_migrate::mirror::MirrorService::new(
+        store,
+        Arc::clone(&env.service),
+    ));
     let harness = Harness::wired(env, move |state| {
         crate::api_with(state, ModuleSet::ALL)
             .0
             .layer(Extension(ipam))
+            .layer(Extension(mirrors))
     });
     (harness, admin)
+}
+
+/// ADR 0033 decision 3 (E73): a mirror's token is refused on every operation of the document
+/// but the push of its own mirror. An operation with a body may refuse the body first, so
+/// there it never succeeds; without a body it is refused as unauthenticated or forbidden.
+#[tokio::test]
+async fn a_mirror_token_is_refused_on_every_operation_but_its_push() {
+    let (harness, admin) = installation().await;
+    let created = harness
+        .call(
+            "POST",
+            "/migrate/mirrors",
+            Cookie(&admin),
+            Some(&json!({ "name": "dc1", "kind": "windows-dhcp" })),
+        )
+        .await;
+    created.assert_status(201);
+    let token = created.body["token"]
+        .as_str()
+        .expect("the token")
+        .to_owned();
+    let mut wrong = Vec::new();
+    let mut checked = 0_usize;
+    for (key, requirement, operation) in operations() {
+        if requirement == Requirement::Public
+            || key == "GET /events"
+            || key == "PUT /migrate/mirrors/{id}/snapshot"
+        {
+            continue;
+        }
+        let reply = call(&harness, &key, &operation, Bearer(&token)).await;
+        let refused = refused_as_unauthenticated(&reply)
+            || (reply.status.as_u16() == 403 && reply.body["code"] == "auth.forbidden");
+        // A stub, or a service this installation does not wire, answers before it reads
+        // the caller: it tells nothing.
+        let passes = if matches!(reply.status.as_u16(), 501 | 503) && !refused {
+            true
+        } else if operation.get("requestBody").is_some() {
+            !reply.status.is_success()
+        } else {
+            refused
+        };
+        if !passes {
+            wrong.push(format!("{key}: {} {}", reply.status, reply.text));
+        }
+        checked += 1;
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert!(checked > 400, "only {checked} operations");
 }
 
 /// `key` with every path parameter filled in: a number where the document says integer,

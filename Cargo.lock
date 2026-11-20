@@ -3196,6 +3196,7 @@ dependencies = [
  "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
+ "tenko-migrate",
  "tenko-scan",
  "tenko-store",
  "tenko-vault",
@@ -3250,6 +3251,7 @@ dependencies = [
  "tenko-dns",
  "tenko-ipam",
  "tenko-jobs",
+ "tenko-migrate",
  "tenko-scan",
  "tenko-store",
  "tenko-vault",
@@ -3602,6 +3604,21 @@ dependencies = [
 [[package]]
 name = "tenko-migrate"
 version = "0.0.12-rc.7"
+dependencies = [
+ "flate2",
+ "ipnet",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tenko-auth",
+ "tenko-core",
+ "tenko-dhcp",
+ "tenko-ipam",
+ "tenko-store",
+ "tokio",
+ "tracing",
+ "utoipa",
+]
 
 [[package]]
 name = "tenko-net"

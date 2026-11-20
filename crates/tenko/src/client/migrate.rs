@@ -1,7 +1,8 @@
 //! `tenko migrate ...`: mirrored sources and the takeover of their scopes (Windows takeover
-//! plan section 3.2, WP14.0). The commands are wired to the routes of `/api/v1/migrate`,
-//! which answer `501 sys.not_implemented` until WP14.1 and WP14.2 build them; the commands
-//! print the problem and exit with the server's status like every other client command.
+//! plan section 3.2, WP14.0). The commands are wired to the routes of `/api/v1/migrate`; the
+//! mirrors, the losses and the diff are built (WP14.1), the prepare, the takeover and the
+//! revert answer `501 sys.not_implemented` until WP14.2 builds them. A refusal prints the
+//! problem and exits with the server's status like every other client command.
 //!
 //! - `tenko migrate mirror list|create|show|token|delete|losses|ack`
 //! - `tenko migrate diff <mirror> <cidr>`

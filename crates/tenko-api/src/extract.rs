@@ -96,6 +96,21 @@ where
                     return Err(tenko_auth::AuthError::PasswordChangeRequired.into());
                 }
                 let principal = authenticated.principal.clone();
+                // ADR 0033: a mirror's token reaches the push of its mirror and nothing else,
+                // also where a route reads no right of its own.
+                if let Some(mirror) = parts
+                    .extensions
+                    .get::<std::sync::Arc<tenko_auth::AuthService>>()
+                    .and_then(|service| service.token_mirror(&principal))
+                    && !is_mirror_push(&parts.method, parts.uri.path(), mirror)
+                {
+                    return Err(tenko_core::Denied {
+                        action: tenko_core::Action::Read,
+                        object: tenko_core::migrate::mirror_object(mirror),
+                        reason: tenko_core::DenyReason::MissingPermission,
+                    }
+                    .into());
+                }
                 parts.extensions.insert(authenticated);
                 principal
             }
@@ -108,6 +123,18 @@ where
             idempotency,
         }))
     }
+}
+
+/// Whether the request is the push of `mirror`, the one request its token may make. `path`
+/// may carry the API base or not.
+fn is_mirror_push(method: &axum::http::Method, path: &str, mirror: tenko_core::MirrorId) -> bool {
+    let path = path.strip_prefix(crate::API_BASE).unwrap_or(path);
+    method == axum::http::Method::PUT
+        && path
+            .strip_prefix("/migrate/mirrors/")
+            .and_then(|rest| rest.strip_suffix("/snapshot"))
+            .and_then(|id| id.parse::<tenko_core::MirrorId>().ok())
+            == Some(mirror)
 }
 
 /// The routes an account that must change its password may still use: the password change

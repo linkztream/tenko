@@ -763,13 +763,18 @@ async fn system_status(
     findings: Option<Extension<Arc<crate::findings::FindingsService>>>,
     // IAM-20: the token warnings.
     auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
+    // WP14.1: the findings of the mirrored sources.
+    mirrors: Option<Extension<Arc<tenko_migrate::mirror::MirrorService>>>,
     Ctx(ctx): Ctx,
 ) -> Result<Json<SystemStatus>, ApiError> {
     state.authorize(&ctx.principal, Action::Read, &system_object())?;
-    let status = assemble(
+    let mut status = assemble(
         auth, &state, ctx.now, running, leader, backup, format, dns, zones, dhcp, ipam, connectors,
     )
     .await;
+    status
+        .warnings
+        .extend(super::migrate::warnings(mirrors.map(|Extension(m)| m), ctx.now).await);
     if let Some(Extension(findings)) = findings {
         findings.set_health(&status.warnings, ctx.now);
     }
@@ -792,6 +797,8 @@ pub(crate) struct StatusSources {
     connectors: Option<Arc<tenko_connect::host::ConnectorHost>>,
     // IAM-20: the token warnings.
     auth: Option<Arc<tenko_auth::AuthService>>,
+    // WP14.1: the findings of the mirrored sources.
+    mirrors: Option<Arc<tenko_migrate::mirror::MirrorService>>,
 }
 
 impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
@@ -818,6 +825,9 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
                 .get::<Arc<tenko_connect::host::ConnectorHost>>()
                 .cloned(),
             auth: extensions.get::<Arc<tenko_auth::AuthService>>().cloned(),
+            mirrors: extensions
+                .get::<Arc<tenko_migrate::mirror::MirrorService>>()
+                .cloned(),
         }))
     }
 }
@@ -825,7 +835,8 @@ impl<S: Send + Sync> axum::extract::FromRequestParts<S> for StatusSources {
 impl StatusSources {
     /// The warnings of the status document without the lease conflicts.
     pub(crate) async fn warnings(self, state: &AppState, now: Timestamp) -> Vec<StatusWarning> {
-        assemble(
+        let mirrors = super::migrate::warnings(self.mirrors, now).await;
+        let mut warnings = assemble(
             self.auth.map(Extension),
             state,
             now,
@@ -840,7 +851,9 @@ impl StatusSources {
             self.connectors.map(Extension),
         )
         .await
-        .warnings
+        .warnings;
+        warnings.extend(mirrors);
+        warnings
     }
 }
 

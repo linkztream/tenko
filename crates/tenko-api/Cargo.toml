@@ -32,6 +32,7 @@ server = [
   "dep:tenko-dns",
   "dep:tenko-ipam",
   "dep:tenko-jobs",
+  "dep:tenko-migrate",
   "dep:tenko-scan",
   "dep:tenko-store",
   "dep:tenko-vault",
@@ -82,6 +83,8 @@ tenko-dns = { workspace = true, optional = true }
 tenko-vault = { workspace = true, optional = true }
 tenko-ipam = { workspace = true, optional = true }
 tenko-jobs = { workspace = true, optional = true }
+# WP14.1: the mirror service of the migrate routes.
+tenko-migrate = { workspace = true, optional = true }
 tenko-scan = { workspace = true, optional = true }
 tenko-store = { workspace = true, optional = true }
 tokio = { workspace = true, optional = true }
@@ -100,6 +103,8 @@ flate2 = "1.1.10"
 sha2 = { workspace = true }
 
 [dev-dependencies]
+# The gzip push bodies of the mirror route tests.
+flate2 = "1.1.10"
 tenko-vault = { workspace = true, features = ["testing"] }
 hyper = { version = "1.12.0", features = ["client", "http1", "http2"] }
 rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs", "crypto", "pem"] }

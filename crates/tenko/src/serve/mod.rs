@@ -1957,6 +1957,16 @@ async fn start(
             if let Some(config) = &dhcp_config {
                 server.extensions.insert(Arc::clone(config));
             }
+            // WP14.1: the mirrored sources, part of the DHCP module like their routes.
+            let mirrors = dhcp_config.is_some().then(|| {
+                Arc::new(tenko_migrate::mirror::MirrorService::new(
+                    Arc::clone(&store_dyn),
+                    Arc::clone(&auth),
+                ))
+            });
+            if let Some(mirrors) = &mirrors {
+                server.extensions.insert(Arc::clone(mirrors));
+            }
             let module_switch: Arc<dyn tenko_api::routes::system::modules::ModuleService> =
                 Arc::new(crate::modules::ModuleSwitch::new(
                     Arc::clone(&store_dyn),
@@ -2080,6 +2090,7 @@ async fn start(
             gauges.leader = Some(leader_view.source());
             gauges.kek = Some(Arc::clone(&kek_admin));
             gauges.backups = Some(backup_status);
+            gauges.mirrors = mirrors;
             // The metrics topic shows the other controllers and answers their reads.
             gauges.peers = Some(cluster_peers.peers().clone());
             gauges.node_registry = Some(Arc::clone(cluster.registry()));
@@ -2746,7 +2757,7 @@ mod tests {
         assert!(probation.switch_back("upgrade.not_ready"));
         let restart = crate::upgrade::restart::Restart::new();
         let mut running = Running::new();
-        let started = start(&resolved, &mut running, &restart, Some(&probation)).await;
+        let started = Box::pin(start(&resolved, &mut running, &restart, Some(&probation))).await;
         running.stop().await;
         let Err(error) = started else {
             panic!("a start after the switch back goes on");

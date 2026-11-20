@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 use proptest::prelude::*;
 use tenko_auth::{settings::Profile, testing::TestEnv};
 use tenko_core::{
-    Coded, Credentials, MirrorId, RequestCtx, Timestamp,
+    Coded, Credentials, MirrorId, RequestCtx,
     ir::{MirrorSnapshot, SourceKindLabel},
     migrate::tables,
 };
@@ -367,15 +367,15 @@ async fn a_new_token_stops_the_old_and_deletion_takes_everything() {
             .len(),
         0
     );
-    assert!(
-        lab.env
-            .ctx_for(&Credentials::Bearer(token.token.expose().to_owned()))
-            .await
-            .is_err()
-    );
+    let gone = lab
+        .env
+        .ctx_for(&Credentials::Bearer(token.token.expose().to_owned()))
+        .await
+        .expect_err("the token went with the mirror");
+    assert_eq!(gone.code(), "auth.unauthenticated");
     assert_eq!(
         lab.service
-            .get(lab.id, Timestamp::now())
+            .get(lab.id, lab.at(0).now)
             .await
             .expect_err("gone")
             .code(),

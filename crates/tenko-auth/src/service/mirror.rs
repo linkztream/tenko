@@ -8,7 +8,7 @@
 //! Minting needs an interactive session that signed in within the last five minutes, as every
 //! scoped token of a service account does: the token outlives the session.
 
-use tenko_core::{ApiTokenId, MirrorId, ObjectRef, RequestCtx, Timestamp, UserId};
+use tenko_core::{ApiTokenId, MirrorId, ObjectRef, Principal, RequestCtx, Timestamp, UserId};
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
 
 use super::{
@@ -17,6 +17,7 @@ use super::{
     types::{CreatedToken, TokenRequest},
 };
 use crate::{
+    authz::TokenAuthz,
     error::AuthError,
     model::{
         SCOPED_TOKENS, TokenScope, USER_NAMES, USER_SCOPED_TOKENS, USERS, UserKind, UserRecord,
@@ -193,6 +194,19 @@ impl AuthService {
                 .with_context("name", user.name),
         );
         Ok(())
+    }
+
+    /// The mirror whose push a principal's token is for, if it is a mirror token: the API
+    /// refuses such a token on every request but that push, also where a route reads no
+    /// right (the calling token's own description, a list a scope filters to nothing).
+    pub fn token_mirror(&self, principal: &Principal) -> Option<MirrorId> {
+        let Principal::Token { id, .. } = principal else {
+            return None;
+        };
+        match self.index.image().token(*id)? {
+            TokenAuthz::Scoped { scopes, .. } => scopes.iter().find_map(|scope| scope.mirror()),
+            TokenAuthz::Personal { .. } => None,
+        }
     }
 
     /// When the scoped token `token` of `account` expires; `None` for a token that never

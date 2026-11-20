@@ -182,6 +182,8 @@ pub(crate) struct Sources {
     pub(crate) engine: Option<JobEngine>,
     /// The connector host.
     pub(crate) connectors: Option<Arc<ConnectorHost>>,
+    /// The mirrored sources (WP14.1).
+    pub(crate) mirrors: Option<Arc<tenko_migrate::mirror::MirrorService>>,
     /// The node sessions of this controller.
     pub(crate) sessions: Option<Arc<Sessions>>,
     /// The leader supervisor's view.
@@ -204,6 +206,7 @@ impl Sources {
             store: None,
             engine: None,
             connectors: None,
+            mirrors: None,
             sessions: None,
             leader: None,
             kek: None,
@@ -244,6 +247,7 @@ pub(crate) fn register(registry: &Registry) {
     ] {
         registry.register(family);
     }
+    tenko_migrate::mirror::service::register_metrics(registry);
 }
 
 /// The sources of the samples of the `metrics` topic: the gauges that read memory only, and
@@ -392,6 +396,12 @@ pub(crate) async fn refresh(sources: &Sources, now: Timestamp) {
     audit_export(state.store.as_ref(), now).await;
     if let Some(backups) = &sources.backups {
         backup_age(backups.as_ref()).await;
+    }
+    // WP14.1: the pushes and the age of the mirrored sources.
+    if let Some(mirrors) = &sources.mirrors
+        && let Err(error) = mirrors.refresh_metrics(now).await
+    {
+        tracing::warn!(%error, "the metrics of the mirrored sources could not be read");
     }
 }
 

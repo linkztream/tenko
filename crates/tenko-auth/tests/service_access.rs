@@ -2381,10 +2381,12 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         .expect("staged");
     lab.env.store.propose(batch).await.expect("committed");
     let old = Credentials::Bearer(credentials.token.token.expose().to_owned());
-    assert!(
-        lab.env.ctx_for(&old).await.is_err(),
-        "the old token stopped"
-    );
+    let stopped = lab
+        .env
+        .ctx_for(&old)
+        .await
+        .expect_err("the old token stopped");
+    assert_eq!(stopped.code(), "auth.unauthenticated");
     let pusher = lab.token_ctx(renewed.token.expose()).await.principal;
     assert_eq!(lab.code(&pusher, Action::Execute, own), "ok");
 
@@ -2401,8 +2403,6 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
         .expect("staged");
     lab.env.store.propose(batch).await.expect("committed");
     let renewed = Credentials::Bearer(renewed.token.expose().to_owned());
-    assert!(
-        lab.env.ctx_for(&renewed).await.is_err(),
-        "the account's token went with it"
-    );
+    let gone = lab.env.ctx_for(&renewed).await.expect_err("the token went");
+    assert_eq!(gone.code(), "auth.unauthenticated");
 }
