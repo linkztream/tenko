@@ -23,10 +23,11 @@
 //! are: the members Tenko writes into a catalog zone, and the names a flip froze
 //! ([`super::flip`]).
 //!
-//! The flip hands a zone over in one commit of its row: every batch of a transfer and of
-//! an expiry expects the row as it read it, so a flip committed meanwhile makes the
-//! transfer write nothing more, and the service drops the zone when it reads the rows
-//! again.
+//! The flip hands a zone over in one commit of its row: a refresh reads the row before it
+//! fetches, and every batch it writes (the transfer's, the record of a current copy)
+//! expects the row as it was then, as does an expiry; so a flip committed while a refresh
+//! runs, or a flip and its reverse, makes that refresh write nothing, and the service drops
+//! the zone when it reads the rows again.
 //!
 //! Catalog zones (RFC 9432): a secondary catalog zone's members become secondary zones of
 //! this installation with the catalog's primaries (described as members of the catalog,
@@ -1286,7 +1287,13 @@ impl Inner {
 
     /// Records that the copy at `serial` was found current now: the stamp alone, in the
     /// background class (no RRset changes, and nobody waits on it).
-    async fn confirm(&self, id: ZoneId, serial: u32, epoch: u64) -> Result<Timestamp, FetchError> {
+    async fn confirm(
+        &self,
+        id: ZoneId,
+        revision: Revision,
+        serial: u32,
+        epoch: u64,
+    ) -> Result<Timestamp, FetchError> {
         let failed = |error: &dyn std::fmt::Display| FetchError {
             code: codes::TRANSFER_FAILED,
             detail: format!("the store refused the record of the refresh: {error}"),
@@ -1294,6 +1301,7 @@ impl Inner {
         let cx = system();
         let mut batch = WriteBatch::for_request(&cx);
         batch.preconditions.push(tenko_store::fence(epoch));
+        batch.expect_typed(&ZONES, &id, Some(revision));
         stage_stamp(&mut batch, id, serial, cx.now).map_err(|error| failed(&error))?;
         self.zones
             .store()
@@ -1305,7 +1313,11 @@ impl Inner {
 
     async fn try_refresh(&self, id: ZoneId, epoch: u64) -> Option<Refreshed> {
         let view = self.zones.view(None).await.ok()?;
-        let zone = ZoneService::zone(view.as_ref(), id).ok()?.zone;
+        // The row as it is before the fetch: what the refresh writes expects it unchanged.
+        let row = ZoneService::zone(view.as_ref(), id)
+            .ok()
+            .filter(|row| row.zone.kind == ZoneKind::Secondary)?;
+        let (zone, revision) = (row.zone, row.revision);
         let forced = self
             .lock()
             .get_mut(&id)
@@ -1353,7 +1365,7 @@ impl Inner {
             };
             if let Fetched::Current { serial } = fetched {
                 let serial = held.as_ref().map_or(serial, |held| held.serial);
-                match self.confirm(id, serial, epoch).await {
+                match self.confirm(id, revision, serial, epoch).await {
                     Ok(at) => {
                         self.set_primary(id, address, Ok(()));
                         return Some(Refreshed::Serial { serial, at });
@@ -1371,7 +1383,7 @@ impl Inner {
                 continue;
             }
             match self
-                .apply(&zone, held.as_ref(), &fetched, address, epoch)
+                .apply(&zone, revision, held.as_ref(), &fetched, address, epoch)
                 .await
             {
                 Ok((serial, at)) => {
@@ -1447,6 +1459,7 @@ impl Inner {
     async fn apply(
         &self,
         zone: &Zone,
+        revision: Revision,
         held: Option<&Held>,
         fetched: &Fetched,
         address: SocketAddr,
@@ -1459,15 +1472,6 @@ impl Inner {
         let cx = system();
         let stamp = Stamp::new(cx.now, cx.principal.clone());
         let view = self.zones.view(None).await.map_err(store_error)?;
-        // Every batch expects the zone's row as this view holds it, so that a flip to
-        // primary committed while the transfer runs makes it write nothing more.
-        let row = ZoneService::zone(view.as_ref(), zone.id).map_err(store_error)?;
-        if row.zone.kind != ZoneKind::Secondary {
-            return Err(FetchError {
-                code: codes::TRANSFER_FAILED,
-                detail: "the zone is no longer a secondary zone".to_owned(),
-            });
-        }
         let before = scope_rrsets(view.as_ref(), zone.id).map_err(store_error)?;
         let after = target(zone, &before, fetched, &stamp)?;
         let serial = after
@@ -1510,7 +1514,7 @@ impl Inner {
         for chunk in &chunks {
             let mut batch = WriteBatch::for_request(&cx);
             batch.preconditions.push(tenko_store::fence(epoch));
-            batch.expect_typed(&ZONES, &zone.id, Some(row.revision));
+            batch.expect_typed(&ZONES, &zone.id, Some(revision));
             stage_changes(&mut batch, chunk).map_err(store_error)?;
             self.zones
                 .store()
@@ -1520,7 +1524,7 @@ impl Inner {
         }
         let mut batch = WriteBatch::for_request(&cx);
         batch.preconditions.push(tenko_store::fence(epoch));
-        batch.expect_typed(&ZONES, &zone.id, Some(row.revision));
+        batch.expect_typed(&ZONES, &zone.id, Some(revision));
         if chunks.is_empty() {
             stage_changes(&mut batch, &others).map_err(store_error)?;
         }
@@ -1666,7 +1670,7 @@ impl Inner {
                 && zone.description.as_deref() == Some(marker.as_str())
                 && !members.contains(&zone.name)
             {
-                match self.zones.delete(&cx, zone.id, None).await {
+                match self.zones.delete(&cx, zone.id, Some(row.revision)).await {
                     Ok(_) => {
                         tracing::info!(zone = %zone.name, catalog = %catalog.name, "catalog member zone deleted");
                     }

@@ -47,11 +47,16 @@ enum Answer {
     Current(u32),
     /// Nothing: the connection is closed at once.
     Closed,
+    /// The whole zone at this serial, once [`Primary::release`] lets it go; the request
+    /// is signaled through [`Primary::asked`].
+    Stalled(u32),
 }
 
 struct Primary {
     address: SocketAddr,
     answer: Arc<Mutex<Answer>>,
+    asked: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
 }
 
 impl Primary {
@@ -59,12 +64,20 @@ impl Primary {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let address = listener.local_addr().expect("address");
         let answer = Arc::new(Mutex::new(answer));
+        let (asked, release) = (Arc::default(), Arc::default());
         let shared = Arc::clone(&answer);
+        let (on_ask, on_release): (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) =
+            (Arc::clone(&asked), Arc::clone(&release));
         tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
                 let answer = *shared.lock().expect("answer");
                 let serial = match answer {
                     Answer::Zone(serial) | Answer::Current(serial) => serial,
+                    Answer::Stalled(serial) => {
+                        on_ask.notify_one();
+                        on_release.notified().await;
+                        serial
+                    }
                     Answer::Closed => continue,
                 };
                 let Ok(len) = stream.read_u16().await else {
@@ -79,7 +92,7 @@ impl Primary {
                 let apex = name("example.test").to_wire();
                 let soa = Rdata::from_data(&soa(serial));
                 writer.push(&apex, TYPE_SOA, 60, soa.as_bytes());
-                if let Answer::Zone(_) = answer {
+                if let Answer::Zone(_) | Answer::Stalled(_) = answer {
                     let www = name("www.example.test").to_wire();
                     writer.push(&www, 1, 300, a(1).as_bytes());
                     writer.push(&apex, TYPE_SOA, 60, soa.as_bytes());
@@ -93,7 +106,12 @@ impl Primary {
                 let _ = stream.write_all(&framed).await;
             }
         });
-        Self { address, answer }
+        Self {
+            address,
+            answer,
+            asked,
+            release,
+        }
     }
 
     fn answer(&self, answer: Answer) {
@@ -517,4 +535,54 @@ async fn a_zone_flipped_to_primary_is_neither_transferred_into_nor_expired() {
         .expect("read")
         .expect("an SOA");
     assert_eq!(super::super::soa_serial(&soa), Some(flipped.serial));
+}
+
+/// The flip's hand-off while a transfer runs: the primary holds its answer, the zone is
+/// flipped to primary and back meanwhile, and the transfer that read the zone before
+/// writes nothing when the answer comes.
+#[tokio::test]
+async fn a_transfer_that_runs_across_a_flip_and_its_reverse_writes_nothing() {
+    let primary = Primary::start(Answer::Zone(7)).await;
+    let lab = Lab::new(&primary).await;
+    let node = lab.node();
+    term(&node).await;
+    primary.answer(Answer::Stalled(9));
+    node.lock()
+        .get_mut(&lab.zone.id)
+        .expect("state")
+        .force(Timestamp::now());
+    let running = {
+        let node = Arc::clone(&node);
+        tokio::spawn(async move { look(&node).await })
+    };
+    primary.asked.notified().await;
+    let to_primary = ZoneFlip::Primary {
+        soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
+        ns: vec![name("ns1.example.test")],
+    };
+    let flipped = lab
+        .zones
+        .flip(&system(), lab.zone.id, &to_primary)
+        .await
+        .expect("flip");
+    let back = ZoneFlip::Secondary {
+        primaries: lab.zone.source.clone().expect("source").primaries,
+    };
+    lab.zones
+        .flip(&system(), lab.zone.id, &back)
+        .await
+        .expect("the flip back");
+    primary.release.notify_one();
+    running.await.expect("the refresh ends");
+    let view = lab.view().await;
+    let (soa, _) = view
+        .get_typed(&RRSETS, &soa_key(&lab.zone))
+        .expect("read")
+        .expect("an SOA");
+    assert_eq!(super::super::soa_serial(&soa), Some(flipped.serial));
+    assert_ne!(
+        soa.origin,
+        Origin::Transfer,
+        "the stalled transfer wrote nothing"
+    );
 }
