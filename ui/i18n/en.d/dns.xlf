@@ -2822,6 +2822,41 @@
       <unit id="dns.loss.wins">
         <segment><source>WINS records are not kept.</source></segment>
       </unit>
+      <unit id="dns.zone.flip.action">
+        <notes><note category="description">Label of the zone page's action that flips a secondary zone to primary in place.</note></notes>
+        <segment><source>Flip to primary</source></segment>
+      </unit>
+      <unit id="dns.zone.flip.title">
+        <segment><source>Flip {name} to primary</source></segment>
+      </unit>
+      <unit id="dns.zone.flip.body">
+        <segment><source>Tenko becomes the source of the zone in place. The records stay: the names a DHCP server wrote stay frozen until a takeover adopts them, the other records become AD records that the zone's dynamic updates may change, and the transfers from the primaries stop. The SOA names and the name servers become the values below.</source></segment>
+      </unit>
+      <unit id="dns.zone.flip.submit">
+        <segment><source>Flip to primary</source></segment>
+      </unit>
+      <unit id="dns.zone.flip.done">
+        <segment><source>{name} is a primary zone at serial {serial}</source></segment>
+      </unit>
+      <unit id="dns.zone.release.action">
+        <notes><note category="description">Label of the zone page's action that releases the frozen names of a primary zone.</note></notes>
+        <segment><source>Release frozen names</source></segment>
+      </unit>
+      <unit id="dns.zone.release.title">
+        <segment><source>Release the frozen names of {name}?</source></segment>
+      </unit>
+      <unit id="dns.zone.release.body">
+        <segment><source>{count, plural, one {One name is frozen with no lease or reservation behind it} other {{names} names are frozen with no lease or reservation behind them}}. Released, they become manual records.</source></segment>
+      </unit>
+      <unit id="dns.zone.release.delete">
+        <segment><source>Delete them instead</source></segment>
+      </unit>
+      <unit id="dns.zone.release.confirm">
+        <segment><source>Release</source></segment>
+      </unit>
+      <unit id="dns.zone.release.done">
+        <segment><source>The frozen names of {name} were released</source></segment>
+      </unit>
     </group>
   </file>
 </xliff>

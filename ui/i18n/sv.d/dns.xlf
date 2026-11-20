@@ -2822,6 +2822,41 @@
       <unit id="dns.loss.wins">
         <segment><source>WINS records are not kept.</source><target>WINS-poster behålls inte.</target></segment>
       </unit>
+      <unit id="dns.zone.flip.action">
+        <notes><note category="description">Label of the zone page's action that flips a secondary zone to primary in place.</note></notes>
+        <segment><source>Flip to primary</source><target>Gör till primär</target></segment>
+      </unit>
+      <unit id="dns.zone.flip.title">
+        <segment><source>Flip {name} to primary</source><target>Gör {name} till primär zon</target></segment>
+      </unit>
+      <unit id="dns.zone.flip.body">
+        <segment><source>Tenko becomes the source of the zone in place. The records stay: the names a DHCP server wrote stay frozen until a takeover adopts them, the other records become AD records that the zone's dynamic updates may change, and the transfers from the primaries stop. The SOA names and the name servers become the values below.</source><target>Tenko blir zonens källa på plats. Posterna finns kvar: namnen som en DHCP-server skrev förblir frysta tills ett övertagande tar över dem, de övriga posterna blir AD-poster som zonens dynamiska uppdateringar får ändra, och överföringarna från de primära servrarna upphör. SOA-namnen och namnservrarna får värdena nedan.</target></segment>
+      </unit>
+      <unit id="dns.zone.flip.submit">
+        <segment><source>Flip to primary</source><target>Gör till primär</target></segment>
+      </unit>
+      <unit id="dns.zone.flip.done">
+        <segment><source>{name} is a primary zone at serial {serial}</source><target>{name} är en primär zon med serienummer {serial}</target></segment>
+      </unit>
+      <unit id="dns.zone.release.action">
+        <notes><note category="description">Label of the zone page's action that releases the frozen names of a primary zone.</note></notes>
+        <segment><source>Release frozen names</source><target>Frigör frysta namn</target></segment>
+      </unit>
+      <unit id="dns.zone.release.title">
+        <segment><source>Release the frozen names of {name}?</source><target>Frigöra de frysta namnen i {name}?</target></segment>
+      </unit>
+      <unit id="dns.zone.release.body">
+        <segment><source>{count, plural, one {One name is frozen with no lease or reservation behind it} other {{names} names are frozen with no lease or reservation behind them}}. Released, they become manual records.</source><target>{count, plural, one {Ett namn är fryst utan lån eller reservation bakom sig} other {{names} namn är frysta utan lån eller reservation bakom sig}}. När de frigörs blir de manuella poster.</target></segment>
+      </unit>
+      <unit id="dns.zone.release.delete">
+        <segment><source>Delete them instead</source><target>Radera dem i stället</target></segment>
+      </unit>
+      <unit id="dns.zone.release.confirm">
+        <segment><source>Release</source><target>Frigör</target></segment>
+      </unit>
+      <unit id="dns.zone.release.done">
+        <segment><source>The frozen names of {name} were released</source><target>De frysta namnen i {name} frigjordes</target></segment>
+      </unit>
     </group>
   </file>
 </xliff>

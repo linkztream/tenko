@@ -1,5 +1,6 @@
 // One zone (/dns/zones/:id/:tab?): its name, kind and serving state and the serial it serves,
-// the actions (import a zone file, export one, delete the zone) and four tabs: the records,
+// the actions (import a zone file, export one, delete the zone; flip a secondary zone to primary,
+// release the frozen names of a primary zone) and four tabs: the records,
 // the settings (SOA, apex NS, serial policy), the history and DNSSEC (WP6.3), and for a primary
 // zone the owners of its names (secure dynamic updates). The zone follows the `dns`
 // topic; a 501 of the API (WP4.2 not landed) or the module switched off shows the notice.
@@ -20,6 +21,7 @@ import { dnsPaths, type ZoneTab } from "./paths";
 import { OwnersTab } from "./OwnersTab";
 import { RecordsTab } from "./RecordsTab";
 import { DeleteZoneDialog } from "./ZoneDialogs";
+import { FlipZoneDialog, mayFlip, mayRelease, ReleaseZoneDialog } from "./ZoneFlip";
 import { DnssecTab } from "./dnssec/DnssecTab";
 import { HistoryTab, SettingsTab } from "./ZoneSettings";
 import { errorMessage } from "../api/problem";
@@ -34,6 +36,7 @@ export default function ZonePage() {
   const tab = (): ZoneTab => (TABS.includes(params.tab as ZoneTab) ? (params.tab as ZoneTab) : "records");
   const [deleting, setDeleting] = createSignal(false);
   const [exporting, setExporting] = createSignal(false);
+  const [acting, setActing] = createSignal<"flip" | "release" | null>(null);
 
   const query = createLiveQuery({
     topics: ["dns"],
@@ -108,6 +111,16 @@ export default function ZonePage() {
                     <Icon name="download" />
                     {t("dns.do.export")}
                   </button>
+                  <Show when={mayWriteDns() && mayFlip(z())}>
+                    <button type="button" class="btn" data-testid="dns-zone-flip" onClick={() => setActing("flip")}>
+                      {t("dns.zone.flip.action")}
+                    </button>
+                  </Show>
+                  <Show when={mayWriteDns() && mayRelease(z())}>
+                    <button type="button" class="btn" data-testid="dns-zone-release" onClick={() => setActing("release")}>
+                      {t("dns.zone.release.action")}
+                    </button>
+                  </Show>
                   <Show when={mayWriteDns()}>
                     <button type="button" class="btn danger" data-testid="dns-zone-delete" onClick={() => setDeleting(true)}>
                       <Icon name="trash" />
@@ -161,6 +174,12 @@ export default function ZonePage() {
                 />
               </Match>
             </Switch>
+            <Show when={acting() === "flip"}>
+              <FlipZoneDialog zone={z()} onClose={() => setActing(null)} onDone={() => { setActing(null); query.refetch(); }} />
+            </Show>
+            <Show when={acting() === "release"}>
+              <ReleaseZoneDialog zone={z()} onClose={() => setActing(null)} onDone={() => { setActing(null); query.refetch(); }} />
+            </Show>
             <Show when={deleting()}>
               <DeleteZoneDialog
                 zone={z()}

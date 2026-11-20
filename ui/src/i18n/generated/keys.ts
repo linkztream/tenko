@@ -4303,8 +4303,19 @@ export type MessageKey =
   | "dns.zone.field.rname"
   | "dns.zone.field.serial"
   | "dns.zone.field.ttl"
+  | "dns.zone.flip.action"
+  | "dns.zone.flip.body"
+  | "dns.zone.flip.done"
+  | "dns.zone.flip.submit"
+  | "dns.zone.flip.title"
   | "dns.zone.not_served"
   | "dns.zone.not_served_hint"
+  | "dns.zone.release.action"
+  | "dns.zone.release.body"
+  | "dns.zone.release.confirm"
+  | "dns.zone.release.delete"
+  | "dns.zone.release.done"
+  | "dns.zone.release.title"
   | "dns.zone.reverse"
   | "dns.zone.serial"
   | "dns.zone.stub"
@@ -9378,6 +9389,11 @@ export interface MessageArgs {
   "dns.zone.delete.body": { count: number; name: string | number; rrsets: string | number };
   "dns.zone.delete.done": { name: string | number };
   "dns.zone.delete.title": { name: string | number };
+  "dns.zone.flip.done": { name: string | number; serial: string | number };
+  "dns.zone.flip.title": { name: string | number };
+  "dns.zone.release.body": { count: number; names: string | number };
+  "dns.zone.release.done": { name: string | number };
+  "dns.zone.release.title": { name: string | number };
   "dns.zone.serial": { serial: string | number };
   "errors.auth.password.too_long": { max: string | number };
   "errors.auth.password.too_short": { min: string | number };
@@ -14576,8 +14592,19 @@ export const messageKeys: readonly MessageKey[] = [
   "dns.zone.field.rname",
   "dns.zone.field.serial",
   "dns.zone.field.ttl",
+  "dns.zone.flip.action",
+  "dns.zone.flip.body",
+  "dns.zone.flip.done",
+  "dns.zone.flip.submit",
+  "dns.zone.flip.title",
   "dns.zone.not_served",
   "dns.zone.not_served_hint",
+  "dns.zone.release.action",
+  "dns.zone.release.body",
+  "dns.zone.release.confirm",
+  "dns.zone.release.delete",
+  "dns.zone.release.done",
+  "dns.zone.release.title",
   "dns.zone.reverse",
   "dns.zone.serial",
   "dns.zone.stub",
