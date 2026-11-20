@@ -50,9 +50,13 @@ function snapshotAt(at: number): MetricsSnapshot {
 /** Answers every connection of the tiles' stream with a fresh history and one snapshot at that moment. */
 async function fakeHistoryStream(page: Page, options: { startedAgo?: number } = {}): Promise<void> {
   await page.goto("about:blank");
+  // The burst at a fixed moment in the middle of the ten-minute bucket about two hours back: at a
+  // fixed age it would straddle two buckets in the last seconds before a ten-minute boundary, and
+  // two neighbors that high are no lone needle, so neither would stand above the scale.
+  const burst = Math.floor((Date.now() / 1000 - 7200) / 600) * 600 + 300;
   await page.route(STREAM, async (route) => {
     const at = Date.now() / 1000;
-    const history = testHistory({ at, startedAgo: options.startedAgo });
+    const history = testHistory({ at, startedAgo: options.startedAgo, burstAgo: at - burst });
     const body = [
       { topic: "metrics", kind: "metrics.history", history },
       { topic: "metrics", kind: "metrics.snapshot", metrics: snapshotAt(at) },
