@@ -492,6 +492,8 @@ const STDERR_TAIL: usize = 2048;
 /// What the new binary printed and how it ended.
 struct NewOutput {
     status: Option<i32>,
+    /// How it ended, as the platform words it: `exit status: 1`, `signal: 4 (SIGILL)`.
+    ended: String,
     stdout: String,
     /// The end of its standard error, trimmed.
     stderr: String,
@@ -561,6 +563,7 @@ async fn run_new(
     };
     let result = NewOutput {
         status: output.status.code(),
+        ended: output.status.to_string(),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
         stderr: tail(&output.stderr, STDERR_TAIL),
     };
@@ -586,17 +589,7 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
     .await?;
     let reported = super::parse_version_output(&version.stdout);
     if version.status != Some(0) || reported.as_ref() != Ok(&params.version) {
-        return Err(failed(
-            "update.version_mismatch",
-            400,
-            format!(
-                "the new binary reports version `{}` (exit status {:?}), the manifest says {}{}",
-                version.stdout.trim(),
-                version.status,
-                params.version,
-                version.stderr_note()
-            ),
-        ));
+        return Err(version_mismatch(&params.version, &version));
     }
     let raft = inner
         .raft
@@ -638,8 +631,8 @@ async fn check(inner: &Inner, params: &SwitchParams) -> Result<(), StepError> {
             "update.check_failed",
             400,
             format!(
-                "the new binary's check printed no report (exit status {:?}): {error}{}",
-                output.status,
+                "the new binary's check printed no report ({}): {error}{}",
+                output.ended,
                 output.stderr_note()
             ),
         )
@@ -691,6 +684,26 @@ fn config_refused(version: &ReleaseVersion, config: &Path, stderr: &str) -> Step
             } else {
                 stderr
             }
+        ),
+    )
+}
+
+/// The refusal when the new binary did not answer `upgrade version` with the manifest's
+/// version: how it ended comes first, since a binary killed by a signal prints nothing.
+fn version_mismatch(version: &ReleaseVersion, output: &NewOutput) -> StepError {
+    let reported = output.stdout.trim();
+    failed(
+        "update.version_mismatch",
+        400,
+        format!(
+            "the new binary ended with {} and reported {}, the manifest says {version}{}",
+            output.ended,
+            if reported.is_empty() {
+                "no version".to_owned()
+            } else {
+                format!("version `{reported}`")
+            },
+            output.stderr_note()
         ),
     )
 }
@@ -866,6 +879,41 @@ mod tests {
         assert_eq!(error.code, "update.check_timeout");
         assert!(
             error.detail.contains("`slow test` within 1 s"),
+            "{}",
+            error.detail
+        );
+    }
+
+    /// A binary that dies at start (an instruction the CPU lacks raises SIGILL) prints nothing:
+    /// the refusal names the signal, or the exit code on Windows, instead of an empty version.
+    #[tokio::test]
+    async fn a_version_mismatch_names_how_the_binary_ended() {
+        #[cfg(windows)]
+        let (shell, arguments, ended): (std::path::PathBuf, Vec<&std::ffi::OsStr>, &str) = (
+            Path::new(&std::env::var_os("SystemRoot").unwrap())
+                .join("System32")
+                .join("cmd.exe"),
+            vec!["/c".as_ref(), "exit".as_ref(), "3".as_ref()],
+            "exit code: 3",
+        );
+        #[cfg(not(windows))]
+        let (shell, arguments, ended): (std::path::PathBuf, Vec<&std::ffi::OsStr>, &str) = (
+            std::path::PathBuf::from("/bin/sh"),
+            vec!["-c".as_ref(), "kill -ILL $$".as_ref()],
+            "SIGILL",
+        );
+        let output = run_new("signal test", &shell, &arguments, Duration::from_secs(60))
+            .await
+            .unwrap();
+        let StepError::Coded(error) =
+            version_mismatch(&"0.0.12".parse().expect("version"), &output)
+        else {
+            panic!("a coded error");
+        };
+        assert_eq!(error.code, "update.version_mismatch");
+        assert!(error.detail.contains(ended), "{}", error.detail);
+        assert!(
+            error.detail.contains("reported no version"),
             "{}",
             error.detail
         );
