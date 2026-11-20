@@ -41,7 +41,7 @@ Creating a primary or RPZ zone writes, in every scope, the apex SOA (with the fi
 - a change of `soa` rewrites the SOA of every scope with the next serial and a journal entry;
 - a new scope gets an SOA and a copy of the default scope's NS set;
 - a removed scope loses its RRsets and its journal;
-- the name and the kind do not change.
+- the name does not change, and the kind changes only by a flip between `secondary` and `primary` in place (`POST /dns/zones/{id}/flip`, an interactive session; section 10.6), which keeps the records with their provenance and is reversible.
 
 Deleting a zone removes its row, its RRsets and its journal in one write when they fit in one batch. A larger zone loses its row first (so the engine stops serving it at once) and its RRsets are deleted in batches right after.
 
@@ -75,6 +75,8 @@ ETag: "42"
 | `get_dns_zone` | `GET /dns/zones/{id}` | `dns.read` |
 | `update_dns_zone` | `PATCH /dns/zones/{id}` | `dns.write` |
 | `delete_dns_zone` | `DELETE /dns/zones/{id}` | `dns.write` |
+| `flip_dns_zone` | `POST /dns/zones/{id}/flip` | `dns.write`, an interactive session |
+| `release_dns_zone` | `POST /dns/zones/{id}/release` | `dns.write` |
 
 ## 2. Records and the RRset rules
 
@@ -647,9 +649,57 @@ The time of each zone's last successful refresh is stored with the serial it con
 
 These are codes in the transfer status, not HTTP answers of a route.
 
+**The flip** (MIG-04; ADR 0034, [windows-takeover-plan.md](plans/windows-takeover-plan.md) section 2.6). A secondary zone becomes a primary zone in place, and back, without copying its records anywhere. It needs `dns.write` and an interactive session (a personal token is refused with 403 `auth.forbidden`), because it changes which server is the authority of the zone:
+
+```
+POST /api/v1/dns/zones/{id}/flip
+{"to": "primary", "soa": {"mname": "tenko1.corp.example.test", "rname": "hostmaster.corp.example.test"},
+ "ns": ["tenko1.corp.example.test"]}
+
+200 OK
+{"zone": "0190d1c2-...", "kind": "primary", "serial": 2026112000, "revision": 81,
+ "origins": [{"origin": "manual", "rrsets": 2}, {"origin": "ad", "rrsets": 17},
+             {"origin": "transfer", "rrsets": 120}]}
+```
+
+A flip to primary writes one change set: the row takes the kind `primary`, the given SOA values and no `source`; the apex NS set becomes the given names; the SOA continues from the copy's serial by the zone's serial policy, with one journal entry, so the zone's own secondaries follow by IXFR; the transfer service stops refreshing the zone with that commit (a transfer that read the zone before it writes nothing). Every other RRset stays, with the origin that says where it came from:
+
+| The copy's RRset | Origin after the flip |
+|---|---|
+| A, AAAA and DHCID at a name that holds a DHCID RRset, and a PTR whose target is such a name in a zone of the same tenant that Tenko holds | `transfer`: frozen (section 10.7) |
+| The apex SOA and NS | Replaced by the given values (`manual`) |
+| Every other RRset of the copy (the controllers' SRV, CNAME and A records, static hosts, the `_msdcs` zone entire) | `ad`: a record of an AD zone without a known owner; a dynamic update the zone's policy allows may change it (section 13.4) |
+
+The PTR rule reads the forward zone, so the reverse zones are flipped after the forward zones; a PTR whose target is in a zone Tenko does not hold becomes `ad`. An RRset of another origin, in a zone flipped back before its next transfer, keeps its origin. The flip is audited as `dns.zone.flip` with the kinds before and after, the serial and the RRsets by origin (`rrsets.transfer`, `rrsets.ad`, ...).
+
+A flip to secondary, `{"to": "secondary", "primaries": [{"address": "192.0.2.5"}]}`, turns a primary zone back into a secondary of the named primaries: each address passes the egress policy as in `source` (400 `dns.zone.invalid`, field `primaries`) and a `key` needs `dns.keys`. The records stay and are served until the next transfer, which replaces every one of them with the copy's, `transfer` again: the zone's SOA is not one a transfer wrote, so that transfer asks for AXFR and applies it whatever its serial. The owners of the zone's names (section 13.12) are removed, since a secondary takes no updates. Its answer counts the RRsets as they are until that transfer.
+
+Both directions refuse a catalog zone (409 `dns.zone.flip.catalog`), a zone of the other kind (409 `dns.zone.flip.not_secondary` for a flip to primary, `dns.zone.flip.not_primary` for a flip to secondary), a zone with scopes besides `default` (transfers fill that scope only; 400 `dns.zone.invalid`, field `scopes`), more than 20,000 RRsets (one change set; field `rrsets`), and a setting a secondary zone cannot keep (online signing, `update.kerberos`: switch it off first).
+
+```
+tenko dns zone flip corp.example.test --to primary --mname tenko1.corp.example.test \
+  --rname hostmaster@corp.example.test --ns tenko1.corp.example.test
+tenko dns zone flip corp.example.test --to secondary --primary 192.0.2.5
+```
+
+In the UI, a secondary zone's page has the action **Flip to primary**, with the SOA and NS form; the flip back to secondary is made through the API or the command line.
+
 ### 10.7 The read-only rule
 
-The records of a secondary zone come from the primary, so every other write is refused with 409 `dns.zone.secondary` (parameter `zone`): the batch (section 3), the zone file import (section 4) and the actuator of IPAM (section 7). The same code refuses a write to an RRset of origin `transfer` in a primary zone, which are the generated members of a catalog zone (section 10.8); `take_over` does not apply to them. The UI shows the records of a secondary zone with a notice and without edit controls.
+The records of a secondary zone come from the primary, so every other write is refused with 409 `dns.zone.secondary` (parameter `zone`): the batch (section 3), the zone file import (section 4) and the actuator of IPAM (section 7). The same code refuses a write to an RRset of origin `transfer` in a primary zone, which are the generated members of a catalog zone (section 10.8) and the frozen names a flip kept (section 10.6); `take_over` does not apply to them. A dynamic update of a frozen RRset is refused with REFUSED and audited as `dns.update.refuse` (section 13.4), and Tenko's DHCP writer adds nothing at such a name. The UI shows the records of a secondary zone with a notice and without edit controls.
+
+**Frozen names.** A name a DHCP server wrote (it holds a DHCID RRset) stays frozen after a flip until the takeover of its scope adopts it as a `dhcp` name ([windows-takeover-plan.md](plans/windows-takeover-plan.md) section 2.8). A name no mirrored lease or reservation explains (a stale name Windows would have scavenged; Tenko does not scavenge until DNS-29) stays frozen after the takeover and is released by hand:
+
+```
+POST /api/v1/dns/zones/{id}/release
+{"dry_run": true}
+
+200 OK
+{"zone": "0190d1c2-...", "deleted": false, "dry_run": true, "rrsets": 4,
+ "names": ["old-laptop-01.corp.example.test", "old-laptop-02.corp.example.test"]}
+```
+
+`release` needs `dns.write`. It lists every `transfer` RRset of a primary zone with `dry_run` and changes nothing; without it, it turns them into `manual` RRsets (the records do not change, so the serial does not move), or with `{"delete": true}` deletes them with a serial step and a journal entry. One change set of at most 20,000 RRsets, audited as `dns.zone.release` with the action (`manual` or `delete`) and the counts. A catalog zone keeps its own rule (409 `dns.zone.flip.catalog`), and a zone of another kind than `primary` is refused (409 `dns.zone.flip.not_primary`). `tenko dns zone release corp.example.test --dry-run` lists, `--delete` deletes. In the UI a primary zone that holds frozen names has the action **Release frozen names**, which lists them first.
 
 ### 10.8 Catalog zones
 
