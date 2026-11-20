@@ -36,8 +36,8 @@
 //! | `POST /dns/zones/{id}/dnssec/rollover` | `dns.keys` | Start a DNSSEC key rollover |
 //! | `GET /dns/zones/{id}/transfer` | `dns.read` | Get the transfer state of a zone |
 //! | `POST /dns/zones/{id}/transfer` | `dns.write` | Transfer a secondary zone now |
-//! | `POST /dns/zones/{id}/flip` | `dns.write`, a session | Flip a zone between secondary and primary in place (WP14.0 stub) |
-//! | `POST /dns/zones/{id}/release` | `dns.write` | Release the frozen names of a primary zone (WP14.0 stub) |
+//! | `POST /dns/zones/{id}/flip` | `dns.write`, a session | Flip a zone between secondary and primary in place |
+//! | `POST /dns/zones/{id}/release` | `dns.write` | Release the frozen names of a primary zone |
 //! | `GET /dns/views` | `dns.read` | List DNS views |
 //! | `POST /dns/views` | `dns.write` | Create a DNS view |
 //! | `GET /dns/views/{id}` | `dns.read` | Get a DNS view |
@@ -104,7 +104,7 @@ mod kerberos;
 mod owners;
 // WP6.1: the two transfer routes.
 mod transfer;
-// WP14.0: the flip and the release of a zone (stubs until WP14.2).
+// WP14.0: the flip and the release of a zone.
 mod flip;
 // WP6.4: the view routes.
 mod views;

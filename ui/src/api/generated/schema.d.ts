@@ -2624,7 +2624,7 @@ export interface paths {
         put?: never;
         /**
          * Flip a zone between secondary and primary in place
-         * @description Scope: `dns.write`, an interactive session. `{"to": "primary", "soa": {...}, "ns": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets at a name with a DHCID RRset, and the PTR records pointing at such names, stay `transfer`, frozen for the takeover; every other RRset becomes `ad`, WT-Q9). `{"to": "secondary", "primaries": [...]}` turns a primary zone back into a secondary of the named primaries; the next transfer replaces every record. One change set per zone; audited as `dns.zone.flip` with the counts by origin. A catalog zone is refused.
+         * @description Scope: `dns.write`, an interactive session. `{"to": "primary", "soa": {...}, "ns": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets at a name with a DHCID RRset, and the PTR records pointing at such names in a zone Tenko holds, stay `transfer`, frozen for the takeover; every other RRset of the copy becomes `ad`, WT-Q9). `{"to": "secondary", "primaries": [...]}` turns a primary zone back into a secondary of the named primaries: the next transfer replaces every record, whatever its serial, and the owners of its names are removed; a primary's address passes the egress policy of server-side fetches and a key needs `dns.keys`. One change set per zone of at most 20,000 RRsets, and only a zone with the scope `default` alone; audited as `dns.zone.flip` with the RRsets by origin. A catalog zone is refused.
          */
         post: operations["flip_dns_zone"];
         delete?: never;
@@ -2788,7 +2788,7 @@ export interface paths {
         put?: never;
         /**
          * Release the frozen names of a primary zone
-         * @description Scope: `dns.write`. Turns every remaining `transfer` RRset of a primary zone into `manual`, or deletes them with `delete`, after listing them with `dry_run`: the names a takeover did not adopt because no mirrored lease or reservation stands behind them. Audited as `dns.zone.release` with the counts. A catalog zone is refused.
+         * @description Scope: `dns.write`. Turns every remaining `transfer` RRset of a primary zone into `manual`, or deletes them with `delete` (with a serial step and a journal entry), after listing them with `dry_run`: the names a takeover did not adopt because no mirrored lease or reservation stands behind them. At most 20,000 RRsets in one change set. Audited as `dns.zone.release` with the counts. A catalog zone is refused.
          */
         post: operations["release_dns_zone"];
         delete?: never;
@@ -39165,7 +39165,7 @@ export interface operations {
                     "application/json": components["schemas"]["ZoneFlipReport"];
                 };
             };
-            /** @description The request is malformed, or the values are invalid (`sys.invalid_request`, `dns.zone.invalid`) */
+            /** @description The request is malformed, or the values are invalid (`sys.invalid_request`, `dns.zone.invalid`; `primaries` for an address the egress policy refuses, `scopes` for a zone with other scopes, `rrsets` for a zone too large for one change set, a setting a secondary zone cannot keep) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -39183,7 +39183,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write`, or a token was used (`auth.forbidden`) */
+            /** @description The principal lacks the scope `dns.write` (or `dns.keys` for a key it names), or a token was used (`auth.forbidden`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -39192,7 +39192,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such zone (`dns.zone.not_found`) */
+            /** @description No such zone or key (`dns.zone.not_found`, `dns.key.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -39203,15 +39203,6 @@ export interface operations {
             };
             /** @description The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -39885,7 +39876,7 @@ export interface operations {
                     "application/json": components["schemas"]["ZoneReleaseReport"];
                 };
             };
-            /** @description The request is malformed (`sys.invalid_request`) */
+            /** @description The request is malformed (`sys.invalid_request`), or the zone holds more RRsets than one change set takes (`dns.zone.invalid`) */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -39923,15 +39914,6 @@ export interface operations {
             };
             /** @description The zone is not a primary zone, or is a catalog zone (`dns.zone.flip.not_primary`, `dns.zone.flip.catalog`) */
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not built yet (`sys.not_implemented`) */
-            501: {
                 headers: {
                     [name: string]: unknown;
                 };
