@@ -489,7 +489,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends qemu-user
+          # A downloaded artifact has no executable bit, and QEMU refuses such a file with a
+          # message on standard output: the bit is set first, and the output is printed.
+          chmod +x "dist/tenko-${VERSION}-linux-x86_64"
           if ! out="$(qemu-x86_64 -cpu qemu64 "dist/tenko-${VERSION}-linux-x86_64" --version)"; then
+            echo "$out"
             echo "::error::The Linux binary does not run on a CPU without AVX (QEMU, -cpu qemu64)."
             exit 1
           fi
