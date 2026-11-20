@@ -195,8 +195,9 @@ audit_count() { py 'str(len(v["items"]))' <"$1"; }
 # only the unsigned refusal is expected. Its record has the key `none`; a refusal of an
 # update signed with GSS-TSIG names the principal and has no key, one signed with TSIG names
 # its key, so every record but those with the key `none` counts.
+# The context of a record is at draft.details.context.
 signed_refusals() {
-  py 'str(len([i for i in v["items"] if (i.get("context") or {}).get("key") != "none"]))' <"$1"
+  py 'str(len([i for i in v["items"] if i["draft"]["details"].get("context", {}).get("key") != "none"]))' <"$1"
 }
 
 # mentions <file> <text>...: how many audit records of the file contain every text.
