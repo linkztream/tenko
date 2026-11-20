@@ -27,8 +27,10 @@
 //! that changed nothing neither changes an owner nor is audited.
 //!
 //! Origins (2.5): an RRset of origin `ipam` is changed only when the zone's
-//! `may_replace_ipam` allows it, an RRset of origin `transfer` or `dnssec` never, and in a
-//! zone signed online the types the signer writes are refused; such an update is REFUSED
+//! `may_replace_ipam` allows it, an RRset of origin `transfer` or `dnssec` never, a name
+//! that holds a `transfer` RRset takes no added RRset of any type and gets no owner (a
+//! frozen name, `zone::flip`), and in a zone signed online the types the signer writes are
+//! refused; such an update is REFUSED
 //! with `dns.update.refused`, its extended error naming the first RRset. A model rule the
 //! result breaks (a record set too large, a CNAME beside other data written another way)
 //! fails the update: SERVFAIL with the rule in the extended error, nothing of it written.
@@ -341,6 +343,21 @@ fn is_dnssec_type(rtype: Rtype) -> bool {
     matches!(rtype, Rtype::RRSIG | Rtype::NSEC)
 }
 
+/// Whether a name is frozen: it holds an RRset a transfer wrote into a primary zone (a
+/// name a flip kept for the takeover, a catalog member). No update adds to it or makes
+/// anyone its owner.
+fn is_frozen<'a>(rrsets: impl IntoIterator<Item = &'a RrSet>) -> bool {
+    rrsets
+        .into_iter()
+        .any(|rrset| rrset.origin == Origin::Transfer && !is_dnssec_type(rrset.rtype))
+}
+
+fn frozen(name: &DnsName) -> Stop {
+    refused(format!(
+        "{name} holds records of a zone transfer and is read-only until a takeover adopts them or they are released"
+    ))
+}
+
 impl Planner<'_> {
     fn load(&mut self, scope: &ScopeName, name: &DnsName) -> ZoneResult<()> {
         let key = (scope.clone(), name.clone());
@@ -545,6 +562,12 @@ impl Planner<'_> {
             )));
         };
         let privileged = self.is_privileged(signer);
+        // A frozen name is static and gets no owner, not even a privileged one.
+        if is_frozen(rrsets.iter().copied()) {
+            return privileged
+                .then_some(Decision::Unowned)
+                .ok_or_else(|| frozen(name));
+        }
         if is_locator(&self.zone.name, name) {
             return if privileged {
                 Ok(Decision::Privileged)
@@ -776,6 +799,9 @@ impl Planner<'_> {
         }
         if rtype != Rtype::CNAME && !is_dnssec_type(rtype) && next.contains_key(&Rtype::CNAME) {
             return Ok(());
+        }
+        if is_frozen(next.values()) {
+            return Err(frozen(name));
         }
         let existing = next.get(&rtype);
         self.may_change(name, rtype, existing)?;

@@ -2097,3 +2097,71 @@ impl Lab {
         self.memory.propose(batch).await.expect("write");
     }
 }
+
+/// A name a flip kept frozen (it holds `transfer` RRsets in a primary zone) takes no new
+/// RRset of any type from anyone and gives nobody its ownership, a privileged principal
+/// included.
+#[tokio::test]
+async fn a_frozen_name_takes_no_record_and_no_owner() {
+    let lab = lab().await;
+    let frozen = "laptop-01.corp.example.test";
+    let transfer = |rtype: Rtype, records: Vec<RecordData>| Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(frozen),
+        rtype,
+        ttl: Some(1200),
+        records,
+        take_over: false,
+        origin: Origin::Transfer,
+    };
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.zone.id,
+            &[transfer(
+                Rtype::A,
+                vec![RecordData::A {
+                    address: std::net::Ipv4Addr::new(192, 0, 2, 110),
+                }],
+            )],
+            false,
+        )
+        .await
+        .expect("a frozen name");
+    let pc = lab.who(
+        "laptop-01$@CORP.EXAMPLE.TEST",
+        Some(sid(1010)),
+        vec![sid(515)],
+        "192.0.2.110",
+    );
+    let dc = lab.who(
+        "dc01$@CORP.EXAMPLE.TEST",
+        Some(sid(1000)),
+        vec![sid(516)],
+        "192.0.2.2",
+    );
+    let aaaa = [0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    for (who, msg) in [
+        (&pc, Msg::default().rr(frozen, 28, CLASS_IN, 300, &aaaa)),
+        (
+            &pc,
+            Msg::default().rr(frozen, 16, CLASS_IN, 300, b"\x04test"),
+        ),
+        (&dc, Msg::default().add_srv(frozen)),
+        (&dc, Msg::default().rr(frozen, 28, CLASS_IN, 300, &aaaa)),
+    ] {
+        assert_eq!(lab.gss(who, &msg).await, REFUSED);
+    }
+    for rtype in [Rtype::AAAA, Rtype::TXT, Rtype::SRV] {
+        assert!(lab.rrset(frozen, rtype).await.is_none(), "{rtype}");
+    }
+    assert!(
+        lab.owner(frozen).await.is_none(),
+        "nobody owns a frozen name"
+    );
+    assert_eq!(
+        lab.rrset(frozen, Rtype::A).await.map(|rrset| rrset.origin),
+        Some(Origin::Transfer)
+    );
+}
