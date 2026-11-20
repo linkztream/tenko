@@ -190,6 +190,15 @@ audit() {
 # audit_count <file>: how many records a page of audit records holds.
 audit_count() { py 'str(len(v["items"]))' <"$1"; }
 
+# signed_refusals <file>: how many refusal records are of a signed update. A Windows machine
+# first sends each update unsigned and is refused, then negotiates a key and sends it again:
+# only the unsigned refusal is expected. Its record has the key `none`; a refusal of an
+# update signed with GSS-TSIG names the principal and has no key, one signed with TSIG names
+# its key, so every record but those with the key `none` counts.
+signed_refusals() {
+  py 'str(len([i for i in v["items"] if (i.get("context") or {}).get("key") != "none"]))' <"$1"
+}
+
 # mentions <file> <text>...: how many audit records of the file contain every text.
 mentions() {
   python3 - "$@" <<'EOF'

@@ -362,7 +362,10 @@ curl -s http://127.0.0.1:9100/metrics | grep -E 'tenko_dns_(tkey|updates)_total'
 
 **Expect:** `records not in Tenko: 0`; `nltest /dsquerydns` reports success for every record;
 no NETLOGON event 5774 or 5781 after the restart; `dns.update.apply` records with the
-principal `DC1$@CORP.EXAMPLE.TEST`, its SID and the decision `privileged`; no refusal. The
+principal `DC1$@CORP.EXAMPLE.TEST`, its SID and the decision `privileged`; no refusal of a
+signed update. Windows first sends each update unsigned, and Tenko refuses that one: a
+`dns.update.refuse` record whose `key` is `none` is expected (the audit holds at most one
+refusal a minute per client, however many the capture shows). The
 zone's **Owners** tab lists `dc1.corp.example.test` owned by `DC1$` (`created`), and no
 locator name. **Keep:** the capture `captures/w5-dc1.pcapng`, the events, the nltest outputs
 and the audit lines in `results/w5/`.

@@ -18,6 +18,6 @@ audit dns.update.refuse "$since" "$STEP_DIR/audit-refuse.json"
 audit dns.update.apply "$since" "$STEP_DIR/audit-apply.json"
 printf 'since %s: dns.update.refuse %s, dns.update.apply %s\n' "$since" \
   "$(audit_count "$STEP_DIR/audit-refuse.json")" "$(audit_count "$STEP_DIR/audit-apply.json")" >"$STEP_DIR/w13.txt"
-(($(audit_count "$STEP_DIR/audit-refuse.json") == 0)) || fail "updates were refused after the restart (audit-refuse.json)"
+(($(signed_refusals "$STEP_DIR/audit-refuse.json") == 0)) || fail "signed updates were refused after the restart (audit-refuse.json)"
 
-step "nothing was refused after the node's restart"
+step "no signed update was refused after the node's restart"

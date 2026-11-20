@@ -9,7 +9,8 @@
 # last 30 minutes), owners-corp.example.test.json, owners-_msdcs.corp.example.test.json,
 # metrics.txt (tenko_dns_tkey_total and tenko_dns_updates_total).
 # Checks: dns.update.apply records with the controller's principal and the decision
-# privileged; no dns.update.refuse and no dns.gss.refuse; <dc>.corp.example.test owned by
+# privileged; no dns.update.refuse of a signed update (the unsigned first attempts of Windows
+# are refused and counted in refusals.txt) and no dns.gss.refuse; <dc>.corp.example.test owned by
 # <DC>$ (created); no locator name owned (nothing in _msdcs, no owned name that starts
 # with an underscore).
 # Departs from the runbook: the metrics come from GET /api/v1/metrics with the lab reader's
@@ -29,7 +30,9 @@ audit dns.update.refuse "$since" "$STEP_DIR/audit-refuse.json"
 audit dns.gss.refuse "$since" "$STEP_DIR/audit-gss-refuse.json"
 (($(mentions "$STEP_DIR/audit-apply.json" "$DC\$@CORP.EXAMPLE.TEST" privileged) > 0)) ||
   fail "no dns.update.apply by $DC\$@CORP.EXAMPLE.TEST with the decision privileged (audit-apply.json)"
-(($(audit_count "$STEP_DIR/audit-refuse.json") == 0)) || fail "updates were refused (audit-refuse.json)"
+printf 'refusals: %s, of them of a signed update: %s\n' "$(audit_count "$STEP_DIR/audit-refuse.json")" \
+  "$(signed_refusals "$STEP_DIR/audit-refuse.json")" >"$STEP_DIR/refusals.txt"
+(($(signed_refusals "$STEP_DIR/audit-refuse.json") == 0)) || fail "signed updates were refused (audit-refuse.json)"
 (($(audit_count "$STEP_DIR/audit-gss-refuse.json") == 0)) || fail "GSS negotiations were refused (audit-gss-refuse.json)"
 
 say "the owners"
@@ -45,4 +48,4 @@ say "the counters"
 api reader GET /metrics | grep -E 'tenko_dns_(tkey|updates)_total' >"$STEP_DIR/metrics.txt" ||
   fail "the metrics hold no tenko_dns_tkey_total or tenko_dns_updates_total"
 
-step "$dc registered with GSS-TSIG as $DC\$, privileged; it owns $dc.corp.example.test; nothing refused"
+step "$dc registered with GSS-TSIG as $DC\$, privileged; it owns $dc.corp.example.test; no signed update refused"
