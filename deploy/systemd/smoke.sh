@@ -216,14 +216,15 @@ server_version() {
     --ca-file "$CA_FILE" | jget version
 }
 
-# The next patch version of $1: 0.0.1 -> 0.0.2.
+# The version to update to from $1: the release of a pre-release (0.0.12-rc.6 -> 0.0.12, which a
+# node is offered without updates.prereleases), else the next patch version (0.0.1 -> 0.0.2).
 next_patch() {
   python3 -c '
 import re, sys
-m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", sys.argv[1])
+m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.-]+)?", sys.argv[1])
 if not m:
-    sys.exit("not a plain SemVer version: " + sys.argv[1])
-print("%s.%s.%d" % (m[1], m[2], int(m[3]) + 1))' "$1"
+    sys.exit("not a SemVer version: " + sys.argv[1])
+print("%s.%s.%d" % (m[1], m[2], int(m[3]) + (0 if m[4] else 1)))' "$1"
 }
 
 # The platform name of the release file, as the server computes it: <os>-<arch>.
