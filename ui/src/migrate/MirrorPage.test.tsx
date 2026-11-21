@@ -2,8 +2,10 @@
 // diff of a scope, the losses acknowledged, the settings with the commands and the deletion, in
 // English and Swedish, without accessibility violations.
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "../api/generated/schema";
+import { server } from "../api/mock/node";
 import { seedMirror } from "../api/mock/routes-migrate";
 import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
@@ -11,7 +13,7 @@ import { signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
 import { setLocale } from "../i18n";
 import { sourceList } from "./api";
-import { MirrorCards } from "./MirrorCards";
+import { MirrorCards, REFRESH_MS } from "./MirrorCards";
 import MirrorPage from "./MirrorPage";
 import { installCommands, mirrorState } from "./model";
 import { migratePaths } from "./paths";
@@ -126,9 +128,57 @@ describe("the mirror cards", () => {
     const token = await screen.findByTestId("mirror-token");
     // Bound to its sources, the token has the constrained form.
     expect(token.textContent).toMatch(/^tnkc_mock-mirror-/);
+    // Esc does not lose a token that is shown once; the box does.
+    fireEvent.keyDown(screen.getByTestId("dialog-mirror-token"), { key: "Escape" });
+    expect(screen.getByTestId("mirror-token")).toBeTruthy();
+    expect((screen.getByTestId("mirror-token-done") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("mirror-token-stored"));
     fireEvent.click(screen.getByTestId("mirror-token-done"));
     await waitFor(() => expect(screen.getAllByTestId("mirror-card")).toHaveLength(2));
     expect(screen.queryByTestId("mirror-token")).toBeNull();
+  });
+});
+
+describe("the poll of the mirror cards", () => {
+  /** Renders the cards and returns the function the 5-second timer runs. */
+  async function openCards() {
+    const ticks: Array<() => void> = [];
+    const real = globalThis.setInterval;
+    vi.spyOn(globalThis, "setInterval").mockImplementation(((fn: () => void, ms?: number) => {
+      if (ms === REFRESH_MS) ticks.push(fn);
+      return real(fn, ms);
+    }) as typeof setInterval);
+    renderRoute(MirrorCards, { url: "/connectors", path: "/connectors" });
+    await screen.findByTestId("mirror-card");
+    return ticks.at(-1)!;
+  }
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+  });
+
+  it("keeps the cards when one poll fails, instead of saying there are no mirrors", async () => {
+    seed();
+    const tick = await openCards();
+    server.use(http.get("/api/v1/migrate/mirrors", () => HttpResponse.json({ status: 503, code: "x", title: "Down", params: {} }, { status: 503 })));
+    tick();
+    await screen.findByTestId("error-notice");
+    expect(screen.getAllByTestId("mirror-card")).toHaveLength(1);
+    expect(screen.queryByText(/No mirrored source yet/)).toBeNull();
+  });
+
+  it("does not poll while the tab is hidden", async () => {
+    seed();
+    const tick = await openCards();
+    let reads = 0;
+    server.use(http.get("/api/v1/migrate/mirrors", () => (reads++, HttpResponse.json({ items: [], next: null }))));
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    tick();
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    tick();
+    // The visible tick alone read the list (now empty); the hidden one read nothing.
+    await screen.findByText(/No mirrored source yet/);
+    expect(reads).toBe(1);
   });
 });
 
@@ -166,6 +216,7 @@ describe("the mirror page", () => {
     fireEvent.click(screen.getByTestId("mirror-token-replace"));
     expect((await screen.findByTestId("mirror-token")).textContent).toMatch(/^tnk_/);
     expect(sourceList(" 192.0.2.10,198.51.100.0/24  2001:db8::1 ")).toEqual(["192.0.2.10", "198.51.100.0/24", "2001:db8::1"]);
+    fireEvent.click(screen.getByTestId("mirror-token-stored"));
     fireEvent.click(screen.getByTestId("mirror-token-done"));
     fireEvent.click(screen.getByTestId("mirror-delete"));
     fireEvent.click(await screen.findByTestId("confirm-ok"));

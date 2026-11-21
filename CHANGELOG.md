@@ -10,6 +10,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- The settings and access pages no longer lose or misreport what they show. The token of a new mirror and the enrollment code of an integration host, both shown only once, now close only after the "I have saved it" box is ticked, as an API token does, instead of vanishing on Esc or a click outside the dialog. The state of an integration host's certificate (active, expiring, lapsed) and the list of waiting enrollment codes update as time passes, without a reload. Withdrawing an enrollment code asks first and shows a refusal in the dialog instead of failing silently. The mirror cards keep the list they had when one refresh fails and stop refreshing while the browser tab is hidden. Saving a change that requires bound service-account tokens (a profile switch or the integrations toggle) reads the removal count again first and asks for a new confirmation when tokens made in the meantime would also be removed.
 - A removed controller that calls a member on a new connection in the first moment after its revocation gets the refusal `cluster.peer.revoked`, as at any later call. Before, the revocation also closed the connections the removed controller opened in its first 300 milliseconds, and such a call could end in a TLS error without a code. The connections it had before its revocation still close after those 300 milliseconds.
 
 ## [0.0.12-rc.7] - 2026-11-20

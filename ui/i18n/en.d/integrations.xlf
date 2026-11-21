@@ -83,6 +83,15 @@
       <unit id="integrations.codes.withdraw">
         <segment><source>Withdraw</source></segment>
       </unit>
+      <unit id="integrations.codes.withdraw_title">
+        <segment><source>Withdraw the enrollment code for {account}?</source></segment>
+      </unit>
+      <unit id="integrations.codes.withdraw_body">
+        <segment><source>A host that has not used the code yet can no longer enroll with it. This cannot be undone.</source></segment>
+      </unit>
+      <unit id="integrations.code.stored">
+        <segment><source>I have saved the code</source></segment>
+      </unit>
       <unit id="integrations.code.withdrawn">
         <segment><source>Enrollment code for {account} withdrawn</source></segment>
       </unit>
@@ -209,6 +218,9 @@
       </unit>
       <unit id="settings.security.unbound.account">
         <segment><source>{name} ({count})</source></segment>
+      </unit>
+      <unit id="settings.security.unbound.grew">
+        <segment><source>More tokens would now be removed than when you last read the count. Check the new count, then save again.</source></segment>
       </unit>
       <unit id="settings.security.unbound.permanent">
         <segment><source>Turning the requirement off later brings none of them back.</source></segment>

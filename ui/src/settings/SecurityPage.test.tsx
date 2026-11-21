@@ -380,6 +380,26 @@ describe("the security page", () => {
     expect(db.tokens.some((t) => t.info.name === "ipam-readonly")).toBe(false);
   });
 
+  it("does not remove more tokens than the count the person confirmed (TGL-47)", async () => {
+    await signInAs();
+    seedAccess();
+    await openPage();
+    fireEvent.click(screen.getByRole("button", { name: "Change profile" }));
+    const dialog = await screen.findByRole("dialog", { name: "Change security profile" });
+    fireEvent.click(within(dialog).getByRole("radio", { name: /Hardened/ }));
+    const save = await enabled(dialog, "Switch to Hardened and remove 1 token");
+    // A token made after the dry run: the settings revision does not change.
+    const first = db.tokens.find((t) => t.info.name === "ipam-readonly")!;
+    db.tokens.push({ ...first, info: { ...first.info, id: "0190d1c2-0000-7000-8000-00000000f001", name: "late" } });
+    fireEvent.click(save);
+    await within(dialog).findByTestId("unbound-grew");
+    expect(db.settings.profile).toBe("standard");
+    expect(db.tokens.some((t) => t.info.name === "late")).toBe(true);
+    fireEvent.click(await enabled(dialog, "Switch to Hardened and remove 2 tokens"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(db.settings.profile).toBe("hardened");
+  });
+
   it("names the removal when TGL-47 starts to require bound tokens, and refuses TLS 1.2 under Hardened", async () => {
     await signInAs();
     seedAccess();

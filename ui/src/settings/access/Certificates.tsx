@@ -2,7 +2,7 @@
 // the state of its certificate at a glance (active, expiring, lapsed, revoked), the enrollment
 // codes that still wait, a dialog that makes a code (shown once), and revocation, confirmed
 // with what it ends. Administrators only; the server decides every change.
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
 import { api } from "../../api/client";
 import type { components } from "../../api/generated/schema";
 import { createLiveQuery, latest } from "../../api/live";
@@ -39,7 +39,11 @@ export function IntegrationCertificatesSection() {
   });
   const [enrolling, setEnrolling] = createSignal(false);
   const [revoking, setRevoking] = createSignal<Lineage | null>(null);
-  const now = () => Date.now();
+  // A state changes with time and no event says so: read the clock again every minute.
+  const [now, setNow] = createSignal(Date.now());
+  const tick = setInterval(() => setNow(Date.now()), 60_000);
+  onCleanup(() => clearInterval(tick));
+  const [withdrawing, setWithdrawing] = createSignal<EnrollmentCode | null>(null);
   const rows = createMemo(() => {
     const read = latest(data);
     return read ? lineages(read.certs, now()) : undefined;
@@ -153,7 +157,7 @@ export function IntegrationCertificatesSection() {
                       {(source) => <span class="muted"> {t("integrations.codes.from", { source: source() })}</span>}
                     </Show>
                   </span>
-                  <button type="button" class="btn sm" data-testid="integration-code-withdraw" onClick={() => void withdraw(code)}>
+                  <button type="button" class="btn sm" data-testid="integration-code-withdraw" onClick={() => setWithdrawing(code)}>
                     {t("integrations.codes.withdraw")}
                   </button>
                 </div>
@@ -168,6 +172,18 @@ export function IntegrationCertificatesSection() {
           onCreated={() => data.refetch()}
           onClose={() => setEnrolling(false)}
         />
+      </Show>
+      <Show when={withdrawing()}>
+        {(code) => (
+          <RunDialog
+            title={t("integrations.codes.withdraw_title", { account: accountName(code().account) })}
+            body={<p>{t("integrations.codes.withdraw_body")}</p>}
+            confirmLabel={t("integrations.codes.withdraw")}
+            danger
+            run={() => withdraw(code())}
+            onClose={() => setWithdrawing(null)}
+          />
+        )}
       </Show>
       <Show when={revoking()}>
         {(lineage) => (

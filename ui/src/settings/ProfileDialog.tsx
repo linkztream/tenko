@@ -12,7 +12,7 @@ import { formatList, t } from "../i18n";
 import { ReloadedNote } from "./fields";
 import { pinCoupled, planProfileChange, PROFILE_DEFAULTS, weakerSettings } from "./profileMatrix";
 import { formatToggle, integrationsOf, startsRequiringBinding } from "./toggles";
-import { UnboundRemoval } from "./UnboundRemoval";
+import { removalGrew, UnboundRemoval } from "./UnboundRemoval";
 
 export function ProfileDialog(props: {
   view: SecuritySettingsView;
@@ -43,6 +43,8 @@ export function ProfileDialog(props: {
     startsRequiringBinding(integrationsOf(props.view.settings), PROFILE_DEFAULTS[target()].integrations) ? { profile: target() } : undefined;
   const [removing, setRemoving] = createSignal<number | undefined>();
   const removalPending = () => removalPatch() !== undefined && removing() === undefined;
+  const [again, setAgain] = createSignal(0);
+  const [grew, setGrew] = createSignal(false);
   const removes = () => removalPatch() !== undefined && (removing() ?? 0) > 0;
   const name = () => t(`profile.${target()}.name`);
 
@@ -60,9 +62,16 @@ export function ProfileDialog(props: {
     if (busy() || nothing() || pinRefused() || removalPending() || (needsAck() && !acknowledged())) return;
     setBusy(true);
     setError(null);
+    setGrew(false);
     const wasSame = same();
     const profile = target();
     try {
+      const rp = removalPatch();
+      if (rp && (await removalGrew(rp, props.view.revision, removing()))) {
+        setGrew(true);
+        setAgain((n) => n + 1);
+        return;
+      }
       await props.save({ profile });
       toast({
         kind: "ok",
@@ -165,7 +174,7 @@ export function ProfileDialog(props: {
             <Show when={pinRefused()}>
               <Notice kind="bad" testid="profile-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
-            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} />
+            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} again={again()} grew={grew()} />
             <Show when={lab() && !same()}>
               <Notice kind="bad" title={t("settings.security.profile.lab_title")}>
                 {t("settings.security.profile.lab_warning")}

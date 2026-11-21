@@ -5258,12 +5258,15 @@ export type MessageKey =
   | "integrations.code.step_list"
   | "integrations.code.step_run"
   | "integrations.code.step_save"
+  | "integrations.code.stored"
   | "integrations.code.title"
   | "integrations.code.withdrawn"
   | "integrations.codes.from"
   | "integrations.codes.heading"
   | "integrations.codes.waiting"
   | "integrations.codes.withdraw"
+  | "integrations.codes.withdraw_body"
+  | "integrations.codes.withdraw_title"
   | "integrations.col.host"
   | "integrations.col.key"
   | "integrations.col.state"
@@ -7434,6 +7437,7 @@ export type MessageKey =
   | "settings.security.transfer_site.use_default"
   | "settings.security.unbound.account"
   | "settings.security.unbound.body"
+  | "settings.security.unbound.grew"
   | "settings.security.unbound.none"
   | "settings.security.unbound.permanent"
   | "settings.security.unbound.save_remove"
@@ -9542,6 +9546,7 @@ export interface MessageArgs {
   "integrations.code.withdrawn": { account: string | number };
   "integrations.codes.from": { source: string | number };
   "integrations.codes.waiting": { account: string | number; expires: string | number };
+  "integrations.codes.withdraw_title": { account: string | number };
   "integrations.help.active": { renewed: string | number };
   "integrations.help.revoked": { reason: string | number };
   "integrations.of_account": { account: string | number };
@@ -15526,12 +15531,15 @@ export const messageKeys: readonly MessageKey[] = [
   "integrations.code.step_list",
   "integrations.code.step_run",
   "integrations.code.step_save",
+  "integrations.code.stored",
   "integrations.code.title",
   "integrations.code.withdrawn",
   "integrations.codes.from",
   "integrations.codes.heading",
   "integrations.codes.waiting",
   "integrations.codes.withdraw",
+  "integrations.codes.withdraw_body",
+  "integrations.codes.withdraw_title",
   "integrations.col.host",
   "integrations.col.key",
   "integrations.col.state",
@@ -17702,6 +17710,7 @@ export const messageKeys: readonly MessageKey[] = [
   "settings.security.transfer_site.use_default",
   "settings.security.unbound.account",
   "settings.security.unbound.body",
+  "settings.security.unbound.grew",
   "settings.security.unbound.none",
   "settings.security.unbound.permanent",
   "settings.security.unbound.save_remove",

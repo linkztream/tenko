@@ -34,6 +34,11 @@ export function EnrollmentCodeDialog(props: { accounts: UserInfo[]; onCreated: (
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
   const [created, setCreated] = createSignal<CreatedCode | null>(null);
+  // Esc and a click outside must not lose a code the server shows once: close after the box.
+  const [stored, setStored] = createSignal(false);
+  const guardedClose = () => {
+    if (!created() || stored()) props.onClose();
+  };
 
   const sourceError = () => (source().trim() !== "" && !NETWORK.test(source().trim()) ? t("integrations.code.source_rule") : undefined);
 
@@ -64,7 +69,7 @@ export function EnrollmentCodeDialog(props: { accounts: UserInfo[]; onCreated: (
   };
 
   return (
-    <Dialog label={t("integrations.code.title")} onClose={props.onClose} class="dialog nodes-dialog">
+    <Dialog label={t("integrations.code.title")} onClose={guardedClose} class="dialog nodes-dialog">
       <Show
         when={created()}
         fallback={
@@ -162,9 +167,19 @@ export function EnrollmentCodeDialog(props: { accounts: UserInfo[]; onCreated: (
                 <li>{t("integrations.code.step_run")}</li>
                 <li>{t("integrations.code.step_list")}</li>
               </ol>
+              <label class="ackrow">
+                <input
+                  type="checkbox"
+                  class="cb"
+                  checked={stored()}
+                  data-testid="integration-code-stored"
+                  onChange={(e) => setStored(e.currentTarget.checked)}
+                />
+                {t("integrations.code.stored")}
+              </label>
             </div>
             <div class="dialog-actions">
-              <button type="button" class="btn primary" data-testid="integration-code-done" onClick={() => props.onClose()}>
+              <button type="button" class="btn primary" data-testid="integration-code-done" disabled={!stored()} onClick={guardedClose}>
                 {t("integrations.code.done")}
               </button>
             </div>

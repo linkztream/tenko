@@ -118,17 +118,20 @@ function CreateMirror(props: { onClose: () => void; onCreated: (created: MirrorC
 
 export function MirrorCards() {
   const [error, setError] = createSignal<unknown>(null);
-  const [mirrors, { refetch }] = createResource(async () => {
+  const [mirrors, { refetch }] = createResource<MirrorItem[] | undefined>(async (_, { value }) => {
     try {
       const list = await listMirrors();
       setError(null);
       return list;
     } catch (err) {
       setError(err);
-      return undefined;
+      // The list read last stays: one failed poll is not "no mirrors".
+      return value;
     }
   });
-  const timer = setInterval(() => void refetch(), REFRESH_MS);
+  const timer = setInterval(() => {
+    if (!document.hidden && !mirrors.loading) void refetch();
+  }, REFRESH_MS);
   onCleanup(() => clearInterval(timer));
   const [creating, setCreating] = createSignal(false);
   const [created, setCreated] = createSignal<MirrorCreated | null>(null);

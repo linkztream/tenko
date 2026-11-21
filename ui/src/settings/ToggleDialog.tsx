@@ -16,7 +16,7 @@ import { t } from "../i18n";
 import { ReloadedNote } from "./fields";
 import { homeValue, pinCoupled, sameValue } from "./profileMatrix";
 import { patchFor } from "./toggleEdit";
-import { UnboundRemoval } from "./UnboundRemoval";
+import { removalGrew, UnboundRemoval } from "./UnboundRemoval";
 import {
   AuditExportEditor,
   BreachEditor,
@@ -96,6 +96,8 @@ export function ToggleDialog(props: {
   };
   const [removing, setRemoving] = createSignal<number | undefined>();
   const removalPending = () => removalPatch() !== undefined && removing() === undefined;
+  const [again, setAgain] = createSignal(0);
+  const [grew, setGrew] = createSignal(false);
 
   const submit = async (e: Event) => {
     e.preventDefault();
@@ -103,7 +105,14 @@ export function ToggleDialog(props: {
     if (!d || !changed() || pinRefused() || busy() || removalPending()) return;
     setBusy(true);
     setError(null);
+    setGrew(false);
     try {
+      const rp = removalPatch();
+      if (rp && (await removalGrew(rp, props.view.revision, removing()))) {
+        setGrew(true);
+        setAgain((n) => n + 1);
+        return;
+      }
       await props.save(patchFor(setting, d.value));
       toast({ kind: "ok", title: t("settings.security.saved", { name: name() }), body: formatToggle(setting, d.value) });
       props.onClose();
@@ -202,7 +211,7 @@ export function ToggleDialog(props: {
             <Show when={pinRefused()}>
               <Notice kind="bad" testid="toggle-pin-coupling">{t("errors.settings.pin_coupling")}</Notice>
             </Show>
-            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} />
+            <UnboundRemoval patch={removalPatch()} revision={props.view.revision} onCount={setRemoving} again={again()} grew={grew()} />
             <Show when={changed() && draftWeak()}>
               <Notice kind="bad" title={t("settings.security.marker.weak")}>
                 {bannerOn() ? t("settings.security.consequence.weak_stays") : t("settings.security.consequence.weak_new")}

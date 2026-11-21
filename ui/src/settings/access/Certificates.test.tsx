@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from "@solidjs/testing-library";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { http, HttpResponse } from "msw";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ACCESS_IDS, seedAccess } from "../../api/mock/access-store";
+import { server } from "../../api/mock/node";
 import { integrationsState, mockCertificate } from "../../api/mock/routes-integrations";
 import { axeViolations } from "../../app/testing/axe";
 import { renderRoute } from "../../app/testing/render";
@@ -107,14 +109,51 @@ describe("the integration certificates of the access page", () => {
     expect(once.textContent).toContain("save the code to the file enroll.code");
     expect(within(once).getByTestId("integration-code-fingerprint").textContent).toMatch(/^[0-9A-F]{2}(:[0-9A-F]{2})+$/);
     expect(await axeViolations(document.body, NO_SHELL)).toEqual([]);
+    // Esc does not lose a code that is shown once; the box does.
+    fireEvent.keyDown(once, { key: "Escape" });
+    expect(screen.getByTestId("dialog-integration-code-once")).toBeTruthy();
+    expect((within(once).getByTestId("integration-code-done") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(within(once).getByTestId("integration-code-stored"));
     fireEvent.click(within(once).getByTestId("integration-code-done"));
     await waitFor(() => expect(screen.queryByTestId("dialog-integration-code-once")).toBeNull());
 
     const waiting = await screen.findByTestId("integration-code");
     expect(waiting.textContent).toContain("For dns-sync");
     fireEvent.click(within(waiting).getByTestId("integration-code-withdraw"));
+    // Withdrawing asks first, and a refusal stays in the dialog.
+    const confirm = await screen.findByTestId("dialog-confirm");
+    expect(confirm.textContent).toContain("Withdraw the enrollment code for dns-sync?");
+    expect([...integrationsState().codes.values()].map((c) => c.state.state)).toEqual(["pending"]);
+    server.use(http.delete("/api/v1/integrations/enrollments/:id", () => HttpResponse.json({ status: 403, code: "x", title: "No", params: {} }, { status: 403 })));
+    fireEvent.click(within(confirm).getByTestId("confirm-ok"));
+    await within(confirm).findByTestId("error-notice");
+    expect(screen.getByTestId("integration-code")).toBeTruthy();
+    server.resetHandlers();
+    fireEvent.click(within(confirm).getByTestId("confirm-ok"));
     await waitFor(() => expect(screen.queryByTestId("integration-code")).toBeNull());
     expect([...integrationsState().codes.values()].map((c) => c.state.state)).toEqual(["withdrawn"]);
+  });
+
+  it("recomputes the state of a host and the waiting codes as time passes", async () => {
+    const ticks: Array<() => void> = [];
+    const real = globalThis.setInterval;
+    vi.spyOn(globalThis, "setInterval").mockImplementation(((fn: () => void, ms?: number) => {
+      if (ms === 60_000) ticks.push(fn);
+      return real(fn, ms);
+    }) as typeof setInterval);
+    const start = Date.now();
+    integrationsState().certs.set("soon", {
+      ...mockCertificate(ACCESS_IDS.serviceAccount, "soon-host", 5),
+      serial: "soon",
+      not_after: new Date(start + 3_600_000).toISOString(),
+    });
+    await openPage();
+    expect(lineageRow("soon-host").dataset.state).toBe("expiring");
+    vi.useFakeTimers({ toFake: ["Date"], now: start + 2 * DAY });
+    ticks.forEach((tick) => tick());
+    await waitFor(() => expect(lineageRow("soon-host").dataset.state).toBe("lapsed"));
+    vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("refuses a malformed network before sending anything", async () => {
