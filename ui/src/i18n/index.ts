@@ -407,10 +407,6 @@ export function formatDateTime(
   return cached("d", options, (loc) => new Intl.DateTimeFormat(loc, options)).format(toDate(value));
 }
 
-export function formatTime(value: Date | number | string): string {
-  return formatDateTime(value, { timeStyle: "short" });
-}
-
 const RELATIVE_STEPS: readonly [Intl.RelativeTimeFormatUnit, number][] = [
   ["second", 60],
   ["minute", 60],

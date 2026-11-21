@@ -806,15 +806,6 @@ pub fn sentinel(qname: &[u8]) -> Option<Sentinel> {
     })
 }
 
-/// Whether a secure A or AAAA answer to a sentinel name is answered (RFC 8509 section
-/// 3), given the key tags of the trusted root anchors.
-pub fn sentinel_answers(sentinel: Sentinel, tags: &[u16]) -> bool {
-    match sentinel {
-        Sentinel::IsTrustAnchor(tag) => tags.contains(&tag),
-        Sentinel::NotTrustAnchor(tag) => !tags.contains(&tag),
-    }
-}
-
 /// The name of RFC 8145's trust anchor signaling query (section 4.1): `_ta-<tag>[-<tag>]`
 /// with the tags in ascending order as four hexadecimal digits each, at the root; `None`
 /// without a tag.

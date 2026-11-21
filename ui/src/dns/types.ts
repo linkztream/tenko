@@ -84,6 +84,5 @@ export type ImportReport = S["ZoneFileImportReport"] & { types?: TypeCount[] };
 
 export const ZONE_KINDS: readonly ZoneKind[] = ["primary", "secondary", "stub", "forward", "rpz"];
 export const SERIAL_POLICIES: readonly SerialPolicy[] = ["unixtime", "counter", "date_counter"];
-export const OWNER_SOURCES: readonly OwnerSource[] = ["created", "claimed", "assigned", "imported"];
 export const ORIGINS: readonly Origin[] = ["manual", "ipam", "dynamic", "dhcp", "ad", "transfer"];
 export const TSIG_ALGORITHMS: readonly TsigAlgorithm[] = ["hmac-sha256", "hmac-sha384", "hmac-sha512", "hmac-sha1"];

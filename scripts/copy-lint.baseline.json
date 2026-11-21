@@ -357,7 +357,6 @@
     {"rule":"paging","file":"ui/src/import/model.ts","scope":"","text":"rowsCursor: event.page.next_cursor"},
     {"rule":"list-type","file":"ui/src/ipam/IpamView.tsx","scope":"fetchAll","text":"fetchAll<"},
     {"rule":"list-type","file":"ui/src/ipam/address/AddressesView.tsx","scope":"createListSource","text":"createListSource<"},
-    {"rule":"list-type","file":"ui/src/ipam/alarms.ts","scope":"fetchAll","text":"fetchAll<"},
     {"rule":"field-error","file":"ui/src/ipam/formKit.tsx","scope":"fieldMessage","text":"function fieldMessage"},
     {"rule":"field-error","file":"ui/src/ipam/formKit.tsx","scope":"messageArgs","text":"function messageArgs"},
     {"rule":"field-kit","file":"ui/src/ipam/formKit.tsx","scope":"Field","text":"function Field"},

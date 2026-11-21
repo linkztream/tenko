@@ -69,9 +69,6 @@ export const OPTION_KINDS: readonly OptionKind[] = [
   "empty",
 ];
 
-/** The levels of the effective options, least specific first. */
-export const OPTION_LEVELS: readonly OptionLevel[] = ["server", "shared_network", "scope", "pool", "policy", "host"];
-
 /** The nil UUID: in a scope PATCH it leaves the shared network. */
 export const NIL_ID = "00000000-0000-0000-0000-000000000000";
 

@@ -109,9 +109,3 @@ export function setWlanPolicy(ssid: string, policy: WlanPolicy): Promise<S["Stor
 export function keepOnWlan(ssid: string, host: string, reason?: string): Promise<S["WlanException"]> {
   return api.put("/api/v1/topology/ssids/{ssid}/exceptions/{host}", { path: { ssid, host }, body: reason ? { reason } : {} });
 }
-
-/** The findings of the topology (the root, the WLAN rules), the most urgent first. */
-export async function listTopologyFindings(signal?: AbortSignal): Promise<Finding[]> {
-  const page = await api.get("/api/v1/findings", { query: { area: "topology", limit: 1000 }, signal });
-  return page.items;
-}

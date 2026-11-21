@@ -256,11 +256,6 @@ impl RecursionPolicy {
             .any(|prefix| prefix.contains(&address))
     }
 
-    /// The number of known prefixes.
-    pub fn prefix_count(&self) -> usize {
-        self.prefixes.load().len()
-    }
-
     /// Whether the default allows `client` (a view without an access list).
     pub fn allows_by_default(&self, client: IpAddr) -> bool {
         match self.default_rule() {

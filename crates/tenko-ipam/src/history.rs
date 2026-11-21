@@ -10,7 +10,7 @@ use tenko_core::{
     ObjectRef, Principal, RequestId, Revision, Timestamp, audit::FieldChange, codec::encode_key,
 };
 use tenko_jobs::JobKind;
-use tenko_store::{KeyRange, ReadView, ReadViewExt};
+use tenko_store::{KeyRange, ReadView};
 use utoipa::ToSchema;
 
 use crate::{error::IpamResult, object::IpamObject, tables::HISTORY};
@@ -125,17 +125,4 @@ pub fn read_history(
             Ok((key.to_vec(), entry))
         })
         .collect()
-}
-
-/// The newest history entry of an object, if any.
-///
-/// # Errors
-///
-/// Returns store or decoding errors.
-pub fn last_entry(view: &dyn ReadView, object: ObjectRef) -> IpamResult<Option<HistoryEntry>> {
-    let rows = view.scan_typed(&HISTORY, KeyRange::prefix(encode_key(&object)), 1, true)?;
-    Ok(rows.into_iter().next().map(|(_, mut entry, revision)| {
-        entry.revision = revision;
-        entry
-    }))
 }

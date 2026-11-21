@@ -95,11 +95,6 @@ export function ruleSubtree(rule: ScopeRule): boolean {
   return (rule.kind === "site" || rule.kind === "prefix") && rule.value.subtree;
 }
 
-/** A stable key of a rule, to compare and deduplicate rules. */
-export function ruleKey(rule: ScopeRule): string {
-  return `${rule.kind}:${ruleId(rule)}:${ruleSubtree(rule) ? "subtree" : "own"}`;
-}
-
 /**
  * A scope rule in words: "Prefix 203.0.113.0/24 and everything inside it", "Site Garage only",
  * "VRF default". An object whose name is not known shows its identifier.

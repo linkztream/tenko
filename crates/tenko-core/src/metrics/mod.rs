@@ -207,14 +207,6 @@ impl Desc {
         self.unit = Some(unit);
         self
     }
-
-    /// The same description with the given kind of counter or gauge. A gauge family whose
-    /// kind is [`Kind::Counter`] mirrors a total kept elsewhere (set by a timer).
-    #[must_use]
-    pub const fn as_counter(mut self) -> Self {
-        self.kind = Kind::Counter;
-        self
-    }
 }
 
 /// The label values of one series, cheap to clone.

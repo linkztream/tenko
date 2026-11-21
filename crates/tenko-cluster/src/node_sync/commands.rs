@@ -538,17 +538,6 @@ impl IncomingCommand {
             payload: command.payload,
         })
     }
-
-    /// The command of a stored record (the in-process probe of a controller).
-    pub fn from_record(record: &CommandRecord) -> Self {
-        Self {
-            id: record.id,
-            kind: record.kind.clone(),
-            issued_at: Some(record.issued_at),
-            encoding: record.encoding.clone(),
-            payload: record.payload.0.clone(),
-        }
-    }
 }
 
 /// Where a node's reports go: the agent's queue to the controllers, or the store directly

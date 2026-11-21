@@ -9,12 +9,6 @@ import { t } from "../../i18n";
 import { checkDelegatedLen, onBoundary } from "../../ipam/prefix/delegation";
 import { addressIn } from "../../ipam/prefix/inputs";
 import { formatIp, parseCidr, parseIp } from "../../ipam/ip";
-import type { Pool } from "../types";
-
-/** Whether a pool of the scope list is a delegation pool. */
-export function isPdPool(pool: Pick<Pool, "role">): boolean {
-  return pool.role === "dhcp_pd_pool";
-}
 
 /** What the add dialog collects. */
 export interface PdDraft {

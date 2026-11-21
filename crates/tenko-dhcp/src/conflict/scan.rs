@@ -68,15 +68,6 @@ impl ScanProbe {
         }
     }
 
-    /// A probe over `pinger` alone (tests, and hosts without raw sockets).
-    pub fn with_pinger(pinger: Arc<dyn Pinger>) -> Self {
-        Self {
-            pinger: Some(pinger),
-            arp: None,
-            describe: "ICMP".to_owned(),
-        }
-    }
-
     /// What the probe uses, for the role's log line.
     pub fn describe(&self) -> &str {
         &self.describe

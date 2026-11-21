@@ -274,8 +274,6 @@ export type RatioTile = "dns-cache" | "dns-answers";
 export const BUCKET_SECONDS = 5;
 /** Completed buckets behind the headline of a ratio tile and the rates beside it: 30 seconds. */
 export const COMPLETED_BUCKETS = 6;
-/** Seconds behind the headline of a ratio tile. */
-export const RATIO_WINDOW = COMPLETED_BUCKETS * BUCKET_SECONDS;
 
 /** A sample of the cluster with the bucket its own timestamp falls in: `floor(t / bucketSeconds)`. */
 interface Placed {

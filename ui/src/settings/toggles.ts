@@ -53,14 +53,6 @@ export const TOGGLES: readonly ToggleDef[] = [
 /** The number of toggles in the profile matrix (the TGL rows of docs/SECURITY-PROFILES.md); later ones arrive with their features. */
 export const TOGGLE_TOTAL = 44;
 
-export function toggleById(id: string): ToggleDef | undefined {
-  return TOGGLES.find((x) => x.id === id);
-}
-
-export function toggleBySetting(setting: string): ToggleDef | undefined {
-  return TOGGLES.find((x) => x.setting === setting);
-}
-
 /** TGL-21 (IAM-18): whether the audit log leaves the installation. The log itself is never off. */
 export type AuditExport = NonNullable<SecuritySettings["audit_export"]>;
 /** The values from the weakest to the strongest. */

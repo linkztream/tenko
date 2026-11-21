@@ -2,7 +2,7 @@
 // the language of the UI. The pure helpers they build on are in model.ts.
 import { formatDuration, formatList, formatNumber, t } from "../i18n";
 import { normalizedDdns } from "./ddns/model";
-import { isKnownArchitecture, matchKind } from "./model";
+import { isKnownArchitecture } from "./model";
 import type { Condition, DdnsPolicy, LeaseTimes, Match, OptionKind, PolicyAction, Term } from "./types";
 
 /** A match in words: `vendor class starting with "MSFT"`. */
@@ -27,11 +27,6 @@ export function matchWords(match: Match): string {
 /** The matches of a class, joined by "or". */
 export function matchesWords(matches: readonly Match[]): string {
   return formatList(matches.map(matchWords), "disjunction");
-}
-
-/** The word for the kind of a match, for the kind menu. */
-export function matchKindWord(match: Match): string {
-  return t(`dhcp.match.kind.${matchKind(match)}`);
 }
 
 /** One term of a condition in words; `className` turns a class identifier into its name. */

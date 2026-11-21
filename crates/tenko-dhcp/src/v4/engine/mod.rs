@@ -69,9 +69,9 @@ use std::{
 };
 
 use tenko_core::{
-    NodeId, PrefixId, Timestamp, VrfId,
+    PrefixId, Timestamp, VrfId,
     dhcp::{
-        BindingState, FilterVerdict, Lease, LeaseEventKind, LeaseTimes, lease::MAX_IDENTITY,
+        BindingState, FilterVerdict, LeaseEventKind, LeaseTimes, lease::MAX_IDENTITY,
         write_identity,
     },
 };
@@ -84,7 +84,7 @@ pub use self::{
     offers::{OfferBook, OfferTable},
     select::Selector,
 };
-use super::{BOOTREQUEST, ClientFqdn, Message, MessageBuilder, MessageType, RelayAgentInfo};
+use super::{BOOTREQUEST, Message, MessageBuilder, MessageType, RelayAgentInfo};
 // WP8.4: the classes and policies of the request.
 use crate::class::{Decision, Facts};
 use crate::{
@@ -1399,19 +1399,4 @@ pub fn destination(
         },
         _ => Destination::Broadcast(settings.client_port),
     }
-}
-
-/// The lease row of a committed change, for the table: the row the store writes.
-pub fn committed_row(change: &PendingChange, node: NodeId, previous: Option<&Lease>) -> Lease {
-    change.to_lease(node, previous)
-}
-
-/// The FQDN flags of a server that performs no DNS update (RFC 4702 section 4): N set, S
-/// clear, O set when the client asked for S, E as the client sent it.
-pub fn fqdn_flags_without_update(client: &ClientFqdn<'_>) -> u8 {
-    let mut flags = ClientFqdn::FLAG_N | (client.flags() & ClientFqdn::FLAG_E);
-    if client.server_updates() {
-        flags |= ClientFqdn::FLAG_O;
-    }
-    flags
 }

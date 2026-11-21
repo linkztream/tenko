@@ -19,9 +19,9 @@ use tracing::{Instrument as _, Span, field::Empty};
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::{
-    ActuatorIntent, ActuatorPlan, ActuatorReceipt, CallContext, ConnectorError, Cursor,
-    HealthReport, InventoryBatch, L2Change, L2Plan, L2Receipt, MigrationScope, TopologySnapshot,
-    WebhookRequest, WriteMode, convert,
+    ActuatorIntent, ActuatorPlan, CallContext, ConnectorError, Cursor, HealthReport,
+    InventoryBatch, L2Change, L2Plan, L2Receipt, MigrationScope, TopologySnapshot, WebhookRequest,
+    WriteMode, convert,
     proto::v1,
     status::{ERROR_CODE, TOKEN_METADATA, from_status},
 };
@@ -449,59 +449,6 @@ impl PluginClient {
         );
         let response = call(span, timeout, self.actuator().plan(request)).await?;
         Ok(convert::actuator_plan_from_proto("plan", response.plan)?)
-    }
-
-    /// Applies an actuation plan.
-    ///
-    /// # Errors
-    ///
-    /// As [`topology`](PluginClient::topology).
-    pub async fn actuator_apply(
-        &self,
-        ctx: &CallContext,
-        plan: &ActuatorPlan,
-        mode: WriteMode,
-        timeout: Duration,
-    ) -> Result<ActuatorReceipt, ConnectorError> {
-        let (request, span) = self.traced(
-            ACTUATOR,
-            "Apply",
-            v1::ActuatorApplyRequest {
-                context: Some(convert::context_to_proto(ctx)),
-                plan: Some(convert::actuator_plan_to_proto(plan)),
-                mode: convert::mode_to_proto(mode),
-            },
-            timeout,
-        );
-        let response = call(span, timeout, self.actuator().apply(request)).await?;
-        Ok(convert::actuator_receipt_from_proto(
-            "receipt",
-            response.receipt,
-        )?)
-    }
-
-    /// Reverts an actuation.
-    ///
-    /// # Errors
-    ///
-    /// [`ConnectorError::Timeout`] or the plugin's error.
-    pub async fn actuator_revert(
-        &self,
-        ctx: &CallContext,
-        receipt: &ActuatorReceipt,
-        timeout: Duration,
-    ) -> Result<(), ConnectorError> {
-        let (request, span) = self.traced(
-            ACTUATOR,
-            "Revert",
-            v1::ActuatorRevertRequest {
-                context: Some(convert::context_to_proto(ctx)),
-                receipt: Some(convert::actuator_receipt_to_proto(receipt)),
-            },
-            timeout,
-        );
-        call(span, timeout, self.actuator().revert(request)).await?;
-        Ok(())
     }
 
     /// Reads a migration source into IR and a loss report. `timeout` bounds the whole

@@ -1,6 +1,6 @@
 //! Targets of scans on demand and the probes that cover them.
 
-use std::{collections::BTreeSet, net::IpAddr};
+use std::collections::BTreeSet;
 
 use ipnet::IpNet;
 use tenko_cluster::{
@@ -278,11 +278,6 @@ pub fn shares(
         }
     }
     out.into_iter().collect()
-}
-
-/// The address of a host prefix, else `None`.
-pub fn single_address(net: &IpNet) -> Option<IpAddr> {
-    (net.prefix_len() == net.max_prefix_len()).then(|| net.addr())
 }
 
 #[cfg(test)]

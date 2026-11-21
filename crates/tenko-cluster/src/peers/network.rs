@@ -217,11 +217,6 @@ impl PeerNetwork {
         lock(&self.inner.channels).clear();
     }
 
-    /// Whether the transport has client credentials.
-    pub fn has_tls(&self) -> bool {
-        self.inner.tls.load().is_some()
-    }
-
     /// The store whose member records name the endpoints (a weak handle).
     pub fn attach(&self, store: &RaftStore) {
         let _ = self.inner.store.set(store.downgrade());

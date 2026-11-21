@@ -240,11 +240,6 @@ impl Guard {
         self.limits.refuse(limit, client, scope, (cap, held), now);
     }
 
-    /// The refusals of the limits.
-    pub fn limit_log(&self) -> &LimitLog {
-        &self.limits
-    }
-
     /// The conflict budget.
     pub fn conflicts(&self) -> &ConflictBudget {
         &self.conflicts

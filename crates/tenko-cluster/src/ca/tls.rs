@@ -1,12 +1,7 @@
 //! The TLS modes of the API and UI listener (OPS-22, TGL-08) and the TLS material for
 //! modes a and b.
 
-use std::{
-    fmt,
-    net::IpAddr,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{fmt, net::IpAddr, path::PathBuf, sync::Arc};
 
 use arc_swap::ArcSwapOption;
 use rustls::{
@@ -310,30 +305,6 @@ impl TlsMaterial {
             }
         })?);
         Self::build(chain, &key, source)
-    }
-
-    /// Reads and parses the files of mode b.
-    ///
-    /// # Errors
-    ///
-    /// [`TlsError::Io`] or as [`from_pem`](TlsMaterial::from_pem).
-    pub fn load_files(cert_path: &Path, key_path: &Path) -> Result<Self, TlsError> {
-        let read = |path: &Path| {
-            std::fs::read(path).map_err(|e| TlsError::Io {
-                path: path.display().to_string(),
-                reason: e.to_string(),
-            })
-        };
-        let cert = read(cert_path)?;
-        let key = Zeroizing::new(read(key_path)?);
-        Self::from_pem(
-            &cert,
-            &key,
-            CertSource::Imported {
-                cert_path: cert_path.to_owned(),
-                key_path: key_path.to_owned(),
-            },
-        )
     }
 
     fn build(

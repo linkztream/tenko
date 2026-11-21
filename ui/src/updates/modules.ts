@@ -12,9 +12,6 @@ export const MODULE_NAMES: readonly ModuleName[] = ["ipam", "dns", "dhcp", "disc
 
 const [settings, setSettings] = createSignal<ModuleSettings | null>(null);
 
-/** What the server reported, or null while unknown. */
-export { settings as moduleSettings };
-
 /** Reads the module settings; a failed read leaves the modules unknown. */
 export async function loadModules(): Promise<void> {
   try {

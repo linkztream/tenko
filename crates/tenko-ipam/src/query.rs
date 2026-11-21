@@ -1201,21 +1201,3 @@ fn all<T: Entity>(view: &dyn ReadView) -> IpamResult<Vec<T>> {
 pub fn updated_at<T: Entity>(object: &T) -> Timestamp {
     object.meta().updated.at
 }
-
-/// The prefixes of a VRF that contain `ip`, most specific last.
-///
-/// # Errors
-///
-/// Store and decoding errors.
-pub fn containing_prefixes(view: &dyn ReadView, vrf: VrfId, ip: IpAddr) -> IpamResult<Vec<Prefix>> {
-    let family = Family::of(ip);
-    let value = ip_to_u128(ip);
-    let mut out = Vec::new();
-    for len in 0..=family.bits() {
-        let net = crate::net::net_from(family, value, len);
-        if let Some((id, _)) = view.get_typed(&crate::tables::PREFIX_CIDRS, &(vrf, net))? {
-            out.push(get::<Prefix>(view, id)?);
-        }
-    }
-    Ok(out)
-}

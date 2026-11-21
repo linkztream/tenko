@@ -99,11 +99,6 @@ impl<'a> Message<'a> {
         self.header
     }
 
-    /// The octets after the magic cookie, up to the end of the datagram.
-    pub fn options_field(&self) -> &'a [u8] {
-        self.options
-    }
-
     /// The length of the datagram.
     pub fn len(&self) -> usize {
         OPTIONS_START + self.options.len()

@@ -10,8 +10,8 @@ use tenko_core::{
 
 use super::{ConnectorHost, HostError};
 use crate::{
-    ActuatorIntent, ActuatorPlan, ActuatorReceipt, Capability, ConnectorError, Guardrails, Health,
-    HealthReport, L2Change, L2Plan, L2Receipt, MigrationScope, TopologySnapshot, WriteMode,
+    Capability, ConnectorError, Guardrails, Health, HealthReport, L2Change, L2Plan, L2Receipt,
+    MigrationScope, TopologySnapshot, WriteMode,
 };
 
 /// A remote system that answers a check with an error is a report about it: unreachable for
@@ -197,67 +197,6 @@ impl ConnectorHost {
             crate::host::guardrails::check_undo(guardrails, receipt, &topology)?;
         }
         Ok(client.revert(&ctx, receipt, timeout).await?)
-    }
-
-    /// Plans an actuation (no write).
-    ///
-    /// # Errors
-    ///
-    /// `connect.unsupported`, the plugin's error, or the errors of a call.
-    pub async fn plan_actuation(
-        &self,
-        id: ConnectorId,
-        intent: &ActuatorIntent,
-        on_behalf_of: Option<UserId>,
-    ) -> Result<ActuatorPlan, HostError> {
-        capability(self, id, Capability::Actuator)?;
-        let (runtime, client) = self.client(id).await?;
-        let _slot = runtime.calls.acquire().await;
-        let ctx = self
-            .context(&runtime, "actuator_plan", on_behalf_of)
-            .await?;
-        Ok(client
-            .actuator_plan(&ctx, intent, runtime.call_timeout())
-            .await?)
-    }
-
-    /// Applies an actuation plan, with the same age and write rules as L2 plans.
-    ///
-    /// # Errors
-    ///
-    /// `connect.writes_disabled`, `connect.verify_mismatch`, or the errors of a call.
-    pub async fn apply_actuation(
-        &self,
-        id: ConnectorId,
-        plan: &ActuatorPlan,
-        mode: WriteMode,
-        on_behalf_of: Option<UserId>,
-    ) -> Result<ActuatorReceipt, HostError> {
-        capability(self, id, Capability::Actuator)?;
-        let (runtime, client) = self.client(id).await?;
-        if mode == WriteMode::Apply && !runtime.instance().writes_enabled {
-            return Err(ConnectorError::WritesDisabled.into());
-        }
-        if Timestamp::now().saturating_since(plan.read_at) > self.config.plan_max_age {
-            return Err(ConnectorError::VerifyMismatch {
-                diff: "the plan is too old; plan the change again".to_owned(),
-            }
-            .into());
-        }
-        let _slot = runtime.calls.acquire().await;
-        let ctx = self
-            .context(&runtime, "actuator_apply", on_behalf_of)
-            .await?;
-        let receipt = client
-            .actuator_apply(&ctx, plan, mode, runtime.call_timeout())
-            .await?;
-        if mode == WriteMode::Apply && !receipt.verified {
-            return Err(ConnectorError::VerifyMismatch {
-                diff: "the plugin reports that the read-back differs from the plan".to_owned(),
-            }
-            .into());
-        }
-        Ok(receipt)
     }
 
     /// Reads a migration source into IR and a loss report.

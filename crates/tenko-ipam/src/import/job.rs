@@ -27,7 +27,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    CodedError, HostId, ImportId, JobId, MessageKey, ObjectKind, ObjectRef, RequestCtx, RequestId,
+    CodedError, HostId, ImportId, JobId, MessageKey, ObjectKind, ObjectRef, RequestId,
     audit::Digest,
     codec::{encode_key, from_cbor, to_cbor},
     ipam::{CustomValue, FieldKey, Meta},
@@ -843,11 +843,6 @@ impl StepHandler for FinishStep {
     ) -> Result<(), StepError> {
         Ok(())
     }
-}
-
-/// The context a job step plans with, for tests.
-pub fn step_request(cx: &StepContext) -> &RequestCtx {
-    &cx.request
 }
 
 /// Reads the credential reference of a host, for tests and tools.

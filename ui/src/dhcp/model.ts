@@ -11,7 +11,6 @@ import type {
   OptionData,
   OptionKind,
   Policy,
-  PolicyAction,
   Term,
 } from "./types";
 import { MAX_LEASE_SECS } from "./types";
@@ -407,11 +406,6 @@ export function policyOrder(policies: readonly Policy[], networkOf: (scope: stri
     if (ka !== kb) return ka < kb ? -1 : 1;
     return a.order - b.order || a.name.localeCompare(b.name);
   });
-}
-
-/** Whether a policy action sets anything. */
-export function actionIsEmpty(action: PolicyAction | undefined): boolean {
-  return !action || (!action.range && !action.lease && !action.ddns);
 }
 
 // ---------------------------------------------------------------------------------

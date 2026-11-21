@@ -123,14 +123,6 @@ pub enum Change {
     Address(AddressId, Option<Address>),
 }
 
-impl Change {
-    /// Whether the change is to a lease (the lease table's part of a delta) rather than to
-    /// the configuration (the image's part).
-    pub fn is_lease(&self) -> bool {
-        matches!(self, Self::Lease(..) | Self::Lease6(..))
-    }
-}
-
 fn set<K: Ord + Clone, V: Clone>(map: &mut BTreeMap<K, V>, key: &K, value: Option<&V>) {
     match value {
         Some(value) => {

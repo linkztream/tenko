@@ -130,11 +130,6 @@ impl AuthService {
         })
     }
 
-    /// The reveal policy in force (TGL-24), from the index: no store read.
-    pub fn reveal_policy(&self) -> RevealPolicy {
-        self.settings().secret_reveal()
-    }
-
     /// The enabled accounts that may reveal operator secrets but sign in with a PIN alone:
     /// a PIN-kind password, no TOTP and no passkey or security key. The PIN coupling rule
     /// (CON-07, IAM-07) lets the vault take operator secrets only once this list is empty.

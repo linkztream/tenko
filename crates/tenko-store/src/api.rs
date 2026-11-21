@@ -679,13 +679,6 @@ impl WatchFilter {
         self
     }
 
-    /// Adds a namespace.
-    #[must_use]
-    pub fn with_namespace(mut self, namespace: impl Into<String>) -> Self {
-        self.namespaces.insert(namespace.into());
-        self
-    }
-
     /// Whether changes of `table` pass.
     pub fn matches(&self, table: &TableName) -> bool {
         self.all || self.tables.contains(table) || self.namespaces.contains(table.namespace())

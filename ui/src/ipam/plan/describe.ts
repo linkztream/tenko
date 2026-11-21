@@ -2,7 +2,7 @@
 // plan, translated warning texts (falling back to the server's English), and the query of
 // a write (`dry_run`, `acknowledge`).
 import type { Query } from "../../api/client";
-import type { CodedError, IpamObject, ObjectRef, PlanWarning, PlannedChange } from "../../api/types";
+import type { CodedError, IpamObject, PlanWarning, PlannedChange } from "../../api/types";
 import { tDynamic } from "../../i18n";
 
 /** The identifier a person knows the object by: a network, an address, a name. */
@@ -29,12 +29,6 @@ export function objectLabel(obj: IpamObject | null | undefined): string {
 /** The label of a planned change: from the object after the change, else before it. */
 export function changeLabel(change: PlannedChange): string {
   return objectLabel(change.after ?? change.before) || change.object.id;
-}
-
-/** A reference's label when a plan or list knows the object, else its id. */
-export function refLabel(ref: ObjectRef, changes: readonly PlannedChange[] = []): string {
-  const change = changes.find((c) => c.object.kind === ref.kind && c.object.id === ref.id);
-  return change ? changeLabel(change) : ref.id;
 }
 
 /** The translated text of a warning or coded error (`errors.<code>`), else the server's English. */

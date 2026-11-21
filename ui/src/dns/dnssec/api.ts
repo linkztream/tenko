@@ -16,11 +16,6 @@ export type KeyState = S["KeyState"];
 
 export const ALGORITHMS: readonly DnssecAlgorithm[] = ["ecdsa_p256_sha256", "ed25519"];
 
-/** The algorithm number of the DNSKEY, for the DS line. */
-export function algorithmNumber(algorithm: DnssecAlgorithm): number {
-  return algorithm === "ed25519" ? 15 : 13;
-}
-
 export function getDnssec(id: string, signal?: AbortSignal): Promise<DnssecStatus> {
   return api.get("/api/v1/dns/zones/{id}/dnssec", { path: { id }, signal });
 }

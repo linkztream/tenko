@@ -70,11 +70,6 @@ impl PluginRegistry {
         Self { bundled, installed }
     }
 
-    /// The directory of installed plugins.
-    pub fn installed_dir(&self) -> Option<&Path> {
-        self.installed.as_deref()
-    }
-
     /// Every plugin, bundled first, then installed by name.
     pub fn list(&self) -> Vec<PluginInfo> {
         let mut plugins: Vec<PluginInfo> = self

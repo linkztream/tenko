@@ -104,10 +104,3 @@ export function setMotionPaused(on: boolean): void {
   setMotionSignal(on);
   write(MOTION_KEY, on ? "paused" : null);
 }
-
-/** Re-applies every preference to <html> (after tests or a document swap). */
-export function applyPrefs(): void {
-  setTheme(theme());
-  setDensity(density());
-  setEmphasizeHost(emphasizeHost());
-}

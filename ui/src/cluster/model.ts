@@ -17,7 +17,6 @@ type S = components["schemas"];
 
 /** `single` (one voter, never isolated), `healthy`, `electing`, `isolated`, `fenced` (stopped by a forced recovery), or `unknown` (a newer server's state). */
 export type QuorumKind = S["QuorumKind"];
-export const QUORUM_KINDS: readonly QuorumKind[] = ["single", "healthy", "electing", "isolated", "fenced", "unknown"];
 /** Whether a controller is in contact with a quorum (OPS-26). */
 export type QuorumView = S["QuorumView"];
 export type MemberRole = S["MemberRole"];
@@ -50,14 +49,12 @@ export type ChangeSummary = S["ChangeSummary"];
 export type SummaryAction = S["SummaryAction"];
 /** `queued` (waits for the heal), `applying` (the heal applies it) or `expired`. */
 export type ItemState = S["ItemState"];
-export const ITEM_STATES: readonly ItemState[] = ["queued", "applying", "expired"];
 /** An item of the local queue of an isolated controller (`GET /queue`, the answer of `POST /queue`). */
 export type QueueItemView = S["QueueItemView"];
 /** `GET /queue`: the caller's items on this controller, oldest first. */
 export type QueueList = S["QueueList"];
 /** What became of a queued change after the heal: `applied`, `conflict` or `expired`. */
 export type ChangeState = S["ChangeState"];
-export const CHANGE_STATES: readonly ChangeState[] = ["applied", "conflict", "expired"];
 /** Why a queued change did not apply by itself (`queue.plan_changed`, a planner or authorization error). */
 export type Conflict = S["Conflict"];
 /** One settled queued change of the caller, with the revision of its record (`GET /queue/conflicts`). */

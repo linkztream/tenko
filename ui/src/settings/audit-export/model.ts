@@ -66,7 +66,6 @@ export const MIN_MAX_BYTES = 64 * 1024;
 export const MAX_MAX_BYTES = 2 ** 40;
 export const DEFAULT_KEEP = 10;
 export const MAX_KEEP = 1000;
-export const DEFAULT_ALERT_AFTER_SECS = 300;
 export const ALERT_AFTER_RANGE = { min: 10, max: 86_400 } as const;
 export const MAX_SINKS = 8;
 

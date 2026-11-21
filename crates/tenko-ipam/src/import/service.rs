@@ -28,7 +28,6 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet, VecDeque},
-    ops::Range,
     path::PathBuf,
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
@@ -58,7 +57,7 @@ use super::{
     mapping::{self, CredentialPolicy, Mapping, SheetAnalysis},
     model::{CredentialValues, ImportModel},
     read::{self, ReadError, ReadLimits, SourceFile},
-    reconcile::{self, ItemAction, ItemOutcome, Reconciled, WorkItem},
+    reconcile::{self, ItemAction, Reconciled, WorkItem},
     staging::{Frozen, PREVIEWS, SESSIONS, Session, StagedFile, Stash, StoredPreview},
     translate::{self, ItemKey, Translation},
     vocab::Target,
@@ -1687,21 +1686,6 @@ fn group_loss(report: &LossReport) -> (Vec<SheetLoss>, LossCounts) {
             .sort_by(|a, b| (a.row, a.column.as_deref()).cmp(&(b.row, b.column.as_deref())));
     }
     (groups, counts)
-}
-
-/// The outcomes of reconciling, for tests and tools.
-pub fn outcomes_of(reconciled: &Reconciled) -> &[ItemOutcome] {
-    &reconciled.outcomes
-}
-
-/// The cut of the items into chunks, for tests and tools.
-pub fn chunk_ranges(
-    model: &ImportModel,
-    options: &mapping::ImportOptions,
-    config: &ImportConfig,
-) -> Vec<Range<usize>> {
-    let items = reconcile::work_items(model, options);
-    job::cut_chunks(&items, model, config.chunk_bytes, config.max_chunk_commands)
 }
 
 #[cfg(test)]

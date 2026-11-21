@@ -39,11 +39,6 @@ export function identity6Of(iface: Pick<Interface, "duid" | "mac">): Identity | 
   return undefined;
 }
 
-/** Whether the address is an IPv4 address. */
-export function isV4(ip: string): boolean {
-  return parseIp(ip)?.version === 4;
-}
-
 /** The scope an address falls in: the most specific network of the same VRF that contains it. */
 export function scopeFor(address: Pick<Address, "ip" | "vrf">, scopes: readonly Scope[]): Scope | undefined {
   const ip = parseIp(address.ip);

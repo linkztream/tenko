@@ -984,13 +984,6 @@ impl<A: Authority> Engine<A> {
         Err(FailureCause::NoReachableAuthority)
     }
 
-    /// Primes now if a priming is due; for the forwarder's housekeeping.
-    pub async fn prime_if_due(&self) {
-        if self.priming_due(Instant::now()) {
-            let _ = self.prime().await;
-        }
-    }
-
     // -----------------------------------------------------------------------------------
     // The client query
 

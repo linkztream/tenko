@@ -322,11 +322,6 @@ impl DnsPlan {
             && self.follow.is_empty()
             && self.stamps.is_empty()
     }
-
-    /// The RRset changes in all zones.
-    pub fn change_count(&self) -> usize {
-        self.batches.iter().map(|batch| batch.changes.len()).sum()
-    }
 }
 
 // ----- loading -------------------------------------------------------------------------
