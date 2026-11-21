@@ -395,6 +395,15 @@ export function updateStatus(): UpdateStatus {
   };
   if (latest) status.latest = latest;
   if (reason) status.check.off_reason = reason;
+  if (mockUpdates.running.includes("-") && !prereleasesOffered()) {
+    const on = db.settings.update_prereleases === true;
+    const turnOn = mockUpdates.prereleasesAllowed ? "switch" : on ? "config" : "both";
+    status.check.prerelease_notice = {
+      code: "sys.update.prereleases_off",
+      detail: `the server runs the pre-release ${mockUpdates.running}, but pre-releases are off`,
+      params: { version: mockUpdates.running, turn_on: turnOn },
+    };
+  }
   if (mockUpdates.lastChecked) status.check.last_checked = mockUpdates.lastChecked;
   if (mockUpdates.lastError) status.check.last_error = mockUpdates.lastError;
   if (mockUpdates.manifest) status.manifest = { ...mockUpdates.manifest };

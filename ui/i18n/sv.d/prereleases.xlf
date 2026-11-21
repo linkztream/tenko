@@ -22,6 +22,18 @@
       <unit id="updates.prerelease.stepup">
         <segment><source>Changing this switch needs a sign-in within the last five minutes. Sign in again and you return to this page.</source><target>Att ändra den här inställningen kräver en inloggning inom de senaste fem minuterna. Logga in igen så kommer du tillbaka till den här sidan.</target></segment>
       </unit>
+      <unit id="updates.prerelease.running_switch">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = switch: the node runs a pre-release and the switch is off.</note></notes>
+        <segment><source>This node runs the pre-release {version}, and pre-release updates are off, so only a newer final release is offered. Turn on Pre-release updates to be offered the next release candidate.</source><target>Noden kör förhandsversionen {version}, och förhandsversioner är avstängda, så bara en nyare färdig utgåva erbjuds. Slå på Förhandsversioner för att få nästa releasekandidat erbjuden.</target></segment>
+      </unit>
+      <unit id="updates.prerelease.running_config">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = config: the node runs a pre-release and the configuration file forbids pre-releases.</note></notes>
+        <segment><source>This node runs the pre-release {version}, but tenko.toml forbids pre-releases, so only a newer final release is offered. Set updates.prereleases = true in tenko.toml as root and restart the service.</source><target>Noden kör förhandsversionen {version}, men tenko.toml förbjuder förhandsversioner, så bara en nyare färdig utgåva erbjuds. Sätt updates.prereleases = true i tenko.toml som root och starta om tjänsten.</target></segment>
+      </unit>
+      <unit id="updates.prerelease.running_both">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = both: the configuration file forbids pre-releases and the switch is off.</note></notes>
+        <segment><source>This node runs the pre-release {version}, but tenko.toml forbids pre-releases and pre-release updates are off, so only a newer final release is offered. Set updates.prereleases = true in tenko.toml as root, restart the service, then turn on Pre-release updates.</source><target>Noden kör förhandsversionen {version}, men tenko.toml förbjuder förhandsversioner och förhandsversioner är avstängda, så bara en nyare färdig utgåva erbjuds. Sätt updates.prereleases = true i tenko.toml som root, starta om tjänsten och slå sedan på Förhandsversioner.</target></segment>
+      </unit>
       <unit id="errors.update.prerelease_off">
         <segment><source>Pre-releases are off on this installation.</source><target>Förhandsversioner är avstängda i den här installationen.</target></segment>
       </unit>

@@ -40,6 +40,18 @@ export function offReasonText(reason: NonNullable<UpdateCheck["off_reason"]> | n
   return reason === "air_gapped" ? t("updates.check.off_air_gapped") : t("updates.check.off_setting");
 }
 
+/** Why a node on the pre-release `version` is offered no later one, by what is off (`check.prerelease_notice`). */
+export function prereleaseNoticeText(turnOn: string | undefined, version: string): string {
+  switch (turnOn) {
+    case "config":
+      return t("updates.prerelease.running_config", { version });
+    case "both":
+      return t("updates.prerelease.running_both", { version });
+    default:
+      return t("updates.prerelease.running_switch", { version });
+  }
+}
+
 /** A server code in words: the translation of `errors.<code>`, else the code itself. */
 export function codeText(code: string): string {
   return tDynamic(`errors.${code}`) ?? t("updates.code_unknown", { code });

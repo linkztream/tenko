@@ -2067,6 +2067,12 @@ profile, not a weakening: pre-releases pass the same release workflow as final r
 The rule: **a node offers and installs a pre-release only when the switch is on and
 `tenko.toml` does not set `updates.prereleases = false`.** Only root (on Windows an
 administrator) writes that file, so `false` locks the switch off and the page says so.
+A node that runs a pre-release while the rule says no is offered newer final releases only,
+and `latest` in the status can then be older than the running version. The status says why
+in `check.prerelease_notice` (code `sys.update.prereleases_off`, parameter `turn_on`:
+`switch`, `config` or `both`), and the page shows it beside the switch. Nothing turns the
+switch on by itself, not even an upgrade to a pre-release: a security setting changes only
+when a person changes it.
 
 How a node finds a pre-release. The default source always gives the newest final release.
 With the switch on, a source of the form `.../releases/latest/download/<file>` and the file

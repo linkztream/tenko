@@ -5,13 +5,13 @@ import { A } from "@solidjs/router";
 import { createEffect, createSignal, Show } from "solid-js";
 import { isApiError } from "../api/problem";
 import { paths } from "../app/paths";
-import { ErrorNotice } from "../components/Notice";
+import { ErrorNotice, Notice } from "../components/Notice";
 import { Switch } from "../components/Switch";
 import { toast } from "../components/toast";
 import { t } from "../i18n";
 import { checkUpdates, setPrereleases, type UpdateStatus } from "./api";
 import { StepUpNotice } from "./StepUpNotice";
-import { codeText, offReasonText, whenText } from "./words";
+import { codeText, offReasonText, prereleaseNoticeText, whenText } from "./words";
 
 export function CheckPanel(props: {
   status: UpdateStatus;
@@ -125,6 +125,15 @@ export function CheckPanel(props: {
             hint={prereleaseHint()}
           />
         </div>
+        <Show when={check().prerelease_notice}>
+          {(notice) => (
+            <Notice kind="warn" testid="updates-prerelease-notice" code={notice().code}>
+              <span data-key={notice().params?.turn_on}>
+                {prereleaseNoticeText(notice().params?.turn_on, props.status.running)}
+              </span>
+            </Notice>
+          )}
+        </Show>
         <Show when={isApiError(switchError(), "auth.step_up_required")} fallback={<ErrorNotice error={switchError()} />}>
           <StepUpNotice body={t("updates.prerelease.stepup")} />
         </Show>

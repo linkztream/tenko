@@ -63,6 +63,7 @@ use tenko_api::{
             Release, ReleaseAsset, ReleaseManifest, ReleaseVersion, current_platform,
             parse_changelog,
         },
+        system::StatusWarning,
         updates::{
             CheckOff, InstallAbility, InstallBlock, InstallPolicy, InstallRequest, InstallStarted,
             ManifestInfo, ManifestOrigin, PreUpdateBackup, PreUpdateBackupStatus, UpdateCheck,
@@ -401,6 +402,40 @@ impl Inner {
         }
         Ok(())
     }
+}
+
+/// The code of the status notice for a node that runs a pre-release while pre-releases are
+/// off (OPS-30).
+pub const PRERELEASES_OFF: &str = "sys.update.prereleases_off";
+
+/// The notice [`PRERELEASES_OFF`] from `updates.prereleases` and the switch; `None` for a
+/// final release or both on. Neither is turned on here: the switch is a security setting
+/// that a person changes.
+fn prereleases_notice(inner: &Inner) -> Option<StatusWarning> {
+    let running = &inner.env.running;
+    let (turn_on, what) = match (inner.section.prereleases, inner.policy.prereleases()) {
+        _ if !running.is_prerelease() => return None,
+        (true, true) => return None,
+        (true, false) => ("switch", "the switch on the Updates page is off"),
+        (false, true) => ("config", "updates.prereleases in tenko.toml is false"),
+        (false, false) => (
+            "both",
+            "updates.prereleases in tenko.toml is false and the switch on the Updates page is off",
+        ),
+    };
+    Some(StatusWarning {
+        code: PRERELEASES_OFF.to_owned(),
+        detail: format!(
+            "the server runs the pre-release {running}, but {what}: only a newer final release \
+             is offered, no later pre-release"
+        ),
+        params: [
+            ("version".to_owned(), running.to_string()),
+            ("turn_on".to_owned(), turn_on.to_owned()),
+        ]
+        .into_iter()
+        .collect(),
+    })
 }
 
 fn store_error(error: &StoreError) -> CodedError {
@@ -984,6 +1019,7 @@ impl Updates {
             last_error: check_state.last_error.clone(),
             prereleases: inner.policy.prereleases(),
             prereleases_allowed: inner.section.prereleases,
+            prerelease_notice: prereleases_notice(inner),
         };
         drop(check_state);
         let newest = source_releases.first();
@@ -2701,6 +2737,10 @@ mod tests {
             let status = updates.status_now().await.expect("status");
             assert_eq!(status.check.prereleases, on);
             assert_eq!(status.check.prereleases_allowed, allowed);
+            assert_eq!(
+                status.check.prerelease_notice, None,
+                "a final release needs none"
+            );
             let offered = status.releases.iter().any(|r| r.version.is_prerelease());
             assert_eq!(offered, allowed && on, "allowed {allowed}, on {on}");
             if allowed && on {
@@ -2729,6 +2769,52 @@ mod tests {
                 .await
                 .expect_err("an upload of a pre-release");
             assert_eq!(error.code, "update.prerelease_off");
+        }
+    }
+
+    /// OPS-30: a node that runs a pre-release while pre-releases are off is told why it is
+    /// offered nothing, and what to turn on; the switch stays as it was.
+    #[tokio::test]
+    async fn a_pre_release_with_pre_releases_off_names_what_to_turn_on() {
+        for (allowed, on, turn_on) in [
+            (true, false, Some("switch")),
+            (false, true, Some("config")),
+            (false, false, Some("both")),
+            (true, true, None),
+        ] {
+            let store = Arc::new(MemStore::default());
+            let policy = FixedPolicy::new(UpdateInstall::Ui, true);
+            policy.switch(on);
+            let updates = build(
+                &store,
+                environment("0.0.12-rc.7"),
+                UpdatesSection {
+                    prereleases: allowed,
+                    ..section()
+                },
+                Arc::clone(&policy),
+                false,
+            );
+            fetched(
+                &updates,
+                manifest_of(vec![release("0.0.11", false, "- Final.")]),
+            )
+            .await;
+            let status = updates.status_now().await.expect("status");
+            assert!(!status.update_available);
+            assert_eq!(status.check.prereleases, on, "the switch is left alone");
+            let notice = status.check.prerelease_notice;
+            assert_eq!(
+                notice.as_ref().map(|n| n.code.as_str()),
+                turn_on.map(|_| PRERELEASES_OFF)
+            );
+            assert_eq!(
+                notice
+                    .as_ref()
+                    .and_then(|n| n.params.get("turn_on"))
+                    .map(String::as_str),
+                turn_on
+            );
         }
     }
 

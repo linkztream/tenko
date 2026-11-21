@@ -675,6 +675,18 @@ describe("the pre-release switch (TGL-45)", () => {
     );
   });
 
+  it("tells a node on a pre-release what to turn on, and leaves the switch to the user", async () => {
+    await signInAdmin();
+    mockUpdates.running = "0.0.12-rc.7";
+    await openPage();
+    const notice = screen.getByTestId("updates-prerelease-notice");
+    expect(notice.textContent).toContain("This node runs the pre-release 0.0.12-rc.7, and pre-release updates are off");
+    expect(prereleaseSwitch().checked).toBe(false);
+    expect(db.settings.update_prereleases).toBe(false);
+    fireEvent.click(prereleaseSwitch());
+    await waitFor(() => expect(screen.queryByTestId("updates-prerelease-notice")).toBeNull());
+  });
+
   it("asks for a fresh sign-in and keeps the switch off until then", async () => {
     await signInAdmin();
     await openPage();

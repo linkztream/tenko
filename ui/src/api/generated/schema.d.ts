@@ -24930,6 +24930,7 @@ export interface components {
             /** @description The code of the last failed check, for example `update.fetch_failed`. */
             last_error?: string | null;
             off_reason?: components["schemas"]["CheckOff"] | null;
+            prerelease_notice?: components["schemas"]["StatusWarning"] | null;
             /** @description The pre-release switch (TGL-45). */
             prereleases: boolean;
             /**

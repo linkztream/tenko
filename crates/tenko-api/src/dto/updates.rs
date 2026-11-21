@@ -10,7 +10,10 @@ use serde::{Deserialize, Serialize};
 use tenko_core::{JobId, Timestamp};
 use utoipa::{IntoParams, ToSchema};
 
-use super::release::{Release, ReleaseVersion};
+use super::{
+    release::{Release, ReleaseVersion},
+    system::StatusWarning,
+};
 
 /// How an administrator may install a new version (TGL-23).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -54,6 +57,13 @@ pub struct UpdateCheck {
     /// Whether `tenko.toml` lets the switch be used (`updates.prereleases`, default true).
     /// Pre-releases are offered and installed only when both are true (OPS-30).
     pub prereleases_allowed: bool,
+    /// Set when the running version is a pre-release while pre-releases are off: only a
+    /// newer final release is offered, never a later pre-release. Code
+    /// `sys.update.prereleases_off`; the parameter `turn_on` names what is off: `switch`,
+    /// `config` (`updates.prereleases` in `tenko.toml`) or `both`. Nothing turns either on
+    /// by itself: the switch is a security setting that a person changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prerelease_notice: Option<StatusWarning>,
 }
 
 /// Where the stored release manifest came from.
@@ -213,7 +223,10 @@ pub struct UpdateStatus {
     pub format: u32,
     /// The platform of this server, `<os>-<arch>`.
     pub platform: String,
-    /// The newest release in the manifest.
+    /// The newest release in the manifest that the node may be offered: a pre-release only
+    /// while pre-releases are on. It can be older than `running` when the node runs a
+    /// pre-release with pre-releases off (`check.prerelease_notice`); `update_available` and
+    /// `releases` say whether anything newer is offered.
     pub latest: Option<ReleaseVersion>,
     /// A release newer than the running one exists.
     pub update_available: bool,

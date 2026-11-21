@@ -8499,6 +8499,9 @@ export type MessageKey =
   | "updates.prerelease.hint"
   | "updates.prerelease.locked"
   | "updates.prerelease.mirror"
+  | "updates.prerelease.running_both"
+  | "updates.prerelease.running_config"
+  | "updates.prerelease.running_switch"
   | "updates.prerelease.stepup"
   | "updates.prerelease.uploads_only"
   | "updates.progress.failed"
@@ -10276,6 +10279,9 @@ export interface MessageArgs {
   "updates.manifest.fetched": { count: number; when: string | number };
   "updates.manifest.uploaded": { count: number; when: string | number };
   "updates.module.body": { module: string | number };
+  "updates.prerelease.running_both": { version: string | number };
+  "updates.prerelease.running_config": { version: string | number };
+  "updates.prerelease.running_switch": { version: string | number };
   "updates.progress.failed": { version: string | number };
   "updates.progress.heading": { version: string | number };
   "updates.release.format": { format: string | number };
@@ -18802,6 +18808,9 @@ export const messageKeys: readonly MessageKey[] = [
   "updates.prerelease.hint",
   "updates.prerelease.locked",
   "updates.prerelease.mirror",
+  "updates.prerelease.running_both",
+  "updates.prerelease.running_config",
+  "updates.prerelease.running_switch",
   "updates.prerelease.stepup",
   "updates.prerelease.uploads_only",
   "updates.progress.failed",

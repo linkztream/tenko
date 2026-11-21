@@ -22,6 +22,18 @@
       <unit id="updates.prerelease.stepup">
         <segment><source>Changing this switch needs a sign-in within the last five minutes. Sign in again and you return to this page.</source></segment>
       </unit>
+      <unit id="updates.prerelease.running_switch">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = switch: the node runs a pre-release and the switch is off.</note></notes>
+        <segment><source>This node runs the pre-release {version}, and pre-release updates are off, so only a newer final release is offered. Turn on Pre-release updates to be offered the next release candidate.</source></segment>
+      </unit>
+      <unit id="updates.prerelease.running_config">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = config: the node runs a pre-release and the configuration file forbids pre-releases.</note></notes>
+        <segment><source>This node runs the pre-release {version}, but tenko.toml forbids pre-releases, so only a newer final release is offered. Set updates.prereleases = true in tenko.toml as root and restart the service.</source></segment>
+      </unit>
+      <unit id="updates.prerelease.running_both">
+        <notes><note category="description">Status notice sys.update.prereleases_off with turn_on = both: the configuration file forbids pre-releases and the switch is off.</note></notes>
+        <segment><source>This node runs the pre-release {version}, but tenko.toml forbids pre-releases and pre-release updates are off, so only a newer final release is offered. Set updates.prereleases = true in tenko.toml as root, restart the service, then turn on Pre-release updates.</source></segment>
+      </unit>
       <unit id="errors.update.prerelease_off">
         <segment><source>Pre-releases are off on this installation.</source></segment>
       </unit>

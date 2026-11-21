@@ -88033,6 +88033,17 @@
               }
             ]
           },
+          "prerelease_notice": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StatusWarning",
+                "description": "Set when the running version is a pre-release while pre-releases are off: only a\nnewer final release is offered, never a later pre-release. Code\n`sys.update.prereleases_off`; the parameter `turn_on` names what is off: `switch`,\n`config` (`updates.prereleases` in `tenko.toml`) or `both`. Nothing turns either on\nby itself: the switch is a security setting that a person changes."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "prereleases": {
             "type": "boolean",
             "description": "The pre-release switch (TGL-45)."
@@ -88286,7 +88297,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/ReleaseVersion",
-                "description": "The newest release in the manifest."
+                "description": "The newest release in the manifest that the node may be offered: a pre-release only\nwhile pre-releases are on. It can be older than `running` when the node runs a\npre-release with pre-releases off (`check.prerelease_notice`); `update_available` and\n`releases` say whether anything newer is offered."
               },
               {
                 "type": "null"
