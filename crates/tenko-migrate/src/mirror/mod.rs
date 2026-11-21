@@ -299,6 +299,11 @@ pub enum MirrorError {
         /// Seconds until the next push is admitted.
         retry_after: u64,
     },
+    /// Another read of a stored snapshot held the node's one too long (429).
+    Busy {
+        /// Seconds after which to try again.
+        retry_after: u64,
+    },
     /// The mirror holds no snapshot yet (404).
     NoSnapshot(MirrorId),
     /// The snapshot holds no such scope (404).
@@ -322,7 +327,8 @@ pub enum MirrorError {
         /// The most mirrors.
         max: usize,
     },
-    /// The push names another server than the one the mirror is bound to (409).
+    /// The push names another server than the one the mirror is bound to (409). The answer
+    /// names the pushed server only; the audit record names both.
     Source {
         /// The mirror.
         id: MirrorId,
@@ -374,6 +380,10 @@ impl fmt::Display for MirrorError {
                 f,
                 "a push came faster than the floor; retry in {retry_after} s"
             ),
+            Self::Busy { retry_after } => write!(
+                f,
+                "another read of a stored snapshot runs on this node; retry in {retry_after} s"
+            ),
             Self::NoSnapshot(id) => write!(f, "the mirror {id} holds no snapshot yet"),
             Self::ScopeNotFound(id, scope) => {
                 write!(f, "the snapshot of mirror {id} holds no scope {scope}")
@@ -390,9 +400,9 @@ impl fmt::Display for MirrorError {
                 write!(f, "the installation holds {max} mirrors, the most it may")
             }
             Self::BodyTimeout => f.write_str("the body did not arrive in time"),
-            Self::Source { id, bound, server } => write!(
+            Self::Source { id, server, .. } => write!(
                 f,
-                "the mirror {id} is bound to the server {bound}, and the push names {server}; replace the token to bind it anew"
+                "the mirror {id} is bound to another server than {server}; replace the token to bind it anew"
             ),
             Self::Partner {
                 id,
@@ -422,6 +432,7 @@ impl Coded for MirrorError {
             Self::TooLarge { .. } => codes::MIRROR_TOO_LARGE,
             Self::Invalid(invalid) => invalid.code(),
             Self::Rate { .. } => codes::MIRROR_RATE,
+            Self::Busy { .. } => codes::MIRROR_BUSY,
             Self::NoSnapshot(_) => codes::MIRROR_NO_SNAPSHOT,
             Self::ScopeNotFound(..) => codes::MIRROR_SCOPE_NOT_FOUND,
             Self::Request(_) => INVALID_REQUEST,
@@ -452,7 +463,7 @@ impl Coded for MirrorError {
             Self::Disabled(_) => 403,
             Self::TooLarge { .. } => 413,
             Self::Invalid(invalid) => invalid.http_status(),
-            Self::Rate { .. } => 429,
+            Self::Rate { .. } | Self::Busy { .. } => 429,
             Self::Auth(error) => error.http_status(),
             Self::Dhcp(error) => error.http_status(),
             Self::Store(error) => error.http_status(),
@@ -476,7 +487,7 @@ impl Coded for MirrorError {
             ]),
             Self::TooLarge { limit } => BTreeMap::from([("limit", limit.to_string())]),
             Self::Invalid(invalid) => invalid.params(),
-            Self::Rate { retry_after } => {
+            Self::Rate { retry_after } | Self::Busy { retry_after } => {
                 BTreeMap::from([("retry_after", retry_after.to_string())])
             }
             Self::ScopeNotFound(mirror, scope) => {
@@ -488,11 +499,9 @@ impl Coded for MirrorError {
                 ("latest", latest.to_string()),
             ]),
             Self::Limit { max } => BTreeMap::from([("max", max.to_string())]),
-            Self::Source { id, bound, server } => BTreeMap::from([
-                ("id", id.to_string()),
-                ("bound", bound.clone()),
-                ("server", server.clone()),
-            ]),
+            Self::Source { id, server, .. } => {
+                BTreeMap::from([("id", id.to_string()), ("server", server.clone())])
+            }
             Self::Partner {
                 id,
                 partner,

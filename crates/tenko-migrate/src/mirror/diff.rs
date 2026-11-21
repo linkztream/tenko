@@ -301,12 +301,7 @@ fn configuration(snapshot: &Snapshot, ir: &IrScope) -> BTreeMap<String, String> 
 
 /// A filter entry as the item of a row: `allow 00:00:5e:00:53:20`.
 fn filter_item(kind: FilterKind, mac: &MacPattern) -> String {
-    let kind = if kind == FilterKind::Allow {
-        "allow"
-    } else {
-        "deny"
-    };
-    format!("{kind} {mac}")
+    format!("{} {mac}", kind.as_str())
 }
 
 /// The partner rows: every configuration difference of the scope between the mirror's
@@ -446,7 +441,7 @@ pub fn diff(
     snapshot: &Snapshot,
     scope: IpNet,
     losses_open: u32,
-    partner: Option<(MirrorId, Option<&Snapshot>)>,
+    partner: Option<(MirrorId, Option<Snapshot>)>,
 ) -> Result<ScopeDiff, MirrorError> {
     let ir: &IrScope = snapshot
         .envelope
@@ -659,8 +654,8 @@ pub fn diff(
         &tenko_filters,
         tenko_scope.map(|scope| scope.restricted),
     );
-    if let Some((_, theirs)) = partner {
-        partner_rows(&mut rows, snapshot, ir, theirs);
+    if let Some((_, theirs)) = &partner {
+        partner_rows(&mut rows, snapshot, ir, theirs.as_ref());
     }
 
     rows.sort_by(|a, b| (a.kind, &a.item).cmp(&(b.kind, &b.item)));
@@ -671,8 +666,10 @@ pub fn diff(
         source_active: ir.active,
         tenko_scope: tenko_scope.map(|scope| scope.prefix),
         tenko_enabled: tenko_scope.is_some_and(|scope| scope.enabled),
+        partner_sequence: partner
+            .as_ref()
+            .and_then(|(_, theirs)| Some(theirs.as_ref()?.sequence)),
         partner: partner.map(|(id, _)| id),
-        partner_sequence: partner.and_then(|(_, theirs)| theirs.map(|theirs| theirs.sequence)),
         rows,
         losses_open,
     })

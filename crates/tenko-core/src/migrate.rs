@@ -367,7 +367,9 @@ pub struct Takeover {
     pub partner: Option<TakeoverPartner>,
     /// The job that ran it.
     pub job: JobId,
-    /// When the state was reached.
+    /// When the state was reached. For `Done` this is no earlier than the moment the
+    /// source's servers were made silent (plan section 2.17): a push of the mirror or of
+    /// its partner accepted after it raises `migrate.mirror.scope_active`.
     pub at: Timestamp,
     /// Who started the job.
     pub by: UserId,
@@ -491,8 +493,8 @@ pub mod codes {
     /// The mirror is stale: no push for three intervals (409 on an action that needs it;
     /// also the finding). Params: `id`, `age`.
     pub const MIRROR_STALE: &str = "migrate.mirror.stale";
-    /// The source's scope is active again while Tenko's scope serves (409; also the
-    /// finding). Params: `id`, `scope`.
+    /// A source answers again after a takeover silenced it (409; also the finding). Params:
+    /// `id`, `scope`.
     pub const MIRROR_SCOPE_ACTIVE: &str = "migrate.mirror.scope_active";
     /// The mirror's token expires within fourteen days (the finding). Params: `id`,
     /// `expires_at`.
@@ -538,15 +540,15 @@ pub mod codes {
     /// its pushes are refused like an unknown token's). Params: `mirrors`, `ids`.
     pub const MIRROR_UNBOUND: &str = "migrate.mirror.unbound";
     /// The push names another server than the one the mirror is bound to (409, audited as a
-    /// refused push). Params: `id`, `bound`, `server`.
+    /// refused push, whose record names the bound server; the answer does not). Params: `id`,
+    /// `server`.
     pub const MIRROR_SOURCE: &str = "migrate.mirror.source";
     /// A pairing of two mirrors is refused: the mirror itself, a mirror that does not exist,
     /// or one already paired with another (409). Params: `id`, `partner`, `reason`.
     pub const MIRROR_PARTNER: &str = "migrate.mirror.partner";
-    /// A mirror is stale while a scope of it or of its partner is taken over: the Windows
-    /// side is expected to be quiet and nothing shows that it is (the finding, an error).
-    /// Params: `mirrors`, `ids`.
-    pub const MIRROR_STALE_AFTER_TAKEOVER: &str = "migrate.mirror.stale_after_takeover";
+    /// Another read of a stored snapshot held the node's one for two seconds (429, with
+    /// `Retry-After`). Params: `retry_after`.
+    pub const MIRROR_BUSY: &str = "migrate.mirror.busy";
 
     /// Every code of the module, for the contracts document and its test.
     pub const ALL: [&str; 29] = [
@@ -578,7 +580,7 @@ pub mod codes {
         MIRROR_UNBOUND,
         MIRROR_SOURCE,
         MIRROR_PARTNER,
-        MIRROR_STALE_AFTER_TAKEOVER,
+        MIRROR_BUSY,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -811,28 +813,26 @@ pub mod metrics {
 /// The names of the health findings the module adds to `GET /system/status` and the mirror
 /// card (plan section 2.12).
 pub mod findings {
-    /// No push for three intervals: a warning, an error once a scope of the mirror was
-    /// taken over.
+    /// No push for three intervals (a warning); none once the scope of the mirror or of its
+    /// partner is taken over, when the source's servers are silent and a stale mirror is the
+    /// expected state (plan section 2.17).
     pub const MIRROR_STALE: &str = super::codes::MIRROR_STALE;
-    /// A source's scope is active again while Tenko's scope serves it: two servers answer
-    /// one network (an error).
+    /// A push of the mirror or of its partner accepted after a takeover's recorded silence
+    /// ([`Takeover::at`](super::Takeover::at) of a record in the state `Done`): a Windows server
+    /// answers beside Tenko again (an error).
     pub const MIRROR_SCOPE_ACTIVE: &str = super::codes::MIRROR_SCOPE_ACTIVE;
     /// The mirror's token expires within fourteen days (WT-Q11).
     pub const MIRROR_TOKEN_EXPIRING: &str = super::codes::MIRROR_TOKEN_EXPIRING;
     /// Under Hardened, an enabled mirror whose token has no source prefix: its pushes are
     /// refused until the token is replaced with prefixes (a warning).
     pub const MIRROR_UNBOUND: &str = super::codes::MIRROR_UNBOUND;
-    /// No push for three intervals from a mirror whose scope, or whose partner's scope, is
-    /// taken over (an error; it replaces [`MIRROR_STALE`] for that mirror).
-    pub const MIRROR_STALE_AFTER_TAKEOVER: &str = super::codes::MIRROR_STALE_AFTER_TAKEOVER;
 
     /// Every finding.
-    pub const ALL: [&str; 5] = [
+    pub const ALL: [&str; 4] = [
         MIRROR_STALE,
         MIRROR_SCOPE_ACTIVE,
         MIRROR_TOKEN_EXPIRING,
         MIRROR_UNBOUND,
-        MIRROR_STALE_AFTER_TAKEOVER,
     ];
 }
 

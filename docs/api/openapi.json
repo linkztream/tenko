@@ -24266,6 +24266,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -24359,6 +24369,16 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -24439,6 +24459,16 @@
           },
           "404": {
             "description": "No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -24833,6 +24863,16 @@
           },
           "404": {
             "description": "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)",
             "content": {
               "application/problem+json": {
                 "schema": {

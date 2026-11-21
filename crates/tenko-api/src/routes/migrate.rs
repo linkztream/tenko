@@ -459,8 +459,14 @@ async fn push_mirror_snapshot(
     if !matches!(error, MirrorError::NotFound(_) | MirrorError::Store(_)) {
         service.refused(&cx, id, &error).await;
     }
+    Ok(refusal(error))
+}
+
+/// The problem of a refused mirror operation, with `Retry-After` when the refusal says when
+/// to come back (429 `migrate.mirror.rate` and `migrate.mirror.busy`).
+fn refusal(error: MirrorError) -> Response {
     let retry = match &error {
-        MirrorError::Rate { retry_after } => Some(*retry_after),
+        MirrorError::Rate { retry_after } | MirrorError::Busy { retry_after } => Some(*retry_after),
         _ => None,
     };
     let mut response = ApiError::from(error).into_response();
@@ -469,7 +475,15 @@ async fn push_mirror_snapshot(
             .headers_mut()
             .insert(header::RETRY_AFTER, HeaderValue::from(seconds));
     }
-    Ok(response)
+    response
+}
+
+/// The answer of a read of a stored snapshot: its body, or the refusal.
+fn answered<T: Serialize>(result: Result<T, MirrorError>) -> Response {
+    match result {
+        Ok(body) => Json(body).into_response(),
+        Err(error) => refusal(error),
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -715,7 +729,8 @@ async fn replace_mirror_token(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn get_mirror_snapshot(
@@ -732,7 +747,11 @@ async fn get_mirror_snapshot(
         Action::Read,
         ("GET", "/migrate/mirrors/{id}/snapshot"),
     )?;
-    Ok(Json(service.snapshot(id).await?).into_response())
+    // Serialized while the read is held, so that the next read decodes after it.
+    Ok(match service.snapshot(id).await {
+        Ok(held) => Json(&*held).into_response(),
+        Err(error) => refusal(error),
+    })
 }
 
 #[utoipa::path(
@@ -748,7 +767,8 @@ async fn get_mirror_snapshot(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn list_mirror_losses(
@@ -765,7 +785,7 @@ async fn list_mirror_losses(
         Action::Read,
         ("GET", "/migrate/mirrors/{id}/losses"),
     )?;
-    Ok(Json(service.losses(id).await?).into_response())
+    Ok(answered(service.losses(id).await))
 }
 
 #[utoipa::path(
@@ -784,7 +804,8 @@ async fn list_mirror_losses(
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A newer snapshot came in after the one that was read (`migrate.mirror.snapshot_moved`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 409, description = "A newer snapshot came in after the one that was read (`migrate.mirror.snapshot_moved`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn ack_mirror_losses(
@@ -802,8 +823,12 @@ async fn ack_mirror_losses(
         Action::Update,
         ("POST", "/migrate/mirrors/{id}/losses/ack"),
     )?;
-    let (acks, revision) = service.ack(&cx, id, body.sequence, &body.keys).await?;
-    Ok(Json(LossAckResult { acks, revision }).into_response())
+    Ok(answered(
+        service
+            .ack(&cx, id, body.sequence, &body.keys)
+            .await
+            .map(|(acks, revision)| LossAckResult { acks, revision }),
+    ))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -825,7 +850,8 @@ async fn ack_mirror_losses(
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 404, description = "No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn get_mirror_scope_diff(
@@ -836,7 +862,7 @@ async fn get_mirror_scope_diff(
 ) -> Result<Response, ApiError> {
     let (id, scope) = mirror_and_scope(&app, &cx, &id, &cidr, Action::Read, ObjectKind::Mirror)?;
     let service = service(mirrors, "GET", "/migrate/mirrors/{id}/scopes/{cidr}/diff")?;
-    Ok(Json(service.diff(id, scope).await?).into_response())
+    Ok(answered(service.diff(id, scope).await))
 }
 
 #[utoipa::path(
@@ -1029,10 +1055,7 @@ pub(crate) async fn warnings(
             let detail = match finding.code {
                 findings::MIRROR_STALE => "no push for three intervals from the mirrored sources",
                 findings::MIRROR_SCOPE_ACTIVE => {
-                    "a mirrored source serves a scope Tenko took over: two servers answer one network"
-                }
-                findings::MIRROR_STALE_AFTER_TAKEOVER => {
-                    "no push for three intervals from mirrored sources whose scope, or whose partner's, Tenko took over"
+                    "a mirrored source pushed after a takeover silenced it: a server answers beside Tenko"
                 }
                 findings::MIRROR_UNBOUND => {
                     "the Hardened profile refuses the pushes of mirrors whose token has no source prefix; replace their tokens with prefixes"

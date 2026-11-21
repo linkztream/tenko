@@ -2,7 +2,7 @@
 //! (plan section 2.5): every action a row can name, the rule for server options, options of
 //! a class and of a code without a definition, the case of values, the inherited lease time,
 //! reservations found by address and by identity (also a client identifier held outside
-//! the scope), the DDNS settings, and the VRF the network is looked up in.
+//! the scope), the DDNS settings, the MAC filters, and the VRF the network is looked up in.
 
 use std::{net::IpAddr, sync::Arc};
 
@@ -487,5 +487,51 @@ async fn the_network_is_looked_up_in_the_default_vrf() {
     assert_eq!(
         rows_of(&found.rows, DiffKind::Prefix),
         [(SCOPE.to_owned(), DiffAction::Create)]
+    );
+}
+
+/// The MAC filters against a Tenko scope that exists: the source's restriction updates the
+/// scope's, a source entry Tenko lacks is created, Tenko's own deny entry stays, and Tenko's
+/// own allow entry on a scope the source restricts is the operator's decision.
+#[tokio::test]
+async fn the_filters_follow_the_source_and_leave_tenkos_allow_entries_to_the_operator() {
+    use tenko_core::dhcp::{Filter, FilterId, FilterKind, tables::FILTERS};
+    let mut tenko = Tenko::new();
+    let vrf = tenko.vrf;
+    let prefix = tenko.prefix(vrf, SCOPE);
+    tenko.scope(&prefix);
+    for (last, kind) in [(0x30, FilterKind::Allow), (0x31, FilterKind::Deny)] {
+        let filter = Filter {
+            id: FilterId::generate(),
+            mac: tenko_core::dhcp::MacPattern::exact(mac(last).octets()),
+            kind,
+            note: None,
+            created: stamp(),
+            updated: stamp(),
+        };
+        tenko
+            .batch
+            .put_typed(&FILTERS, &filter.id, &filter)
+            .expect("filter");
+    }
+    let store = tenko.store().await;
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let mut envelope = fixture();
+    envelope.dhcp.scopes[0].restricted = true;
+    envelope.dhcp.filters.push(tenko_core::ir::dhcp::IrFilter {
+        mac: tenko_core::dhcp::MacPattern::exact(mac(0x20).octets()),
+        kind: FilterKind::Allow,
+        description: None,
+        origin: tenko_core::ir::SourceLocation::default(),
+    });
+    let scope = SCOPE.parse().expect("net");
+    let found = diff(view.as_ref(), &snapshot(envelope), scope, 0, None).expect("diff");
+    assert_eq!(
+        rows_of(&found.rows, DiffKind::Filter),
+        [
+            ("allow 00:00:5e:00:53:20".to_owned(), DiffAction::Create),
+            ("allow 00:00:5e:00:53:30".to_owned(), DiffAction::Decide),
+            ("restricted".to_owned(), DiffAction::Update),
+        ]
     );
 }

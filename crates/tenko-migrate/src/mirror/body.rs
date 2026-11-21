@@ -111,6 +111,18 @@ pub const BUFFERED_BODIES_BOUND: usize = MAX_BODY_BYTES * tenko_core::migrate::M
 /// briefly holds it twice; the one being decoded is counted in both.
 pub const PUSH_MEMORY_BOUND: usize = BUFFERED_BODIES_BOUND + DECODE_ALLOCATION_BOUND;
 
+/// What the reads of stored snapshots hold on a node at worst: one such read at a time
+/// (`MirrorService::reading`, also for a card's summary that is not in memory), which decodes
+/// at most two snapshots (the diff of a paired mirror) and makes its answer from them. A
+/// stored row is at most a store batch (16 MiB), smaller than an inflated body, so a decode
+/// and what is made from it stay within [`DECODE_ALLOCATION_BOUND`] each: 306,042,880 octets
+/// (292 MiB).
+pub const STORED_READ_BOUND: usize = 2 * DECODE_ALLOCATION_BOUND;
+
+/// What the mirrors may hold on a node at worst: the pushes ([`PUSH_MEMORY_BOUND`]) and the
+/// reads of stored snapshots ([`STORED_READ_BOUND`]), 727,499,776 octets (694 MiB).
+pub const NODE_MEMORY_BOUND: usize = PUSH_MEMORY_BOUND + STORED_READ_BOUND;
+
 /// Decodes a push body that the caller read within [`MAX_BODY_BYTES`]: `gzip` when the
 /// request says `Content-Encoding: gzip`.
 ///
@@ -401,6 +413,8 @@ mod tests {
         assert_eq!(DECODE_ALLOCATION_BOUND, 153_021_440);
         assert_eq!(BUFFERED_BODIES_BOUND, 268_435_456);
         assert_eq!(PUSH_MEMORY_BOUND, 421_456_896);
+        assert_eq!(STORED_READ_BOUND, 306_042_880);
+        assert_eq!(NODE_MEMORY_BOUND, 727_499_776);
     }
 
     #[test]
@@ -408,7 +422,7 @@ mod tests {
         let long = "x".repeat(tenko_core::ir::mirror::MAX_LOCATION_LEN + 1);
         for (from, to, path) in [
             (
-                "\"column\": \"Name=Printers\"",
+                "\"column\": \"192.0.2.0:Printers\"",
                 format!("\"column\": \"{long}\""),
                 "losses.entries[0].location.column",
             ),

@@ -1,6 +1,6 @@
 # The mirror fixtures
 
-The envelope a mirrored source pushes (`tenko_core::ir::MirrorSnapshot`, `docs/plans/windows-takeover-plan.md` sections 3.1 and 3.4, ADR 0033), for the fictitious domain `corp.example.test`. `snapshot.json` is the contract between the exporter of `deploy/windows/mirror/` and the server: the exporter's Pester suite produces it byte for byte from recorded cmdlet output, and `tests/mirror_model.rs` holds it to the types the same way. Its field names are those of section 3.1 and of the IR; nothing else is added.
+The envelope a mirrored source pushes (`tenko_core::ir::MirrorSnapshot`, `docs/plans/windows-takeover-plan.md` sections 3.1 and 3.4, ADR 0033), for the fictitious domain `corp.example.test`. `tests/mirror_model.rs` builds these files from the types and holds them to them byte for byte; their field names, loss codes and location columns are those the exporter of `deploy/windows/mirror/` writes. The exporter's own output is `deploy/windows/mirror/tests/fixtures/expected-snapshot.json` and `fixtures/lab-dc1/expected-snapshot.json`, which its Pester suites produce from recorded cmdlet output and `crates/tenko-migrate/tests/mirror_service.rs` decodes, stores and diffs.
 
 | File | Content |
 |---|---|

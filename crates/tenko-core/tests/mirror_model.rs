@@ -398,25 +398,25 @@ fn fixture(active: bool) -> MirrorSnapshot {
         entries: vec![
             loss(
                 "Get-DhcpServerv4Policy",
-                "Name=Printers",
+                "192.0.2.0:Printers",
                 losses::POLICY,
                 "the policy `Printers` of scope 192.0.2.0 (enabled, vendor class `HP Printers`) is not carried; policies go to the loss report",
             ),
             loss(
                 "Get-DhcpServerv4Filter",
-                "MacAddress=00-00-5E-00-53-F0",
+                "filter:00-00-5E-00-53",
                 losses::FILTER,
-                "the deny filter for `00-00-5E-00-53-F0` (`Rogue AP`) is not carried; filters go to the loss report",
+                "the deny list entry `00-00-5E-00-53` is not a MAC address pattern Tenko can match and is not carried: Tenko would serve the client the server refuses",
             ),
             loss(
                 "Get-DhcpServerv4Superscope",
-                "SuperscopeName=Campus",
+                "superscope:Campus",
                 losses::SUPERSCOPE,
                 "the superscope `Campus` over 192.0.2.0 is not carried; superscopes go to the loss report",
             ),
             loss(
                 "Get-DhcpServerv4Lease",
-                "IPAddress=192.0.2.198",
+                "192.0.2.198",
                 losses::LEASE_STATE,
                 "the lease of 192.0.2.198 is in the state `Offered`, which the mirror does not carry",
             ),
@@ -613,7 +613,7 @@ fn the_fixture_holds_every_way_of_naming_and_every_identity_kind() {
     );
     assert_eq!(
         snapshot.losses.entries[0].key(),
-        "Get-DhcpServerv4Policy, column Name=Printers|migrate.loss.policy"
+        "Get-DhcpServerv4Policy, column 192.0.2.0:Printers|migrate.loss.policy"
     );
 }
 

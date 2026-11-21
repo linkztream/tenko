@@ -374,7 +374,7 @@
       </unit>
       <unit id="migrate.settings.values_help">
         <notes><note category="description">Explains where the values go and how to check the fingerprint.</note></notes>
-        <segment><source>Type these values into the install command of the exporter's README on the DHCP server. Compare the fingerprint with the one the Tenko node printed when it started (its console and its log), not only with this page.</source></segment>
+        <segment><source>Type these values into the install command of the exporter's README on the DHCP server. Compare the fingerprint with the one the Tenko node's own console shows (the exporter's README says how), not only with this page.</source></segment>
       </unit>
       <unit id="migrate.settings.url">
         <notes><note category="description">Label of the controller's address the exporter pushes to.</note></notes>

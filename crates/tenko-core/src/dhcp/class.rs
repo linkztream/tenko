@@ -438,6 +438,17 @@ pub enum FilterKind {
     Deny,
 }
 
+impl FilterKind {
+    /// The name the API writes (`allow`, `deny`).
+    // copy-lint: allow name-ladder two names; the code-list macro is planned and not yet built
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+        }
+    }
+}
+
 /// A server-wide MAC filter entry (`dhcp.filters`, DHCP-08).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Filter {

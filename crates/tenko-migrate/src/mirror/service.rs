@@ -205,6 +205,13 @@ impl Summary {
             .with_context("hash", to_hex(hash))
     }
 
+    /// The record `migrate.mirror.update` of a mirror bound to the server this push names.
+    fn bound(&self, ctx: &RequestCtx, id: MirrorId) -> AuditDraft {
+        AuditDraft::success(audit::MIRROR_UPDATE, vec![mirror_object(id)])
+            .with_source_ip(ctx.source_ip)
+            .with_context("server", self.source.server.clone())
+    }
+
     /// The entries no acknowledgment holds for, within `scope` when given (an entry without
     /// a scope counts for every scope).
     fn open(&self, acks: &BTreeMap<String, LossAck>, scope: Option<IpNet>) -> u32 {
@@ -265,29 +272,32 @@ fn entry_hash(entry: &LossEntry) -> Result<Vec<u8>, MirrorError> {
     Ok(canonical_sha256(entry)?.to_vec())
 }
 
-/// The scope a loss entry belongs to: the scope holding the first address its location's
-/// column names, as the exporter writes it (`192.0.2.198`, `192.0.2.0:81` for an option of
-/// a scope) or as `Key=address` (`ScopeId=192.0.2.0`); none when it names none, and such an
-/// entry belongs to every scope.
+/// The scope a loss entry belongs to: the scope holding the address the first comma part
+/// of its location's column starts with, alone or followed by `:<key>` (`192.0.2.198`,
+/// `192.0.2.0:81` for an option of a scope); none otherwise, and such an entry belongs to
+/// every scope. A column of the whole server starts with its kind (`superscope:`,
+/// `failover:`, `policy:`, `server:`), never an address, so that a name that looks like a
+/// network places nothing.
 pub(crate) fn entry_scope(entry: &LossEntry, scopes: &[MirroredScope]) -> Option<IpNet> {
-    let column = entry.location.column.as_deref()?;
-    column
-        .split(',')
-        .filter_map(|part| {
-            let value = part.split_once('=').map_or(part, |(_, value)| value).trim();
-            value.parse::<IpAddr>().ok().or_else(|| {
-                // An address followed by `:<code>`; an IPv6 address takes the last colon.
-                [value.split_once(':'), value.rsplit_once(':')]
-                    .into_iter()
-                    .find_map(|split| split?.0.parse().ok())
-            })
-        })
-        .find_map(|ip| {
-            scopes
-                .iter()
-                .find(|scope| scope.cidr.contains(&ip))
-                .map(|scope| scope.cidr)
-        })
+    let first = entry.location.column.as_deref()?.split(',').next()?.trim();
+    // shortcut: an IPv6 scope with a `:<key>` suffix reads as one address; the exporter is
+    // DHCPv4 only, a DHCPv6 source needs a separator of its own.
+    let ip: IpAddr = first
+        .parse()
+        .ok()
+        .or_else(|| first.split_once(':')?.0.parse().ok())?;
+    scopes
+        .iter()
+        .find(|scope| scope.cidr.contains(&ip))
+        .map(|scope| scope.cidr)
+}
+
+/// The answer to a read that waited [`DECODE_WAIT_SECS`] for the node's one read of a stored
+/// snapshot.
+fn busy() -> MirrorError {
+    MirrorError::Busy {
+        retry_after: DECODE_WAIT_SECS,
+    }
 }
 
 /// Binds the mirror to the server a push names when it is bound to none, and says so; a
@@ -376,6 +386,23 @@ pub struct MirrorService {
     memory: Mutex<HashMap<MirrorId, Memory>>,
     clock: Arc<dyn Clock>,
     decoding: tokio::sync::Semaphore,
+    /// The node's one decode of a stored snapshot ([`MirrorService::reading`]).
+    reading: tokio::sync::Semaphore,
+}
+
+/// A stored snapshot with the node's one read of a stored snapshot, held until this is
+/// dropped, so that the caller serializes it before the next read decodes one.
+pub struct Held<'a> {
+    _reading: tokio::sync::SemaphorePermit<'a>,
+    snapshot: Snapshot,
+}
+
+impl std::ops::Deref for Held<'_> {
+    type Target = Snapshot;
+
+    fn deref(&self) -> &Snapshot {
+        &self.snapshot
+    }
 }
 
 impl std::fmt::Debug for MirrorService {
@@ -399,6 +426,7 @@ impl MirrorService {
             memory: Mutex::new(HashMap::new()),
             clock: Arc::new(SystemClock),
             decoding: tokio::sync::Semaphore::new(1),
+            reading: tokio::sync::Semaphore::new(1),
         }
     }
 
@@ -466,8 +494,10 @@ impl MirrorService {
     }
 
     /// The summary of the mirror's stored snapshot, if it has one: from memory when this
-    /// controller wrote it or read it last.
-    fn summary(
+    /// controller wrote it or read it last, else decoded under the node's one read of a
+    /// stored snapshot. It waits for that read without a bound, since the findings and the
+    /// cards need it, and finds the summary of a read it waited for in memory.
+    async fn summary(
         &self,
         view: &dyn ReadView,
         mirror: &Mirror,
@@ -475,12 +505,17 @@ impl MirrorService {
         let Some(stored_at) = mirror.stored_at else {
             return Ok(None);
         };
-        if let Some(summary) = self
-            .memory()
-            .get(&mirror.id)
-            .and_then(|memory| memory.summary.clone())
-            .filter(|summary| summary.stored_at == stored_at)
-        {
+        let cached = || {
+            self.memory()
+                .get(&mirror.id)
+                .and_then(|memory| memory.summary.clone())
+                .filter(|summary| summary.stored_at == stored_at)
+        };
+        if let Some(summary) = cached() {
+            return Ok(Some(summary));
+        }
+        let _reading = self.reading.acquire().await.map_err(|_| busy())?;
+        if let Some(summary) = cached() {
             return Ok(Some(summary));
         }
         match view.get_typed(&tables::SNAPSHOTS, &mirror.id)? {
@@ -504,10 +539,10 @@ impl MirrorService {
             .collect())
     }
 
-    fn item(&self, view: &dyn ReadView, mirror: Mirror) -> Result<MirrorItem, MirrorError> {
+    async fn item(&self, view: &dyn ReadView, mirror: Mirror) -> Result<MirrorItem, MirrorError> {
         let now = self.now();
         let mirror = self.fresh(mirror);
-        let summary = self.summary(view, &mirror)?;
+        let summary = self.summary(view, &mirror).await?;
         let losses_open = match &summary {
             Some(summary) => summary.open(&Self::acks(view, mirror.id)?, None),
             None => 0,
@@ -540,10 +575,11 @@ impl MirrorService {
     /// A store error.
     pub async fn list(&self) -> Result<Vec<MirrorItem>, MirrorError> {
         let view = self.view().await?;
-        Self::rows(view.as_ref())?
-            .into_iter()
-            .map(|mirror| self.item(view.as_ref(), mirror))
-            .collect()
+        let mut items = Vec::new();
+        for mirror in Self::rows(view.as_ref())? {
+            items.push(self.item(view.as_ref(), mirror).await?);
+        }
+        Ok(items)
     }
 
     /// One mirror.
@@ -554,7 +590,7 @@ impl MirrorService {
     pub async fn get(&self, id: MirrorId) -> Result<MirrorItem, MirrorError> {
         let view = self.view().await?;
         let (mirror, _) = Self::row(view.as_ref(), id)?;
-        self.item(view.as_ref(), mirror)
+        self.item(view.as_ref(), mirror).await
     }
 
     fn hardened(&self) -> bool {
@@ -694,7 +730,7 @@ impl MirrorService {
                 Err(error) if is_conflict(&error) => continue,
                 result => result?,
             }
-            let item = self.item(self.view().await?.as_ref(), mirror)?;
+            let item = self.item(self.view().await?.as_ref(), mirror).await?;
             return Ok((
                 MirrorItem {
                     token_expires_at: credentials.token.info.expires_at,
@@ -838,7 +874,7 @@ impl MirrorService {
         if !mirror.enabled {
             self.drop_newest(id);
         }
-        self.item(self.view().await?.as_ref(), mirror)
+        self.item(self.view().await?.as_ref(), mirror).await
     }
 
     /// Drops the newest leases this controller holds for `id`.
@@ -856,6 +892,12 @@ impl MirrorService {
     /// [`MirrorError::NotFound`], [`MirrorError::Conflict`], a store error.
     pub async fn delete(&self, ctx: &RequestCtx, id: MirrorId) -> Result<(), MirrorError> {
         self.rewrite(ctx, id, |view, mirror, batch| {
+            let mut draft = AuditDraft::success(audit::MIRROR_DELETE, vec![mirror_object(id)])
+                .with_source_ip(ctx.source_ip)
+                .with_context("name", mirror.name.clone());
+            if let Some(partner) = mirror.partner {
+                draft = draft.with_context("partner", partner.to_string());
+            }
             // The partner's row forgets the pair in the same batch.
             Self::pair(
                 view,
@@ -871,11 +913,7 @@ impl MirrorService {
             }
             self.auth
                 .stage_mirror_account_removal(ctx, view, batch, mirror.account)?;
-            batch.audit(
-                AuditDraft::success(audit::MIRROR_DELETE, vec![mirror_object(id)])
-                    .with_source_ip(ctx.source_ip)
-                    .with_context("name", mirror.name.clone()),
-            );
+            batch.audit(draft);
             Ok(())
         })
         .await?;
@@ -939,7 +977,7 @@ impl MirrorService {
         let (mirror, token) = written.ok_or(MirrorError::Conflict(id))?;
         // Nothing reads the old token's leases any more.
         self.drop_newest(id);
-        let item = self.item(self.view().await?.as_ref(), mirror)?;
+        let item = self.item(self.view().await?.as_ref(), mirror).await?;
         Ok((
             MirrorItem {
                 token_expires_at: token.info.expires_at,
@@ -1080,6 +1118,9 @@ impl MirrorService {
                     mirror.last_change = Some(now);
                     batch.audit(summary.audited(ctx, id, &hash));
                 }
+                if bind {
+                    batch.audit(summary.bound(ctx, id));
+                }
                 if stored {
                     mirror.last_hash = Some(HexBytes(hash.clone()));
                     mirror.leases_hash = Some(HexBytes(leases_hash.clone()));
@@ -1163,32 +1204,66 @@ impl MirrorService {
         }
         let mut batch = WriteBatch::for_request(ctx);
         batch.idempotency = None;
-        batch.audit(
-            AuditDraft::failed(audit::MIRROR_REFUSE, vec![mirror_object(id)], error)
-                .with_source_ip(ctx.source_ip)
-                .with_context("code", tenko_core::Coded::code(error)),
-        );
+        let mut draft = AuditDraft::failed(audit::MIRROR_REFUSE, vec![mirror_object(id)], error)
+            .with_source_ip(ctx.source_ip)
+            .with_context("code", tenko_core::Coded::code(error));
+        // The record names the bound server, which the answer does not.
+        if let MirrorError::Source { bound, server, .. } = error {
+            draft = draft
+                .with_context("bound", bound.clone())
+                .with_context("server", server.clone());
+        }
+        batch.audit(draft);
         if let Err(store_error) = self.store.propose(batch).await {
             tracing::warn!(error = %store_error, mirror = %id, "could not record a refused push");
         }
     }
 
-    async fn stored(&self, id: MirrorId) -> Result<(Arc<dyn ReadView>, Snapshot), MirrorError> {
-        let view = self.view().await?;
-        Self::row(view.as_ref(), id)?;
-        let (snapshot, _) = view
-            .get_typed(&tables::SNAPSHOTS, &id)?
-            .ok_or(MirrorError::NoSnapshot(id))?;
-        Ok((view, snapshot))
-    }
-
-    /// The latest snapshot as stored.
+    /// The node's one read of a stored snapshot, for the reads a person makes (the snapshot,
+    /// the losses, their acknowledgment and the diff), taken for at most [`DECODE_WAIT_SECS`]
+    /// and held until the read's answer is made, so that their decodes take
+    /// [`super::body::STORED_READ_BOUND`] of a node at most however many arrive.
     ///
     /// # Errors
     ///
-    /// [`MirrorError::NotFound`], [`MirrorError::NoSnapshot`], a store error.
-    pub async fn snapshot(&self, id: MirrorId) -> Result<Snapshot, MirrorError> {
-        Ok(self.stored(id).await?.1)
+    /// [`MirrorError::Busy`] when another read held it that long.
+    async fn reading(&self) -> Result<tokio::sync::SemaphorePermit<'_>, MirrorError> {
+        tokio::time::timeout(
+            Duration::from_secs(DECODE_WAIT_SECS),
+            self.reading.acquire(),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .ok_or_else(busy)
+    }
+
+    /// The mirror's row and its stored snapshot with the snapshot's revision, decoded once.
+    fn stored_in(
+        view: &dyn ReadView,
+        id: MirrorId,
+    ) -> Result<(Mirror, Snapshot, Revision), MirrorError> {
+        let (mirror, _) = Self::row(view, id)?;
+        let (snapshot, revision) = view
+            .get_typed(&tables::SNAPSHOTS, &id)?
+            .ok_or(MirrorError::NoSnapshot(id))?;
+        Ok((mirror, snapshot, revision))
+    }
+
+    /// The latest snapshot as stored, with the node's one read of a stored snapshot held
+    /// until the answer is dropped.
+    ///
+    /// # Errors
+    ///
+    /// [`MirrorError::NotFound`], [`MirrorError::NoSnapshot`], [`MirrorError::Busy`], a
+    /// store error.
+    pub async fn snapshot(&self, id: MirrorId) -> Result<Held<'_>, MirrorError> {
+        let reading = self.reading().await?;
+        let (_, snapshot, _) = Self::stored_in(self.view().await?.as_ref(), id)?;
+        Ok(Held {
+            _reading: reading,
+            snapshot,
+        })
     }
 
     /// The loss report of the latest snapshot with the acknowledgments that hold.
@@ -1197,7 +1272,9 @@ impl MirrorService {
     ///
     /// As [`MirrorService::snapshot`].
     pub async fn losses(&self, id: MirrorId) -> Result<MirrorLosses, MirrorError> {
-        let (view, snapshot) = self.stored(id).await?;
+        let _reading = self.reading().await?;
+        let view = self.view().await?;
+        let (_, snapshot, _) = Self::stored_in(view.as_ref(), id)?;
         let acks = Self::acks(view.as_ref(), id)?;
         let summary = self.summary_of(&snapshot)?;
         let entries = snapshot
@@ -1243,7 +1320,9 @@ impl MirrorService {
             .principal
             .user()
             .ok_or(MirrorError::Auth(AuthError::Unauthenticated))?;
-        let (view, snapshot) = self.stored(id).await?;
+        let _reading = self.reading().await?;
+        let view = self.view().await?;
+        let (_, snapshot, revision) = Self::stored_in(view.as_ref(), id)?;
         if snapshot.sequence != sequence {
             return Err(MirrorError::SnapshotMoved {
                 sequence,
@@ -1275,12 +1354,7 @@ impl MirrorService {
             );
         }
         let mut batch = WriteBatch::for_request(ctx);
-        batch.expect_typed(
-            &tables::SNAPSHOTS,
-            &id,
-            view.get_typed(&tables::SNAPSHOTS, &id)?
-                .map(|(_, revision)| revision),
-        );
+        batch.expect_typed(&tables::SNAPSHOTS, &id, Some(revision));
         for key in Self::acks(view.as_ref(), id)?.into_keys() {
             if !summary.losses.iter().any(|(known, ..)| *known == key) {
                 batch.delete_typed(&tables::LOSS_ACKS, &(id, key));
@@ -1299,7 +1373,8 @@ impl MirrorService {
             Ok(committed) => committed.revision,
             // A push changed the snapshot between the read and the commit.
             Err(StoreError::PreconditionFailed(_)) => {
-                let latest = self.stored(id).await?.1.sequence;
+                drop(snapshot);
+                let latest = Self::stored_in(self.view().await?.as_ref(), id)?.1.sequence;
                 return Err(MirrorError::SnapshotMoved { sequence, latest });
             }
             Err(error) => return Err(error.into()),
@@ -1313,11 +1388,14 @@ impl MirrorService {
     ///
     /// As [`MirrorService::snapshot`], and [`MirrorError::ScopeNotFound`].
     pub async fn diff(&self, id: MirrorId, scope: IpNet) -> Result<ScopeDiff, MirrorError> {
-        let (view, snapshot) = self.stored(id).await?;
+        // One read holds both snapshots of a pair.
+        let _reading = self.reading().await?;
+        let view = self.view().await?;
+        let (mirror, snapshot, _) = Self::stored_in(view.as_ref(), id)?;
         let open = self
             .summary_of(&snapshot)?
             .open(&Self::acks(view.as_ref(), id)?, Some(scope));
-        let partner = match Self::row(view.as_ref(), id)?.0.partner {
+        let partner = match mirror.partner {
             Some(partner) => Some((
                 partner,
                 view.get_typed(&tables::SNAPSHOTS, &partner)?
@@ -1325,17 +1403,14 @@ impl MirrorService {
             )),
             None => None,
         };
-        let partner = partner
-            .as_ref()
-            .map(|(partner, snapshot)| (*partner, snapshot.as_ref()));
         super::diff::diff(view.as_ref(), &snapshot, scope, open, partner)
     }
 
-    /// The health findings of the mirrors (plan section 2.12): stale mirrors (an error once a
-    /// scope of the mirror or of its partner is taken over), tokens that expire within
-    /// [`TOKEN_EXPIRING_DAYS`] days, taken-over scopes the source serves again (on either
-    /// mirror of a pair), and under Hardened the enabled mirrors whose token has no source
-    /// prefix.
+    /// The health findings of the mirrors (plan sections 2.12 and 2.17): stale mirrors (none
+    /// once a takeover of the mirror or of its partner silenced their servers), tokens that
+    /// expire within [`TOKEN_EXPIRING_DAYS`] days, a push of either mirror of a pair accepted
+    /// after such a takeover's silence (`Takeover::at` of a `Done` record), and under
+    /// Hardened the enabled mirrors whose token has no source prefix.
     ///
     /// # Errors
     ///
@@ -1343,16 +1418,17 @@ impl MirrorService {
     pub async fn findings(&self) -> Result<Vec<Finding>, MirrorError> {
         let now = self.now();
         let view = self.view().await?;
-        // A scope taken over from a pair is taken over from both of its mirrors.
-        let takeovers: Vec<(MirrorId, IpNet)> = view
+        // The silence of each completed takeover, by the mirrors it was taken from: a scope
+        // taken over from a pair silenced both of its servers.
+        let silenced: Vec<(MirrorId, Timestamp)> = view
             .scan_typed(&tables::TAKEOVERS, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .filter(|(_, takeover, _)| takeover.state == TakeoverState::Done)
             .flat_map(|(_, takeover, _)| {
                 let partner = takeover
                     .partner
-                    .map(|partner| (partner.mirror, takeover.scope));
-                std::iter::once((takeover.mirror, takeover.scope)).chain(partner)
+                    .map(|partner| (partner.mirror, takeover.at));
+                std::iter::once((takeover.mirror, takeover.at)).chain(partner)
             })
             .collect();
         let mut found: BTreeMap<&'static str, Vec<(MirrorId, String)>> = BTreeMap::new();
@@ -1361,23 +1437,20 @@ impl MirrorService {
         for mirror in Self::rows(view.as_ref())? {
             let mirror = self.fresh(mirror);
             // Its own takeovers and its partner's: either mirror of a pair answers for both.
-            let taken_over: Vec<IpNet> = takeovers
+            let silence = silenced
                 .iter()
                 .filter(|(of, _)| *of == mirror.id || Some(*of) == mirror.partner)
-                .map(|(_, scope)| *scope)
-                .collect();
+                .map(|(_, at)| *at)
+                .min();
             let mut raise = |code| {
                 found
                     .entry(code)
                     .or_default()
                     .push((mirror.id, mirror.name.clone()));
             };
-            if mirror.is_stale(now) {
-                raise(if taken_over.is_empty() {
-                    findings::MIRROR_STALE
-                } else {
-                    findings::MIRROR_STALE_AFTER_TAKEOVER
-                });
+            // After a takeover the servers are silent and a stale mirror is expected.
+            if mirror.is_stale(now) && silence.is_none() {
+                raise(findings::MIRROR_STALE);
             }
             let token = AuthService::scoped_token(view.as_ref(), mirror.account, mirror.token)?;
             if token
@@ -1393,12 +1466,8 @@ impl MirrorService {
             {
                 raise(findings::MIRROR_UNBOUND);
             }
-            if let Some(summary) = self.summary(view.as_ref(), &mirror)?
-                && summary
-                    .scopes
-                    .iter()
-                    .any(|mirrored| mirrored.active && taken_over.contains(&mirrored.cidr))
-            {
+            // A push accepted after the silence: a server answers again, whatever its scopes say.
+            if silence.is_some_and(|at| mirror.last_push.is_some_and(|push| push > at)) {
                 raise(findings::MIRROR_SCOPE_ACTIVE);
             }
         }

@@ -1417,7 +1417,7 @@
       {
         "location": {
           "sheet": "Get-DhcpServerv4Policy",
-          "column": "Name=Printers"
+          "column": "192.0.2.0:Printers"
         },
         "code": "migrate.loss.policy",
         "detail": "the policy `Printers` of scope 192.0.2.0 (enabled, vendor class `HP Printers`) is not carried; policies go to the loss report"
@@ -1425,15 +1425,15 @@
       {
         "location": {
           "sheet": "Get-DhcpServerv4Filter",
-          "column": "MacAddress=00-00-5E-00-53-F0"
+          "column": "filter:00-00-5E-00-53"
         },
         "code": "migrate.loss.filter",
-        "detail": "the deny filter for `00-00-5E-00-53-F0` (`Rogue AP`) is not carried; filters go to the loss report"
+        "detail": "the deny list entry `00-00-5E-00-53` is not a MAC address pattern Tenko can match and is not carried: Tenko would serve the client the server refuses"
       },
       {
         "location": {
           "sheet": "Get-DhcpServerv4Superscope",
-          "column": "SuperscopeName=Campus"
+          "column": "superscope:Campus"
         },
         "code": "migrate.loss.superscope",
         "detail": "the superscope `Campus` over 192.0.2.0 is not carried; superscopes go to the loss report"
@@ -1441,7 +1441,7 @@
       {
         "location": {
           "sheet": "Get-DhcpServerv4Lease",
-          "column": "IPAddress=192.0.2.198"
+          "column": "192.0.2.198"
         },
         "code": "migrate.loss.lease_state",
         "detail": "the lease of 192.0.2.198 is in the state `Offered`, which the mirror does not carry"

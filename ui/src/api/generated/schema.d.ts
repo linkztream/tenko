@@ -44609,6 +44609,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     ack_mirror_losses: {
@@ -44681,6 +44690,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     get_mirror_scope_diff: {
@@ -44735,6 +44753,15 @@ export interface operations {
             };
             /** @description No such mirror, no push yet, or the snapshot holds no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`) */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -45031,6 +45058,15 @@ export interface operations {
             };
             /** @description No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`) */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

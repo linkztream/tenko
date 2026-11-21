@@ -297,6 +297,7 @@ async fn changed_leases_alone_are_written_every_ten_minutes_without_an_audit_rec
         (stored.sequence, stored.envelope.dhcp.leases.len()),
         (4, 57)
     );
+    let stored = stored.received;
     assert_eq!(
         lab.audit("migrate.mirror.push").await,
         1,
@@ -305,7 +306,7 @@ async fn changed_leases_alone_are_written_every_ten_minutes_without_an_audit_rec
     let item = lab.service.get(lab.id).await.expect("item");
     assert_eq!(
         (item.stored_sequence, item.mirror.stored_at),
-        (Some(4), Some(stored.received))
+        (Some(4), Some(stored))
     );
     assert_eq!(item.counts.map(|counts| counts.leases), Some(57));
 }
@@ -475,8 +476,9 @@ async fn losses_are_acknowledged_as_read_until_they_change() {
         .expect("the lease entry");
     assert_eq!(lease.scope, Some("192.0.2.0/24".parse().expect("net")));
     assert_eq!(
-        losses.entries[0].scope, None,
-        "a policy named by its name holds for every scope"
+        (losses.entries[0].scope, losses.entries[2].scope),
+        (Some("192.0.2.0/24".parse().expect("net")), None),
+        "a scope's policy is placed by its column, a superscope holds for every scope"
     );
 
     let unknown = lab
@@ -593,11 +595,42 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
     lab.push(181, fixture(2)).await.expect("again");
     assert!(!lab.service.get(lab.id).await.expect("item").stale);
 
-    // A scope taken over that the source serves again.
+    // The token expires in thirty days: the finding comes fourteen days ahead.
+    let later = 17 * 86_400;
+    lab.push(later, fixture(3)).await.expect("fresh");
+    assert_eq!(
+        codes(lab.service.findings().await.expect("findings")),
+        ["migrate.mirror.token_expiring"]
+    );
+
+    // A takeover silenced the source now: the active scope it pushed before raises nothing,
+    // and a stale mirror is then the expected state.
+    put_takeover(&lab, lab.id, None).await;
+    lab.at(later + 181);
+    assert!(lab.service.get(lab.id).await.expect("item").stale);
+    assert_eq!(
+        codes(lab.service.findings().await.expect("findings")),
+        ["migrate.mirror.token_expiring"]
+    );
+    // A push accepted after the silence: a server answers again, whatever its scopes say.
+    lab.push(later + 200, inactive(4))
+        .await
+        .expect("after the silence");
+    assert_eq!(
+        codes(lab.service.findings().await.expect("findings")),
+        [
+            "migrate.mirror.scope_active",
+            "migrate.mirror.token_expiring"
+        ]
+    );
+}
+
+/// Records a completed takeover of `mirror` (with its partner) silenced at the lab's now.
+async fn put_takeover(lab: &Lab, mirror: MirrorId, partner: Option<MirrorId>) {
     let mut batch = WriteBatch::for_request(&lab.admin);
     let takeover = Takeover {
         id: TakeoverId::generate(),
-        mirror: lab.id,
+        mirror,
         scope: "192.0.2.0/24".parse().expect("net"),
         sequence: 2,
         state: TakeoverState::Done,
@@ -607,7 +640,11 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
         frozen_names: Vec::new(),
         skipped: Vec::new(),
         before: Vec::new(),
-        partner: None,
+        partner: partner.map(|partner| tenko_core::migrate::TakeoverPartner {
+            mirror: partner,
+            sequence: 1,
+            leases_hash: tenko_core::serde_util::HexBytes(vec![0; 32]),
+        }),
         job: JobId::generate(),
         at: lab.env.now(),
         by: UserId::generate(),
@@ -616,22 +653,6 @@ async fn findings_follow_the_freshness_the_token_and_the_takeovers() {
         .put_typed(&tables::TAKEOVERS, &takeover.id, &takeover)
         .expect("row");
     lab.env.store.propose(batch).await.expect("committed");
-    assert_eq!(
-        codes(lab.service.findings().await.expect("findings")),
-        ["migrate.mirror.scope_active"]
-    );
-    lab.push(191, inactive(3)).await.expect("inactive");
-    assert_eq!(
-        codes(lab.service.findings().await.expect("findings")),
-        [] as [&str; 0]
-    );
-
-    // The token expires in thirty days: the finding comes fourteen days ahead.
-    lab.push(17 * 86_400, inactive(4)).await.expect("fresh");
-    assert_eq!(
-        codes(lab.service.findings().await.expect("findings")),
-        ["migrate.mirror.token_expiring"]
-    );
 }
 
 // ---------------------------------------------------------------------------------------
@@ -680,9 +701,38 @@ fn pair(partner: Option<MirrorId>) -> MirrorPatch {
 /// both sides, so that the two cannot read the contract differently unnoticed.
 #[tokio::test]
 async fn the_exporters_snapshots_carry_the_servers_codes_and_place_every_entry() {
+    // Whole-server entries whose names look like a network or hold a comma: never placed.
+    let whole_server = [
+        (
+            "Get-DhcpServerv4Superscope",
+            "superscope:192.0.2.0,198.51.100.0",
+            losses::SUPERSCOPE,
+        ),
+        (
+            "Get-DhcpServerv4Failover",
+            "failover:192.0.2.0",
+            losses::FAILOVER,
+        ),
+        (
+            "Get-DhcpServerv4Policy",
+            "policy:192.0.2.0/24",
+            losses::POLICY,
+        ),
+    ];
     for (name, text) in [("corp", EXPORTER_CORP), ("lab", EXPORTER_LAB)] {
         let lab = Lab::new().await;
-        let snapshot = body::decode(text.as_bytes(), false).expect(name);
+        let mut snapshot = body::decode(text.as_bytes(), false).expect(name);
+        for (sheet, column, code) in whole_server {
+            snapshot.losses.entries.push(tenko_core::ir::LossEntry {
+                location: tenko_core::ir::SourceLocation {
+                    sheet: Some(sheet.to_owned()),
+                    row: None,
+                    column: Some(column.to_owned()),
+                },
+                code: std::borrow::Cow::Borrowed(code),
+                detail: "a name that looks like a network".to_owned(),
+            });
+        }
         lab.push(0, snapshot).await.expect(name);
         let report = lab.service.losses(lab.id).await.expect("losses");
         assert!(!report.entries.is_empty(), "{name}");
@@ -694,15 +744,20 @@ async fn the_exporters_snapshots_carry_the_servers_codes_and_place_every_entry()
                 entry.code
             );
             let column = entry.location.column.as_deref().unwrap_or_default();
-            let names_an_address = column
-                .split([',', '=', ':'])
-                .any(|part| part.trim().parse::<std::net::IpAddr>().is_ok());
+            // The rule: the first comma part is an address, alone or before `:<key>`.
+            let first = column.split(',').next().unwrap_or_default().trim();
+            let address = |text: &str| text.parse::<std::net::IpAddr>().is_ok();
+            let names_an_address =
+                address(first) || first.split_once(':').is_some_and(|(head, _)| address(head));
             assert_eq!(
                 item.scope.is_some(),
                 names_an_address,
-                "{name}: the entry at `{column}` ({}) is placed in its scope exactly when it names an address",
+                "{name}: the entry at `{column}` ({}) is placed in its scope exactly when its column starts with an address",
                 entry.code
             );
+            if whole_server.iter().any(|(_, whole, _)| *whole == column) {
+                assert_eq!(item.scope, None, "{name}: `{column}` holds for every scope");
+            }
         }
     }
 }
@@ -827,23 +882,42 @@ async fn a_mirror_is_bound_to_the_server_of_its_first_push_until_its_token_is_re
     let mut other = body::decode(PARTNER.as_bytes(), false).expect("partner");
     other.sequence = 3;
     let refused = lab.push(20, other).await.expect_err("another server");
+    // The answer does not tell a token holder which server the mirror is bound to.
     assert_eq!(
         (
             refused.code(),
             refused.http_status(),
-            refused.params()["bound"].as_str(),
             refused.params()["server"].as_str()
         ),
-        (
-            "migrate.mirror.source",
-            409,
-            "dc1.corp.example.test",
-            "dc2.corp.example.test"
-        )
+        ("migrate.mirror.source", 409, "dc2.corp.example.test")
     );
-    // The route writes the refusal to the audit log as it does for every refused push.
+    assert!(!refused.params().contains_key("bound") && !refused.to_string().contains("dc1"));
+    // The route writes the refusal to the audit log as it does for every refused push; the
+    // record names both servers, as the record of the binding names the bound one.
     lab.service.refused(&lab.pusher, lab.id, &refused).await;
-    assert_eq!(lab.audit("migrate.mirror.refuse").await, 1);
+    let view = lab
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let context = |action: &str| {
+        view.scan_typed(&store_tables::AUDIT, KeyRange::all(), 100_000, false)
+            .expect("audit")
+            .into_iter()
+            .filter(|(_, record, _)| record.draft.action.as_str() == action)
+            .map(|(_, record, _)| record.draft.details.context)
+            .collect::<Vec<_>>()
+    };
+    let refusal = context("migrate.mirror.refuse");
+    assert_eq!(
+        (refusal[0]["bound"].as_str(), refusal[0]["server"].as_str()),
+        ("dc1.corp.example.test", "dc2.corp.example.test")
+    );
+    assert_eq!(
+        context("migrate.mirror.update")[0]["server"],
+        "dc1.corp.example.test"
+    );
     assert_eq!(lab.service.snapshot(lab.id).await.expect("row").sequence, 2);
 
     // A new token binds anew, with its first push even when the snapshot is unchanged.
@@ -991,7 +1065,7 @@ async fn the_diff_of_the_fixture_pair_shows_exactly_the_fixtures_differences() {
 }
 
 #[tokio::test]
-async fn either_mirror_of_a_pair_answers_for_a_scope_taken_over_from_the_pair() {
+async fn either_mirror_of_a_pair_raises_a_push_after_the_takeovers_silence() {
     let lab = Lab::new().await;
     let (dc2, dc2_pusher) = another(&lab, "dc2").await;
     lab.service
@@ -1011,42 +1085,22 @@ async fn either_mirror_of_a_pair_answers_for_a_scope_taken_over_from_the_pair() 
     };
     assert_eq!(codes(lab.service.findings().await.expect("findings")), []);
 
-    // The takeover is recorded on dc1; dc2 still serves the scope.
-    let mut batch = WriteBatch::for_request(&lab.admin);
-    let takeover = Takeover {
-        id: TakeoverId::generate(),
-        mirror: lab.id,
-        scope: "192.0.2.0/24".parse().expect("net"),
-        sequence: 1,
-        state: TakeoverState::Done,
-        counts: tenko_core::migrate::TakeoverCounts::default(),
-        adopted_leases: Vec::new(),
-        adopted_names: Vec::new(),
-        frozen_names: Vec::new(),
-        skipped: Vec::new(),
-        before: Vec::new(),
-        partner: None,
-        job: JobId::generate(),
-        at: lab.env.now(),
-        by: UserId::generate(),
-    };
-    batch
-        .put_typed(&tables::TAKEOVERS, &takeover.id, &takeover)
-        .expect("row");
-    lab.env.store.propose(batch).await.expect("committed");
+    // The takeover is recorded on dc1 alone: both servers are silent, and the scopes both
+    // pushed before raise nothing; both go stale as expected.
+    lab.at(10);
+    put_takeover(&lab, lab.id, None).await;
+    lab.at(10 + 181);
+    assert_eq!(codes(lab.service.findings().await.expect("findings")), []);
+
+    // dc2 pushes again after the silence: someone started its service again.
+    let mut again = body::decode(PARTNER.as_bytes(), false).expect("the partner fixture");
+    again.sequence = 2;
+    push_as(&lab, dc2, &dc2_pusher, again)
+        .await
+        .expect("dc2 again");
     let found = lab.service.findings().await.expect("findings");
     assert_eq!(codes(found.clone()), [("migrate.mirror.scope_active", 1)]);
-    assert_eq!(found[0].mirrors[0].0, dc2, "the partner that serves it");
-
-    // Both go quiet: each is stale while the pair's scope is taken over, an error.
-    lab.at(181);
-    assert_eq!(
-        codes(lab.service.findings().await.expect("findings")),
-        [
-            ("migrate.mirror.scope_active", 1),
-            ("migrate.mirror.stale_after_takeover", 2)
-        ]
-    );
+    assert_eq!(found[0].mirrors[0].0, dc2, "the partner that answers");
 }
 
 #[tokio::test]
@@ -1624,6 +1678,48 @@ async fn one_push_of_a_mirror_is_in_flight_at_a_time() {
         .expect("another mirror is not held");
     drop(held);
     lab.service.admit(lab.id).await.expect("the push ended");
+}
+
+/// One read of a stored snapshot at a time on a node: while the snapshot read is held (its
+/// answer not yet made), every other read that decodes one waits 2 s and is refused, and a
+/// card whose summary is in memory needs no decode.
+#[tokio::test]
+async fn one_read_of_a_stored_snapshot_at_a_time() {
+    let lab = Lab::new().await;
+    lab.push(0, fixture(1)).await.expect("first");
+    let scope = "192.0.2.0/24".parse().expect("net");
+    let held = lab.service.snapshot(lab.id).await.expect("held");
+    let refused = lab.service.losses(lab.id).await.expect_err("busy");
+    assert_eq!(
+        (
+            refused.code(),
+            refused.http_status(),
+            refused.params()["retry_after"].as_str()
+        ),
+        ("migrate.mirror.busy", 429, "2")
+    );
+    assert_eq!(
+        lab.service
+            .diff(lab.id, scope)
+            .await
+            .expect_err("busy")
+            .code(),
+        "migrate.mirror.busy"
+    );
+    assert_eq!(
+        lab.service
+            .ack(&lab.admin, lab.id, 1, &["x".to_owned()])
+            .await
+            .expect_err("busy")
+            .code(),
+        "migrate.mirror.busy"
+    );
+    lab.service
+        .get(lab.id)
+        .await
+        .expect("the card's summary is in memory");
+    drop(held);
+    lab.service.losses(lab.id).await.expect("the read ended");
 }
 
 #[tokio::test]
