@@ -239,11 +239,6 @@ impl RelyingParty {
         &self.config
     }
 
-    /// Whether attestation trust anchors are configured.
-    pub fn has_trust_anchors(&self) -> bool {
-        !self.anchors.is_empty()
-    }
-
     /// Options for a registration ceremony. `user_handle` is the account's 16-byte user
     /// handle; `exclude` lists the account's existing credentials.
     pub fn creation_options(

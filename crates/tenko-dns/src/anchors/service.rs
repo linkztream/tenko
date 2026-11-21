@@ -229,11 +229,6 @@ impl AnchorService {
         &self.wiring
     }
 
-    /// What the last pass did.
-    pub fn last_pass(&self) -> PassReport {
-        *self.last.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-
     async fn propose(&self, mut batch: WriteBatch, epoch: Option<u64>) -> Result<(), String> {
         if let Some(epoch) = epoch {
             batch.preconditions.push(fence(epoch));

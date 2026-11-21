@@ -1221,20 +1221,6 @@ impl AuthService {
         Ok(())
     }
 
-    /// Re-reads a session record (tests and handlers that need the stored state).
-    ///
-    /// # Errors
-    ///
-    /// A store error.
-    pub async fn session_record(
-        &self,
-        user: UserId,
-        session: SessionId,
-    ) -> Result<Option<crate::model::SessionRecord>, AuthError> {
-        let view = self.view().await?;
-        Ok(Self::load_session(view.as_ref(), user, session)?.map(|(_, record)| record))
-    }
-
     /// Whether a session row exists for the hash (tests).
     #[doc(hidden)]
     pub async fn session_exists(&self, hash: &[u8]) -> Result<bool, AuthError> {

@@ -118,15 +118,6 @@ pub fn new_api_token() -> Result<BearerSecret, AuthError> {
     prefixed_secret(TOKEN_PREFIX)
 }
 
-/// A new constrained scoped token: `tnkc_` and 256 random bits, base64url.
-///
-/// # Errors
-///
-/// [`AuthError::Internal`] if the random source fails.
-pub fn new_constrained_token() -> Result<BearerSecret, AuthError> {
-    prefixed_secret(CONSTRAINED_PREFIX)
-}
-
 /// A new token of `form`: `tnk_`, `tnkc_` or `tnkb_` and 256 random bits, base64url.
 ///
 /// # Errors
