@@ -42,6 +42,7 @@
 #                  releases.json, after checking every earlier release of the previous manifest
 #                  against the SHA256SUMS its own release published (its texts are taken from
 #                  the changelog, never from the previous manifest); adds the installers, the
+#                  Windows takeover scripts and their archive (deploy/windows/takeover), the
 #                  Proxmox files pinned by tenko-proxmox.sh and the SBOMs to SHA256SUMS, and
 #                  hands the release files on as one artifact, so that the files attested are
 #                  the files published;
@@ -1203,6 +1204,20 @@ jobs:
           test "${#files[@]}" -eq 6
           (cd dist && sha256sum -- "${files[@]}" >> SHA256SUMS)
           sort -k 2 -o dist/SHA256SUMS dist/SHA256SUMS
+      # The Windows takeover (ADR 0038): Tenko-Takeover.ps1 with the exporter and its installer
+      # embedded, the two as loose files, and tenko-takeover-<version>.zip with the three and
+      # the README, listed in SHA256SUMS and so covered by the provenance of `attest`. The
+      # build refuses a script that is not ASCII with CRLF line ends, so that a copy pasted
+      # into a file has the digest the start line checks. They carry no Authenticode
+      # signature; `publish` refuses to publish without their lines in SHA256SUMS and the
+      # start line in the release notes.
+      - name: The Windows takeover scripts
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(pwsh -NoProfile -NonInteractive -File deploy/windows/takeover/build/New-TakeoverRelease.ps1 -Version "$VERSION" -OutDir dist)
+          test "${#files[@]}" -eq 4
+          (cd dist && sha256sum -- "${files[@]}" >> SHA256SUMS)
+          sort -k 2 -o dist/SHA256SUMS dist/SHA256SUMS
       # L1.9: the SBOMs as release assets, listed in SHA256SUMS like the installers and not in
       # releases.json (release-manifest.mjs ignores them: they are no asset of a platform).
       - name: The SBOMs
@@ -1447,6 +1462,19 @@ jobs:
           test "$(grep -c . dist/SHA256SUMS)" -eq "$(find dist -type f ! -name SHA256SUMS | wc -l)"
       - name: Release notes
         run: node scripts/release-manifest.mjs --version "$VERSION" --base-url "$DOWNLOAD_URL" --release-notes notes.md
+      - name: The Windows takeover's start line
+        # The start line and its fetching form, with the digest of the attested
+        # Tenko-Takeover.ps1 built in; nothing is published without them and without the
+        # takeover files' lines in SHA256SUMS (checked above against the digest `manifest`
+        # stated).
+        run: |
+          set -euo pipefail
+          for f in Tenko-Takeover.ps1 Tenko-DhcpMirror.ps1 Install-TenkoDhcpMirror.ps1 "tenko-takeover-${VERSION}.zip"; do
+            grep -q -E "^[0-9a-f]{64}  ${f//./\\.}\$" dist/SHA256SUMS || { echo "::error::${f} has no line in SHA256SUMS"; exit 1; }
+          done
+          pwsh -NoProfile -NonInteractive -File deploy/windows/takeover/build/New-TakeoverRelease.ps1 -Notes -Tag "$TAG" -Script dist/Tenko-Takeover.ps1 >> notes.md
+          digest="$(sha256sum dist/Tenko-Takeover.ps1 | cut -d' ' -f1)"
+          test "$(grep -c -i -F -e "-eq '${digest}'" notes.md)" -eq 2
       # skopeo is on the runner image; installed here only if it is not, in a step without the
       # token, so that no package script runs where the token is.
       - name: skopeo

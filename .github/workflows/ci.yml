@@ -944,6 +944,75 @@ jobs:
           & ./deploy/windows/mirror/tests/Invoke-Analysis.ps1
           exit $LASTEXITCODE
 
+  # The Windows takeover script (deploy/windows/takeover, ADR 0038): the Pester suites over a
+  # fake domain, a fake Tenko and a loopback TLS server, on Windows PowerShell 5.1 and on
+  # PowerShell 7, PSScriptAnalyzer with the same rule file as the exporter, and the release
+  # build, which refuses a released script that is not ASCII with CRLF line ends (a copy
+  # pasted into a file must have the release digest). Same pinned tools as mirror-exporter.
+  takeover-script:
+    name: Windows takeover script (${{ matrix.os }}, ${{ matrix.shell }})
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            shell: powershell
+          - os: windows-latest
+            shell: pwsh
+          - os: ubuntu-latest
+            shell: pwsh
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The released script is ASCII with CRLF line ends
+        # The release build refuses anything else; run here on every change, into a
+        # scratch directory that nothing publishes.
+        if: matrix.shell == 'pwsh'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./deploy/windows/takeover/build/New-TakeoverRelease.ps1 -Version 0.0.0 -OutDir (Join-Path $env:RUNNER_TEMP 'takeover')
+      - name: Install Pester and PSScriptAnalyzer (pinned)
+        run: |
+          $ErrorActionPreference = 'Stop'
+          function Install-Pinned([string] $Name, [string] $Version, [switch] $SkipPublisherCheck) {
+            foreach ($attempt in 1..3) {
+              try {
+                Install-Module -Name $Name -RequiredVersion $Version -Force -Scope CurrentUser -SkipPublisherCheck:$SkipPublisherCheck
+                return
+              } catch {
+                Write-Host "The download of $Name $Version failed (attempt $attempt of 3): $($_.Exception.Message)"
+                if ($attempt -eq 3) { throw }
+                Start-Sleep -Seconds (10 * $attempt)
+              }
+            }
+          }
+          Install-Pinned -Name Pester -Version 5.7.1 -SkipPublisherCheck
+          if ($PSVersionTable.PSEdition -eq 'Core') { Install-Pinned -Name PSScriptAnalyzer -Version 1.24.0 }
+      - name: Pester
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module Pester -RequiredVersion 5.7.1
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'deploy/windows/takeover/tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
+      - name: PSScriptAnalyzer
+        # Two passes, PSUseCorrectCasing apart, for the reason given at mirror-exporter.
+        if: matrix.shell == 'pwsh'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Import-Module PSScriptAnalyzer -RequiredVersion 1.24.0
+          & ./deploy/windows/takeover/tests/Invoke-Analysis.ps1
+          exit $LASTEXITCODE
+
   # Changelog rule (OPS-23). Every change to the product adds an entry under
   # "## [Unreleased]" in CHANGELOG.md, because that section becomes the release notes that
   # running installations show. The product is `crates/**` and `ui/src/**`, except tests
