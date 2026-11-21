@@ -28,7 +28,7 @@ mod end;
 mod guard;
 mod hold;
 mod login;
-mod misses;
+pub(crate) mod misses;
 mod pins;
 // U6 of the UI plan: the person's saved table layouts.
 mod preferences;

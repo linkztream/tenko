@@ -607,9 +607,9 @@ async fn renew_integration_certificate(
     }
 }
 
-/// One pass of the integration alarms: removes the tokens of lapsed lineages and the secrets
-/// of expired enrollment codes, and sets or
-/// clears the status conditions [`TLS12_NOTICE`] (while TGL-47 allows TLS 1.2) and
+/// One pass of the integration alarms: removes the tokens of lapsed lineages, the records of
+/// ended certificates past their validity and the secrets of expired enrollment codes, and
+/// sets or clears the status conditions [`TLS12_NOTICE`] (while TGL-47 allows TLS 1.2) and
 /// [`EXPIRING_NOTICE`] (while a lineage is in the last sixth of its lifetime without having
 /// renewed).
 pub async fn refresh_integration_notices(certs: &ClientCerts, state: &AppState) {

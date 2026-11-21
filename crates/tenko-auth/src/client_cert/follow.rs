@@ -3,7 +3,7 @@
 //! that no read of the store sits on that path (ADR 0035, decision 9).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -16,6 +16,7 @@ use futures::StreamExt as _;
 use tenko_core::{Timestamp, UserId};
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, Store, WatchFilter};
 use tokio::{sync::watch, task::JoinHandle};
+use uuid::Uuid;
 
 use super::{
     ClientCertError, ClientCerts,
@@ -122,15 +123,18 @@ impl CertIndex {
     /// renewed: the certificate expiry alarm (OPS-29).
     pub fn expiring(&self, now: Timestamp) -> Vec<ClientCertRecord> {
         let certs = self.certs.load();
+        let renewed: HashSet<Uuid> = certs
+            .values()
+            .filter(|record| record.state == CertState::Pending)
+            .map(|record| record.lineage)
+            .collect();
         let mut expiring: Vec<ClientCertRecord> = certs
             .values()
             .filter(|record| {
                 record.state == CertState::Current
                     && now.0 >= super::alarm_after(record).0
                     && now.0 < record.not_after.0
-                    && !certs.values().any(|other| {
-                        other.lineage == record.lineage && other.state == CertState::Pending
-                    })
+                    && !renewed.contains(&record.lineage)
             })
             .cloned()
             .collect();
@@ -222,10 +226,7 @@ impl CertIndex {
             .scan_typed(&ENROLLMENT_CODES, KeyRange::all(), usize::MAX, false)?
             .into_iter()
             .any(|(_, code, _)| code.state == CodeState::Pending && now.0 < code.expires_at.0);
-        let policy = view.get_typed(&SETTINGS, &())?.map_or_else(
-            || IntegrationPolicy::of(Profile::Standard),
-            |(settings, _)| settings.integrations(),
-        );
+        let policy = ClientCerts::policy(view.as_ref())?;
         let count = certs.len();
         self.certs.store(Arc::new(certs));
         self.accounts.store(Arc::new(accounts));
@@ -252,6 +253,14 @@ impl ClientCerts {
                 SETTINGS.name().clone(),
             ]);
             loop {
+                // Subscribe before the load: a change committed between the load's snapshot
+                // and the subscription would otherwise never reach the index.
+                let Ok(mut changes) = service.store.watch(None, filter.clone()) else {
+                    tokio::select! {
+                        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                        () = tokio::time::sleep(Duration::from_secs(1)) => continue,
+                    }
+                };
                 if let Err(error) = service.index.load(service.store.as_ref()).await {
                     // Read again shortly, not at the next change: a quiet installation may not
                     // change for hours, and past the bound the index refuses everything.
@@ -264,12 +273,6 @@ impl ClientCerts {
                         () = tokio::time::sleep(Duration::from_secs(1)) => continue,
                     }
                 }
-                let Ok(mut changes) = service.store.watch(None, filter.clone()) else {
-                    tokio::select! {
-                        () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
-                        () = tokio::time::sleep(Duration::from_secs(1)) => continue,
-                    }
-                };
                 loop {
                     tokio::select! {
                         () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,

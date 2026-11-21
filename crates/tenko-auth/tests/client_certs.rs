@@ -23,7 +23,9 @@ use tenko_auth::{
     model::{USERS, UserKind, UserRecord},
     settings::Profile,
 };
-use tenko_core::{RequestCtx, SystemComponent, Timestamp, UserId, audit::AuditOutcome};
+use tenko_core::{
+    RequestCtx, SystemComponent, Timestamp, UserId, audit::AuditOutcome, testing::wait_until_async,
+};
 use tenko_store::{
     KeyRange, ReadConsistency, ReadViewExt as _, Store, WriteBatch, mem::MemStore, tables,
 };
@@ -475,7 +477,8 @@ async fn every_refusal_leaves_the_code_and_is_audited() {
         Err(ClientCertError::InvalidRequest { .. })
     ));
     assert_eq!(env.code_state(code.id).await, (CodeState::Pending, true));
-    assert_eq!(env.audit_outcomes("auth.client_cert.issue").await.len(), 15);
+    // Every refusal but the one of the unknown code id.
+    assert_eq!(env.audit_outcomes("auth.client_cert.issue").await.len(), 14);
     assert!(
         env.audit_outcomes("auth.client_cert.issue")
             .await
@@ -570,6 +573,10 @@ async fn plain_http_is_refused_and_audited_and_the_code_stays_usable() {
         .refuse_transport(&ctx(t0()), code.id, "plain HTTP")
         .await;
     assert_eq!(refused, ClientCertError::Transport("plain HTTP"));
+    assert_eq!(
+        env.audit_outcomes("auth.client_cert.issue").await,
+        [AuditOutcome::Denied]
+    );
     assert_eq!(env.code_state(code.id).await.0, CodeState::Pending);
     // Whoever knows only a code id cannot burn the code: it still enrolls over HTTPS.
     env.enroll(&code, &key(1))
@@ -975,10 +982,13 @@ async fn a_renewal_needs_a_certificate_that_still_passes() {
 }
 
 /// A store whose next write waits at a gate until the test opens it, so that another
-/// operation can commit between this one's read and its write.
+/// operation can commit between this one's read and its write. It also counts the reads at
+/// the leader, and commits `after_read` right after the next read took its snapshot.
 struct Gated {
     inner: Arc<MemStore>,
     gate: std::sync::Mutex<Option<Gate>>,
+    leader_reads: AtomicU64,
+    after_read: std::sync::Mutex<Option<WriteBatch>>,
 }
 
 type Gate = (
@@ -1020,7 +1030,15 @@ impl Store for Gated {
         &self,
         consistency: ReadConsistency,
     ) -> Result<Arc<dyn tenko_store::ReadView>, tenko_store::StoreError> {
-        self.inner.read(consistency).await
+        if matches!(consistency, ReadConsistency::Linearizable) {
+            self.leader_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        let view = self.inner.read(consistency).await?;
+        let after = self.after_read.lock().expect("batch").take();
+        if let Some(batch) = after {
+            self.inner.propose(batch).await?;
+        }
+        Ok(view)
     }
 
     fn watch(
@@ -1052,6 +1070,8 @@ fn racing(env: &Env) -> (Arc<ClientCerts>, Arc<Gated>) {
     let gated = Arc::new(Gated {
         inner: Arc::clone(&env.store),
         gate: std::sync::Mutex::new(None),
+        leader_reads: AtomicU64::new(0),
+        after_read: std::sync::Mutex::new(None),
     });
     let vault: Arc<dyn Vault> = Arc::new(MemVault::with_store(env.store.clone()));
     let certs = Arc::new(ClientCerts::new(
@@ -1187,6 +1207,97 @@ async fn an_index_that_cannot_read_a_change_refuses_after_the_bound_and_names_it
     assert_eq!(
         index.next_boundary(&current.serial, at(21, 0)),
         Some(Timestamp(at(21, 0).0 + OVERLAP))
+    );
+}
+
+#[tokio::test]
+async fn a_revocation_committed_while_the_index_loads_reaches_it() {
+    let env = Env::new();
+    let (account, current) = enrolled(&env).await;
+    let (certs, gated) = racing(&env);
+    let mut revoked = current.clone();
+    revoked.state = CertState::Revoked;
+    revoked.ended_at = Some(t0());
+    let mut batch = WriteBatch::for_request(&ctx(t0()));
+    batch
+        .put_typed(&CLIENT_CERTS, &revoked.serial, &revoked)
+        .expect("encode");
+    // Committed after the load's snapshot and before anything else happens.
+    *gated.after_read.lock().expect("batch") = Some(batch);
+    let (stop, stopped) = tokio::sync::watch::channel(false);
+    let follower = certs.follow(stopped);
+    wait_until_async("the index refuses the revoked certificate", || async {
+        certs.index().accept(&current.serial, account.id, at(1, 0)) == Acceptance::Refused("ended")
+    })
+    .await;
+    stop.send(true).expect("the follower listens");
+    follower.await.expect("the follower ends");
+}
+
+#[tokio::test]
+async fn unknown_code_ids_cost_one_leader_read_and_no_audit_record() {
+    let env = Env::new();
+    let (certs, gated) = racing(&env);
+    let unknown = Uuid::now_v7();
+    for _ in 0..3 {
+        let input = EnrollInput {
+            code: unknown,
+            proof: vec![0; 32],
+            csr: key(1),
+            label: "h".to_owned(),
+            source: None,
+        };
+        assert_eq!(
+            certs.enroll(&ctx(t0()), input).await.err(),
+            Some(ClientCertError::CodeInvalid)
+        );
+    }
+    assert_eq!(
+        certs
+            .refuse_transport(&ctx(t0()), unknown, "plain HTTP")
+            .await,
+        ClientCertError::Transport("plain HTTP")
+    );
+    assert_eq!(gated.leader_reads.load(Ordering::SeqCst), 1);
+    assert_eq!(env.audit_outcomes("auth.client_cert.issue").await, []);
+}
+
+#[tokio::test]
+async fn the_sweep_deletes_ended_certificates_past_their_validity_and_keeps_their_keys() {
+    let env = Env::new();
+    let (account, current) = enrolled(&env).await;
+    let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    env.certs
+        .note_presented(&ctx(at(21, 1)), &successor)
+        .await
+        .expect("presented");
+    let serials = || async {
+        env.certs
+            .list(None)
+            .await
+            .expect("list")
+            .into_iter()
+            .map(|record| record.serial)
+            .collect::<Vec<_>>()
+    };
+    env.certs
+        .remove_lapsed_tokens(at(29, 0))
+        .await
+        .expect("sweep");
+    assert_eq!(
+        serials().await,
+        [current.serial.clone(), successor.clone()],
+        "still valid"
+    );
+    env.certs
+        .remove_lapsed_tokens(at(31, 0))
+        .await
+        .expect("sweep");
+    assert_eq!(serials().await, [successor]);
+    let again = env.code(account.id).await;
+    assert_eq!(
+        env.enroll(&again, &key(1)).await.err(),
+        Some(ClientCertError::KeyUsed)
     );
 }
 

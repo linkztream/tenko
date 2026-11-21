@@ -30,7 +30,7 @@ pub use enroll::{CreatedCode, EnrollInput, NewCode, enrollment_proof, valid_labe
 pub use follow::{Acceptance, CertIndex, OVERLAP, STALE_LIMIT};
 pub use renew::{RENEW_INTERVAL, Renewal, alarm_after, renew_after};
 
-use crate::{model::SETTINGS, settings::Profile};
+use crate::{model::SETTINGS, service::misses::Misses, settings::Profile};
 use model::IntegrationPolicy;
 
 /// The prefix of an enrollment code's text: `tnki.<code id>.<account id>.<secret>.<fingerprint>`.
@@ -251,6 +251,9 @@ pub struct ClientCerts {
     vault: Arc<dyn Vault>,
     issuer: Arc<dyn Issuer>,
     index: Arc<CertIndex>,
+    /// Enrollment code ids neither this copy nor the leader holds, and the bound on the
+    /// reads at the leader they may cause.
+    misses: Misses,
 }
 
 impl std::fmt::Debug for ClientCerts {
@@ -267,6 +270,7 @@ impl ClientCerts {
             vault,
             issuer,
             index: Arc::new(CertIndex::default()),
+            misses: Misses::default(),
         }
     }
 

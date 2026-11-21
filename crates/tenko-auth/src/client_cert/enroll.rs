@@ -5,7 +5,7 @@
 //! `SubjectPublicKeyInfo` of its request ([`enrollment_proof`]). The controller keeps the
 //! secret in the vault while the code can be used, since it needs it to check the proof.
 
-use std::net::IpAddr;
+use std::{net::IpAddr, sync::Arc};
 
 use aws_lc_rs::hmac;
 use ipnet::IpNet;
@@ -248,9 +248,9 @@ impl ClientCerts {
     }
 
     /// Refuses an enrollment that arrived over plain HTTP, or through a proxy that did not
-    /// state the scheme, and audits the refusal (ADR 0035, decision 5). The code stays
-    /// usable: its secret never travels, so the request showed nothing that could redeem it,
-    /// and withdrawing it would let anyone who knows a code id burn the code.
+    /// state the scheme, and audits the refusal when the code exists (ADR 0035, decision 5).
+    /// The code stays usable: its secret never travels, so the request showed nothing that
+    /// could redeem it, and withdrawing it would let anyone who knows a code id burn the code.
     pub async fn refuse_transport(
         &self,
         ctx: &RequestCtx,
@@ -258,11 +258,41 @@ impl ClientCerts {
         why: &'static str,
     ) -> ClientCertError {
         let error = ClientCertError::Transport(why);
-        let draft = AuditDraft::denied(actions::ISSUE, Vec::<ObjectRef>::new())
-            .with_context("code", id.to_string())
-            .with_context("reason", tenko_core::Coded::code(&error).to_owned());
-        self.audit_refusal(ctx, draft).await;
+        if matches!(self.code_view(id, ctx.now).await, Ok(Some(_))) {
+            let draft = AuditDraft::denied(actions::ISSUE, Vec::<ObjectRef>::new())
+                .with_context("code", id.to_string())
+                .with_context("reason", tenko_core::Coded::code(&error).to_owned());
+            self.audit_refusal(ctx, draft).await;
+        }
         error
+    }
+
+    /// A view that holds the code `id`: this controller's copy, or a read at the leader when
+    /// the copy does not hold it yet (a code made a moment ago on another controller). `None`
+    /// when the leader does not hold it either, when it was refused so a moment ago, or when
+    /// the bounded number of such reads is under way: ids that do not exist cost the leader
+    /// a bounded number of reads, whatever their rate.
+    async fn code_view(
+        &self,
+        id: Uuid,
+        now: Timestamp,
+    ) -> Result<Option<Arc<dyn ReadView>>, ClientCertError> {
+        let view = self.view().await?;
+        if view.get_typed(&ENROLLMENT_CODES, &id)?.is_some() {
+            return Ok(Some(view));
+        }
+        if self.misses.recent(id.as_bytes(), now) {
+            return Ok(None);
+        }
+        let Some(_slot) = self.misses.confirming() else {
+            return Ok(None);
+        };
+        let view = self.store.read(ReadConsistency::Linearizable).await?;
+        if view.get_typed(&ENROLLMENT_CODES, &id)?.is_some() {
+            return Ok(Some(view));
+        }
+        self.misses.remember(id.as_bytes(), now);
+        Ok(None)
     }
 
     async fn end_code(
@@ -332,7 +362,9 @@ impl ClientCerts {
 
     /// `POST /integrations/enroll`: checks the code, its proof and the account, issues the
     /// certificate and records it in the write that uses the code. The certificate is
-    /// answered only after that write; every refusal is audited.
+    /// answered only after that write; every refusal of a code that exists is audited. A code
+    /// id that does not exist is refused without an audit record: anyone can send such ids,
+    /// as many as the request limit lets through.
     ///
     /// # Errors
     ///
@@ -342,7 +374,10 @@ impl ClientCerts {
         ctx: &RequestCtx,
         input: EnrollInput,
     ) -> Result<String, ClientCertError> {
-        match self.try_enroll(ctx, &input).await {
+        let Some(view) = self.code_view(input.code, ctx.now).await? else {
+            return Err(ClientCertError::CodeInvalid);
+        };
+        match self.try_enroll(ctx, &input, view).await {
             Ok(pem) => Ok(pem),
             Err(error) => {
                 if !matches!(error, ClientCertError::Store(_) | ClientCertError::Vault(_)) {
@@ -356,26 +391,14 @@ impl ClientCerts {
         }
     }
 
-    /// The waiting code of `input` whose proof verifies, with the view it was read in and
-    /// the canonical key of the request.
+    /// The waiting code of `input` in `view` whose proof verifies, with the canonical key of
+    /// the request.
     async fn proven_code(
         &self,
         ctx: &RequestCtx,
         input: &EnrollInput,
-    ) -> Result<
-        (
-            std::sync::Arc<dyn ReadView>,
-            EnrollmentCode,
-            Revision,
-            Vec<u8>,
-        ),
-        ClientCertError,
-    > {
-        // A code made a moment ago on another controller may not be here yet.
-        let mut view = self.view().await?;
-        if view.get_typed(&ENROLLMENT_CODES, &input.code)?.is_none() {
-            view = self.store.read(ReadConsistency::Linearizable).await?;
-        }
+        view: &dyn ReadView,
+    ) -> Result<(EnrollmentCode, Revision, Vec<u8>), ClientCertError> {
         let (code, code_revision) = view
             .get_typed(&ENROLLMENT_CODES, &input.code)?
             .ok_or(ClientCertError::CodeInvalid)?;
@@ -405,19 +428,20 @@ impl ClientCerts {
         {
             return Err(ClientCertError::CodeSource);
         }
-        Ok((view, code, code_revision, spki))
+        Ok((code, code_revision, spki))
     }
 
     async fn try_enroll(
         &self,
         ctx: &RequestCtx,
         input: &EnrollInput,
+        view: Arc<dyn ReadView>,
     ) -> Result<String, ClientCertError> {
         let label = input.label.as_str();
         if !valid_label(label) {
             return Err(ClientCertError::Label);
         }
-        let (view, mut code, code_revision, spki) = self.proven_code(ctx, input).await?;
+        let (mut code, code_revision, spki) = self.proven_code(ctx, input, view.as_ref()).await?;
         let secret_ref = code.secret.ok_or(ClientCertError::CodeInvalid)?;
         let (account, account_revision, key_sha256) = checked_account(view.as_ref(), &code, &spki)?;
         let policy = Self::policy(view.as_ref())?;

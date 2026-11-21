@@ -1,11 +1,12 @@
-//! Secrets refused a moment ago: a bounded negative cache for session cookies and bearer
-//! tokens that neither this controller's copy nor the leader holds, a bound on the reads
-//! at the leader's commit index that unknown secrets may cause at once, and the audit pace of
-//! tokens a binding refuses (IAM-21).
+//! Secrets refused a moment ago: a bounded negative cache for session cookies, bearer
+//! tokens and enrollment code ids that neither this controller's copy nor the leader holds,
+//! a bound on the reads at the leader's commit index that unknown ones may cause at once,
+//! and the audit pace of tokens a binding refuses (IAM-21).
 //!
 //! A session or a token exists only after its batch committed, and its secret has 256 (or
 //! more) random bits, so a secret the leader did not hold cannot become valid later: caching
-//! the refusal never refuses a real session.
+//! the refusal never refuses a real session. An enrollment code is shown only after its
+//! batch committed too, and its id carries 74 random bits.
 
 use std::{
     collections::HashMap,
@@ -29,7 +30,7 @@ pub(super) const REFUSAL_EVERY: Duration = Duration::from_secs(60);
 
 /// The negative cache, the bound on confirming reads and the audit pace of refused tokens.
 #[derive(Debug)]
-pub(super) struct Misses {
+pub(crate) struct Misses {
     refused: Mutex<HashMap<Vec<u8>, Timestamp>>,
     confirming: Arc<Semaphore>,
     /// Per token: when its last refusal was audited and how many followed unaudited.
@@ -48,7 +49,7 @@ impl Default for Misses {
 
 impl Misses {
     /// Whether the secret with this hash was refused less than [`TTL`] ago.
-    pub(super) fn recent(&self, hash: &[u8], now: Timestamp) -> bool {
+    pub(crate) fn recent(&self, hash: &[u8], now: Timestamp) -> bool {
         let mut refused = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
         match refused.get(hash) {
             Some(until) if now < *until => true,
@@ -62,7 +63,7 @@ impl Misses {
 
     /// Notes a secret the leader does not hold. At capacity the ended entries go first,
     /// then an arbitrary one.
-    pub(super) fn remember(&self, hash: &[u8], now: Timestamp) {
+    pub(crate) fn remember(&self, hash: &[u8], now: Timestamp) {
         let until = now.checked_add(TTL).unwrap_or(now);
         let mut refused = self.refused.lock().unwrap_or_else(PoisonError::into_inner);
         if refused.len() >= CAPACITY && !refused.contains_key(hash) {
@@ -101,7 +102,7 @@ impl Misses {
     }
 
     /// A slot for one confirming read, or `None` when [`CONFIRMING`] are under way.
-    pub(super) fn confirming(&self) -> Option<OwnedSemaphorePermit> {
+    pub(crate) fn confirming(&self) -> Option<OwnedSemaphorePermit> {
         Arc::clone(&self.confirming).try_acquire_owned().ok()
     }
 

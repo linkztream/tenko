@@ -1,6 +1,8 @@
 //! Listing and revoking integration certificates, and what a lineage's end does to the
 //! tokens bound to it (ADR 0035, decisions 7 to 9).
 
+use std::collections::HashSet;
+
 use tenko_core::{RequestCtx, Timestamp, UserId, audit::AuditDraft};
 use tenko_store::{KeyRange, ReadConsistency, ReadView, ReadViewExt as _, WriteBatch};
 use uuid::Uuid;
@@ -171,30 +173,54 @@ impl ClientCerts {
 
     /// Removes the tokens bound to lineages that lapsed (no certificate of theirs passes
     /// any more by time): their recovery is a new enrollment and new tokens (ADR 0035,
-    /// decision 7). Returns how many were removed; the expiry alarm calls it every hour.
+    /// decision 7). Also deletes the records of ended certificates past their validity; the
+    /// key records stay, so that a key still never enrolls twice. Returns how many tokens
+    /// were removed; the expiry alarm calls it every hour and after every change of the index.
     ///
     /// # Errors
     ///
     /// A store error; [`ClientCertError::Conflict`] when a record changed meanwhile.
     pub async fn remove_lapsed_tokens(&self, now: Timestamp) -> Result<usize, ClientCertError> {
-        let view = self.view().await?;
-        let certs = view.scan_typed(&CLIENT_CERTS, KeyRange::all(), usize::MAX, false)?;
-        let mut lapsed: Vec<(UserId, Uuid)> = Vec::new();
-        for (_, record, _) in &certs {
-            let lives = certs.iter().any(|(_, other, _)| {
-                other.lineage == record.lineage
-                    && matches!(other.state, CertState::Current | CertState::Pending)
-                    && now.0 < other.not_after.0
-            });
-            if !lives && !lapsed.contains(&(record.account, record.lineage)) {
-                lapsed.push((record.account, record.lineage));
-            }
+        // Work found in this copy is decided again at the leader: a lagging copy can miss the
+        // renewal that keeps a lineage alive, and a lapsed lineage never comes back, so the
+        // leader's view makes the removal final.
+        let (local, _) = Self::stage_sweep(self.view().await?.as_ref(), now)?;
+        if local.is_empty() {
+            return Ok(0);
         }
+        let view = self.store.read(ReadConsistency::Linearizable).await?;
+        let (batch, removed) = Self::stage_sweep(view.as_ref(), now)?;
+        if !batch.is_empty() {
+            self.commit(batch).await?;
+        }
+        Ok(removed)
+    }
+
+    /// The batch of [`ClientCerts::remove_lapsed_tokens`] decided in `view`, and how many
+    /// tokens it removes.
+    fn stage_sweep(
+        view: &dyn ReadView,
+        now: Timestamp,
+    ) -> Result<(WriteBatch, usize), ClientCertError> {
+        let certs = view.scan_typed(&CLIENT_CERTS, KeyRange::all(), usize::MAX, false)?;
+        let living: HashSet<Uuid> = certs
+            .iter()
+            .filter(|(_, record, _)| {
+                matches!(record.state, CertState::Current | CertState::Pending)
+                    && now.0 < record.not_after.0
+            })
+            .map(|(_, record, _)| record.lineage)
+            .collect();
+        let lapsed: HashSet<(UserId, Uuid)> = certs
+            .iter()
+            .filter(|(_, record, _)| !living.contains(&record.lineage))
+            .map(|(_, record, _)| (record.account, record.lineage))
+            .collect();
         let ctx = RequestCtx::system(tenko_core::SystemComponent::Auth).at(now);
         let mut batch = WriteBatch::for_request(&ctx);
         let mut removed = 0;
         for (account, lineage) in lapsed {
-            let count = stage_bound_token_removal(view.as_ref(), &mut batch, account, lineage)?;
+            let count = stage_bound_token_removal(view, &mut batch, account, lineage)?;
             if count > 0 {
                 batch.audit(
                     AuditDraft::success(actions::LAPSE, vec![tenko_core::ObjectRef::from(account)])
@@ -204,9 +230,15 @@ impl ClientCerts {
                 removed += count;
             }
         }
-        if removed > 0 {
-            self.commit(batch).await?;
+        for (serial, record, revision) in &certs {
+            // The overlap is a margin for the clocks of the other controllers.
+            if !matches!(record.state, CertState::Current | CertState::Pending)
+                && now.0 >= record.not_after.0 + super::OVERLAP
+            {
+                batch.expect_typed(&CLIENT_CERTS, serial, Some(*revision));
+                batch.delete_typed(&CLIENT_CERTS, serial);
+            }
         }
-        Ok(removed)
+        Ok((batch, removed))
     }
 }

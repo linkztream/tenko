@@ -25,7 +25,9 @@ use tenko_auth::{
 use tenko_core::{
     Credentials, Principal, RequestCtx, SystemComponent, Timestamp, UserId, audit::AuditOutcome,
 };
-use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
+use tenko_store::{
+    KeyRange, MemStore, ReadConsistency, ReadView, ReadViewExt, Store, WriteBatch, tables,
+};
 use tenko_vault::Vault;
 use uuid::Uuid;
 
@@ -423,6 +425,101 @@ async fn a_revoked_or_lapsed_lineage_takes_its_tokens() {
         fx.audited("auth.client_cert.lapse").await,
         [AuditOutcome::Success]
     );
+}
+
+/// A controller whose copy is behind: its local reads see an old view, its reads at the
+/// leader see what holds.
+struct Behind {
+    inner: Arc<MemStore>,
+    local: Arc<dyn ReadView>,
+}
+
+#[async_trait]
+impl Store for Behind {
+    async fn propose(
+        &self,
+        batch: WriteBatch,
+    ) -> Result<tenko_store::Committed, tenko_store::StoreError> {
+        self.inner.propose(batch).await
+    }
+
+    async fn read(
+        &self,
+        consistency: ReadConsistency,
+    ) -> Result<Arc<dyn ReadView>, tenko_store::StoreError> {
+        match consistency {
+            ReadConsistency::Local => Ok(Arc::clone(&self.local)),
+            other => self.inner.read(other).await,
+        }
+    }
+
+    fn watch(
+        &self,
+        from: Option<tenko_core::Revision>,
+        filter: tenko_store::WatchFilter,
+    ) -> Result<tenko_store::ChangeStream, tenko_store::StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(
+        &self,
+        index: Arc<dyn tenko_store::DerivedIndex>,
+    ) -> Result<(), tenko_store::StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> tenko_store::StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
+}
+
+#[tokio::test]
+async fn a_controller_whose_copy_missed_a_renewal_keeps_the_lineages_tokens() {
+    let fx = fixture().await;
+    let renewing = Uuid::now_v7();
+    fx.put_cert(fx.account.id, renewing, CertState::Current, 2)
+        .await;
+    fx.create(
+        fx.account.id,
+        TokenRequest {
+            name: "nightly".to_owned(),
+            scopes: vec![TokenScope::Metrics],
+            lineage: Some(renewing),
+            ..TokenRequest::default()
+        },
+    )
+    .await
+    .expect("bound");
+    let local = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    // The renewal this controller's copy has not received; the token is not used meanwhile.
+    fx.put_cert(fx.account.id, renewing, CertState::Current, 30)
+        .await;
+    fx.env.clock.advance(Duration::from_secs(3 * 86_400));
+    let behind = ClientCerts::new(
+        Arc::new(Behind {
+            inner: fx.env.store.clone(),
+            local,
+        }),
+        fx.env.vault.clone(),
+        Arc::new(NoIssuer),
+    );
+    assert_eq!(
+        behind
+            .remove_lapsed_tokens(fx.env.now())
+            .await
+            .expect("sweep"),
+        0
+    );
+    assert_eq!(fx.token_count(fx.account.id).await, 1);
 }
 
 #[tokio::test]
