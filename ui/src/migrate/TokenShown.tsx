@@ -39,7 +39,7 @@ export function TokenShown(props: { created: MirrorCreated; onClose: () => void 
         </dl>
         <label class="ackrow">
           <input type="checkbox" class="cb" checked={stored()} data-testid="mirror-token-stored" onChange={(e) => setStored(e.currentTarget.checked)} />
-          {t("access.token.stored")}
+          {t("migrate.token.stored")}
         </label>
       </div>
       <div class="dialog-actions">

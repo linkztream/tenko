@@ -168,6 +168,10 @@
         <notes><note category="description">Button that copies the token.</note></notes>
         <segment><source>Copy token</source><target>Kopiera token</target></segment>
       </unit>
+      <unit id="migrate.token.stored">
+        <notes><note category="description">Check box of the token dialog: the administrator confirms the token is saved.</note></notes>
+        <segment><source>I have stored the token</source><target>Jag har sparat token</target></segment>
+      </unit>
       <unit id="migrate.token.done">
         <notes><note category="description">Button that closes the token dialog.</note></notes>
         <segment><source>Done</source><target>Klar</target></segment>

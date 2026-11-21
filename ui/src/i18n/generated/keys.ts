@@ -6483,6 +6483,7 @@ export type MessageKey =
   | "migrate.token.fingerprint"
   | "migrate.token.no_fingerprint"
   | "migrate.token.once"
+  | "migrate.token.stored"
   | "migrate.token.title"
   | "migrate.token.token"
   | "move.checklist"
@@ -16799,6 +16800,7 @@ export const messageKeys: readonly MessageKey[] = [
   "migrate.token.fingerprint",
   "migrate.token.no_fingerprint",
   "migrate.token.once",
+  "migrate.token.stored",
   "migrate.token.title",
   "migrate.token.token",
   "move.checklist",
