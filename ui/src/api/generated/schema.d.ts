@@ -456,7 +456,7 @@ export interface paths {
         put?: never;
         /**
          * Deny the waiting approvals, of every source or one
-         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Audited as `auth.approval.deny`, one record per approval.
+         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, an IPv4-mapped IPv6 address as its IPv4 address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Answers how many waiting requests and how many uncollected approvals were denied. Audited as `auth.approval.deny`, one record per approval.
          */
         post: operations["clear_approvals"];
         delete?: never;
@@ -8003,15 +8003,18 @@ export interface components {
         /** @description `POST /auth/approvals/clear`: which approvals to deny. */
         ClearApprovals: {
             /**
-             * @description Only those from this address's source (the address, or its IPv6 /64); all when
-             *     absent.
+             * @description Only those from this address's source (the address, an IPv4-mapped IPv6 address as
+             *     its IPv4 address, or its IPv6 /64); all when absent. Anything but an address is
+             *     refused.
              */
             source?: string | null;
         };
-        /** @description The answer to `POST /auth/approvals/clear`. */
+        /** @description The answer to `POST /auth/approvals/clear`: how many of each kind were denied. */
         ClearedApprovals: {
-            /** @description How many waiting or uncollected approvals were denied. */
-            denied: number;
+            /** @description Approvals the script had not collected yet. */
+            approved: number;
+            /** @description Waiting requests. */
+            waiting: number;
         };
         /** @description An integration certificate. */
         ClientCertRecord: {
@@ -28949,7 +28952,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description How many approvals were denied */
+            /** @description How many approvals of each kind were denied */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -28958,7 +28961,7 @@ export interface operations {
                     "application/json": components["schemas"]["ClearedApprovals"];
                 };
             };
-            /** @description The body is not one object of the schema (`sys.invalid_request`) */
+            /** @description The body is not one object of the schema, or `source` is not an address (`sys.invalid_request`) */
             400: {
                 headers: {
                     [name: string]: unknown;

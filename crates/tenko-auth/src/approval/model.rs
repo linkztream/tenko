@@ -7,6 +7,7 @@ use tenko_core::{
     ApprovalId, AuthStrength, DelegationId, MirrorId, SessionId, Timestamp, UserId,
     dns::{DnsName, is_host_label},
     migrate::plan::TakeoverPlan,
+    net::Fqdn,
     table::TableDef,
 };
 use utoipa::ToSchema;
@@ -118,18 +119,21 @@ pub struct CodeEntry {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClearApprovals {
-    /// Only those from this address's source (the address, or its IPv6 /64); all when
-    /// absent.
+    /// Only those from this address's source (the address, an IPv4-mapped IPv6 address as
+    /// its IPv4 address, or its IPv6 /64); all when absent. Anything but an address is
+    /// refused.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub source: Option<IpAddr>,
 }
 
-/// The answer to `POST /auth/approvals/clear`.
+/// The answer to `POST /auth/approvals/clear`: how many of each kind were denied.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct ClearedApprovals {
-    /// How many waiting or uncollected approvals were denied.
-    pub denied: usize,
+    /// Waiting requests.
+    pub waiting: usize,
+    /// Approvals the script had not collected yet.
+    pub approved: usize,
 }
 
 /// `POST /auth/approvals/{id}/collect`: the nonce signed with the script's key.
@@ -229,9 +233,10 @@ pub struct ApprovalRecord {
     pub state: ApprovalState,
     /// When the request arrived.
     pub created_at: Timestamp,
-    /// The mirrors the delegated session created, at most one per DHCP server of the plan.
+    /// The mirrors the delegated session created, each with the plan's DHCP server it is
+    /// named for: one per server.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mirrors: Vec<MirrorId>,
+    pub mirrors: Vec<(Fqdn, MirrorId)>,
 }
 
 impl ApprovalRecord {

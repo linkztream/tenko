@@ -798,13 +798,16 @@ async fn the_approver_can_stop_a_collect_that_has_not_happened() {
     ));
 }
 
-/// The person denies every waiting request of one source in one step, and only those.
+/// The person denies every waiting request of one source in one step, and only those; an
+/// IPv4-mapped source is its IPv4 address; without a source the uncollected approvals go too,
+/// and the answer tells the kinds apart.
 #[tokio::test]
 async fn an_administrator_clears_the_waiting_requests_of_a_source() {
     let (env, _, admin) = installation().await;
     let script = Script::default();
+    let cleared = |waiting, approved| approval::ClearedApprovals { waiting, approved };
     let mut tickets = Vec::new();
-    for address in ["2001:db8::1", "2001:db8::2", "192.0.2.80"] {
+    for address in ["2001:db8::1", "2001:db8::2", "192.0.2.80", "192.0.2.81"] {
         let ctx = env
             .public_ctx()
             .with_source_ip(address.parse().expect("an address"));
@@ -815,13 +818,14 @@ async fn an_administrator_clears_the_waiting_requests_of_a_source() {
                 .expect("a request"),
         );
     }
+    let (_, approved_ticket) = approved(&env, &admin, &script, 82).await;
     let neighbor = "2001:db8::ffff".parse().expect("an address");
     assert_eq!(
         env.service
             .clear_approvals(&admin, Some(neighbor))
             .await
             .expect("cleared"),
-        2,
+        cleared(2, 0),
         "the two of the /64"
     );
     let view = env.store.read(ReadConsistency::Local).await.expect("view");
@@ -835,13 +839,40 @@ async fn an_administrator_clears_the_waiting_requests_of_a_source() {
     assert!(matches!(state(tickets[0].id), ApprovalState::Denied { .. }));
     assert!(matches!(state(tickets[1].id), ApprovalState::Denied { .. }));
     assert_eq!(state(tickets[2].id), ApprovalState::Pending);
+    let mapped = "::ffff:192.0.2.80".parse().expect("an address");
+    assert_eq!(
+        env.service
+            .clear_approvals(&admin, Some(mapped))
+            .await
+            .expect("cleared"),
+        cleared(1, 0),
+        "the IPv4 address"
+    );
     assert_eq!(
         env.service
             .clear_approvals(&admin, None)
             .await
             .expect("cleared"),
-        1
+        cleared(1, 1),
+        "the last waiting one and the uncollected one"
     );
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    assert!(matches!(
+        view.get_typed(&APPROVALS, &approved_ticket.id)
+            .expect("read")
+            .expect("the approval")
+            .0
+            .state,
+        ApprovalState::Denied { .. }
+    ));
+    // A source that is not an address is no body of the operation.
+    for body in [r#"{"source":"192.0.2.0/24"}"#, r#"{"source":"tenko"}"#] {
+        let refused = serde_json::from_str::<approval::ClearApprovals>(body).expect_err(body);
+        assert!(
+            refused.to_string().contains("invalid IP address"),
+            "{refused}"
+        );
+    }
 }
 
 /// No audit record of a whole approval names the session's secret, the nonce or the code.
@@ -898,4 +929,46 @@ async fn the_audit_never_holds_a_secret_of_the_approval() {
             .map(String::as_str),
         Some(tenko_auth::encoding::hex_encode(&Sha256::digest(body.as_bytes())).as_str())
     );
+}
+
+/// The sweep removes an approval whose time is over within one more pending lifetime, not
+/// at the next hourly run: on a paused clock, past the first sweep, a request that is ten
+/// minutes old is gone ten minutes later.
+#[tokio::test(start_paused = true)]
+async fn the_sweep_removes_an_ended_approval_within_ten_minutes() {
+    let (env, _, _) = installation().await;
+    // Past the first sweep, which runs a minute after the service starts.
+    tokio::time::sleep(Duration::from_secs(61)).await;
+    let old = Timestamp::now()
+        .checked_sub(approval::PENDING_LIFETIME)
+        .expect("a time");
+    let ticket = env
+        .service
+        .request_approval(
+            &env.public_ctx().at(old),
+            Script::default().request().as_bytes(),
+        )
+        .await
+        .expect("a request");
+    let written = tokio::time::Instant::now();
+    let (store, id) = (&env.store, ticket.id);
+    let present = move || async move {
+        store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .get_typed(&APPROVALS, &id)
+            .expect("read")
+            .is_some()
+    };
+    assert!(present().await, "stored until the next sweep");
+    tokio::time::sleep(approval::PENDING_LIFETIME).await;
+    tenko_core::testing::wait_until_async("the ended approval removed", || async move {
+        assert!(
+            written.elapsed() < approval::PENDING_LIFETIME * 2,
+            "still stored two pending lifetimes later"
+        );
+        !present().await
+    })
+    .await;
 }

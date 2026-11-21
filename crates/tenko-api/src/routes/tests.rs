@@ -636,6 +636,14 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     )
     .await
     .assert_status(201);
+    // One mirror per server: a second one for the same server, in any case, is refused.
+    let again = mirror("DHCP1.corp.example.test", "192.0.2.30/32");
+    send(
+        &app,
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&again)),
+    )
+    .await
+    .assert_problem(403, "auth.delegation.refused");
     // Six minutes after the approval, on Tenko's clock, the mirror creation is closed.
     let view = env
         .store

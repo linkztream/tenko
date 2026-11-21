@@ -11,7 +11,8 @@
 //!
 //! The expiry is decided at sign-in from the stored dates. The hourly sweep only raises the
 //! alarm (once per account), so a sweep that does not run never keeps an expired PIN alive.
-//! The same sweep removes stored sign-in locks that have ended.
+//! The same sweep removes stored sign-in locks that have ended, and between its runs it
+//! removes the approvals that are over every [`PENDING_LIFETIME`].
 
 use std::{sync::Arc, time::Duration};
 
@@ -20,6 +21,7 @@ use tenko_store::{KeyRange, ReadView, ReadViewExt, StoreError, WriteBatch};
 
 use super::AuthService;
 use crate::{
+    approval::PENDING_LIFETIME,
     clock::{Clock, SystemClock},
     error::AuthError,
     model::{AlarmKind, LOCKS, PIN_RULE_SINCE, SETTINGS, USERS},
@@ -189,9 +191,6 @@ impl AuthService {
                 if let Err(error) = service.prune_known_devices(SystemClock.now()).await {
                     tracing::debug!(%error, "ended known devices could not be removed");
                 }
-                if let Err(error) = service.prune_approvals(SystemClock.now()).await {
-                    tracing::debug!(%error, "ended approvals could not be removed");
-                }
                 if let Err(error) = service.notice_expiring_tokens(SystemClock.now()).await {
                     tracing::debug!(%error, "expiring tokens could not be noted");
                 }
@@ -200,7 +199,17 @@ impl AuthService {
                     tracing::warn!(%error, "the credentials of ended accounts could not be removed");
                 }
                 drop(service);
-                tokio::time::sleep(SWEEP_EVERY).await;
+                // The approvals every pending lifetime, which bounds their stored plans.
+                for _ in 0..SWEEP_EVERY.as_secs() / PENDING_LIFETIME.as_secs() {
+                    let Some(service) = weak.upgrade() else {
+                        return;
+                    };
+                    if let Err(error) = service.prune_approvals(SystemClock.now()).await {
+                        tracing::debug!(%error, "ended approvals could not be removed");
+                    }
+                    drop(service);
+                    tokio::time::sleep(PENDING_LIFETIME).await;
+                }
             }
         });
     }

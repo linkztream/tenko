@@ -22,7 +22,7 @@ const DENIED_NODE_NAMES: [&str; 3] = ["wpad", "isatap", "localhost"];
 /// - The zones are the domain, `_msdcs.<forest root>` and reverse zones that cover a scope's
 ///   network or lie inside one, nothing else.
 /// - The scopes are networks (no host bits); the mirror host is no controller, by name or by
-///   address; the node's name is one label, not on the deny list and not the first label of a
+///   address (an IPv4-mapped IPv6 address as its IPv4 address); the node's name is one label, not on the deny list and not the first label of a
 ///   controller, a DHCP server or the mirror host; the relationship's name is printable ASCII.
 /// - Tenko's computer account is there exactly when `kerberos_adopt` is: its realm is the
 ///   domain in upper case, its account the node's name and a `$` (the node's name then at most
@@ -99,9 +99,9 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
             "zones: the domain, _msdcs of the forest root and the reverse zones of the scopes only",
         );
     }
-    if plan.controllers.iter().any(|controller| {
-        controller.name == plan.mirror_host.name
-            || controller.addresses.contains(&plan.mirror_host.address)
+    let mirror = plan.mirror_host.address.to_canonical();
+    if plan.controllers.iter().any(|c| {
+        c.name == plan.mirror_host.name || c.addresses.iter().any(|a| a.to_canonical() == mirror)
     }) {
         return Err("mirror_host: a domain controller is never the mirror host");
     }
@@ -222,7 +222,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // One table of refused plans.
     fn plans_outside_the_limits_are_refused() {
         type Edit = fn(&mut serde_json::Value);
-        let refused: [(Edit, &str); 27] = [
+        let refused: [(Edit, &str); 29] = [
             (
                 |plan| plan["zones"] = json!(["other.example.test"]),
                 "zones:",
@@ -307,6 +307,17 @@ mod tests {
             (|plan| plan["node_name"] = json!("mgmt1"), "node_name"),
             (
                 |plan| plan["mirror_host"]["address"] = json!("192.0.2.11"),
+                "mirror_host",
+            ),
+            // A controller's IPv4 address in its IPv4-mapped IPv6 form, either way round.
+            (
+                |plan| plan["mirror_host"]["address"] = json!("::ffff:192.0.2.11"),
+                "mirror_host",
+            ),
+            (
+                |plan| {
+                    plan["controllers"][0]["addresses"] = json!(["::ffff:192.0.2.30"]);
+                },
                 "mirror_host",
             ),
             (

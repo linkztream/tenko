@@ -48,7 +48,8 @@ pub struct MirrorTokenTerms {
 }
 
 impl AuthService {
-    /// Stages the service account `mirror-<id>` and its token into `batch`.
+    /// Stages the service account `mirror-<id>` and its token into `batch`, for the mirror
+    /// `mirror` named `name`.
     ///
     /// # Errors
     ///
@@ -61,12 +62,13 @@ impl AuthService {
         view: &dyn ReadView,
         batch: &mut WriteBatch,
         mirror: MirrorId,
+        name: &str,
         terms: &MirrorTokenTerms,
     ) -> Result<MirrorCredentials, AuthError> {
         let (creator, _, strength) = Self::session_principal(ctx)?;
         // ADR 0038: a delegated session within five minutes of its approval, one mirror per
         // DHCP server of its plan; anyone else signed in within the last five minutes.
-        if !Self::stage_delegated_mirror(ctx, view, batch, mirror)? {
+        if !Self::stage_delegated_mirror(ctx, view, batch, mirror, name)? {
             self.require_fresh_session(ctx).await?;
         }
         let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(mirror))?;

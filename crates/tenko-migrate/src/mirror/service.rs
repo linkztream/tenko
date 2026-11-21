@@ -707,7 +707,14 @@ impl MirrorService {
             batch.bump(CREATIONS);
             let credentials = self
                 .auth
-                .stage_mirror_account(ctx, view.as_ref(), &mut batch, mirror.id, &new.token)
+                .stage_mirror_account(
+                    ctx,
+                    view.as_ref(),
+                    &mut batch,
+                    mirror.id,
+                    &mirror.name,
+                    &new.token,
+                )
                 .await
                 .map_err(|error| match error {
                     AuthError::UserNameTaken => MirrorError::Exists(account.clone()),

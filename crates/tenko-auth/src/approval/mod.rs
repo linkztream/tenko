@@ -29,15 +29,21 @@
 //! per source (an IPv4 address or an IPv6 /64) and [`MAX_PENDING`] in all, each pending for
 //! [`PENDING_LIFETIME`]; one request per address every [`REQUEST_SPACING`] on each controller.
 //! A request decodes the small rows of `auth.approvals` only, never a plan. An administrator
-//! denies every waiting request, or those of one source, in one step.
+//! denies every waiting request and uncollected approval, or those of one source, in one
+//! step, and is told how many of each kind.
 //!
-//! The authentication service's hourly sweep removes the rows that are over: a consumed
-//! approval once its delegated session can no longer live ([`crate::delegation::LIFETIME`]
-//! after the collect), every other one once its pending time is over. It removes a row only
-//! when this controller's clock stands that far after the row's time, never on a clock that
-//! stands before it. Stored, that is at most [`MAX_PENDING`] pending approvals of one plan
-//! each, plus those that ended within the last sweep interval, plus one consumed approval per
-//! delegated session alive, which a person's approval and the rule of one run per domain bound.
+//! The authentication service's sweep removes the rows that are over every
+//! [`PENDING_LIFETIME`]: a consumed approval once its delegated session can no longer live
+//! ([`crate::delegation::LIFETIME`] after the collect), every other one once its pending time
+//! is over. It removes a row only when this controller's clock stands that far after the
+//! row's time, never on a clock that stands before it. A row that is not consumed is
+//! therefore stored for at most two pending lifetimes (20 minutes), and the requests of any
+//! ten minutes number at most [`MAX_PENDING`] (each still waits at their end unless a person
+//! decided it). Stored, that is at most 2 × 64 = 128 plans of at most 64 KiB, 8 MiB, and
+//! 2 × 2 = 4 of one source; each request a person denies or approves lets one more in for
+//! those 20 minutes, so a denial of every waiting request lets up to 64 more in. Beside them,
+//! one consumed approval per delegated session alive, which a person's approval and the rule
+//! of one run per domain bound.
 //!
 //! The times of an approval are stored wall-clock times, because any controller may serve its
 //! steps; a controller whose clock stands more than [`CLOCK_TOLERANCE`] before a stored time
@@ -188,9 +194,10 @@ impl From<Refusal> for crate::AuthError {
     }
 }
 
-/// The bucket of a source address: an IPv4 address, or the /64 of an IPv6 address.
+/// The bucket of a source address: an IPv4 address (an IPv4-mapped IPv6 address is that), or
+/// the /64 of an IPv6 address.
 pub fn source_bucket(source: std::net::IpAddr) -> Vec<u8> {
-    match source {
+    match source.to_canonical() {
         std::net::IpAddr::V4(v4) => v4.octets().to_vec(),
         std::net::IpAddr::V6(v6) => v6.octets()[..usize::from(IPV6_SOURCE_PREFIX / 8)].to_vec(),
     }

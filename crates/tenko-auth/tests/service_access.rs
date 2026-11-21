@@ -2322,7 +2322,7 @@ async fn a_mirror_token_pushes_its_own_mirror_and_nothing_else() {
             let staged = lab
                 .env
                 .service
-                .stage_mirror_account(&admin, view.as_ref(), &mut batch, mirror, &terms)
+                .stage_mirror_account(&admin, view.as_ref(), &mut batch, mirror, "dhcp1", &terms)
                 .await;
             (staged, batch)
         }

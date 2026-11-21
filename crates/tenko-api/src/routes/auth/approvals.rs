@@ -224,11 +224,11 @@ async fn deny_approval(
     tag = "auth",
     operation_id = "clear_approvals",
     summary = "Deny the waiting approvals, of every source or one",
-    description = "An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Audited as `auth.approval.deny`, one record per approval.",
+    description = "An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, an IPv4-mapped IPv6 address as its IPv4 address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Answers how many waiting requests and how many uncollected approvals were denied. Audited as `auth.approval.deny`, one record per approval.",
     request_body(content = ClearApprovals, content_type = "application/json"),
     responses(
-        (status = 200, description = "How many approvals were denied", body = ClearedApprovals),
-        (status = 400, description = "The body is not one object of the schema (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 200, description = "How many approvals of each kind were denied", body = ClearedApprovals),
+        (status = 400, description = "The body is not one object of the schema, or `source` is not an address (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session; a token is refused (`auth.unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), or a delegated session (`auth.delegation.refused`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
@@ -240,8 +240,7 @@ async fn clear_approvals(
     Ctx(ctx): Ctx,
     OptionalJson(body): OptionalJson<ClearApprovals>,
 ) -> Result<Json<ClearedApprovals>, RouteError> {
-    let denied = service.clear_approvals(&ctx, body.source).await?;
-    Ok(Json(ClearedApprovals { denied }))
+    Ok(Json(service.clear_approvals(&ctx, body.source).await?))
 }
 
 /// Collects the delegated session of an approved request.

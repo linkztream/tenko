@@ -17,9 +17,9 @@ use super::{AuthService, LIST_LIMIT, SecretString};
 use crate::{
     approval::{
         self, APPROVAL_PLANS, APPROVALS, AUDIT_EVERY, ApprovalRecord, ApprovalState,
-        ApprovalTicket, ApprovalView, Decision, DelegatedSession, LOOKUP_LOCK, MAX_PENDING,
-        MAX_PENDING_PER_SOURCE, PENDING_LIFETIME, REQUEST_SPACING, Refusal, WRONG_CODE_WINDOW,
-        WRONG_CODES, actions,
+        ApprovalTicket, ApprovalView, ClearedApprovals, Decision, DelegatedSession, LOOKUP_LOCK,
+        MAX_PENDING, MAX_PENDING_PER_SOURCE, PENDING_LIFETIME, REQUEST_SPACING, Refusal,
+        WRONG_CODE_WINDOW, WRONG_CODES, actions,
     },
     delegation,
     encoding::hex_encode,
@@ -237,7 +237,8 @@ impl AuthService {
 
     /// `POST /auth/approvals/clear`: an administrator who signed in within the last five
     /// minutes denies every waiting request and every approval not collected yet, or only
-    /// those whose source is `source`'s (its IPv4 address or IPv6 /64). Answers how many.
+    /// those whose source is `source`'s (its IPv4 address, an IPv4-mapped IPv6 address as
+    /// that, or its IPv6 /64). Answers how many of each kind.
     ///
     /// # Errors
     ///
@@ -246,12 +247,15 @@ impl AuthService {
         &self,
         ctx: &RequestCtx,
         source: Option<IpAddr>,
-    ) -> Result<usize, AuthError> {
+    ) -> Result<ClearedApprovals, AuthError> {
         let (user, session) = self.approver(ctx, true).await?;
         let bucket = source.map(approval::source_bucket);
         let view = self.view().await?;
         let mut batch = WriteBatch::for_request(ctx);
-        let mut denied = 0;
+        let mut cleared = ClearedApprovals {
+            waiting: 0,
+            approved: 0,
+        };
         for (_, record, revision) in
             view.scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)?
         {
@@ -259,15 +263,19 @@ impl AuthService {
                 .as_ref()
                 .is_none_or(|bucket| approval::source_bucket(record.source) == *bucket);
             if chosen && deniable(&record, ctx.now) {
+                if matches!(record.state, ApprovalState::Pending) {
+                    cleared.waiting += 1;
+                } else {
+                    cleared.approved += 1;
+                }
                 batch.audit(decision_audit(actions::DENY, &record, user, session, ctx));
                 stage_denial(&mut batch, record, revision, user, ctx.now)?;
-                denied += 1;
             }
         }
-        if denied > 0 {
+        if !batch.mutations.is_empty() {
             self.commit(batch).await?;
         }
-        Ok(denied)
+        Ok(cleared)
     }
 
     /// `POST /auth/approvals/{id}/collect`: the script proves its key by signing the nonce,
@@ -396,19 +404,22 @@ impl AuthService {
             .ok_or(AuthError::DelegationRefused)
     }
 
-    /// For a delegated session, stages the mirror `mirror` into its approval and answers
-    /// `true`: within [`delegation::MIRROR_WINDOW`] of the approval on this controller's
-    /// clock, and at most one mirror per DHCP server of the plan, in the batch that creates
-    /// the mirror. Answers `false` for any other principal.
+    /// For a delegated session, stages the mirror `mirror`, named `name`, into its approval
+    /// and answers `true`: within [`delegation::MIRROR_WINDOW`] of the approval on this
+    /// controller's clock, for the plan's DHCP server of that name (case aside) that has no
+    /// mirror yet, in the batch that creates the mirror. Answers `false` for any other
+    /// principal.
     ///
     /// # Errors
     ///
-    /// [`AuthError::DelegationRefused`] past the window or the plan's count.
+    /// [`AuthError::DelegationRefused`] past the window, for a name that is no DHCP server of
+    /// the plan, or for a server that has its mirror.
     pub(super) fn stage_delegated_mirror(
         ctx: &RequestCtx,
         view: &dyn ReadView,
         batch: &mut WriteBatch,
         mirror: MirrorId,
+        name: &str,
     ) -> Result<bool, AuthError> {
         let Some(delegated) = Self::delegated_of(ctx, view)? else {
             return Ok(false);
@@ -419,14 +430,17 @@ impl AuthService {
         let (mut record, revision) = view
             .get_typed(&APPROVALS, &delegated.approval)?
             .ok_or(AuthError::DelegationRefused)?;
-        let servers = plan_of(view, delegated.approval)
+        let server = plan_of(view, delegated.approval)
             .map_err(|_| AuthError::DelegationRefused)?
             .dhcp_servers
-            .len();
-        if record.mirrors.len() >= servers {
+            .into_iter()
+            .find(|server| server.name.as_str().eq_ignore_ascii_case(name))
+            .ok_or(AuthError::DelegationRefused)?
+            .name;
+        if record.mirrors.iter().any(|(taken, _)| *taken == server) {
             return Err(AuthError::DelegationRefused);
         }
-        record.mirrors.push(mirror);
+        record.mirrors.push((server, mirror));
         batch.expect_typed(&APPROVALS, &delegated.approval, Some(revision));
         batch.put_typed(&APPROVALS, &delegated.approval, &record)?;
         Ok(true)
@@ -448,7 +462,7 @@ impl AuthService {
     /// Removes the approvals that are over: a consumed one [`delegation::LIFETIME`] after its
     /// collect, every other one [`PENDING_LIFETIME`] after its request, on this controller's
     /// clock standing that far after the row's time (a clock that stands before it removes
-    /// nothing). Part of the hourly sweep.
+    /// nothing). The sweep runs it every [`PENDING_LIFETIME`].
     pub(super) async fn prune_approvals(&self, now: Timestamp) -> Result<(), AuthError> {
         let view = self.view().await?;
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
