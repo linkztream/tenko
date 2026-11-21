@@ -725,6 +725,13 @@ fn spawn_housekeeping(layers: Arc<Layers>, mut stop: watch::Receiver<bool>) {
     });
 }
 
+/// Logs a failed `accept` and waits: out of file descriptors and similar errors fail at
+/// once, every time, so a loop that went straight back would spin a core.
+pub(crate) async fn accept_failed(error: &io::Error) {
+    tracing::warn!(%error, "accept failed");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+}
+
 #[cfg(test)]
 mod tests {
     use axum::{
@@ -773,6 +780,13 @@ mod tests {
             ("api", api),
             ("integration", integration_app(state, &layers, extensions)),
         ]
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_failed_accept_waits_before_the_next() {
+        let started = tokio::time::Instant::now();
+        accept_failed(&io::Error::from(io::ErrorKind::Other)).await;
+        assert!(started.elapsed() >= Duration::from_millis(100));
     }
 
     async fn post_prefix(router: Router, body: Body) -> Response {

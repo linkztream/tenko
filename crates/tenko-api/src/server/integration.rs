@@ -262,7 +262,7 @@ async fn accept_loop(socket: TcpListener, shared: Arc<Shared>, mut closed: watch
             accepted = socket.accept() => match accepted {
                 Ok(accepted) => accepted,
                 Err(error) => {
-                    tracing::debug!(%error, "integration accept failed");
+                    super::accept_failed(&error).await;
                     continue;
                 }
             },

@@ -1044,9 +1044,7 @@ impl Signer {
                 position: verify.then_some(start),
                 ..Trigger::full(verify && *mode == DnssecMode::Online)
             };
-            if self.sync(*id, trigger).await.is_err() {
-                shared.again(*id);
-            }
+            shared.passed(*id, self.sync(*id, trigger).await.is_ok());
         }
         let mut tick = tokio::time::interval(self.config.tick);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -1064,9 +1062,7 @@ impl Signer {
                     }
                     for (id, mut trigger) in pending {
                         trigger.position = Some(position);
-                        if self.sync(id, trigger).await.is_err() {
-                            shared.again(id);
-                        }
+                        shared.passed(id, self.sync(id, trigger).await.is_ok());
                         if let Ok(view) = self.zones.view(None).await
                             && let Ok(row) = ZoneService::zone(view.as_ref(), id)
                         {
@@ -1082,13 +1078,7 @@ impl Signer {
                     if let Err(error) = self.on_timer(shared).await {
                         tracing::warn!(%error, "the signing timer could not look at the zones");
                     }
-                    let mut inbox = shared.inbox();
-                    let retry = std::mem::take(&mut inbox.retry);
-                    for id in &retry {
-                        inbox.zones.insert(*id, Trigger::full(true));
-                    }
-                    drop(inbox);
-                    if !retry.is_empty() {
+                    if shared.retries_due() {
                         shared.notify.notify_one();
                     }
                 }
@@ -1107,7 +1097,7 @@ impl Signer {
         for (id, mode) in &tracked {
             let position = {
                 let inbox = shared.inbox();
-                if inbox.zones.contains_key(id) || inbox.retry.contains(id) {
+                if inbox.zones.contains_key(id) || inbox.retry.contains_key(id) {
                     continue;
                 }
                 inbox.position
@@ -1159,6 +1149,17 @@ fn watch_filter() -> WatchFilter {
     WatchFilter::tables([ZONES.name().clone(), RRSETS.name().clone()])
 }
 
+/// How a zone whose passes keep failing is retried: the wait doubles with each failure.
+#[derive(Clone, Copy)]
+struct Backoff {
+    failures: u32,
+    /// Ticks left before the next try.
+    wait: u32,
+}
+
+/// The longest wait between two tries of a failing zone, in ticks (an hour at the default).
+const RETRY_WAIT_MAX: u32 = 60;
+
 /// The changes gathered for the next passes.
 #[derive(Default)]
 struct Inbox {
@@ -1166,8 +1167,8 @@ struct Inbox {
     zones: HashMap<ZoneId, Trigger>,
     /// The revision the gathered changes run to.
     position: Revision,
-    /// The zones whose pass failed, for a full pass that verifies at the next tick.
-    retry: HashSet<ZoneId>,
+    /// The zones whose pass failed, for a full pass that verifies when the wait is over.
+    retry: HashMap<ZoneId, Backoff>,
     /// Why the change stream ended, which stops the service.
     failed: Option<String>,
 }
@@ -1201,12 +1202,38 @@ impl Shared {
         }
     }
 
-    /// A zone whose pass failed gets, at the next tick (not at the next change, so a zone
-    /// that keeps failing is tried once a tick), a full pass that verifies every signature
-    /// it keeps: it covers whatever the failed pass carried, in a size that does not grow
-    /// with the changes.
-    fn again(&self, zone: ZoneId) {
-        self.inbox().retry.insert(zone);
+    /// A zone whose pass failed gets, at the next tick (not at the next change), a full
+    /// pass that verifies every signature it keeps: it covers whatever the failed pass
+    /// carried, in a size that does not grow with the changes. A zone that keeps failing
+    /// waits twice as long after each failure, up to [`RETRY_WAIT_MAX`] ticks, so one
+    /// zone that cannot be signed does not cost a verifying pass every tick.
+    fn passed(&self, zone: ZoneId, ok: bool) {
+        let mut inbox = self.inbox();
+        if ok {
+            inbox.retry.remove(&zone);
+            return;
+        }
+        let failures = inbox.retry.get(&zone).map_or(0, |backoff| backoff.failures) + 1;
+        let wait = 1_u32
+            .checked_shl(failures - 1)
+            .map_or(RETRY_WAIT_MAX, |wait| wait.min(RETRY_WAIT_MAX));
+        inbox.retry.insert(zone, Backoff { failures, wait });
+    }
+
+    /// One tick of the waits: queues the full pass of every zone whose wait is over and
+    /// says whether it queued any.
+    fn retries_due(&self) -> bool {
+        let mut inbox = self.inbox();
+        let inbox = &mut *inbox;
+        let mut any = false;
+        for (id, backoff) in &mut inbox.retry {
+            backoff.wait = backoff.wait.saturating_sub(1);
+            if backoff.wait == 0 {
+                inbox.zones.insert(*id, Trigger::full(true));
+                any = true;
+            }
+        }
+        any
     }
 
     /// Stops the service with `reason` at its next look at the inbox.
@@ -1385,4 +1412,42 @@ pub fn generated(view: &dyn ReadView, zone: &Zone) -> ZoneResult<Vec<RrSet>> {
         );
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn shared() -> Shared {
+        Shared {
+            inbox: std::sync::Mutex::default(),
+            tracked: std::sync::Mutex::default(),
+            notify: tokio::sync::Notify::new(),
+        }
+    }
+
+    /// A zone whose passes keep failing is tried at the next tick, then after 2, 4, ...
+    /// ticks, never less than every `RETRY_WAIT_MAX`; a pass that works ends the waiting.
+    #[test]
+    fn a_zone_that_keeps_failing_is_retried_less_and_less_often() {
+        let shared = shared();
+        let zone = ZoneId::generate();
+        let mut tries = Vec::new();
+        shared.passed(zone, false);
+        for tick in 1..=200 {
+            if shared.retries_due() {
+                tries.push(tick);
+                shared.inbox().zones.clear();
+                shared.passed(zone, false);
+            }
+        }
+        assert_eq!(tries, [1, 3, 7, 15, 31, 63, 123, 183]);
+        shared.passed(zone, true);
+        assert!(!shared.retries_due());
+        shared.passed(zone, false);
+        assert!(
+            shared.retries_due(),
+            "a zone that healed starts again at one tick"
+        );
+    }
 }

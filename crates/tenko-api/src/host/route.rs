@@ -16,9 +16,10 @@ use std::{
     future::Future,
     net::IpAddr,
     pin::Pin,
-    sync::{Mutex, PoisonError},
     time::{Duration, Instant},
 };
+
+use tokio::sync::Mutex;
 
 use tenko_ipam::topology::DefaultRoute;
 
@@ -36,25 +37,29 @@ impl OsDefaultRoute {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// The kept answer while it is fresh, else the answer of `read`. The lock is held
+    /// across the read, so callers that arrive while it runs wait for it instead of each
+    /// starting the child processes again.
+    async fn cached<F: Future<Output = Vec<IpAddr>>>(
+        &self,
+        read: impl FnOnce() -> F,
+    ) -> Vec<IpAddr> {
+        let mut kept = self.kept.lock().await;
+        if let Some((at, hops)) = kept.as_ref()
+            && at.elapsed() < ROUTE_TTL
+        {
+            return hops.clone();
+        }
+        let hops = read().await;
+        *kept = Some((Instant::now(), hops.clone()));
+        hops
+    }
 }
 
 impl DefaultRoute for OsDefaultRoute {
     fn next_hops(&self) -> Pin<Box<dyn Future<Output = Vec<IpAddr>> + Send + '_>> {
-        Box::pin(async move {
-            if let Some((at, hops)) = self
-                .kept
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .as_ref()
-                && at.elapsed() < ROUTE_TTL
-            {
-                return hops.clone();
-            }
-            let hops = read().await;
-            *self.kept.lock().unwrap_or_else(PoisonError::into_inner) =
-                Some((Instant::now(), hops.clone()));
-            hops
-        })
+        Box::pin(self.cached(read))
     }
 }
 
@@ -175,6 +180,20 @@ mod tests {
 
     fn ips(text: &[&str]) -> Vec<IpAddr> {
         text.iter().map(|ip| ip.parse().expect("ip")).collect()
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn concurrent_callers_share_one_read() {
+        let route = OsDefaultRoute::new();
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let read = || async {
+            reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            ips(&["192.0.2.1"])
+        };
+        let (a, b, c) = tokio::join!(route.cached(read), route.cached(read), route.cached(read));
+        assert!([a, b, c].iter().all(|hops| *hops == ips(&["192.0.2.1"])));
+        assert_eq!(reads.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     #[test]

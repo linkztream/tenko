@@ -85,9 +85,7 @@ pub(crate) async fn accept_loop(
         let (tcp, peer) = match accepted {
             Ok(accepted) => accepted,
             Err(error) => {
-                // Out of file descriptors and similar: back off instead of spinning.
-                tracing::warn!(%error, "accept failed");
-                tokio::time::sleep(Duration::from_millis(100)).await;
+                super::accept_failed(&error).await;
                 continue;
             }
         };

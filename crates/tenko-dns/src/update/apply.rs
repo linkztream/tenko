@@ -328,15 +328,24 @@ impl From<ZoneError> for Stop {
     }
 }
 
-/// Whether `new` only refreshes `old`: `old` is dynamic, and `new` holds its TTL and its
-/// records in any order. An RRset of another origin becomes dynamic at its first update.
-fn refreshes(old: &RrSet, new: &RrSet) -> bool {
+/// How long a dynamic RRset keeps its aging stamp against refreshes (identity plan section
+/// 3.8, the default of the no-refresh interval): the first refresh after it is written, so
+/// that the stamp a scavenger reads stays younger than the interval while the client lives.
+const NO_REFRESH: Duration = Duration::from_secs(7 * 24 * 3600);
+
+/// Whether `new` only refreshes `old` at `now`: `old` is dynamic and stamped within the
+/// no-refresh interval, and `new` holds its TTL and its records in any order. An RRset of
+/// another origin becomes dynamic at its first update.
+fn refreshes(old: &RrSet, new: &RrSet, now: Timestamp) -> bool {
     fn sorted(rrset: &RrSet) -> Vec<&Rdata> {
         let mut records: Vec<&Rdata> = rrset.rdata.iter().collect();
         records.sort_unstable();
         records
     }
-    old.origin == Origin::Dynamic && old.ttl == new.ttl && sorted(old) == sorted(new)
+    old.origin == Origin::Dynamic
+        && now.saturating_since(old.updated.at) < NO_REFRESH
+        && old.ttl == new.ttl
+        && sorted(old) == sorted(new)
 }
 
 fn is_dnssec_type(rtype: Rtype) -> bool {
@@ -946,7 +955,11 @@ impl Planner<'_> {
                     .is_none_or(|owner| owner.hold_passed(now));
             if let Some(node) = self.nodes.get_mut(key).filter(|_| !takes) {
                 for (rtype, old) in before {
-                    if node.after.get(rtype).is_some_and(|new| refreshes(old, new)) {
+                    if node
+                        .after
+                        .get(rtype)
+                        .is_some_and(|new| refreshes(old, new, now))
+                    {
                         node.after.insert(*rtype, old.clone());
                     }
                 }
@@ -1270,6 +1283,31 @@ mod tests {
         RecordData::Ptr {
             target: name(target),
         }
+    }
+
+    /// A refresh inside the no-refresh interval writes nothing; the first one after it is
+    /// written, which gives the RRset a new aging stamp.
+    #[test]
+    fn a_refresh_after_the_no_refresh_interval_is_a_write() {
+        let mut old = rrset(
+            "www.corp.example.test",
+            Rtype::PTR,
+            &[ptr("a.corp.example.test")],
+        );
+        old.origin = Origin::Dynamic;
+        let new = old.clone();
+        let at = old.updated.at;
+        let day = Duration::from_secs(24 * 3600);
+        assert!(refreshes(
+            &old,
+            &new,
+            at.checked_add(day * 6).expect("time")
+        ));
+        assert!(!refreshes(
+            &old,
+            &new,
+            at.checked_add(day * 8).expect("time")
+        ));
     }
 
     /// DNS-28: the locator names of section 3.6.
