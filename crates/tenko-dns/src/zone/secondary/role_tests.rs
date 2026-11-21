@@ -50,6 +50,8 @@ enum Answer {
     /// The whole zone at this serial, once [`Primary::release`] lets it go; the request
     /// is signaled through [`Primary::asked`].
     Stalled(u32),
+    /// The SOA alone with this serial, the same way.
+    StalledCurrent(u32),
 }
 
 struct Primary {
@@ -73,7 +75,7 @@ impl Primary {
                 let answer = *shared.lock().expect("answer");
                 let serial = match answer {
                     Answer::Zone(serial) | Answer::Current(serial) => serial,
-                    Answer::Stalled(serial) => {
+                    Answer::Stalled(serial) | Answer::StalledCurrent(serial) => {
                         on_ask.notify_one();
                         on_release.notified().await;
                         serial
@@ -585,4 +587,42 @@ async fn a_transfer_that_runs_across_a_flip_and_its_reverse_writes_nothing() {
         Origin::Transfer,
         "the stalled transfer wrote nothing"
     );
+}
+
+/// The same for a refresh that finds the copy current: the flip removed the record of the
+/// copy's last refresh, and the refresh that read the zone before it writes no new one.
+#[tokio::test]
+async fn a_current_copy_found_across_a_flip_and_its_reverse_is_not_recorded() {
+    let primary = Primary::start(Answer::Zone(7)).await;
+    let lab = Lab::new(&primary).await;
+    let node = lab.node();
+    term(&node).await;
+    primary.answer(Answer::StalledCurrent(7));
+    node.lock()
+        .get_mut(&lab.zone.id)
+        .expect("state")
+        .force(Timestamp::now());
+    let running = {
+        let node = Arc::clone(&node);
+        tokio::spawn(async move { look(&node).await })
+    };
+    primary.asked.notified().await;
+    let to_primary = ZoneFlip::Primary {
+        soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
+        ns: vec![name("ns1.example.test")],
+    };
+    lab.zones
+        .flip(&system(), lab.zone.id, &to_primary)
+        .await
+        .expect("flip");
+    let back = ZoneFlip::Secondary {
+        primaries: lab.zone.source.clone().expect("source").primaries,
+    };
+    lab.zones
+        .flip(&system(), lab.zone.id, &back)
+        .await
+        .expect("the flip back");
+    primary.release.notify_one();
+    running.await.expect("the refresh ends");
+    assert_eq!(lab.stamp().await, None, "the current copy was not recorded");
 }
