@@ -798,6 +798,19 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
         picture.abandoned_mac = lease.client.mac().map(MacAddr::new);
     }
 
+    // The open orphaned-record proposals by the name they concern, with their place in key
+    // order, so that a row looks its proposal up instead of walking them all.
+    let mut orphan_proposals: BTreeMap<String, (usize, ProposalId)> = BTreeMap::new();
+    for (at, (proposal, _)) in snapshot.open.values().enumerate() {
+        if proposal.rule == rule::DNS_ORPHANED_RECORD
+            && let Some(name) = proposal.subject.name.as_deref()
+        {
+            orphan_proposals
+                .entry(norm(name))
+                .or_insert((at, proposal.id));
+        }
+    }
+
     let mut rows = Vec::new();
     let mut conflicted: BTreeSet<(VrfId, IpAddr)> = BTreeSet::new();
     for (&(vrf, ip), picture) in &pictures {
@@ -866,19 +879,14 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
         // Orphans: records of an address no host holds.
         if held.is_none() && !(picture.forward.is_empty() && picture.ptr.is_empty()) {
             let ptr_owner = norm(reverse::ptr_name(ip).as_str());
-            let proposal = snapshot
-                .open
-                .values()
-                .filter(|(proposal, _)| proposal.rule == rule::DNS_ORPHANED_RECORD)
-                .find(|(proposal, _)| {
-                    proposal
-                        .subject
-                        .name
-                        .as_deref()
-                        .map(norm)
-                        .is_some_and(|name| picture.forward.contains(&name) || name == ptr_owner)
-                })
-                .map(|(proposal, _)| proposal.id);
+            // The first open proposal, in key order, that names a forward record or the owner.
+            let proposal = picture
+                .forward
+                .iter()
+                .chain(Some(&ptr_owner))
+                .filter_map(|name| orphan_proposals.get(name))
+                .min()
+                .map(|&(_, id)| id);
             let rule_id = if proposal.is_some() {
                 WinRule::OrphanRule
             } else {
@@ -1029,14 +1037,10 @@ fn last_sighting(
     interface: InterfaceId,
 ) -> Option<Timestamp> {
     let facts = snapshot
-        .facts
-        .iter()
-        .filter(|fact| {
-            !matches!(
-                fact.observed,
-                Observed::Name { .. } | Observed::Vendor { .. } | Observed::Link { .. }
-            )
-        })
+        .sighting_facts
+        .named(&BTreeSet::from([ip]), &mac.into_iter().collect())
+        .into_iter()
+        .map(|at| &snapshot.facts[at])
         .filter(|fact| {
             (fact.vrf().is_none_or(|own| own == vrf) && fact.ips().contains(&ip))
                 || mac.is_some_and(|mac| fact.macs().contains(&mac))
@@ -1128,9 +1132,10 @@ pub(crate) fn os_guesses(
 ) -> Vec<OsField> {
     let mut found: Vec<(u8, OsField)> = Vec::new();
     for fact in snapshot
-        .facts
-        .iter()
-        .filter(|fact| fact.is_current(snapshot.now))
+        .os_facts
+        .named(ips, macs)
+        .into_iter()
+        .map(|at| &snapshot.facts[at])
     {
         let field = |guess: &str, confidence: u8| OsField {
             guess: guess.trim().to_owned(),
@@ -1254,3 +1259,7 @@ impl HostScope {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "view_tests.rs"]
+mod tests;

@@ -376,6 +376,58 @@ pub(crate) struct Snapshot {
     /// anycast address): scan artifacts, never a conflict, a discovered host or a mismatch.
     /// They are not in [`Self::seen`]; the findings list them as `scan_artifact`.
     pub artifacts: Vec<Seen>,
+    /// The current host and OS facts by the addresses and MAC addresses they name.
+    pub os_facts: FactIndex,
+    /// Every fact within retention that sights a device, current or not (every kind but
+    /// names, vendors and links), by the addresses and MAC addresses it names.
+    pub sighting_facts: FactIndex,
+}
+
+/// Indexes in [`Snapshot::facts`] by the addresses and MAC addresses the facts name: a
+/// lookup for one address replaces a walk over every fact.
+#[derive(Debug, Default)]
+pub(crate) struct FactIndex {
+    by_ip: BTreeMap<IpAddr, Vec<usize>>,
+    by_mac: BTreeMap<MacAddr, Vec<usize>>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The facts [`FactIndex::named`] returned on this thread: the cost of the lookups.
+    pub(crate) static VISITED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+impl FactIndex {
+    pub(crate) fn of<'a>(facts: impl Iterator<Item = (usize, &'a ObservedFact)>) -> Self {
+        let mut index = Self::default();
+        for (at, fact) in facts {
+            for ip in fact.ips() {
+                index.by_ip.entry(ip).or_default().push(at);
+            }
+            for mac in fact.macs() {
+                index.by_mac.entry(mac).or_default().push(at);
+            }
+        }
+        index
+    }
+
+    /// The facts naming one of the addresses or MAC addresses, once each, in fact order.
+    pub(crate) fn named(
+        &self,
+        ips: &BTreeSet<IpAddr>,
+        macs: &BTreeSet<MacAddr>,
+    ) -> BTreeSet<usize> {
+        let found: BTreeSet<usize> = ips
+            .iter()
+            .filter_map(|ip| self.by_ip.get(ip))
+            .chain(macs.iter().filter_map(|mac| self.by_mac.get(mac)))
+            .flatten()
+            .copied()
+            .collect();
+        #[cfg(test)]
+        VISITED.with(|visited| visited.set(visited.get() + found.len()));
+        found
+    }
 }
 
 impl Snapshot {
@@ -467,10 +519,21 @@ impl Snapshot {
             .into_iter()
             .map(|(object, sighting, revision)| (object, (sighting, revision)))
             .collect();
+        let os_facts = FactIndex::of(facts.iter().enumerate().filter(|(_, fact)| {
+            fact.is_current(now) && matches!(fact.observed, Observed::Host(_) | Observed::Os { .. })
+        }));
+        let sighting_facts = FactIndex::of(facts.iter().enumerate().filter(|(_, fact)| {
+            !matches!(
+                fact.observed,
+                Observed::Name { .. } | Observed::Vendor { .. } | Observed::Link { .. }
+            )
+        }));
         Ok(Self {
             now,
             intent,
             facts,
+            os_facts,
+            sighting_facts,
             seen,
             name_facts,
             authorities: super::names::Authorities::load(view)?,
