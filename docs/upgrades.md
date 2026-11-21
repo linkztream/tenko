@@ -1844,7 +1844,7 @@ The attempt record is JSON:
 | `reason` | A stable code for `failed` and `rolled_back`: `upgrade.not_ready` (the watchdog fired), `upgrade.not_confirmed` (a second start), or the code of the start step that failed |
 | `deadline_secs` | The time the new version has to become ready |
 | `starts` | How many times the new version has started |
-| `backup` | The pre-migration copy taken by the new version, if any |
+| `backup` | The pre-migration copy taken by the new version, if any: the store copy made before a format migration, not the update job's own restore point, which is the backup with reason `before_update` (section 8.12) |
 | `restore` | The previous version must restore `backup` before it opens the store |
 | `reported` | The outcome has been written to the audit log |
 | `schema` | 1. A record without it is schema 1 |

@@ -118,7 +118,8 @@ pub struct Attempt {
     /// Starts of the new version so far.
     #[serde(default)]
     pub starts: u32,
-    /// The store copy the new version took before it migrated.
+    /// The store copy the new version took before it migrated. It is not the update job's
+    /// own restore point, which is the backup listed with reason `before_update`.
     #[serde(default)]
     pub backup: Option<PathBuf>,
     /// The previous version must put `backup` back before it opens the store.
