@@ -52,7 +52,7 @@ export function FindingAction(props: {
   const writeToast = useWriteToast();
   const [proposal, setProposal] = createSignal<Proposal | null>(null);
   const [host, setHost] = createSignal<Host | null>(null);
-  const [clock, setClock] = createSignal<string | null>(null);
+  const [clock, setClock] = createSignal<{ node: string; nodeId: string } | null>(null);
   const [busy, setBusy] = createSignal(false);
   const plan = () => planFor(props.finding);
   const cls = () => (props.primary ? "btn primary" : "btn sm finding-action");
@@ -102,7 +102,7 @@ export function FindingAction(props: {
                   const now = p();
                   if (now.kind === "approve") void approve(now.proposal);
                   else if (now.kind === "decommission") void decommission(now.host);
-                  else if (now.kind === "confirm_clock") setClock(now.node);
+                  else if (now.kind === "confirm_clock") setClock(now);
                   else props.onPanel(props.finding);
                 }}
               >
@@ -129,7 +129,7 @@ export function FindingAction(props: {
               />
             )}
           </Show>
-          <Show when={clock()}>{(node) => <ClockConfirm node={node()} onClose={() => setClock(null)} onDone={() => props.onDone?.()} />}</Show>
+          <Show when={clock()}>{(node) => <ClockConfirm node={node().node} nodeId={node().nodeId} onClose={() => setClock(null)} onDone={() => props.onDone?.()} />}</Show>
           <Show when={host()} keyed>
             {(found) => (
               <DecommissionDialog

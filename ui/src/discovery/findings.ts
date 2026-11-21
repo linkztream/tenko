@@ -209,7 +209,7 @@ export type ActionPlan =
   | { kind: "panel"; label: string }
   | { kind: "approve"; label: string; proposal: string }
   | { kind: "decommission"; label: string; host: string }
-  | { kind: "confirm_clock"; label: string; node: string };
+  | { kind: "confirm_clock"; label: string; node: string; nodeId: string };
 
 export function actionOf(finding: Finding): ActionPlan | null {
   const proposal = proposalOf(finding);
@@ -248,7 +248,7 @@ export function actionOf(finding: Finding): ActionPlan | null {
     case "move_host":
       return { kind: "link", label: t("discovery.findings.action.open_ssids"), href: `${paths.topology()}?view=ssids` };
     case "confirm_clock":
-      return { kind: "confirm_clock", label: t("discovery.findings.action.confirm_clock"), node: finding.params?.node ?? "" };
+      return { kind: "confirm_clock", label: t("discovery.findings.action.confirm_clock"), node: finding.params?.node ?? "", nodeId: finding.params?.node_id ?? "" };
     case "none":
       return null;
   }

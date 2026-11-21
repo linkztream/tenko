@@ -142,9 +142,11 @@ describe("findingEvidence", () => {
   it("words a clock hold with the size of the jump and the end of its wait", () => {
     const params = { node: "ns1", reason: "jump", direction: "forward", jump_secs: "3600", until: "2026-10-14T13:00:00Z" };
     const jumped = finding({ kind: "health", source: "health", code: "sys.clock.jumped", params });
-    expect(findingEvidence(jumped).text).toMatch(/^The clock of ns1 jumped forward by 1 hr\. Tenko trusts it again by itself at .+, or at once when you confirm the clock\.$/);
+    expect(findingEvidence(jumped).text).toMatch(/^The clock of ns1 jumped forward by 1 hr\. Tenko trusts it again to judge what has expired by itself at .+, or at once when you confirm the clock\.$/);
     const held = finding({ kind: "health", source: "health", code: "sys.clock.held", params: { ...params, reason: "start_gap", jump_secs: "172800" } });
     expect(findingEvidence(held).text).toBe("ns1 was off for 2 days. Tenko trusts it again only when you confirm the clock. Check the host's time first.");
+    const expiry = finding({ kind: "health", source: "health", code: "sys.clock.held", params: { ...params, reason: "start_gap", jump_secs: "172800", stage: "expiry" } });
+    expect(findingEvidence(expiry).text).toBe("ns1 was off for 2 days. Tenko trusts it again to judge what has expired only when you confirm the clock. Check the host's time first.");
     const issuing = finding({ kind: "health", source: "health", code: "sys.clock.held", params: { ...params, stage: "issuing" } });
     expect(findingEvidence(issuing).text).toBe(
       "The clock of ns1 jumped forward by 1 hr. Tenko trusts it again to judge what has expired, but not to issue what other machines check until you confirm the clock. Check the host's time first.",
@@ -227,8 +229,8 @@ describe("findingAction", () => {
 
   it("confirms the clock of the node of both clock codes", () => {
     for (const code of ["sys.clock.jumped", "sys.clock.held"]) {
-      const action = findingAction(finding({ kind: "health", source: "health", code, action: "confirm_clock", params: { node: "ns1" } }));
-      expect(action).toEqual({ label: "Confirm the clock", clock: "ns1" });
+      const action = findingAction(finding({ kind: "health", source: "health", code, action: "confirm_clock", params: { node: "ns1", node_id: "7" } }));
+      expect(action).toEqual({ label: "Confirm the clock", clock: { node: "ns1", id: "7" } });
     }
   });
 

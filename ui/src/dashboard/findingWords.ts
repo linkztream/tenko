@@ -89,6 +89,12 @@ export function findingEvidence(finding: Finding): { text: string; mono: boolean
   }
 }
 
+/** The node whose clock a confirm names: the name a person reads and the id the server compares. */
+export interface ClockNode {
+  node: string;
+  id: string;
+}
+
 /** The words of a clock hold: the jump as a duration and the end of its wait as a time. */
 function clockWords(params: Record<string, string>): Record<string, string> {
   if (params.jump_secs === undefined) return params;
@@ -99,7 +105,7 @@ function clockWords(params: Record<string, string>): Record<string, string> {
  * The default action of a finding: its words and where it is done, or the node whose clock the
  * confirm dialog confirms; null for a finding without one.
  */
-export function findingAction(finding: Finding): { label: string; href: string } | { label: string; href?: undefined; clock: string } | null {
+export function findingAction(finding: Finding): { label: string; href: string } | { label: string; href?: undefined; clock: ClockNode } | null {
   const fromProposal = finding.source === "proposal";
   const proposal = () => (fromProposal ? paths.proposal(finding.evidence.id) : RECONCILE_PATH);
   switch (finding.action) {
@@ -131,7 +137,7 @@ export function findingAction(finding: Finding): { label: string; href: string }
     case "move_host":
       return { label: t("dashboard.finding.action.open_ssids"), href: `${paths.topology()}?view=ssids` };
     case "confirm_clock":
-      return { label: t("dashboard.finding.action.confirm_clock"), clock: finding.params?.node ?? "" };
+      return { label: t("dashboard.finding.action.confirm_clock"), clock: { node: finding.params?.node ?? "", id: finding.params?.node_id ?? "" } };
     case "none":
       return null;
   }

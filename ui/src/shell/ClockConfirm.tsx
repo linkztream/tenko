@@ -1,6 +1,6 @@
 // The confirmation of a held clock (`POST /system/clock/confirm`), from the clock's finding: the
 // node's time in UTC and in the browser's time zone to compare with, and the confirm. The
-// request names the node of the finding, which alone confirms; the server needs a sign-in
+// request names the node id of the finding, and that node alone confirms; the server needs a sign-in
 // within five minutes and the system administration right, and its refusal shows in the dialog.
 //
 // Test ids: `dialog-clock-confirm`, `form-cancel`, `form-submit`.
@@ -10,7 +10,7 @@ import { Dialog } from "../components/Dialog";
 import { ErrorNotice } from "../components/Notice";
 import { formatDateTime, t } from "../i18n";
 
-export function ClockConfirm(props: { node: string; onClose: () => void; onDone?: () => void }) {
+export function ClockConfirm(props: { node: string; nodeId: string; onClose: () => void; onDone?: () => void }) {
   // The node's own time: the host sample of its status, read when the dialog opens.
   const [status] = createResource(() => api.get("/api/v1/system/status").catch(() => null));
   const [busy, setBusy] = createSignal(false);
@@ -23,7 +23,7 @@ export function ClockConfirm(props: { node: string; onClose: () => void; onDone?
     setBusy(true);
     setError(null);
     try {
-      await api.post("/api/v1/system/clock/confirm", { body: { node: props.node } });
+      await api.post("/api/v1/system/clock/confirm", { body: { node_id: props.nodeId } });
       props.onDone?.();
       props.onClose();
     } catch (err) {

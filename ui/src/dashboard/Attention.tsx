@@ -20,7 +20,7 @@ import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
 import { ClockConfirm } from "../shell/ClockConfirm";
 import type { FindingArea, FindingCounts } from "../shell/findings";
-import { findingAction, findingEvidence, findingGlyph, findingKindWord, findingSubject, type Finding } from "./findingWords";
+import { findingAction, findingEvidence, findingGlyph, findingKindWord, findingSubject, type ClockNode, type Finding } from "./findingWords";
 
 /** Rows the strip shows; the rest are one link to the list. */
 const ROWS = 5;
@@ -52,7 +52,7 @@ export function Attention(props: { counts: FindingCounts | null }) {
       ),
     );
   const loaded = () => act.latest() !== undefined;
-  const [clock, setClock] = createSignal<string | null>(null);
+  const [clock, setClock] = createSignal<ClockNode | null>(null);
 
   return (
     <section
@@ -117,7 +117,7 @@ export function Attention(props: { counts: FindingCounts | null }) {
           </div>
         </Show>
       </Show>
-      <Show when={clock()}>{(node) => <ClockConfirm node={node()} onClose={() => setClock(null)} onDone={() => act.refetch()} />}</Show>
+      <Show when={clock()}>{(node) => <ClockConfirm node={node().node} nodeId={node().id} onClose={() => setClock(null)} onDone={() => act.refetch()} />}</Show>
       <Show when={review() > 0}>
         <div class="attention-row review" data-testid="dashboard-proposals" data-count={review()}>
           <Icon name="proposal" size="sm" class="review-glyph" />

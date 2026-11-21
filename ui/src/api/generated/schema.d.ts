@@ -5760,7 +5760,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm that the clock of this node is right
-         * @description Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node` names the node as its clock finding does; a node of another name refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.
+         * @description Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node_id` names the node as its clock finding does; a node of another id refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.
          */
         post: operations["confirm_clock"];
         delete?: never;
@@ -8084,10 +8084,10 @@ export interface components {
         /** @description The body of `POST /system/clock/confirm`. */
         ClockConfirm: {
             /**
-             * @description The node whose clock is confirmed, as its clock finding names it (the parameter
-             *     `node`): its host name, or its node id when it has none.
+             * @description The node id of the node whose clock is confirmed, as its clock finding carries it (the
+             *     parameter `node_id`).
              */
-            node: string;
+            node_id: string;
         };
         /** @description The node transport of a controller, for `GET /system/status`. */
         ClusterStatus: {
@@ -54413,7 +54413,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node) */
+            /** @description The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node's name) */
             409: {
                 headers: {
                     [name: string]: unknown;
