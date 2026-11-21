@@ -1158,6 +1158,10 @@
         <notes><note category="description">What the audit action sys.backup.settings is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Change the backup settings</source></segment>
       </unit>
+      <unit id="audit.action.sys.clock.confirm">
+        <notes><note category="description">What the audit action sys.clock.confirm is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Confirm the clock</source></segment>
+      </unit>
       <unit id="audit.action.sys.diagnostics">
         <notes><note category="description">What the audit action sys.diagnostics is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Read the diagnostics</source></segment>

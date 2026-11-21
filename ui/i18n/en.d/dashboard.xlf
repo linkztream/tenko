@@ -133,6 +133,14 @@
         <notes><note category="description">The forwarders of [dns] forwarders in tenko.toml get no query because the node's own recursion resolves the names (docs/dns-resolver.md section 10.1): the number of forwarders and the node.</note></notes>
         <segment><source>Node {node} resolves names outside its zones itself, so the forwarders in [dns] forwarders of its tenko.toml ({count}) get no query. To send those names to them, set [dns.recursion] enabled = false there and restart the service.</source></segment>
       </unit>
+      <unit id="dashboard.finding.health.sys.clock.jumped">
+        <notes><note category="description">The clock of a node jumped while it ran (OPS-09): Tenko keeps the data that looks expired and resumes by itself once it has waited as long as the jump. {node} is the node, {direction} is back or forward, {magnitude} the size of the jump, {until} when it resumes.</note></notes>
+        <segment><source>The clock of {node} jumped {direction, select, back {back} other {forward}} by {magnitude}. Tenko keeps expired data there and resumes by itself at {until}.</source></segment>
+      </unit>
+      <unit id="dashboard.finding.health.sys.clock.held">
+        <notes><note category="description">The clock of a node is held until a person confirms it (OPS-09): it jumped by more than a day, or the node started far from the last time it trusted. {reason} is start_gap or another reason, {direction} back or forward, {magnitude} the size.</note></notes>
+        <segment><source>{reason, select, start_gap {{direction, select, back {The clock of {node} is {magnitude} behind the last time it trusted.} other {{node} was off for {magnitude}.}}} other {The clock of {node} jumped {direction, select, back {back} other {forward}} by {magnitude}.}} Tenko keeps expired data there. Check the host's time, then confirm the clock.</source></segment>
+      </unit>
       <unit id="dashboard.finding.action.resolve">
         <segment><source>Resolve conflict</source></segment>
       </unit>
@@ -168,6 +176,10 @@
       </unit>
       <unit id="dashboard.finding.action.open_settings">
         <segment><source>Open Settings</source></segment>
+      </unit>
+      <unit id="dashboard.finding.action.confirm_clock">
+        <notes><note category="description">Default action of a held clock: opens the dialog that confirms it.</note></notes>
+        <segment><source>Confirm the clock</source></segment>
       </unit>
       <unit id="dashboard.health.label">
         <notes><note category="description">Accessible name of the health row of metric blocks.</note></notes>

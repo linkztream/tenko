@@ -139,6 +139,14 @@ describe("findingEvidence", () => {
     );
   });
 
+  it("words a clock hold with the size of the jump and the end of its wait", () => {
+    const params = { node: "ns1", reason: "jump", direction: "forward", jump_secs: "3600", until: "2026-10-14T13:00:00Z" };
+    const jumped = finding({ kind: "health", source: "health", code: "sys.clock.jumped", params });
+    expect(findingEvidence(jumped).text).toMatch(/^The clock of ns1 jumped forward by 1 hr\. Tenko keeps expired data there and resumes by itself at .+\.$/);
+    const held = finding({ kind: "health", source: "health", code: "sys.clock.held", params: { ...params, reason: "start_gap", jump_secs: "172800" } });
+    expect(findingEvidence(held).text).toBe("ns1 was off for 2 days. Tenko keeps expired data there. Check the host's time, then confirm the clock.");
+  });
+
   it("falls back to the summary for a health code the page has no words for", () => {
     const unknown = finding({ kind: "health", source: "health", code: "sys.unheard.of", params: { detail: "x" } });
     expect(findingEvidence(unknown)).toEqual({ text: "the server's one-line summary", mono: false });
@@ -211,6 +219,13 @@ describe("findingAction", () => {
     expect(status("ipam")?.href).toBe("/ipam");
     expect(status("settings")?.href).toBe("/settings");
     expect(status("jobs")?.href).toBe("/settings");
+  });
+
+  it("confirms the clock of the node of both clock codes", () => {
+    for (const code of ["sys.clock.jumped", "sys.clock.held"]) {
+      const action = findingAction(finding({ kind: "health", source: "health", code, action: "confirm_clock", params: { node: "ns1" } }));
+      expect(action).toEqual({ label: "Confirm the clock", clock: "ns1" });
+    }
   });
 
   it("gives no action for a finding that names none", () => {

@@ -5749,6 +5749,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/clock/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm that the clock of this node is right
+         * @description Ends a hold of the clock guard on this node: rounds that delete or let expire by the wall clock, and what the node issues, go on by the clock as it is now, during a wait too. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the jump and its reason; answers 204 also when nothing was held.
+         */
+        post: operations["confirm_clock"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/diagnostics": {
         parameters: {
             query?: never;
@@ -10926,7 +10946,7 @@ export interface components {
          * @description The default action of a finding, which the UI maps to its button.
          * @enum {string}
          */
-        FindingAction: "resolve" | "open_manual_step" | "open_prefix" | "adopt" | "delete_record" | "fix_ptr" | "open_host" | "decide" | "decommission" | "open_status" | "use_root" | "move_host" | "none";
+        FindingAction: "resolve" | "open_manual_step" | "open_prefix" | "adopt" | "delete_record" | "fix_ptr" | "open_host" | "decide" | "decommission" | "open_status" | "use_root" | "move_host" | "none" | "confirm_clock";
         /**
          * @description The area of the UI a finding belongs to: the rail entry whose badge counts it.
          * @enum {string}
@@ -54329,6 +54349,60 @@ export interface operations {
             };
             /** @description The listener does not use the internal CA (`tls.no_internal_ca`) */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    confirm_clock: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The clock is trusted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description This server has no authentication service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

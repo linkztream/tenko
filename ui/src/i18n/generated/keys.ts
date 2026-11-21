@@ -643,6 +643,7 @@ export type MessageKey =
   | "audit.action.sys.backup.prune"
   | "audit.action.sys.backup.restore"
   | "audit.action.sys.backup.settings"
+  | "audit.action.sys.clock.confirm"
   | "audit.action.sys.diagnostics"
   | "audit.action.sys.idempotency.replay"
   | "audit.action.sys.modules.update"
@@ -1570,6 +1571,7 @@ export type MessageKey =
   | "dashboard.duration.hours"
   | "dashboard.duration.minutes"
   | "dashboard.duration.seconds"
+  | "dashboard.finding.action.confirm_clock"
   | "dashboard.finding.action.decommission"
   | "dashboard.finding.action.open_connectors"
   | "dashboard.finding.action.open_dhcp"
@@ -1597,6 +1599,8 @@ export type MessageKey =
   | "dashboard.finding.health.migrate.mirror.stale"
   | "dashboard.finding.health.migrate.mirror.token_expiring"
   | "dashboard.finding.health.migrate.mirror.unbound"
+  | "dashboard.finding.health.sys.clock.held"
+  | "dashboard.finding.health.sys.clock.jumped"
   | "dashboard.finding.health.sys.update.installer_repair"
   | "dashboard.finding.kind.conflict"
   | "dashboard.finding.kind.dns"
@@ -2711,6 +2715,7 @@ export type MessageKey =
   | "discovery.filter.remove_prefix"
   | "discovery.filter.state"
   | "discovery.findings.action.adopt"
+  | "discovery.findings.action.confirm_clock"
   | "discovery.findings.action.decide"
   | "discovery.findings.action.decommission"
   | "discovery.findings.action.delete_record"
@@ -8068,6 +8073,9 @@ export type MessageKey =
   | "shell.banner.weak_body"
   | "shell.banner.weak_title"
   | "shell.brand.home"
+  | "shell.clock.confirm.body"
+  | "shell.clock.confirm.confirm"
+  | "shell.clock.confirm.title"
   | "shell.command.addresses"
   | "shell.command.audit_verify"
   | "shell.command.dashboard_hint"
@@ -8882,6 +8890,8 @@ export interface MessageArgs {
   "dashboard.finding.health.migrate.mirror.stale": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.token_expiring": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.unbound": { mirrors: string | number };
+  "dashboard.finding.health.sys.clock.held": { direction: string; magnitude: string | number; node: string | number; reason: string };
+  "dashboard.finding.health.sys.clock.jumped": { direction: string; magnitude: string | number; node: string | number; until: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
   "dashboard.health.connectors_more": { count: string | number; names: string | number };
@@ -10205,6 +10215,8 @@ export interface MessageArgs {
   "setup.welcome.restore": { link: string | number };
   "shell.account.open": { name: string | number };
   "shell.account.who": { method: string | number; role: string | number };
+  "shell.clock.confirm.body": { now: string | number };
+  "shell.clock.confirm.title": { node: string | number };
   "shell.keys.goto": { area: string | number };
   "shell.nav.badge.act": { act: string | number; area: string | number; count: number };
   "shell.nav.badge.jobs": { area: string | number; count: number };
@@ -10965,6 +10977,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.sys.backup.prune",
   "audit.action.sys.backup.restore",
   "audit.action.sys.backup.settings",
+  "audit.action.sys.clock.confirm",
   "audit.action.sys.diagnostics",
   "audit.action.sys.idempotency.replay",
   "audit.action.sys.modules.update",
@@ -11892,6 +11905,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.duration.hours",
   "dashboard.duration.minutes",
   "dashboard.duration.seconds",
+  "dashboard.finding.action.confirm_clock",
   "dashboard.finding.action.decommission",
   "dashboard.finding.action.open_connectors",
   "dashboard.finding.action.open_dhcp",
@@ -11919,6 +11933,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.health.migrate.mirror.stale",
   "dashboard.finding.health.migrate.mirror.token_expiring",
   "dashboard.finding.health.migrate.mirror.unbound",
+  "dashboard.finding.health.sys.clock.held",
+  "dashboard.finding.health.sys.clock.jumped",
   "dashboard.finding.health.sys.update.installer_repair",
   "dashboard.finding.kind.conflict",
   "dashboard.finding.kind.dns",
@@ -13033,6 +13049,7 @@ export const messageKeys: readonly MessageKey[] = [
   "discovery.filter.remove_prefix",
   "discovery.filter.state",
   "discovery.findings.action.adopt",
+  "discovery.findings.action.confirm_clock",
   "discovery.findings.action.decide",
   "discovery.findings.action.decommission",
   "discovery.findings.action.delete_record",
@@ -18390,6 +18407,9 @@ export const messageKeys: readonly MessageKey[] = [
   "shell.banner.weak_body",
   "shell.banner.weak_title",
   "shell.brand.home",
+  "shell.clock.confirm.body",
+  "shell.clock.confirm.confirm",
+  "shell.clock.confirm.title",
   "shell.command.addresses",
   "shell.command.audit_verify",
   "shell.command.dashboard_hint",

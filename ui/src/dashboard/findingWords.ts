@@ -6,7 +6,7 @@
 import type { components } from "../api/generated/schema";
 import { paths } from "../app/paths";
 import type { IconName } from "../components/Icon";
-import { formatNumber, t, tDynamic } from "../i18n";
+import { formatDateTime, formatDuration, formatNumber, t, tDynamic } from "../i18n";
 import { jobTitle } from "../jobs/words";
 import { formatBytes } from "../nodes/format";
 
@@ -83,14 +83,23 @@ export function findingEvidence(finding: Finding): { text: string; mono: boolean
       if (finding.code === "node.disk.low" && params.available && params.total) {
         return { text: t("dashboard.finding.evidence.disk_low", { free: formatBytes(Number(params.available)), total: formatBytes(Number(params.total)) }), mono: false };
       }
-      return { text: tDynamic(`dashboard.finding.health.${finding.code}`, params) ?? finding.summary, mono: false };
+      return { text: tDynamic(`dashboard.finding.health.${finding.code}`, clockWords(params)) ?? finding.summary, mono: false };
     default:
       return { text: finding.summary, mono: false };
   }
 }
 
-/** The default action of a finding: its words and where it is done; null for a finding without one. */
-export function findingAction(finding: Finding): { label: string; href: string } | null {
+/** The words of a clock hold: the jump as a duration and the end of its wait as a time. */
+function clockWords(params: Record<string, string>): Record<string, string> {
+  if (params.jump_secs === undefined) return params;
+  return { ...params, magnitude: formatDuration(Number(params.jump_secs)), until: params.until ? formatDateTime(params.until) : "" };
+}
+
+/**
+ * The default action of a finding: its words and where it is done, or the node whose clock the
+ * confirm dialog confirms; null for a finding without one.
+ */
+export function findingAction(finding: Finding): { label: string; href: string } | { label: string; href?: undefined; clock: string } | null {
   const fromProposal = finding.source === "proposal";
   const proposal = () => (fromProposal ? paths.proposal(finding.evidence.id) : RECONCILE_PATH);
   switch (finding.action) {
@@ -121,6 +130,8 @@ export function findingAction(finding: Finding): { label: string; href: string }
       return { label: t("dashboard.finding.action.open_topology"), href: paths.topology() };
     case "move_host":
       return { label: t("dashboard.finding.action.open_ssids"), href: `${paths.topology()}?view=ssids` };
+    case "confirm_clock":
+      return { label: t("dashboard.finding.action.confirm_clock"), clock: finding.params?.node ?? "" };
     case "none":
       return null;
   }

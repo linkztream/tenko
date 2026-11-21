@@ -10,13 +10,14 @@
 // (`data-id`, `data-kind`), `dashboard-finding-action`, `dashboard-findings-more`, `dashboard-clear`,
 // `dashboard-proposals` (the review line, `data-count`) with `dashboard-proposals-link`.
 import { A } from "@solidjs/router";
-import { For, Show } from "solid-js";
+import { createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
 import { Icon } from "../components/Icon";
 import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
+import { ClockConfirm } from "../shell/ClockConfirm";
 import type { FindingArea, FindingCounts } from "../shell/findings";
 import { findingAction, findingEvidence, findingGlyph, findingKindWord, findingSubject, type Finding } from "./findingWords";
 
@@ -50,6 +51,7 @@ export function Attention(props: { counts: FindingCounts | null }) {
       ),
     );
   const loaded = () => act.latest() !== undefined;
+  const [clock, setClock] = createSignal<string | null>(null);
 
   return (
     <section
@@ -85,11 +87,18 @@ export function Attention(props: { counts: FindingCounts | null }) {
                   <TimeAgo at={finding.since} />
                 </span>
                 <Show when={action()}>
-                  {(a) => (
-                    <A class="btn sm act-action" href={a().href} data-testid="dashboard-finding-action">
-                      {a().label}
-                    </A>
-                  )}
+                  {(a) => {
+                    const now = a();
+                    return now.href !== undefined ? (
+                      <A class="btn sm act-action" href={now.href} data-testid="dashboard-finding-action">
+                        {now.label}
+                      </A>
+                    ) : (
+                      <button type="button" class="btn sm act-action" data-testid="dashboard-finding-action" onClick={() => setClock(now.clock)}>
+                        {now.label}
+                      </button>
+                    );
+                  }}
                 </Show>
               </div>
             );
@@ -103,6 +112,7 @@ export function Attention(props: { counts: FindingCounts | null }) {
           </div>
         </Show>
       </Show>
+      <Show when={clock()}>{(node) => <ClockConfirm node={node()} onClose={() => setClock(null)} onDone={() => act.refetch()} />}</Show>
       <Show when={review() > 0}>
         <div class="attention-row review" data-testid="dashboard-proposals" data-count={review()}>
           <Icon name="proposal" size="sm" class="review-glyph" />

@@ -214,6 +214,10 @@
         <notes><note category="description">Default action of a health condition of the settings.</note></notes>
         <segment><source>Open Settings</source><target>Öppna Inställningar</target></segment>
       </unit>
+      <unit id="discovery.findings.action.confirm_clock">
+        <notes><note category="description">Default action of a held clock: opens the dialog that confirms it.</note></notes>
+        <segment><source>Confirm the clock</source><target>Bekräfta klockan</target></segment>
+      </unit>
       <unit id="discovery.findings.action.open_topology">
         <notes><note category="description">Default action of a topology root whose sources disagree: opens the topology.</note></notes>
         <segment><source>Open the topology</source><target>Öppna topologin</target></segment>

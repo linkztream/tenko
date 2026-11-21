@@ -8,7 +8,8 @@
 // - the side panel, for a decision with several choices (resolve a conflict, decide a proposal);
 // - adopt a device or delete an orphaned record: the approval of the proposal
 //   (`POST /proposals/{id}/approve` through the plan dialog, a dry run first);
-// - decommission the host of a ghost address (`POST /hosts/{id}/decommission` through its dialog).
+// - decommission the host of a ghost address (`POST /hosts/{id}/decommission` through its dialog);
+// - confirm a node's clock (`POST /system/clock/confirm` through its dialog).
 //
 // A person who may not decide gets the panel instead of a write; the server checks again.
 import { A } from "@solidjs/router";
@@ -18,6 +19,7 @@ import { errorMessage } from "../api/problem";
 import { may } from "../auth/gate";
 import { toast } from "../components/toast";
 import { DecommissionDialog, decommissionTitle } from "../hosts/DecommissionDialog";
+import { ClockConfirm } from "../shell/ClockConfirm";
 import { readHost } from "../hosts/lifecycle";
 import { t } from "../i18n";
 import { useWriteToast } from "../ipam/plan/PlanDialog";
@@ -49,6 +51,7 @@ export function FindingAction(props: {
   const writeToast = useWriteToast();
   const [proposal, setProposal] = createSignal<Proposal | null>(null);
   const [host, setHost] = createSignal<Host | null>(null);
+  const [clock, setClock] = createSignal<string | null>(null);
   const [busy, setBusy] = createSignal(false);
   const plan = () => planFor(props.finding);
   const cls = () => (props.primary ? "btn primary" : "btn sm finding-action");
@@ -98,6 +101,7 @@ export function FindingAction(props: {
                   const now = p();
                   if (now.kind === "approve") void approve(now.proposal);
                   else if (now.kind === "decommission") void decommission(now.host);
+                  else if (now.kind === "confirm_clock") setClock(now.node);
                   else props.onPanel(props.finding);
                 }}
               >
@@ -124,6 +128,7 @@ export function FindingAction(props: {
               />
             )}
           </Show>
+          <Show when={clock()}>{(node) => <ClockConfirm node={node()} onClose={() => setClock(null)} onDone={() => props.onDone?.()} />}</Show>
           <Show when={host()} keyed>
             {(found) => (
               <DecommissionDialog
