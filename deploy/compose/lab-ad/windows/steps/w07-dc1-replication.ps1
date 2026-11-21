@@ -4,7 +4,7 @@
 # Expects: dc2 promoted.
 # Leaves: the two controllers replicated in both directions.
 # Keeps: kcc-dc1.txt, kcc-dc2.txt, syncall-Ade.txt, syncall-AdeP.txt, replication.txt
-# (repadmin /replsummary).
+# (repadmin /replsummary), repl-wait.txt (the short wait of Test-Replication).
 # Checks: both synchronizations end without errors; no failed replication and no
 # operational error in the summary.
 # Departs from the runbook: it rebuilds the links and replicates before it reads the

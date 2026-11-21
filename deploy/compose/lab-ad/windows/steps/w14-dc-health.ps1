@@ -2,19 +2,21 @@
 # CORP\Administrator. One script for both entries.
 #
 # Expects: every earlier step passed.
-# Leaves: nothing changed.
-# Keeps: w14-dcdiag.txt, w14-dcdiag-all.txt, w14-sysvol.txt, w14-repl.txt (to
-# results/w14/<machine>/).
-# Checks: the default dcdiag tests report no failed test, SystemLog and DFSREvent apart;
-# the SYSVOL replicated folder is in the normal state; repadmin /replsummary shows no
-# error. The dcdiag DNS tests that need the DNS Server role, and what SystemLog and
-# DFSREvent flag, are listed by a person in RESULTS.md.
+# Leaves: nothing changed (it waits, it does not trigger replication).
+# Keeps: repl-wait.txt, w14-dcdiag.txt, w14-dcdiag-all.txt, w14-sysvol.txt, w14-repl.txt
+# (to results/w14/<machine>/).
+# Checks: first, within 30 minutes, no inbound replication partner of this controller shows a
+# failure since its last success (Wait-ReplicationState); then the default dcdiag tests
+# report no failed test, SystemLog and DFSREvent apart; the SYSVOL replicated folder is in
+# the normal state; repadmin /replsummary shows no error. The dcdiag DNS tests that need the
+# DNS Server role, and what SystemLog and DFSREvent flag, are listed by a person in RESULTS.md.
 param([switch]$Inner)
 $common = 'C:\lab\run\lab-common.ps1'
 if (-not (Test-Path $common)) { "FAIL: $common is missing (the entry's needs_files copies it)"; exit 1 }
 . $common
 
 Invoke-Step -AsDomainAdmin -Inner:$Inner -AdminMinutes 45 -Pass "dcdiag and repadmin on $Computer show no error" {
+    Wait-ReplicationState
     Invoke-Native 'w14-dcdiag.txt' { dcdiag /test:dns /v } -AnyStatus
     Invoke-Native 'w14-dcdiag-all.txt' { dcdiag } -AnyStatus
     # SystemLog and DFSREvent judge the event logs of the last day, not the state: every start

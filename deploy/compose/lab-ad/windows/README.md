@@ -675,7 +675,15 @@ Windows. List what they flag in RESULTS.md, and read the state of SYSVOL instead
 (Get-CimInstance -Namespace root\microsoftdfs -ClassName DfsrReplicatedFolderInfo -Filter "ReplicatedFolderName='SYSVOL Share'").State   # 4 is normal
 ```
 
-**Keep:** the three files of each controller in `results/w14/`.
+The scripted entry first waits, for at most 30 minutes, until `repadmin /showrepl /csv` shows
+no failure for any inbound partner, and keeps how long that took in `repl-wait.txt`. A
+controller that starts before its partner fails its first replication attempt and retries by
+itself at the next replication pass, within 15 minutes; `dcdiag` and `repadmin /replsummary` show the
+failed attempt until then. The step does not trigger replication, so a domain that does not
+heal by itself still fails.
+
+**Keep:** the three files of each controller in `results/w14/`, and for the scripted entry
+`w14-sysvol.txt` and `repl-wait.txt`.
 
 ## W15. Optional extensions
 

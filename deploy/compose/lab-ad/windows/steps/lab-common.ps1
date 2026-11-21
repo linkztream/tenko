@@ -77,10 +77,37 @@ function Invoke-Native([string]$File, [scriptblock]$Command, [int[]]$Allow = @(0
     if (-not $AnyStatus -and $Allow -notcontains $status) { Fail "{$Command} exited with $status ($File)" }
 }
 
+# Wait-ReplicationState [<seconds>]: waits until repadmin /showrepl /csv (read-only) shows no
+# failure since the last success for any inbound partner; a controller without one passes at
+# once (Test-Replication is what requires a partner). Replication is not triggered, so a
+# domain that does not heal by itself still fails. Why: a controller that starts before its
+# partner fails its first attempt (the partner's KDC is not up) and succeeds at the next
+# replication pass, up to 15 minutes later, while dcdiag and /replsummary keep showing the
+# failed attempt; 30 minutes is two passes. The output has a showrepl_COLUMNS header line and
+# one showrepl_INFO line per partner and naming context; any other shape fails now, outside
+# the wait (which treats an error as "not yet"). Appends to repl-wait.txt: how long, first and
+# last rows (one block per call).
+function Wait-ReplicationState([int]$Seconds = 1800) {
+    $rows = {
+        $lines = @(cmd /c 'repadmin /showrepl /csv 2>&1' | ForEach-Object { "$_" } | Where-Object { $_ -match '^showrepl_(COLUMNS|INFO),' })
+        if ($lines.Count -eq 0 -or $lines[0] -notmatch '^showrepl_COLUMNS,') { Fail 'repadmin /showrepl /csv printed no showrepl_COLUMNS header line' }
+        if ($lines[0] -notmatch ',Number of Failures,') { Fail 'repadmin /showrepl /csv has no Number of Failures column' }
+        @($lines | ConvertFrom-Csv)
+    }
+    $began = Get-Date
+    $seen = @{ First = @(& $rows) }
+    $seen.Last = $seen.First
+    Wait-Until { $seen.Last = @(& $rows); @($seen.Last | Where-Object { $_.'Number of Failures' -ne '0' }).Count -eq 0 } $Seconds 'every inbound replication partner to show no failure (repadmin /showrepl /csv)'
+    $show = { param($r) @($r | ForEach-Object { "$($_.'Source DSA') $($_.'Naming Context'): $($_.'Number of Failures') failures" }) }
+    @("replication state reached after $([int]((Get-Date) - $began).TotalSeconds) s (limit $Seconds s)", 'first look:') + (& $show $seen.First) + 'last look:' + (& $show $seen.Last) |
+        ForEach-Object { $_ | Out-File -Append -Encoding utf8 (Join-Path $StepDir 'repl-wait.txt'); $_ | Out-Host }
+}
+
 # Test-Replication [<file>]: repadmin /replsummary into the file; fails on any failed
 # replication or operational error, as W7 and W14 expect.
 function Test-Replication([string]$File = 'replication.txt') {
     # Only this summary: the file keeps the earlier attempts of a repeated entry.
+    Wait-ReplicationState 120   # a step that forced replication judges it as it stands; 120 s lets the counters settle
     $path = Join-Path $StepDir $File
     $before = if (Test-Path $path) { @(Get-Content $path).Count } else { 0 }
     Invoke-Native $File { repadmin /replsummary } -AnyStatus
