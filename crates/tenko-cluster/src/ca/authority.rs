@@ -589,8 +589,9 @@ impl InternalCa {
     /// stored (certificate in `cluster.server_certs` under `node`, key in the vault, the
     /// old key deleted) with a `cluster.tls.issue` audit record. A controller without a
     /// record takes over `cluster.server_cert` of earlier versions when it carries its
-    /// names. Call at start and periodically (daily), and after the host name changes;
-    /// install the result in the TLS service.
+    /// names. The material presents the leaf followed by this root. Call at start and
+    /// periodically (daily), and after the host name changes; install the result in the TLS
+    /// service.
     ///
     /// # Errors
     ///
@@ -667,7 +668,18 @@ impl InternalCa {
             not_after = %issued.info.not_after,
             "issued a server certificate from the internal CA"
         );
-        Ok(issued.material()?)
+        Ok(self.presented(issued.chain, &issued.key)?)
+    }
+
+    /// What a listener presents: the chain, then this root, so that a client that takes the
+    /// root from the handshake finds it there; it still trusts the root by its fingerprint.
+    fn presented(
+        &self,
+        mut chain: Vec<CertificateDer<'static>>,
+        key: &SecretBytes,
+    ) -> Result<TlsMaterial, TlsError> {
+        chain.push(self.root.clone());
+        TlsMaterial::from_der(chain, key, CertSource::InternalCa)
     }
 
     async fn reusable(
@@ -702,7 +714,7 @@ impl InternalCa {
             }
             Err(error) => return Err(error.into()),
         };
-        Ok(TlsMaterial::from_der(chain, &key, CertSource::InternalCa).ok())
+        Ok(self.presented(chain, &key).ok())
     }
 }
 

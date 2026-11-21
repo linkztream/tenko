@@ -86167,7 +86167,7 @@
           "chain_len": {
             "type": "integer",
             "format": "int32",
-            "description": "Number of certificates in the chain: the leaf and its intermediates.",
+            "description": "Number of certificates the listener presents: the leaf and its intermediates, and in\nmode a the internal CA root after the leaf.",
             "minimum": 0
           },
           "days_left": {

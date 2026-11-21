@@ -444,7 +444,8 @@ pub struct TlsStatus {
     pub mode: TlsMode,
     /// The served certificate (modes a and b, once loaded).
     pub certificate: Option<CertInfo>,
-    /// Number of certificates in the served chain (the leaf and its intermediates).
+    /// Number of certificates the listener presents: the leaf and its intermediates, and in
+    /// mode a the internal CA root after the leaf.
     pub chain_len: usize,
     /// The last load or reload failure; the previous material keeps serving.
     pub last_error: Option<String>,

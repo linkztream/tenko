@@ -24194,7 +24194,8 @@ export interface components {
         TlsCertificate: {
             /**
              * Format: int32
-             * @description Number of certificates in the chain: the leaf and its intermediates.
+             * @description Number of certificates the listener presents: the leaf and its intermediates, and in
+             *     mode a the internal CA root after the leaf.
              */
             chain_len: number;
             /**

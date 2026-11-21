@@ -479,7 +479,7 @@ async fn a_full_tls_handshake_negotiates_h2() {
             assert_eq!(client.alpn_protocol(), Some(&b"h2"[..]));
             assert_eq!(server.alpn_protocol(), Some(&b"h2"[..]));
             let seen = client.peer_certificates().expect("server certificate");
-            assert_eq!(seen[0], material.chain()[0]);
+            assert_eq!(seen, [material.chain()[0].clone(), ca.root_der().clone()]);
             if policy.tls13_only {
                 assert_eq!(
                     client.protocol_version(),
@@ -682,7 +682,9 @@ async fn server_material_issues_once_and_reuses_the_certificate() {
         CertificateDer::pem_slice_iter(record.chain_pem.as_bytes())
             .collect::<Result<_, _>>()
             .expect("stored chain");
-    assert_eq!(stored_chain, first.chain());
+    // The record keeps the leaf; the listener presents it followed by the root.
+    assert_eq!(stored_chain, first.chain()[..1]);
+    assert_eq!(first.chain()[1..], [ca.root_der().clone()]);
 
     let actions = env.audit_actions().await;
     assert_eq!(actions, [CA_CREATE.as_str(), SERVER_CERT_ISSUE.as_str()]);
@@ -705,6 +707,7 @@ async fn server_material_issues_once_and_reuses_the_certificate() {
         .await
         .expect("third");
     assert_eq!(restarted.info().sha256, first.info().sha256);
+    assert_eq!(restarted.chain(), first.chain());
     verify_server(ca.root_der(), &restarted.chain()[0], HOST, after(t0(), 20)).expect("valid");
 }
 
@@ -802,6 +805,7 @@ async fn server_material_renews_within_thirty_days_of_expiry() {
     assert_eq!(renewed.info().not_before.0, soon.0 - Duration::hours(1));
     assert_eq!(renewed.info().not_after, after(soon, 397));
     verify_server(ca.root_der(), &renewed.chain()[0], HOST, soon).expect("valid after renewal");
+    assert_eq!(renewed.chain()[1..], [ca.root_der().clone()]);
     assert!(
         env.vault.meta(old.key).await.expect("meta").is_none(),
         "the old key is deleted"

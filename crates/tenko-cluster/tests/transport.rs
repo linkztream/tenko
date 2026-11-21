@@ -112,6 +112,8 @@ impl Controller {
             .controller_material(&vault, &system())
             .await
             .expect("controller certificate");
+        // The cluster port presents its leaf alone; peers trust their own stored root.
+        assert_eq!(material.chain().len(), 1);
         let resolver = Arc::new(TlsResolver::default());
         resolver.set(Some(material));
         let (stop, _) = watch::channel(false);

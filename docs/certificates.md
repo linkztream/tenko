@@ -201,7 +201,7 @@ Where the upload is not accepted, someone restarts the node. Do that by hand or 
 
 With `internal_ca` the node's certificate is signed by a CA that no browser knows. Admin computers need its root once.
 
-1. **Get it.** Settings → Certificates has "Download the CA root certificate". Without a session: `https://<node>:8443/api/v1/system/ca-root` (public, PEM), `tenko ca-root --url https://<node>:8443 --fingerprint <sha256> -o ca-root.pem`, or `<data_dir>/tls/ca-root.pem` on the node.
+1. **Get it.** Settings → Certificates has "Download the CA root certificate". Without a session: `https://<node>:8443/api/v1/system/ca-root` (public, PEM), `tenko ca-root --url https://<node>:8443 --fingerprint <sha256> -o ca-root.pem`, or `<data_dir>/tls/ca-root.pem` on the node. The listener also presents the root after its own certificate in every TLS handshake (so Settings → Certificates shows a chain of 2), and a client may take it from there; that makes it a candidate only, trusted once its fingerprint matches, never because the node sent it.
 2. **Check it.** The SHA-256 fingerprint is on the Certificates page, in the setup result and in the start log (`CA root at … (SHA-256 …)`). Compare it with the file before you trust it: `openssl x509 -in ca-root.pem -noout -fingerprint -sha256` prints it with colons.
 3. **Install it** as a trusted root on the computers you administer from:
 

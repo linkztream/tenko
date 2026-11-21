@@ -547,7 +547,8 @@ pub struct TlsCertificate {
     pub days_left: i64,
     /// The classification of `days_left`.
     pub state: CertificateState,
-    /// Number of certificates in the chain: the leaf and its intermediates.
+    /// Number of certificates the listener presents: the leaf and its intermediates, and in
+    /// mode a the internal CA root after the leaf.
     pub chain_len: u32,
     /// SHA-256 of the leaf certificate (DER), lower-case hexadecimal.
     pub sha256: String,
