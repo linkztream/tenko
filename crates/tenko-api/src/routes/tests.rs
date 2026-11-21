@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 466, "every operation of the document");
+    assert_eq!(all.len(), 467, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -119,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        107,
+        108,
         "the session-only operations"
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        466 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        467 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 

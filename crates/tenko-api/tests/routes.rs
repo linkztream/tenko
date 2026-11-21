@@ -298,6 +298,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/health", "health"),
     ("GET", "/health/ready", "ready"),
     ("GET", "/system/status", "system_status"),
+    ("POST", "/system/clock/confirm", "confirm_clock"),
     ("GET", "/system/tls", "get_tls"),
     ("GET", "/openapi.json", "openapi_document"),
     ("GET", "/metrics", "metrics"),
