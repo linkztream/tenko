@@ -24,7 +24,8 @@
 //! is held again from the start of its wait, both answers as they were, and a start more than
 //! [`TOLERANCE`] away from the last trusted time is a hold of that gap ([`Reason::StartGap`]).
 //! A start gap never widens [`forward_hold`], since it is mostly real downtime, and a forward
-//! one holds destruction only, unless issuing was held already.
+//! one holds destruction only, unless issuing was held already. A forward jump made while the
+//! node ran keeps feeding [`forward_hold`] across a restart, by its own saved amount.
 //!
 //! One guard per process, behind one lock: every call looks. Tests drive [`Guard`] with
 //! synthetic instants; [`testing::hold`] and [`testing::hold_issuing`] hold the clock for the
@@ -133,6 +134,10 @@ pub struct SavedHold {
     /// Whether issuing is held.
     #[serde(default = "held_before")]
     pub issue: bool,
+    /// The forward jump made while the node ran, in milliseconds, which [`forward_hold`]
+    /// waits out.
+    #[serde(default)]
+    pub forward_ms: i64,
 }
 
 /// The guard's state as the server binary keeps it across a restart.
@@ -156,6 +161,8 @@ struct Hold {
     wait: (Instant, Timestamp, i128),
     destroy: bool,
     issue: bool,
+    /// The forward part of a jump made while running; a start gap never sets it.
+    forward: i128,
 }
 
 impl Hold {
@@ -174,6 +181,11 @@ impl Hold {
             wait: (at.0, at.1, jump),
             destroy: true,
             issue,
+            forward: if reason == Reason::Jump {
+                jump.max(0)
+            } else {
+                0
+            },
         }
     }
 
@@ -230,23 +242,40 @@ impl Guard {
         let Some(saved) = saved else { return guard };
         let gap = offset - saved.last_trusted_at.unix_nanos();
         let far = gap.unsigned_abs() > TOLERANCE_NS;
-        let (reason, since, jump, destroy, issue) = match saved.held {
+        let (reason, since, jump, destroy, issue, forward_ms) = match saved.held {
             Some(held) => {
                 let jump = i128::from(held.jump_ms) * 1_000_000;
                 if held.destroy && jump.unsigned_abs() >= gap.unsigned_abs() {
-                    (held.reason, held.since, jump, true, held.issue)
+                    (
+                        held.reason,
+                        held.since,
+                        jump,
+                        true,
+                        held.issue,
+                        held.forward_ms,
+                    )
                 } else if far {
-                    (Reason::StartGap, wall, gap, true, held.issue || gap < 0)
+                    let issue = held.issue || gap < 0;
+                    (Reason::StartGap, wall, gap, true, issue, held.forward_ms)
                 } else {
-                    (held.reason, held.since, jump, held.destroy, held.issue)
+                    let destroy = held.destroy;
+                    (
+                        held.reason,
+                        held.since,
+                        jump,
+                        destroy,
+                        held.issue,
+                        held.forward_ms,
+                    )
                 }
             }
-            None if far => (Reason::StartGap, wall, gap, true, gap < 0),
+            None if far => (Reason::StartGap, wall, gap, true, gap < 0, 0),
             None => return guard,
         };
         guard.last_trusted = saved.last_trusted_at;
         let mut hold = Hold::new(reason, since, (offset - jump, jump), (mono, wall), issue);
         hold.destroy = destroy;
+        hold.forward = i128::from(forward_ms.max(0)) * 1_000_000;
         guard.hold = (destroy || issue).then_some(hold);
         guard
     }
@@ -267,6 +296,9 @@ impl Guard {
             }
             if hold.destroy {
                 hold.jump = jump;
+                if hold.reason == Reason::Jump {
+                    hold.forward = jump.max(0);
+                }
                 if (jump - hold.wait.2).unsigned_abs() > TOLERANCE_NS {
                     // The clock stepped again: what this node issues is held too.
                     hold.issue = true;
@@ -357,8 +389,8 @@ impl Guard {
     pub fn forward_hold(&self) -> Option<Duration> {
         self.hold
             .as_ref()
-            .filter(|hold| hold.destroy && hold.reason == Reason::Jump && hold.jump > 0)
-            .map(|hold| Duration::from_nanos(u64::try_from(hold.jump).unwrap_or(u64::MAX)))
+            .filter(|hold| hold.destroy && hold.forward > 0)
+            .map(|hold| Duration::from_nanos(u64::try_from(hold.forward).unwrap_or(u64::MAX)))
     }
 
     /// The state to keep across a restart.
@@ -373,6 +405,7 @@ impl Guard {
                     since: held.since,
                     destroy: hold.destroy,
                     issue: hold.issue,
+                    forward_ms: i64::try_from(hold.forward / 1_000_000).unwrap_or(i64::MAX),
                 }
             }),
         }

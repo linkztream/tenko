@@ -316,6 +316,34 @@ fn a_saved_hold_survives_a_restart_and_waits_again() {
 }
 
 #[test]
+fn a_restart_during_a_forward_hold_keeps_forward_hold_at_the_saved_jump() {
+    let mut first = Sim::new(None, 0);
+    first.look(1_000, 60_000);
+    // Restarted 30 s later, the clock still 60 s ahead.
+    let mut second = Sim::new(Some(first.guard.saved()), 61_000 + 30_000);
+    let held = second.guard.trusted().unwrap_err();
+    assert_eq!(
+        (held.reason, held.jump_ms, held.release),
+        (Reason::StartGap, 91_000, Release::Wait)
+    );
+    assert_eq!(second.guard.forward_hold(), Some(Duration::from_secs(60)));
+    assert_eq!(
+        second.guard.plausible().unwrap_err().reason,
+        Reason::StartGap
+    );
+    assert_eq!(second.look(91_000, 0).trusted(), Ok(()));
+    assert_eq!(
+        second.guard.forward_hold(),
+        None,
+        "with destruction trusted again"
+    );
+    assert_eq!(
+        second.guard.plausible().unwrap_err().release,
+        Release::Person
+    );
+}
+
+#[test]
 fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
     let mut first = Sim::new(None, 0);
     first.look(1_000, 60_000);
@@ -326,7 +354,11 @@ fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
         (held.reason, held.release),
         (Reason::StartGap, Release::Person)
     );
-    assert_eq!(second.guard.forward_hold(), None);
+    assert_eq!(
+        second.guard.forward_hold(),
+        Some(Duration::from_secs(60)),
+        "the saved jump alone, never the week"
+    );
     assert_eq!(
         second.guard.plausible().unwrap_err().reason,
         Reason::StartGap,
