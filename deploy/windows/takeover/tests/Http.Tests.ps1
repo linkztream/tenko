@@ -202,6 +202,30 @@ Describe 'The approval''s pin' {
     }
 }
 
+Describe 'The node''s address' {
+    BeforeEach {
+        $script:TkVersion = '0.0.0-test'
+        $script:tried = @()
+        Mock Get-TkHostAddress { @([System.Net.IPAddress]::Parse('2001:db8::53'), [System.Net.IPAddress]::Parse('192.0.2.53')) }
+    }
+
+    It 'is tried IPv4 first when the name resolves to both families' {
+        Mock Invoke-TkHttp { $script:tried += [string]$script:TkConn.Address; @{ Status = 200; Json = @{ version = '0.0.0-test' } } }
+        Connect-TkNode -Address 'tenko.corp.example.test'
+        $script:tried | Should -Be @('192.0.2.53')
+    }
+
+    It 'falls back to the next address only when one takes no connection' {
+        Mock Invoke-TkHttp { $script:tried += [string]$script:TkConn.Address; if ($script:tried.Count -eq 1) { throw 'Tenko at tenko.corp.example.test:8443 did not accept a connection within 30 s' }; @{ Status = 200; Json = @{ version = '0.0.0-test' } } }
+        Connect-TkNode -Address 'tenko.corp.example.test' 3>$null
+        $script:tried | Should -Be @('192.0.2.53', '2001:db8::53')
+        $script:tried = @()
+        Mock Invoke-TkHttp { $script:tried += [string]$script:TkConn.Address; throw 'TLS to tenko.corp.example.test failed: the chain ends in another root' }
+        { Connect-TkNode -Address 'tenko.corp.example.test' } | Should -Throw '*TLS to*'
+        $script:tried | Should -Be @('192.0.2.53') -Because 'a TLS refusal is no reason to try another address'
+    }
+}
+
 Describe 'A refused collect' {
     It 'says plainly that the approval was denied or withdrawn, retries nothing, and offers a new approval' {
         Use-TestConnection
@@ -219,6 +243,20 @@ Describe 'A refused collect' {
         $failure.Data['tk.exit'] | Should -Be 1
         ($server.requests - $before) | Should -Be 2 -Because 'one request and one collect, no retry'
         $script:offers | Should -Be 1
+        $server.queue.Clear()
+    }
+
+    It 'names the approver''s lost right plainly when Tenko answers that the approver may no longer administer' {
+        Use-TestConnection
+        $script:TkVersion = '0.0.0-test'
+        $nonce = ConvertTo-TkBase64Url ([byte[]](1..32))
+        $server.queue.Clear()
+        $server.queue.Enqueue((Get-TestAnswer -Status 201 -Body "{`"id`":`"0190d1c2-0000-7000-8000-00000000a001`",`"nonce`":`"$nonce`"}"))
+        $server.queue.Enqueue((Get-TestAnswer -Status 401 -Type 'application/problem+json' -Body '{"code":"auth.unauthenticated","status":401,"detail":"the approver may no longer administer"}'))
+        Mock Read-TkAnswer { 'n' }
+        $failure = $null
+        try { [void](Request-TkApproval -Plan ([ordered]@{ domain = 'corp.example.test' }) -Domain 'corp.example.test' 6>$null) } catch { $failure = $_.Exception }
+        $failure.Message | Should -Match 'signed out everywhere, was disabled or lost the administrator role'
         $server.queue.Clear()
     }
 }

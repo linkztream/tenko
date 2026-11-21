@@ -485,7 +485,7 @@ Describe 'A failure inside the DHCP window' {
     }
 
     It 'resumes after the silence into Tenko''s task without asking or stopping again' {
-        $script:world.failRoute = '/steps/\d+/complete$'
+        $script:world.crashAtComplete = $true
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
         (Read-State).values.silenced | Should -BeTrue
         $script:world.scopesOn | Should -BeFalse
@@ -494,6 +494,93 @@ Describe 'A failure inside the DHCP window' {
         @($script:world.calls | Where-Object { $_ -like '*|StopDhcp' }).Count | Should -Be 2
         @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
         @($script:world.tenkoCalls | Where-Object { $_ -match '/takeover$' }).Count | Should -Be 1
+    }
+
+    It 'reads each service again on a resume and stops one that answers again before Tenko goes on' {
+        $script:world.crashAtComplete = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        # Between the sittings someone starts dc1's service again.
+        $script:world.services.dc1.Status = 'Running'; $script:world.services.dc1.Start = 'Automatic'
+        $script:world.calls.Clear()
+        Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
+        $calls = @($script:world.calls)
+        [array]::IndexOf($calls, 'dc1|ReadDhcpService') | Should -BeGreaterThan -1
+        [array]::IndexOf($calls, 'dc1|StopDhcp') | Should -BeLessThan ([array]::IndexOf($calls, 'tenko|task-complete'))
+        $calls | Should -Not -Contain 'dc2|StopDhcp' -Because 'dc2 was read back silent'
+        $script:world.services.dc1.Status | Should -Be 'Stopped'
+    }
+
+    It 'starts Windows again, still authorized, and says who answers, when Tenko never completes its task' {
+        $script:world.completeFails = $true
+        $out = @(Invoke-FakeRun -Answers $script:FirstSitting 6>&1)
+        $out[-1] | Should -Be 2
+        $script:lastError | Should -Match 'Tenko did not complete the takeover of 192\.0\.2\.0/24 .*: Windows answers every scope again and Tenko is off; run Tenko-Takeover\.ps1 again to retry the DHCP window'
+        ($out -join "`n") | Should -Match '192\.0\.2\.0/24: Windows answers \(dc1\.corp\.example\.test, dc2\.corp\.example\.test\); Tenko is off'
+        $script:world.completes | Should -Be 3
+        $script:world.services.dc1.Serving | Should -BeTrue
+        $script:world.services.dc2.Serving | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        @($script:world.authorized).Count | Should -Be 2
+        (Read-State).values.Contains('silenced') | Should -BeFalse
+        $script:world.completeFails = $false
+        Invoke-FakeRun -Answers @('c', 'Continue') | Should -Be 3 -Because $script:lastError
+        $script:world.scopesOn | Should -BeTrue
+    }
+
+    It 'reverts the completed takeover first, then starts Windows, when the second completion fails' {
+        $script:world.twoScopes = $true; $script:world.completeOk = 1
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:lastError | Should -Match 'Windows answers every scope again and Tenko is off; run Tenko-Takeover\.ps1 -Reverse'
+        $calls = @($script:world.calls)
+        $off = [array]::IndexOf($calls, 'tenko|scopes-off')
+        $off | Should -BeGreaterThan ([array]::IndexOf($calls, 'tenko|task-complete'))
+        [array]::LastIndexOf($calls, 'dc1|serving=True') | Should -BeGreaterThan $off
+        $script:world.services.dc1.Serving | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        $script:world.completeOk = 0
+        Invoke-FakeRun -Answers @('r') | Should -Be 5 -Because $script:lastError
+        $script:world.services.dc1.Serving | Should -BeTrue
+    }
+
+    It 'reverts and starts Windows again when Tenko''s job fails after its task was completed' {
+        $script:world.jobFailsAfter = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:lastError | Should -Match 'the takeover of 192\.0\.2\.0/24 ended failed after its task was completed: Windows answers every scope again'
+        $script:world.services.dc1.Serving | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        @($script:world.calls | Where-Object { $_ -like '*|ReadAuthorization' }).Count | Should -Be 0 -Because 'nothing waits for a replica before Windows answers'
+    }
+
+    It 'takes a completion Tenko already made as made, and a job that already succeeded as completed' {
+        $script:world.completeThenFail = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:world.completes | Should -Be 1
+        $script:world.scopesOn | Should -BeTrue
+        # A record lost between the completion and the state file: the job's success counts.
+        Install-FakeWorld
+        $script:world.failAt = 'SetAuthorization'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $path = Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'
+        $data = ConvertFrom-TkJson -Chars ([System.IO.File]::ReadAllText($path)).ToCharArray()
+        $data.values.Remove('completed.takeover.192.0.2.0/24')
+        [System.IO.File]::WriteAllBytes($path, (ConvertTo-TkJsonByte $data))
+        Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
+        @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
+    }
+
+    It 'records a pending barrier beside the run''s marker, which a sitting without the state file offers to finish' {
+        $script:TkReplicaWaitSec = 0
+        try {
+            $script:world.staleReads = 1000
+            Invoke-FakeRun -Answers $script:FirstSitting 3>$null | Should -Be 3 -Because $script:lastError
+            $script:world.markerPending | Should -Be 'dc1.corp.example.test,dc2.corp.example.test'
+            Remove-Item -LiteralPath (Get-TkStateDir 'corp.example.test') -Recurse -Force
+            $script:world.staleReads = 0
+            $out = @(Invoke-FakeRun -Answers @('corp.example.test', 'y', 'y') 3>$null 6>&1)
+            ($out -join "`n") | Should -Match 'has a pending step: the removal of the DHCP authorization of dc1\.corp\.example\.test, dc2\.corp\.example\.test'
+            ($out -join "`n") | Should -Match 'the pending step is done'
+            $script:world.markerPending | Should -Be ''
+        } finally { $script:TkReplicaWaitSec = 300 }
     }
 
     It 'resumes inside the authorization barrier without completing Tenko''s task twice' {

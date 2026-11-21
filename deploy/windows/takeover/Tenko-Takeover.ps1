@@ -988,7 +988,7 @@ function Request-TkApproval {
             # An approval denied, withdrawn, or whose approver can no longer give it, is never
             # collected again: a new approval is the way on.
             $why = switch ($answer.Code) {
-                'auth.approval.denied' { 'the approval was denied or withdrawn in Tenko''s UI, or the administrator who gave it signed out everywhere, was disabled or lost the administrator role' }
+                { 'auth.approval.denied', 'auth.unauthenticated' -contains $_ } { 'the approval was denied or withdrawn in Tenko''s UI, or the administrator who gave it signed out everywhere, was disabled or lost the administrator role' }
                 'auth.approval.expired' { 'the approval expired before it was collected' }
                 default { "Tenko refused to hand over the approval ($($answer.Status) $($answer.Code): $($answer.Detail))" }
             }
@@ -1035,16 +1035,29 @@ function Connect-TkNode {
     }
     if ($port -lt 1 -or $port -gt 65535) { Exit-TkTakeover 1 "the port $port is outside 1 to 65535" }
     $ip = $null
-    if ([System.Net.IPAddress]::TryParse($hostName, [ref]$ip)) {
-        $script:TkConn.Address = $ip
-    } else {
+    if ([System.Net.IPAddress]::TryParse($hostName, [ref]$ip)) { $candidates = @($ip) }
+    else {
         $all = @(Get-TkHostAddress $hostName)
         if ($all.Count -eq 0) { Exit-TkTakeover 1 "$hostName does not resolve" }
-        $script:TkConn.Address = $all[0]
+        # IPv4 first: Tenko's approval bounds count an IPv6 /64 as one source, so a neighbor
+        # on the segment could use them up for a script that came over IPv6.
+        $candidates = @(@($all | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }) + @($all | Where-Object { $_.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork }))
     }
     $script:TkConn.Host = $hostName
     $script:TkConn.Port = $port
-    $health = Invoke-TkHttp -Method GET -Path '/api/v1/health' -NoSession
+    $health = $null
+    for ($i = 0; $i -lt $candidates.Count; $i++) {
+        $script:TkConn.Address = $candidates[$i]
+        $script:TkConn.Local = $null
+        try {
+            $health = Invoke-TkHttp -Method GET -Path '/api/v1/health' -NoSession
+            break
+        } catch {
+            # Only an address that takes no connection is passed over; any other failure stops.
+            if ($i -eq $candidates.Count - 1 -or $_.Exception.Message -notmatch 'did not accept a connection|the connection to Tenko failed') { throw }
+            Write-Warning "Tenko at $($candidates[$i]) takes no connection ($($_.Exception.Message)); trying $($candidates[$i + 1])"
+        }
+    }
     $version = [string](Get-TkField $health.Json 'version')
     if ($health.Status -ne 200 -or $version -ne $script:TkVersion) {
         Exit-TkTakeover 1 "Tenko at $hostName runs version $(ConvertTo-TkSafeText $version); this script is version $($script:TkVersion): take the script of the node's own release"
@@ -1367,8 +1380,14 @@ $script:TkRemote = @{
         param([string]$Key)
         if (Test-Path -LiteralPath $Key) {
             $values = Get-ItemProperty -LiteralPath $Key
-            @{ Run = [string]$values.Run; Host = [string]$values.Host; Time = [string]$values.Time }
+            @{ Run = [string]$values.Run; Host = [string]$values.Host; Time = [string]$values.Time; Pending = [string]$values.Pending }
         }
+    }
+    WriteMarkerPending    = {
+        # The DHCP servers whose authorization removal has not reached every controller yet,
+        # beside the run's marker, for a sitting that has no state file.
+        param([string]$Key, [string]$Pending)
+        if (Test-Path -LiteralPath $Key) { $null = New-ItemProperty -Path $Key -Name Pending -Value $Pending -PropertyType String -Force }
     }
     ExportDhcp            = {
         # Into the script's admin-only folder (made by ProtectDirectory first).
@@ -1672,6 +1691,11 @@ $script:TkRemote = @{
         # DHCPServer, never Dhcp (the DHCP client a controller needs for its own registration).
         Stop-Service -Name DHCPServer -Force
         Set-Service -Name DHCPServer -StartupType Disabled
+        $service = Get-Service -Name DHCPServer
+        @{ Status = [string]$service.Status; Start = [string]$service.StartType; Listening = @(Get-NetUDPEndpoint -LocalPort 67 -ErrorAction SilentlyContinue).Count }
+    }
+    ReadDhcpService       = {
+        # Read only: whether DHCPServer is stopped, disabled and silent on UDP 67.
         $service = Get-Service -Name DHCPServer
         @{ Status = [string]$service.Status; Start = [string]$service.StartType; Listening = @(Get-NetUDPEndpoint -LocalPort 67 -ErrorAction SilentlyContinue).Count }
     }
@@ -3005,9 +3029,39 @@ function Sync-TkBarrier {
     }
     $State.Data.values.barrier_pending = $lagging
     Save-TkState $State
+    [void](Invoke-TkRemote -Server $r.pdc -Name WriteMarkerPending -Arguments @($script:TkMarkerKey, $(if ($lagging.Count -gt 0) { $names -join ',' } else { '' })))
     if ($lagging.Count -gt 0) {
         Write-Warning "the removal of the DHCP servers' authorization has not reached $($lagging -join ', ') yet. Tenko serves and the DHCP Server services are stopped and disabled, so no Windows server answers unless someone starts that service; the check step and every later sitting read it again."
     } elseif (-not $Remove) { Write-TkNote 'The removal of the DHCP servers'' authorization has now reached every controller.' }
+}
+
+function Complete-TkMarkedBarrier {
+    # A sitting without that run's state file finds another run's pending barrier beside its
+    # marker on the PDC emulator: it says so, and on y reads the replicas again for it.
+    param([System.Collections.IDictionary]$Readings, [string]$Pending)
+    $servers = @($Pending.Split(',') | Where-Object { $_ -cmatch '^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z0-9-]{1,63}$' })
+    Write-TkNote "The run recorded on $($Readings.pdc) has a pending step: the removal of the DHCP authorization of $($servers -join ', ') has not been read back on every controller."
+    if ($servers.Count -eq 0 -or 'y', 'yes' -notcontains (Read-TkAnswer 'Read the controllers again for it now? [y/N]').Trim().ToLowerInvariant()) { return }
+    [void](Invoke-TkRemote -Server $Readings.pdc -Name Replicate)
+    $lagging = @(Get-TkLaggingController -Readings $Readings -Servers $servers -Authorized $false)
+    if ($lagging.Count -gt 0) { Write-Warning "the removal has still not reached $($lagging -join ', ')"; return }
+    [void](Invoke-TkRemote -Server $Readings.pdc -Name WriteMarkerPending -Arguments @($script:TkMarkerKey, ''))
+    Write-TkNote 'The removal has reached every controller; the pending step is done.'
+}
+
+function Find-TkMarkedBarrier {
+    # A sitting with no readings of its own reads the PDC emulator's marker first, before any
+    # DHCP server: a pending barrier there is offered at once (Complete-TkMarkedBarrier).
+    param([string]$Domain)
+    $pdc = Get-TkPdcName $Domain
+    $script:TkKnownHosts = @($pdc)
+    $marker = Invoke-TkRemote -Server $pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1
+    if ($null -eq $marker -or -not [string]$marker.Pending) { return }
+    $rows = @(Invoke-TkRemote -Server $pdc -Name ReadDomain)
+    $info = $rows | Where-Object { $_.Kind -eq 'domain' } | Select-Object -First 1
+    $controllers = @($rows | Where-Object { $_.Kind -eq 'controller' } | ForEach-Object { [ordered]@{ name = $_.Name } })
+    $script:TkKnownHosts = @($controllers | ForEach-Object { $_.name })
+    Complete-TkMarkedBarrier -Readings ([ordered]@{ pdc = $pdc; controllers = $controllers; configuration = [string]$info.Configuration }) -Pending ([string]$marker.Pending)
 }
 
 function Read-TkChoice {
@@ -3034,6 +3088,28 @@ function Confirm-TkSilence {
         'Abort changes nothing.'
     ) -join "`n"
     return ((Read-TkChoice -Caption 'The DHCP window' -Message $message -Choices @('&Abort', '&Continue') -Default 0) -replace '&', '') -eq 'Continue'
+}
+
+function Restore-TkWindowsSide {
+    # Tenko's side failed after the silence, while the Windows servers are stopped but still
+    # authorized: Tenko's completed takeovers reverted first, then Windows started again as it
+    # was, which answers at once; no replica is waited for. The last lines say which side
+    # answers each scope and what to run next.
+    param([hashtable]$State, [string]$Why)
+    $r = $State.Data.readings
+    $scopes = @($r.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)
+    $completed = @($State.Data.values.Keys | Where-Object { $_ -like 'completed.*' })
+    if ($completed.Count -gt 0) {
+        try { Undo-TkTakeoverJob -State $State; Complete-TkRevert -State $State } catch {
+            throw "${Why}; Tenko's revert failed too ($($_.Exception.Message)): Tenko may still answer $(@($completed | ForEach-Object { $_.Substring(19) }) -join ', '), the Windows DHCP servers are stopped; run Tenko-Takeover.ps1 -Reverse once Tenko answers"
+        }
+    }
+    Resume-TkWindowsDhcp -State $State
+    foreach ($key in @($State.Data.values.Keys | Where-Object { $_ -like 'completed.*' -or $_ -eq 'silenced' })) { $State.Data.values.Remove($key) }
+    Save-TkState $State
+    foreach ($scope in $scopes) { Write-TkNote "  ${scope}: Windows answers ($(@($r.dhcp | ForEach-Object { $_.name }) -join ', ')); Tenko is off" }
+    $next = $(if ($completed.Count -gt 0) { "run Tenko-Takeover.ps1 -Reverse, which undoes the window's takeover in Tenko, before the DHCP window again" } else { 'run Tenko-Takeover.ps1 again to retry the DHCP window, or -Reverse' })
+    throw "${Why}: Windows answers every scope again and Tenko is off; $next"
 }
 
 function Resume-TkWindowsDhcp {
@@ -3086,6 +3162,13 @@ function Get-TkPhase5 {
                 foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
                     if ((Get-TkField $State.Data.values "completed.$key") -eq $true) { continue }
                     $waits[$key] = Wait-TkJob -Id $State.Data.jobs[$key] -ManualKind 'migrate.takeover.silence'
+                    # A sitting that ended between a completion and its record: that job is done.
+                    if ($waits[$key].Step -lt 0 -and $waits[$key].State -eq 'succeeded' -and (Get-TkField $State.Data.values 'silenced') -eq $true) {
+                        $State.Data.values["completed.$key"] = $true
+                        Save-TkState $State
+                        $waits.Remove($key)
+                        continue
+                    }
                     if ($waits[$key].Step -lt 0) { throw "the takeover job of $($key.Substring(9)) ended $($waits[$key].State) before Windows was made silent" }
                 }
                 $State.Data.values.method = 'stop'
@@ -3103,6 +3186,23 @@ function Get-TkPhase5 {
                 }
                 # Tenko never goes on while a Windows server of the pair may still answer: both
                 # silences read back first, or both servers started again and Tenko left off.
+                if ((Get-TkField $State.Data.values 'silenced') -eq $true -and $waits.Count -gt 0) {
+                    # A resume reads each service again before Tenko goes on: one that answers
+                    # again (a policy, a console) is stopped and disabled again.
+                    try {
+                        foreach ($server in $r.dhcp) {
+                            $now = Invoke-TkRemote -Server $server.name -Name ReadDhcpService | Select-Object -Last 1
+                            if ($now.Status -ne 'Stopped' -or $now.Start -ne 'Disabled' -or $now.Listening -ne 0) { $now = Invoke-TkRemote -Server $server.name -Name StopDhcp | Select-Object -Last 1 }
+                            if ($now.Status -ne 'Stopped' -or $now.Start -ne 'Disabled' -or $now.Listening -ne 0) { throw "$($server.name) is not silent: the service is $($now.Status), start $($now.Start), $($now.Listening) listeners on UDP 67" }
+                        }
+                    } catch {
+                        $why = $_.Exception.Message
+                        Resume-TkWindowsDhcp -State $State
+                        $State.Data.values.Remove('silenced')
+                        Save-TkState $State
+                        throw "the silence of the Windows DHCP servers was not read back again ($why): they are started again as they were and answer, and Tenko's scopes stay off"
+                    }
+                }
                 if ((Get-TkField $State.Data.values 'silenced') -ne $true) {
                     if (-not (Confirm-TkSilence -Readings $r)) { Exit-TkTakeover 3 'the DHCP window was aborted at the console; nothing of it was changed, Windows answers as before' }
                     Show-TkRestoreLine $r
@@ -3121,14 +3221,29 @@ function Get-TkPhase5 {
                     $State.Data.values.silenced = $true
                     Save-TkState $State
                 }
-                foreach ($key in $waits.Keys) {
-                    [void](Invoke-Tenko -Method POST -Path "/jobs/$($State.Data.jobs[$key])/steps/$($waits[$key].Step)/complete" -Body ([ordered]@{ note = "Windows silent: DHCPServer stopped and disabled on $($names -join ', '), read back; the authorizations are removed next" }))
+                # Tenko's side failing after the silence leaves no server: Windows is started
+                # again (still authorized), Tenko's completed takeovers reverted first.
+                foreach ($key in @($waits.Keys)) {
+                    for ($try = 1; ; $try++) {
+                        try {
+                            [void](Invoke-Tenko -Method POST -Path "/jobs/$($State.Data.jobs[$key])/steps/$($waits[$key].Step)/complete" -Body ([ordered]@{ note = "Windows silent: DHCPServer stopped and disabled on $($names -join ', '), read back; the authorizations are removed next" }))
+                            break
+                        } catch {
+                            $why = $_.Exception.Message
+                            # Only Tenko's answer, or its absence, is Tenko's side failing.
+                            if ($why -notmatch '^(Tenko refused |the connection to Tenko failed|TLS to |Tenko at |Tenko''s answer)') { throw }
+                            # A completion already made (a sitting that ended before its record) is one.
+                            if ($why -match '^Tenko refused \S+ \S+ with 409') { break }
+                            if ($try -ge $script:TkResumeTries) { Restore-TkWindowsSide -State $State -Why "Tenko did not complete the takeover of $($key.Substring(9)) ($why)" }
+                            Start-Sleep -Seconds $script:TkPollSec
+                        }
+                    }
                     $State.Data.values["completed.$key"] = $true
                     Save-TkState $State
                 }
                 foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
                     $done = Wait-TkJob -Id $State.Data.jobs[$key]
-                    if ($done.State -ne 'succeeded') { throw "the takeover of $($key.Substring(9)) ended $($done.State) after the silence; run -Reverse to make Windows answer again" }
+                    if ($done.State -ne 'succeeded') { Restore-TkWindowsSide -State $State -Why "the takeover of $($key.Substring(9)) ended $($done.State) after its task was completed" }
                 }
                 $State.Data.values.deauthorized = $names
                 Save-TkState $State
@@ -3513,6 +3628,7 @@ function Invoke-Takeover {
 
         # Discovery: always fresh, its controller addresses the class the reverse checks
         # against; the recorded readings stay what the reverse restores from.
+        if ($null -eq $data.readings) { Find-TkMarkedBarrier -Domain $domain }
         $recorded = $(if ($null -ne $data.readings) { @($data.readings.dhcp) } else { @() })
         $readings = Get-TkDiscovery -Domain $domain -Stopped @(@(Get-TkField $data.values 'stopped') | Where-Object { $_ }) -Recorded $recorded -KnownDhcp @($recorded | ForEach-Object { $_.name })
         $script:TkFresh = $readings
@@ -3558,6 +3674,7 @@ function Invoke-Takeover {
         }
         # The run marker before the approval, read back: two machines never both pass it.
         $marker = Invoke-TkRemote -Server $data.readings.pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1
+        if ($null -ne $marker -and $marker.Run -and $marker.Run -ne $data.id -and [string]$marker.Pending) { Complete-TkMarkedBarrier -Readings $readings -Pending ([string]$marker.Pending) }
         if ($null -ne $marker -and $marker.Run -and $marker.Run -ne $data.id) { Exit-TkTakeover 1 "another run ($($marker.Run) from $($marker.Host) at $($marker.Time)) is recorded on $($data.readings.pdc); it must end or be reversed first" }
         [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, $data.id, [System.Environment]::MachineName, $false))
         $marker = Invoke-TkRemote -Server $data.readings.pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1

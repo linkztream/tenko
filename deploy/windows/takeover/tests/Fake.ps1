@@ -94,7 +94,8 @@ function Get-FakeWorld {
         batchRight = $false
         rsat = $true
         marker = $null
-        markerThief = $false
+        markerThief = $false; markerPending = ''
+        completes = 0; completeFails = $false; completeOk = 0; completeThenFail = $false; completeFailedOnce = $false; jobFailsAfter = $false; crashAtComplete = $false; crashedAtComplete = $false
         dnsUser = 'CORP\dhcp-dns'
         v6 = @(); leaseSeconds = 28800; startPolicy = @(); gpp = @(); timeSource = 'time.example.test'
         pwdLastSet = '100'
@@ -202,9 +203,11 @@ function Invoke-FakeRemote {
         'ReadLocalAdmins' { @{ Name = 'CORP\Domain Admins'; Sid = "$($script:FakeSid)-512"; Class = 'Group' } }
         'ReadFeature' { $w.rsat }
         'SetFeature' { $w.rsat = [bool]$a[1]; $w.rsat }
-        'ReadMarker' { if ($w.marker) { [pscustomobject]$w.marker } }
+        'ReadMarker' { if ($w.marker) { $m = @{} + $w.marker; $m.Pending = $w.markerPending; [pscustomobject]$m } }
+        'WriteMarkerPending' { if ($w.marker) { $w.markerPending = $a[1] } }
+        'ReadDhcpService' { $service = $w.services[$s]; @{ Status = $service.Status; Start = $service.Start; Listening = $(if ($service.Status -eq 'Running') { 1 } else { 0 }) } }
         'WriteMarker' {
-            if ($a[3]) { $w.marker = $null }
+            if ($a[3]) { $w.marker = $null; $w.markerPending = '' }
             elseif ($w.markerThief) { $w.marker = @{ Run = 'another-run'; Host = 'ADM2'; Time = '2026-11-21T10:00:00Z' } }
             else { $w.marker = @{ Run = $a[1]; Host = $a[2]; Time = '2026-11-21T10:00:00Z' } }
         }
@@ -413,7 +416,24 @@ function Invoke-FakeTenko {
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' { return (Get-FakeJob 'prepare') }
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/takeover$' { return (Get-FakeJob 'takeover') }
         '^GET /jobs/(.+)$' { return [ordered]@{ job = $w.jobs[$Matches[1]] } }
-        '^POST /jobs/([^/]+)/steps/(\d+)/complete$' { $job = $w.jobs[$Matches[1]]; $job.steps[[int]$Matches[2]].state = [ordered]@{ state = 'done' }; $job.state = 'succeeded'; $w.scopesOn = $true; [void]$w.calls.Add('tenko|task-complete'); return [ordered]@{} }
+        '^POST /jobs/([^/]+)/steps/(\d+)/complete$' {
+            # Tenko may not answer the completion (completeFails, or after completeOk calls), may
+            # answer after doing it (completeThenFail), and a job may fail once completed
+            # (jobFailsAfter). A second completion of a done step is a 409.
+            $job = $w.jobs[$Matches[1]]
+            $step = $job.steps[[int]$Matches[2]]
+            if ([string]$step.state.state -eq 'done') { throw "Tenko refused $Method $Path with 409 jobs.step.not_waiting: the step is done" }
+            # The sitting itself ends here, before the call (crashAtComplete): not Tenko's failure.
+            if ($w.crashAtComplete -and -not $w.crashedAtComplete) { $w.crashedAtComplete = $true; throw 'injected: the sitting ended' }
+            $w.completes++
+            if ($w.completeFails -or ($w.completeOk -gt 0 -and $w.completes -gt $w.completeOk)) { throw 'the connection to Tenko failed: injected' }
+            $step.state = [ordered]@{ state = 'done' }
+            $job.state = $(if ($w.jobFailsAfter) { 'failed' } else { 'succeeded' })
+            if (-not $w.jobFailsAfter) { $w.scopesOn = $true }
+            [void]$w.calls.Add('tenko|task-complete')
+            if ($w.completeThenFail -and -not $w.completeFailedOnce) { $w.completeFailedOnce = $true; throw 'the connection to Tenko failed: injected after the completion' }
+            return [ordered]@{}
+        }
         '^GET /dns/zones$' {
             $name = ($query -replace '^name=', '')
             return [ordered]@{ items = @($w.tzones.Values | Where-Object { $_.name -eq $name }) }
