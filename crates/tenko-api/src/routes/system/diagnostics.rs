@@ -99,6 +99,9 @@ const ERRORS: &[&str] = &[
     // WP13.2: the acceptor raises the same codes from its refusals, from three sources at
     // least: a key version Tenko does not hold and an RC4 ticket are errors above; clock
     // skew and the full table of negotiations (`dns.gss.context_limit`) stay warnings.
+    // A clock hold that a person ends; one that ends by itself (`sys.clock.jumped`) is a
+    // warning.
+    tenko_core::clock::HELD,
 ];
 
 /// The severity of a finding by its code.

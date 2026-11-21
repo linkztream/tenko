@@ -345,6 +345,9 @@ pub enum FindingAction {
     MoveHost,
     /// Nothing to do: the finding is listed for information.
     None,
+    /// Confirm that the node's clock is right (`POST /system/clock/confirm`), during a wait
+    /// too.
+    ConfirmClock,
 }
 
 /// The subject of a finding: what it is about, with the identities the filters and the

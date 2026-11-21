@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, net::IpAddr};
 
 use sha2::{Digest, Sha256};
-use tenko_core::{ObjectKind, ObjectRef, Timestamp, VrfId};
+use tenko_core::{ObjectKind, ObjectRef, Timestamp, VrfId, clock};
 use tenko_jobs::model::{Job, StepState};
 
 use super::model::{
@@ -560,7 +560,11 @@ pub fn of_health(item: &HealthItem, since: Timestamp) -> Finding {
             id: item.code.clone(),
             path: "/system/status".to_owned(),
         },
-        action: FindingAction::OpenStatus,
+        action: if [clock::HELD, clock::JUMPED].contains(&item.code.as_str()) {
+            FindingAction::ConfirmClock
+        } else {
+            FindingAction::OpenStatus
+        },
         since,
         source: FindingSource::Health,
     }

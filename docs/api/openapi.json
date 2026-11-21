@@ -37134,6 +37134,66 @@
         "security": []
       }
     },
+    "/api/v1/system/clock/confirm": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Confirm that the clock of this node is right",
+        "description": "Ends a hold of the clock guard on this node: rounds that delete or let expire by the wall clock, and what the node issues, go on by the clock as it is now, during a wait too. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the jump and its reason; answers 204 also when nothing was held.",
+        "operationId": "confirm_clock",
+        "responses": {
+          "204": {
+            "description": "The clock is trusted"
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "This server has no authentication service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/diagnostics": {
       "get": {
         "tags": [
@@ -53875,7 +53935,8 @@
           "open_status",
           "use_root",
           "move_host",
-          "none"
+          "none",
+          "confirm_clock"
         ]
       },
       "FindingArea": {

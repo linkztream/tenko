@@ -138,8 +138,14 @@ pub fn serve(
     })
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "the start and stop order reads best as one sequence"
+)]
 async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     let started = Instant::now();
+    // The clock guard as the previous run left it, before any round can destroy by the clock.
+    crate::serve::clock::restore(&resolved.data_dir);
     let paths = NodePaths::new(&resolved.data_dir);
     let mut config = AgentConfig::new(paths.clone(), version());
     let mut buffer = BufferConfig::new(paths.buffer());
@@ -189,6 +195,12 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     ));
     // node-roles: end.
     let scanner = crate::node::scan::start_on_node(&resolved, &agent, stopped.clone());
+    let clock = tokio::spawn(crate::serve::clock::run(
+        resolved.data_dir.clone(),
+        None,
+        identity.name.clone(),
+        stopped.clone(),
+    ));
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));
     {
         let mut out = std::io::stdout().lock();
@@ -230,6 +242,8 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     if tokio::time::timeout(STOP_TIMEOUT, task).await.is_err() {
         tracing::warn!("the node process did not stop in time");
     }
+    // The clock guard's last write.
+    let _ = tokio::time::timeout(STOP_TIMEOUT, clock).await;
     // node-roles: exit status 12 asks the service manager to start the node again.
     let _ = tokio::time::timeout(STOP_TIMEOUT, roles_task).await;
     if let Some(reason) = restart.reason() {

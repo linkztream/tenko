@@ -63,6 +63,7 @@
 //! (the service log). While first-run setup is open it also holds `setup-token`, the
 //! one-time setup token that `tenko setup token` prints (see [`setup_token`]).
 
+pub(crate) mod clock;
 pub mod cluster_key;
 // WP7.5: the dhcp role.
 mod dhcp;
@@ -988,6 +989,8 @@ async fn start(
     let layout = resolved.layout();
     let mut steps = Steps::new();
     create_data_dir(&resolved.data_dir)?;
+    // The clock guard as the previous run left it, before any round can destroy by the clock.
+    clock::restore(&resolved.data_dir);
     // A forced step of the cluster recovery that did not finish: the store may be renamed
     // aside, and a start now would make a new installation out of nothing.
     crate::cluster::recover::check_start(&resolved.data_dir, &resolved.layout().store())?;
@@ -2137,6 +2140,13 @@ async fn start(
         })
         .await?;
     running.tasks.extend(metrics_tasks);
+    // The clock guard's sampler: its file, its findings, and a last write at the stop.
+    running.tasks.push(tokio::spawn(clock::run(
+        resolved.data_dir.clone(),
+        Some(warnings_state.clone()),
+        crate::node::enroll::host_name().unwrap_or_else(|| resolved.node_id.to_string()),
+        running.stop.subscribe(),
+    )));
     // node-roles: the follower of the stored role set stops with the server.
     running.tasks.extend(role_task);
     let (api_tls, tls_policy) = (tls.service.clone(), tls.policy);

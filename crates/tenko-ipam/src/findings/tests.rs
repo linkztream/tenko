@@ -447,6 +447,13 @@ fn health_conditions_keep_their_identity_and_their_area() {
         of_health(&item("cluster.quorum.lost", FindingLevel::Act), now).area,
         FindingArea::Nodes
     );
+    for code in [tenko_core::clock::HELD, tenko_core::clock::JUMPED] {
+        assert_eq!(
+            of_health(&item(code, FindingLevel::Act), now).action,
+            FindingAction::ConfirmClock,
+            "{code}"
+        );
+    }
 
     let index = FindingsIndex::new(FindingsConfig::default());
     let first = [item("dns.role.lagging", FindingLevel::Review)];
