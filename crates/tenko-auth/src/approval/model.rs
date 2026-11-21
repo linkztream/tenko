@@ -4,16 +4,26 @@ use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    ApprovalId, AuthStrength, DelegationId, SessionId, Timestamp, UserId, dns::is_host_label,
-    migrate::plan::TakeoverPlan, table::TableDef,
+    ApprovalId, AuthStrength, DelegationId, MirrorId, SessionId, Timestamp, UserId,
+    dns::{DnsName, is_host_label},
+    migrate::plan::TakeoverPlan,
+    table::TableDef,
 };
 use utoipa::ToSchema;
 
 use super::{CLOCK_TOLERANCE, PENDING_LIFETIME};
 use crate::service::SecretString;
 
-/// Approvals by id.
+/// Approvals by id: what is counted and compared, without the plan.
 pub const APPROVALS: TableDef<ApprovalId, ApprovalRecord> = TableDef::new("auth.approvals");
+/// The plan of each approval, by its id: read only for the one approval a step names.
+pub const APPROVAL_PLANS: TableDef<ApprovalId, TakeoverPlan> = TableDef::new("auth.approval_plans");
+
+/// The characters Windows refuses in an account name, and those that could pass for markup
+/// where the name is shown.
+const REFUSED_IN_ACCOUNT: &[char] = &[
+    '"', '/', '\\', '[', ']', ':', ';', '|', '=', ',', '+', '*', '?', '<', '>', '&',
+];
 
 /// What an approval is for: one purpose today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -23,8 +33,9 @@ pub enum Purpose {
     WindowsTakeover,
 }
 
-/// What the script reports about itself, shown to the person labeled as reported. ASCII
-/// only and bounded, so that no direction mark or look-alike character reaches the page.
+/// What the script reports about itself, shown to the person labeled as reported and as text
+/// only. Bounded, and without control or invisible formatting characters, so that no
+/// direction mark reaches the page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ApprovalClient {
@@ -39,8 +50,9 @@ pub struct ApprovalClient {
 impl ApprovalClient {
     /// Checks the bounds: the machine a host label of at most 63 characters; the user a
     /// `NetBIOS` domain of at most 15 characters, a backslash and an account name of 1 to 20
-    /// letters, digits, `.`, `_` or `-`; the version 1 to 32 letters, digits, `.`, `+` or
-    /// `-`.
+    /// characters (spaces and letters of any script allowed) without a control or formatting
+    /// character, a space at either end, or a character Windows refuses there; the version 1 to
+    /// 32 letters, digits, `.`, `+` or `-`.
     pub(crate) fn check(&self) -> Result<(), &'static str> {
         let word = |text: &str, max: usize, extra: &[u8]| {
             !text.is_empty()
@@ -53,7 +65,11 @@ impl ApprovalClient {
             return Err("client.machine: not a host label");
         }
         let valid_user = self.user.split_once('\\').is_some_and(|(domain, account)| {
-            domain.len() <= 15 && is_host_label(domain) && word(account, 20, b"._-")
+            domain.len() <= 15
+                && is_host_label(domain)
+                && account.chars().count() <= 20
+                && crate::client_cert::valid_label(account)
+                && !account.contains(REFUSED_IN_ACCOUNT)
         });
         if !valid_user {
             return Err("client.user: not DOMAIN\\account");
@@ -96,6 +112,24 @@ pub struct ApprovalTicket {
 pub struct CodeEntry {
     /// The code.
     pub code: SecretString,
+}
+
+/// `POST /auth/approvals/clear`: which approvals to deny.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearApprovals {
+    /// Only those from this address's source (the address, or its IPv6 /64); all when
+    /// absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub source: Option<IpAddr>,
+}
+
+/// The answer to `POST /auth/approvals/clear`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ClearedApprovals {
+    /// How many waiting or uncollected approvals were denied.
+    pub denied: usize,
 }
 
 /// `POST /auth/approvals/{id}/collect`: the nonce signed with the script's key.
@@ -164,6 +198,9 @@ pub struct Decision {
     pub at: Timestamp,
     /// The run the delegated session acts for.
     pub delegation: DelegationId,
+    /// The approver's sessions generation at the approval: ending every session of the
+    /// account, or a password change, before the collect refuses it.
+    pub generation: u64,
 }
 
 /// An approval (`auth.approvals`). It holds no secret: the key is public, the nonce proves
@@ -175,8 +212,8 @@ pub struct ApprovalRecord {
     pub id: ApprovalId,
     /// What it is for.
     pub purpose: Purpose,
-    /// The plan, fixed by the request.
-    pub plan: TakeoverPlan,
+    /// The plan's domain (the plan itself is in [`APPROVAL_PLANS`]).
+    pub domain: DnsName,
     /// SHA-256 of the request body as sent.
     pub plan_hash: [u8; 32],
     /// The script's public key, 65 octets.
@@ -192,6 +229,9 @@ pub struct ApprovalRecord {
     pub state: ApprovalState,
     /// When the request arrived.
     pub created_at: Timestamp,
+    /// The mirrors the delegated session created, at most one per DHCP server of the plan.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mirrors: Vec<MirrorId>,
 }
 
 impl ApprovalRecord {
@@ -208,12 +248,12 @@ impl ApprovalRecord {
         matches!(self.state, ApprovalState::Pending) && !self.expired(now)
     }
 
-    /// What the person reads.
-    pub fn view(&self, now: Timestamp) -> ApprovalView {
+    /// What the person reads, with the approval's plan.
+    pub fn view(&self, plan: TakeoverPlan, now: Timestamp) -> ApprovalView {
         ApprovalView {
             id: self.id,
             purpose: self.purpose,
-            plan: self.plan.clone(),
+            plan,
             reported: self.client.clone(),
             source: self.source.to_string(),
             created_at: self.created_at,

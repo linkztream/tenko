@@ -305,27 +305,6 @@ impl AuthService {
         Self::require_fresh(&session, ctx.now)
     }
 
-    /// The freshness the creation of a mirror needs (ADR 0038 decision 5): a session that
-    /// signed in within the last five minutes, or a delegated session within
-    /// [`crate::delegation::MIRROR_WINDOW`] of its approval, on this controller's clock.
-    ///
-    /// # Errors
-    ///
-    /// As [`AuthService::require_fresh_session`]; [`AuthError::DelegationRefused`] for a
-    /// delegated session past the window.
-    pub(super) async fn require_fresh_or_within_approval(
-        &self,
-        ctx: &RequestCtx,
-    ) -> Result<(), AuthError> {
-        let (user, session, _) = Self::session_principal(ctx)?;
-        let (_, _, _, session) = Self::live_session(self.view().await?.as_ref(), user, session)?;
-        match &session.delegation {
-            Some(delegated) if crate::delegation::within_approval(delegated, ctx.now) => Ok(()),
-            Some(_) => Err(AuthError::DelegationRefused),
-            None => Self::require_fresh(&session, ctx.now),
-        }
-    }
-
     /// Checks that a person acting through a session authenticated within the last five
     /// minutes, for changes that decide or bypass other step-ups. The system acts without a
     /// session and passes, as it passes authorization; any other principal is refused.

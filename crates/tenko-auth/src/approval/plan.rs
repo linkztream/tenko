@@ -6,7 +6,7 @@ use std::{collections::BTreeSet, net::IpAddr};
 use ipnet::Ipv4Net;
 use tenko_core::migrate::plan::{
     MAX_ADDRESSES, MAX_CONTROLLERS, MAX_DHCP_SERVERS, MAX_FORWARDERS, MAX_RELATIONSHIP_LEN,
-    MAX_SCOPES, MAX_ZONES, TakeoverPlan,
+    MAX_SCOPES, MAX_SPNS, MAX_ZONES, PlanKerberos, PlanOperation, TakeoverPlan,
 };
 
 /// Names a run's node may never take: names clients look up to find a proxy or a router, and
@@ -21,8 +21,13 @@ const DENIED_NODE_NAMES: [&str; 3] = ["wpad", "isatap", "localhost"];
 /// - The domain is the forest root or below it.
 /// - The zones are the domain, `_msdcs.<forest root>` and reverse zones that cover a scope's
 ///   network or lie inside one, nothing else.
-/// - The scopes are networks (no host bits); the mirror host is no controller; the node's
-///   name is one label and not on the deny list; the relationship's name is printable ASCII.
+/// - The scopes are networks (no host bits); the mirror host is no controller, by name or by
+///   address; the node's name is one label, not on the deny list and not the first label of a
+///   controller, a DHCP server or the mirror host; the relationship's name is printable ASCII.
+/// - Tenko's computer account is there exactly when `kerberos_adopt` is: its realm is the
+///   domain in upper case, its account the node's name and a `$` (the node's name then at most
+///   15 characters), and its 1 to 4 service principal names are `DNS/` and the node's name,
+///   alone or under the domain, each once.
 ///
 /// # Errors
 ///
@@ -94,16 +99,31 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
             "zones: the domain, _msdcs of the forest root and the reverse zones of the scopes only",
         );
     }
-    if plan
-        .controllers
-        .iter()
-        .any(|controller| controller.name == plan.mirror_host.name)
-    {
+    if plan.controllers.iter().any(|controller| {
+        controller.name == plan.mirror_host.name
+            || controller.addresses.contains(&plan.mirror_host.address)
+    }) {
         return Err("mirror_host: a domain controller is never the mirror host");
     }
     let node = plan.node_name.as_str();
-    if node.contains('.') || DENIED_NODE_NAMES.contains(&node) {
-        return Err("node_name: one label, not wpad, isatap or localhost");
+    let first_label = |name: &str| name.split('.').next().unwrap_or(name).to_owned();
+    let taken = plan
+        .controllers
+        .iter()
+        .map(|controller| controller.name.as_str())
+        .chain(plan.dhcp_servers.iter().map(|server| server.name.as_str()))
+        .chain([plan.mirror_host.name.as_str()])
+        .any(|name| first_label(name) == node);
+    if node.contains('.') || DENIED_NODE_NAMES.contains(&node) || taken {
+        return Err("node_name: one label, not wpad, isatap, localhost or a server's name");
+    }
+    match (
+        &plan.kerberos,
+        plan.operations.contains(&PlanOperation::KerberosAdopt),
+    ) {
+        (Some(kerberos), true) => check_kerberos(plan, kerberos)?,
+        (None, false) => {}
+        _ => return Err("kerberos: present exactly when kerberos_adopt is listed"),
     }
     if let Some(name) = &plan.relationship {
         let printable = name.bytes().all(|b| b.is_ascii_graphic() || b == b' ');
@@ -111,6 +131,33 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
         {
             return Err("relationship: 1 to 64 printable ASCII characters");
         }
+    }
+    Ok(())
+}
+
+/// The rules of Tenko's computer account in a plan.
+fn check_kerberos(plan: &TakeoverPlan, kerberos: &PlanKerberos) -> Result<(), &'static str> {
+    if kerberos.realm != plan.domain.as_str().to_ascii_uppercase() {
+        return Err("kerberos.realm: the domain in upper case");
+    }
+    let node = plan.node_name.as_str();
+    let valid_account = kerberos
+        .account
+        .strip_suffix('$')
+        .is_some_and(|name| name.len() <= 15 && name.eq_ignore_ascii_case(node));
+    if !valid_account {
+        return Err("kerberos.account: the node's name and a $, at most 15 characters before it");
+    }
+    let full = format!("{node}.{}", plan.domain.as_str());
+    let valid_spn = |spn: &String| {
+        spn.strip_prefix("DNS/")
+            .is_some_and(|host| host.eq_ignore_ascii_case(node) || host.eq_ignore_ascii_case(&full))
+    };
+    if !(1..=MAX_SPNS).contains(&kerberos.spns.len())
+        || !kerberos.spns.iter().all(valid_spn)
+        || !distinct(kerberos.spns.iter().map(|spn| spn.to_ascii_lowercase()))
+    {
+        return Err("kerberos.spns: 1 to 4 of DNS/<the node's name>, each once");
     }
     Ok(())
 }
@@ -144,7 +191,12 @@ mod tests {
             "scopes": ["192.0.2.0/24"],
             "mirror_host": { "name": "mgmt1.corp.example.test", "address": "192.0.2.30" },
             "node_name": "tenko",
-            "operations": ["mirrors", "secondary_zones", "prepare", "flip", "takeover"]
+            "operations": ["mirrors", "secondary_zones", "kerberos_adopt", "prepare", "flip", "takeover"],
+            "kerberos": {
+                "realm": "CORP.EXAMPLE.TEST",
+                "account": "TENKO$",
+                "spns": ["DNS/tenko", "DNS/tenko.corp.example.test"]
+            }
         })
     }
 
@@ -167,9 +219,10 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // One table of refused plans.
     fn plans_outside_the_limits_are_refused() {
         type Edit = fn(&mut serde_json::Value);
-        let refused: [(Edit, &str); 14] = [
+        let refused: [(Edit, &str); 27] = [
             (
                 |plan| plan["zones"] = json!(["other.example.test"]),
                 "zones:",
@@ -216,6 +269,53 @@ mod tests {
             (
                 |plan| plan["relationship"] = json!("a\u{202e}b"),
                 "relationship:",
+            ),
+            (
+                |plan| plan["kerberos"]["realm"] = json!("corp.example.test"),
+                "kerberos.realm",
+            ),
+            (
+                |plan| plan["kerberos"]["account"] = json!("TENKO"),
+                "kerberos.account",
+            ),
+            (
+                |plan| plan["kerberos"]["account"] = json!("A-NAME-TOO-LONG1$"),
+                "kerberos.account",
+            ),
+            (
+                |plan| plan["kerberos"]["spns"] = json!(["HTTP/tenko"]),
+                "kerberos.spns",
+            ),
+            (
+                |plan| plan["kerberos"]["spns"] = json!(["DNS/dc1"]),
+                "kerberos.spns",
+            ),
+            (
+                |plan| plan["kerberos"]["spns"] = json!(["DNS/tenko", "dns/TENKO"]),
+                "kerberos.spns",
+            ),
+            (|plan| plan["kerberos"]["spns"] = json!([]), "kerberos.spns"),
+            (
+                |plan| plan["kerberos"]["account"] = json!("DC1$"),
+                "kerberos.account",
+            ),
+            (
+                |plan| plan["operations"] = json!(["mirrors"]),
+                "kerberos: present",
+            ),
+            (|plan| plan["node_name"] = json!("dc1"), "node_name"),
+            (|plan| plan["node_name"] = json!("mgmt1"), "node_name"),
+            (
+                |plan| plan["mirror_host"]["address"] = json!("192.0.2.11"),
+                "mirror_host",
+            ),
+            (
+                |plan| {
+                    plan["node_name"] = json!("tenko-sixteen-ch");
+                    plan["kerberos"]["account"] = json!("TENKO-SIXTEEN-CH$");
+                    plan["kerberos"]["spns"] = json!(["DNS/tenko-sixteen-ch"]);
+                },
+                "kerberos.account",
             ),
         ];
         for (edit, reason) in refused {

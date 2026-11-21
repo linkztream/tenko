@@ -64,7 +64,11 @@ impl AuthService {
         terms: &MirrorTokenTerms,
     ) -> Result<MirrorCredentials, AuthError> {
         let (creator, _, strength) = Self::session_principal(ctx)?;
-        self.require_fresh_or_within_approval(ctx).await?;
+        // ADR 0038: a delegated session within five minutes of its approval, one mirror per
+        // DHCP server of its plan; anyone else signed in within the last five minutes.
+        if !Self::stage_delegated_mirror(ctx, view, batch, mirror)? {
+            self.require_fresh_session(ctx).await?;
+        }
         let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(mirror))?;
         let key = UserRecord::name_key(&name);
         if view.get_typed(&USER_NAMES, &key)?.is_some() {

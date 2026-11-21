@@ -5,6 +5,7 @@ use aws_lc_rs::{
     rand::SystemRandom,
     signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair as _},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tenko_core::{ApprovalId, RequestCtx};
@@ -12,7 +13,6 @@ use tenko_core::{ApprovalId, RequestCtx};
 use super::TestEnv;
 use crate::{
     approval::{ApprovalTicket, DelegatedSession},
-    encoding::{base64url_decode, base64url_encode},
     error::AuthError,
     service::SecretString,
 };
@@ -40,7 +40,15 @@ pub fn plan() -> Value {
         "scopes": ["192.0.2.0/24"],
         "mirror_host": { "name": "mgmt1.corp.example.test", "address": "192.0.2.30" },
         "node_name": "tenko",
-        "operations": ["mirrors", "secondary_zones", "forwarding_rules", "prepare", "flip", "takeover"]
+        "operations": [
+            "mirrors", "secondary_zones", "forwarding_rules", "kerberos_adopt", "prepare", "flip",
+            "takeover"
+        ],
+        "kerberos": {
+            "realm": "CORP.EXAMPLE.TEST",
+            "account": "TENKO$",
+            "spns": ["DNS/tenko.corp.example.test"]
+        }
     })
 }
 
@@ -57,7 +65,7 @@ impl Default for Script {
 impl Script {
     /// The public key in base64url, as the request carries it.
     pub fn key(&self) -> String {
-        base64url_encode(self.0.public_key().as_ref())
+        URL_SAFE_NO_PAD.encode(self.0.public_key().as_ref())
     }
 
     /// The request body for `plan`, as sent.
@@ -98,13 +106,13 @@ impl Script {
     ///
     /// If the nonce is not base64url or signing fails.
     pub fn collect(&self, ticket: &ApprovalTicket) -> String {
-        let nonce = base64url_decode(&ticket.nonce).expect("a nonce");
+        let nonce = URL_SAFE_NO_PAD.decode(&ticket.nonce).expect("a nonce");
         let message = crate::approval::collect_message(ticket.id, &nonce);
         let signature = self
             .0
             .sign(&SystemRandom::new(), &message)
             .expect("a signature");
-        json!({ "signature": base64url_encode(signature.as_ref()) }).to_string()
+        json!({ "signature": URL_SAFE_NO_PAD.encode(signature.as_ref()) }).to_string()
     }
 }
 

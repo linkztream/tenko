@@ -85,6 +85,10 @@ impl AuthService {
             Credentials::None => return Err(AuthError::Unauthenticated),
             Credentials::Session(secret) => {
                 let (hash, session, _, view) = self.session_of(secret, now).await?;
+                // A delegated session is never a cookie (ADR 0038).
+                if session.delegation.is_some() {
+                    return Err(AuthError::Unauthenticated);
+                }
                 let row = (SESSIONS.name().clone(), SESSIONS.key(&hash));
                 (session.user, hash, row, view.revision())
             }

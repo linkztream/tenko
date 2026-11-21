@@ -993,7 +993,7 @@ impl AuthService {
         let (user, _) = Self::holder(view, session.user, Issued::Session(session.generation))?;
         if user.is_service()
             || (session.break_glass && !user.break_glass)
-            || (session.delegation.is_some() && !user.roles.contains(&RoleName::Admin))
+            || (session.delegation.is_some() && !user.is_admin())
         {
             return Err(AuthError::Unauthenticated);
         }
@@ -1263,13 +1263,19 @@ fn lifetimes(session: &SessionRecord, settings: &SecuritySettings) -> (Duration,
     if session.break_glass {
         (BREAK_GLASS_SESSION, BREAK_GLASS_IDLE)
     } else if session.delegation.is_some() {
-        (
-            absolute.min(crate::delegation::LIFETIME),
-            idle.min(crate::delegation::IDLE),
-        )
+        delegated_lifetimes(settings)
     } else {
         (absolute, idle)
     }
+}
+
+/// The absolute and the idle lifetime of a delegated session (ADR 0038): the profile's,
+/// capped by [`crate::delegation::LIFETIME`] and [`crate::delegation::IDLE`].
+fn delegated_lifetimes(settings: &SecuritySettings) -> (Duration, Duration) {
+    (
+        settings.session.absolute().min(crate::delegation::LIFETIME),
+        settings.session.idle().min(crate::delegation::IDLE),
+    )
 }
 
 /// The effective end of a session and its absolute end under the current settings.

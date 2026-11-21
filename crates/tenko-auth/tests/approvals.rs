@@ -3,14 +3,15 @@
 //! code, the collect with the key's signature, and a delegated session that is bound to its
 //! source, never fresh, and ends.
 
-use std::{sync::Arc, time::Duration};
+use std::time::Duration;
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tenko_auth::{
-    AuthConfig, AuthError, AuthService, NewSession,
+    AuthError, NewSession,
     approval::{self, APPROVALS, ApprovalState, Refusal},
-    encoding::{base64url_decode, hex_decode},
+    encoding::hex_decode,
     model::{SESSIONS, USERS},
     roles::RoleName,
     secret::hash_secret,
@@ -26,7 +27,6 @@ use tenko_core::{
     ApprovalId, Credentials, Principal, RequestCtx, SystemComponent, Timestamp, audit::AuditRecord,
 };
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
-use tenko_vault::Vault;
 
 const VECTOR: &str = include_str!("fixtures/approval-code.json");
 
@@ -51,7 +51,9 @@ fn the_code_vector_holds() {
     assert_eq!(digest.to_vec(), hex(&code["request_sha256"]));
     let key = hex(&code["key_uncompressed"]);
     assert_eq!(
-        base64url_decode(code["key_base64url"].as_str().expect("text")).expect("base64url"),
+        URL_SAFE_NO_PAD
+            .decode(code["key_base64url"].as_str().expect("text"))
+            .expect("base64url"),
         key
     );
     let id: ApprovalId = code["approval_id"]
@@ -64,6 +66,19 @@ fn the_code_vector_holds() {
         hex(&code["approval_id_octets"])
     );
     let root: [u8; 32] = hex(&code["root_sha256"]).try_into().expect("32 octets");
+    // Every step a script follows: the preimage from its parts, its digest, the 80 bits.
+    let domain = code["domain"].as_str().expect("text");
+    let mut preimage = approval::CODE_CONTEXT.to_vec();
+    preimage.push(0);
+    preimage.push(u8::try_from(domain.len()).expect("a short domain"));
+    preimage.extend_from_slice(domain.as_bytes());
+    for part in [&root[..], &digest[..], &key[..], id.uuid().as_bytes()] {
+        preimage.extend_from_slice(part);
+    }
+    assert_eq!(preimage, hex(&code["preimage"]));
+    let sha = Sha256::digest(&preimage).to_vec();
+    assert_eq!(sha, hex(&code["sha256"]));
+    assert_eq!(sha[..10].to_vec(), hex(&code["first_80_bits"]));
     assert_eq!(
         approval::code(
             code["domain"].as_str().expect("text"),
@@ -87,8 +102,9 @@ fn the_code_vector_holds() {
         approval::collect_message(id, &nonce),
         hex(&collect["message"])
     );
-    let signature =
-        base64url_decode(collect["signature_base64url"].as_str().expect("text")).expect("b64");
+    let signature = URL_SAFE_NO_PAD
+        .decode(collect["signature_base64url"].as_str().expect("text"))
+        .expect("b64");
     assert!(approval::verify_collect(&key, id, &nonce, &signature));
     assert!(!approval::verify_collect(
         &key,
@@ -240,7 +256,7 @@ async fn wrong_late_and_ambiguous_codes_are_refused() {
         "corp.example.test",
         &[0x11; 32],
         &Sha256::digest(body.as_bytes()).into(),
-        &base64url_decode(&script.key()).expect("the key"),
+        &URL_SAFE_NO_PAD.decode(script.key()).expect("the key"),
         ticket.id,
     ));
     assert_eq!(
@@ -431,32 +447,21 @@ async fn a_request_outside_the_limits_is_refused() {
         approval::parse_request(&vec![b' '; approval::MAX_REQUEST_BYTES + 1]),
         Err(Refusal::Plan("the body is larger than 64 KiB".to_owned()))
     );
-    // Two pending approvals per source: a third, through another controller, is refused.
-    let mut services = Vec::new();
-    for _ in 0..3 {
-        let vault: Arc<dyn Vault> = env.vault.clone();
-        services.push(
-            AuthService::new(env.store.clone(), vault, AuthConfig::default())
-                .await
-                .expect("a controller"),
-        );
-    }
-    let source = env
-        .public_ctx()
-        .with_source_ip("2001:db8::7".parse().expect("an address"));
-    for service in &services[..2] {
-        service
-            .request_approval(&source, script.request().as_bytes())
+    // The spacing holds one address; the count of two pending ones holds its /64.
+    let from = |address: &str| {
+        env.public_ctx()
+            .with_source_ip(address.parse().expect("an address"))
+    };
+    for address in ["2001:db8::7", "2001:db8::8"] {
+        env.service
+            .request_approval(&from(address), script.request().as_bytes())
             .await
             .expect("a request");
     }
-    let same_64 = env
-        .public_ctx()
-        .with_source_ip("2001:db8::8".parse().expect("an address"));
     assert_eq!(
         refusal(
-            services[2]
-                .request_approval(&same_64, script.request().as_bytes())
+            env.service
+                .request_approval(&from("2001:db8::9"), script.request().as_bytes())
                 .await
         ),
         Refusal::Limit("source")
@@ -656,4 +661,241 @@ async fn tokens_and_weak_sessions_never_approve() {
         .await
         .expect_err("refused");
     assert_eq!(tenko_core::Coded::code(&refused), "auth.step_up_required");
+}
+
+/// Overwrites the stored session of `secret` with `edit`.
+async fn rewrite_session(
+    env: &TestEnv,
+    secret: &SecretString,
+    edit: impl FnOnce(&mut tenko_auth::model::SessionRecord),
+) {
+    let hash = hash_secret(secret.expose());
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view
+        .get_typed(&SESSIONS, &hash)
+        .expect("read")
+        .expect("the session");
+    edit(&mut record);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch.put_typed(&SESSIONS, &hash, &record).expect("encode");
+    env.store.propose(batch).await.expect("commit");
+}
+
+/// Overwrites the stored account `user` with `edit`.
+async fn rewrite_user(
+    env: &TestEnv,
+    user: tenko_core::UserId,
+    edit: impl FnOnce(&mut tenko_auth::model::UserRecord),
+) {
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut record, _) = view
+        .get_typed(&USERS, &user)
+        .expect("read")
+        .expect("the user");
+    edit(&mut record);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch.put_typed(&USERS, &user, &record).expect("encode");
+    env.store.propose(batch).await.expect("commit");
+}
+
+/// A script that was killed never presents its session again: once the session has lapsed,
+/// its row does not hold the domain, and a new run of the domain is approved.
+#[tokio::test]
+async fn a_killed_script_s_domain_is_approved_again() {
+    let (env, _, admin) = installation().await;
+    let source = |last: u8| std::net::IpAddr::from([192, 0, 2, last]);
+    let first = env
+        .delegate(&admin, &Script::default(), source(61))
+        .await
+        .expect("a delegated session");
+    assert_eq!(
+        refusal(env.delegate(&admin, &Script::default(), source(62)).await),
+        Refusal::Limit("domain"),
+        "while the session lives"
+    );
+    let lapsed = env
+        .now()
+        .checked_sub(Duration::from_secs(1))
+        .expect("a time");
+    rewrite_session(&env, &first.secret, |record| {
+        record.idle_expires_at = lapsed;
+    })
+    .await;
+    env.delegate(&admin, &Script::default(), source(63))
+        .await
+        .expect("the lapsed session's row holds nothing");
+}
+
+/// A request of `script` from 192.0.2.`last`, approved by `admin`: the request's context
+/// and its ticket.
+async fn approved(
+    env: &TestEnv,
+    admin: &RequestCtx,
+    script: &Script,
+    last: u8,
+) -> (RequestCtx, tenko_auth::approval::ApprovalTicket) {
+    let ctx = env
+        .public_ctx()
+        .with_source_ip(std::net::IpAddr::from([192, 0, 2, last]));
+    let body = script.request();
+    let ticket = env
+        .service
+        .request_approval(&ctx, body.as_bytes())
+        .await
+        .expect("a request");
+    let code = SecretString::new(script.code(&body, ticket.id));
+    env.service
+        .approve(admin, ticket.id, &code, &ROOT_SHA256)
+        .await
+        .expect("approved");
+    (ctx, ticket)
+}
+
+/// Between the approval and the collect the person can withdraw the approval, and ending
+/// the approver's sessions or disabling the approver stops the collect.
+#[tokio::test]
+async fn the_approver_can_stop_a_collect_that_has_not_happened() {
+    let (env, admin_session, admin) = installation().await;
+    let user = admin_session.info.user.id;
+    // Withdrawn by the person.
+    let script = Script::default();
+    let (ctx, ticket) = approved(&env, &admin, &script, 71).await;
+    env.service
+        .deny_approval(&admin, ticket.id)
+        .await
+        .expect("withdrawn");
+    assert_eq!(
+        refusal(
+            env.service
+                .collect_approval(&ctx, ticket.id, script.collect(&ticket).as_bytes())
+                .await
+        ),
+        Refusal::Denied
+    );
+    // The approver ended every session of the account.
+    let script = Script::default();
+    let (ctx, ticket) = approved(&env, &admin, &script, 72).await;
+    rewrite_user(&env, user, |record| record.sessions_generation += 1).await;
+    assert!(matches!(
+        env.service
+            .collect_approval(&ctx, ticket.id, script.collect(&ticket).as_bytes())
+            .await,
+        Err(AuthError::Unauthenticated)
+    ));
+    // The approver was disabled.
+    let (env, admin_session, admin) = installation().await;
+    let script = Script::default();
+    let (ctx, ticket) = approved(&env, &admin, &script, 73).await;
+    rewrite_user(&env, admin_session.info.user.id, |record| {
+        record.disabled = true;
+    })
+    .await;
+    assert!(matches!(
+        env.service
+            .collect_approval(&ctx, ticket.id, script.collect(&ticket).as_bytes())
+            .await,
+        Err(AuthError::Unauthenticated)
+    ));
+}
+
+/// The person denies every waiting request of one source in one step, and only those.
+#[tokio::test]
+async fn an_administrator_clears_the_waiting_requests_of_a_source() {
+    let (env, _, admin) = installation().await;
+    let script = Script::default();
+    let mut tickets = Vec::new();
+    for address in ["2001:db8::1", "2001:db8::2", "192.0.2.80"] {
+        let ctx = env
+            .public_ctx()
+            .with_source_ip(address.parse().expect("an address"));
+        tickets.push(
+            env.service
+                .request_approval(&ctx, script.request().as_bytes())
+                .await
+                .expect("a request"),
+        );
+    }
+    let neighbor = "2001:db8::ffff".parse().expect("an address");
+    assert_eq!(
+        env.service
+            .clear_approvals(&admin, Some(neighbor))
+            .await
+            .expect("cleared"),
+        2,
+        "the two of the /64"
+    );
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let state = |id| {
+        view.get_typed(&APPROVALS, &id)
+            .expect("read")
+            .expect("the approval")
+            .0
+            .state
+    };
+    assert!(matches!(state(tickets[0].id), ApprovalState::Denied { .. }));
+    assert!(matches!(state(tickets[1].id), ApprovalState::Denied { .. }));
+    assert_eq!(state(tickets[2].id), ApprovalState::Pending);
+    assert_eq!(
+        env.service
+            .clear_approvals(&admin, None)
+            .await
+            .expect("cleared"),
+        1
+    );
+}
+
+/// No audit record of a whole approval names the session's secret, the nonce or the code.
+#[tokio::test]
+async fn the_audit_never_holds_a_secret_of_the_approval() {
+    let (env, _, admin) = installation().await;
+    let script = Script::default();
+    let body = script.request();
+    let ticket = env
+        .service
+        .request_approval(&env.public_ctx(), body.as_bytes())
+        .await
+        .expect("a request");
+    let code = script.code(&body, ticket.id);
+    env.service
+        .approve(
+            &admin,
+            ticket.id,
+            &SecretString::new(code.clone()),
+            &ROOT_SHA256,
+        )
+        .await
+        .expect("approved");
+    let session = env
+        .service
+        .collect_approval(
+            &env.public_ctx(),
+            ticket.id,
+            script.collect(&ticket).as_bytes(),
+        )
+        .await
+        .expect("collected");
+    let records = audit(&env).await;
+    let text = serde_json::to_string(
+        &records
+            .iter()
+            .map(|record| &record.draft)
+            .collect::<Vec<_>>(),
+    )
+    .expect("json");
+    for secret in [session.secret.expose(), &ticket.nonce, &code] {
+        assert!(!text.contains(secret), "an audit record holds a secret");
+    }
+    let approve = records
+        .iter()
+        .find(|record| record.draft.action.as_str() == "auth.approval.approve")
+        .expect("the approval's record");
+    assert_eq!(
+        approve
+            .draft
+            .details
+            .context
+            .get("request_sha256")
+            .map(String::as_str),
+        Some(tenko_auth::encoding::hex_encode(&Sha256::digest(body.as_bytes())).as_str())
+    );
 }

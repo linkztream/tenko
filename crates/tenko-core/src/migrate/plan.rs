@@ -36,6 +36,8 @@ pub const MAX_FORWARDERS: usize = 64;
 pub const MAX_ADDRESSES: usize = 8;
 /// The longest name of a failover relationship, in characters (ASCII only).
 pub const MAX_RELATIONSHIP_LEN: usize = 64;
+/// The most service principal names of Tenko's computer account.
+pub const MAX_SPNS: usize = 4;
 
 /// The plan of a run, as the script sends it with the approval request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -70,6 +72,22 @@ pub struct TakeoverPlan {
     pub node_name: HostName,
     /// What the run does on Tenko, phase by phase.
     pub operations: Vec<PlanOperation>,
+    /// Tenko's computer account, for zones that take secure updates: the account the run
+    /// adopts, absent when no zone needs one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kerberos: Option<PlanKerberos>,
+}
+
+/// Tenko's computer account in the domain, as the run creates and adopts it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanKerberos {
+    /// The realm: the domain in upper case (`CORP.EXAMPLE.TEST`).
+    pub realm: String,
+    /// The account's `sAMAccountName`: 1 to 15 letters, digits or hyphens and a `$`.
+    pub account: String,
+    /// Its service principal names, `DNS/<the node's name>` (1 to [`MAX_SPNS`]).
+    pub spns: Vec<String>,
 }
 
 /// A domain controller of the plan.

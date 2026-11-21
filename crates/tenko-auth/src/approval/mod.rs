@@ -16,23 +16,33 @@
 //!
 //! | Table | Key | Value |
 //! |---|---|---|
-//! | `auth.approvals` | [`ApprovalId`](tenko_core::ApprovalId) | [`ApprovalRecord`] |
+//! | `auth.approvals` | [`ApprovalId`](tenko_core::ApprovalId) | [`ApprovalRecord`], without the plan |
+//! | `auth.approval_plans` | [`ApprovalId`](tenko_core::ApprovalId) | its plan |
+//!
+//! Neither table sends events: a request without a credential never reaches an
+//! administrator's open page.
 //!
 //! # Bounds
 //!
 //! A request body is at most [`MAX_REQUEST_BYTES`]; a plan that parses holds at most the item
 //! counts of `tenko_core::migrate::plan`. At most [`MAX_PENDING_PER_SOURCE`] pending approvals
 //! per source (an IPv4 address or an IPv6 /64) and [`MAX_PENDING`] in all, each pending for
-//! [`PENDING_LIFETIME`]; one request per source every [`REQUEST_SPACING`] on each controller.
-//! A consumed approval is kept while its delegated session can live
-//! ([`crate::delegation::LIFETIME`]), every other one until its pending time is over; each
-//! request removes the rows that are over. Stored, that is at most [`MAX_PENDING`] pending
-//! rows of one plan each, plus one consumed row per delegated session alive, which a person's
-//! approval and the rule of one run per domain bound.
+//! [`PENDING_LIFETIME`]; one request per address every [`REQUEST_SPACING`] on each controller.
+//! A request decodes the small rows of `auth.approvals` only, never a plan. An administrator
+//! denies every waiting request, or those of one source, in one step.
+//!
+//! The authentication service's hourly sweep removes the rows that are over: a consumed
+//! approval once its delegated session can no longer live ([`crate::delegation::LIFETIME`]
+//! after the collect), every other one once its pending time is over. It removes a row only
+//! when this controller's clock stands that far after the row's time, never on a clock that
+//! stands before it. Stored, that is at most [`MAX_PENDING`] pending approvals of one plan
+//! each, plus those that ended within the last sweep interval, plus one consumed approval per
+//! delegated session alive, which a person's approval and the rule of one run per domain bound.
 //!
 //! The times of an approval are stored wall-clock times, because any controller may serve its
 //! steps; a controller whose clock stands more than [`CLOCK_TOLERANCE`] before a stored time
-//! treats the approval as over, so a clock set back ends it early rather than extending it.
+//! treats the approval as over for its steps, so a clock set back ends it early rather than
+//! extending it.
 
 mod code;
 mod model;
@@ -41,12 +51,15 @@ mod plan;
 
 use std::{collections::BTreeMap, time::Duration};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+
 pub use code::{
     CODE_CONTEXT, COLLECT_CONTEXT, canonical_code, code, collect_message, verify_collect,
 };
 pub use model::{
-    APPROVALS, ApprovalClient, ApprovalRecord, ApprovalRequest, ApprovalState, ApprovalTicket,
-    ApprovalView, CodeEntry, CollectRequest, Decision, DelegatedSession, Purpose,
+    APPROVAL_PLANS, APPROVALS, ApprovalClient, ApprovalRecord, ApprovalRequest, ApprovalState,
+    ApprovalTicket, ApprovalView, ClearApprovals, ClearedApprovals, CodeEntry, CollectRequest,
+    Decision, DelegatedSession, Purpose,
 };
 pub(crate) use pace::Paces;
 pub use plan::check_plan;
@@ -59,7 +72,7 @@ pub const PENDING_LIFETIME: Duration = Duration::from_secs(600);
 pub const MAX_PENDING_PER_SOURCE: usize = 2;
 /// Pending approvals in all.
 pub const MAX_PENDING: usize = 64;
-/// The least time between two requests of one source.
+/// The least time between two requests of one address.
 pub const REQUEST_SPACING: Duration = Duration::from_secs(10);
 /// How often the requests of one source, and the wrong codes of one browser session, are
 /// audited: once in this time, the rest counted in memory.
@@ -195,7 +208,8 @@ pub fn source_bucket(source: std::net::IpAddr) -> Vec<u8> {
 pub fn parse_request(body: &[u8]) -> Result<(ApprovalRequest, Vec<u8>, [u8; 32]), Refusal> {
     let request: ApprovalRequest = strict_json(body)?;
     request.client.check().map_err(plan_refusal)?;
-    let key = crate::encoding::base64url_decode(&request.key)
+    let key = URL_SAFE_NO_PAD
+        .decode(&request.key)
         .ok()
         .filter(|key| key.len() == 65 && key[0] == 0x04)
         .filter(|key| {
@@ -219,7 +233,8 @@ pub fn parse_request(body: &[u8]) -> Result<(ApprovalRequest, Vec<u8>, [u8; 32])
 /// [`Refusal::Signature`] for anything else.
 pub fn parse_collect(body: &[u8]) -> Result<[u8; 64], Refusal> {
     let request: CollectRequest = strict_json(body).map_err(|_| Refusal::Signature)?;
-    crate::encoding::base64url_decode(&request.signature)
+    URL_SAFE_NO_PAD
+        .decode(&request.signature)
         .ok()
         .and_then(|bytes| <[u8; 64]>::try_from(bytes).ok())
         .ok_or(Refusal::Signature)
@@ -285,7 +300,7 @@ mod tests {
 
     #[test]
     fn a_collect_body_is_one_signature_of_64_octets() {
-        let signature = crate::encoding::base64url_encode(&[7u8; 64]);
+        let signature = URL_SAFE_NO_PAD.encode([7u8; 64]);
         assert_eq!(
             parse_collect(format!(r#"{{"signature":"{signature}"}}"#).as_bytes()),
             Ok([7u8; 64])
@@ -294,10 +309,7 @@ mod tests {
             String::new(),
             "[]".to_owned(),
             format!(r#"{{"signature":"{signature}","x":1}}"#),
-            format!(
-                r#"{{"signature":"{}"}}"#,
-                crate::encoding::base64url_encode(&[7u8; 63])
-            ),
+            format!(r#"{{"signature":"{}"}}"#, URL_SAFE_NO_PAD.encode([7u8; 63])),
             r#"{"signature":"!!"}"#.to_owned(),
         ] {
             assert_eq!(

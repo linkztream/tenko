@@ -189,6 +189,9 @@ impl AuthService {
                 if let Err(error) = service.prune_known_devices(SystemClock.now()).await {
                     tracing::debug!(%error, "ended known devices could not be removed");
                 }
+                if let Err(error) = service.prune_approvals(SystemClock.now()).await {
+                    tracing::debug!(%error, "ended approvals could not be removed");
+                }
                 if let Err(error) = service.notice_expiring_tokens(SystemClock.now()).await {
                     tracing::debug!(%error, "expiring tokens could not be noted");
                 }
