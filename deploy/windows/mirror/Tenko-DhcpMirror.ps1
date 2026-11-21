@@ -68,6 +68,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+# The DhcpServer cmdlets are CDXML cmdlets, which the preference above does not reach: a read
+# that fails stops the run, never reads as empty, which would make the server look more open
+# than it is (no filter, no exclusion, no policy).
+$PSDefaultParameterValues = @{ '*-DhcpServer*:ErrorAction' = 'Stop' }
 
 # ---------------------------------------------------------------------------------------
 # Constants
@@ -444,9 +448,6 @@ function Read-DhcpServer {
         superscopes    = @(Get-DhcpServerv4Superscope | Select-Object -Property $p.Superscope)
         failover       = @(Get-DhcpServerv4Failover | Select-Object -Property $p.Failover)
     }
-    # Without the state of the filter lists a server that serves only its allow list would
-    # be mirrored as one that serves every client.
-    if ($raw.filter_lists.Count -ne 1) { throw 'Get-DhcpServerv4FilterList returned no state of the filter lists' }
     foreach ($scope in $raw.scopes) {
         $scopeId = ConvertTo-IpText (Get-Prop $scope 'ScopeId')
         $raw.exclusions[$scopeId] = @(Get-DhcpServerv4ExclusionRange -ScopeId $scopeId | Select-Object -Property $p.Exclusion)
@@ -481,7 +482,7 @@ function ConvertTo-IrOption {
     param([object]$Value, [string]$Sheet, [string]$Scope, [System.Collections.ArrayList]$Losses)
     $code = [int](Get-Prop $Value 'OptionId')
     if ($script:SettingOptionCodes -contains $code) { return $null }
-    $column = $(if ($Scope) { "${Scope}:$code" } else { "$code" })
+    $column = $(if ($Scope) { "${Scope}:$code" } else { "server:$code" })
     $policy = Get-Prop $Value 'PolicyName'
     if (-not (Test-Blank $policy)) {
         Add-Loss -Entries $Losses -Sheet $Sheet -Column $column -Code 'migrate.loss.option_policy' -Detail "option $code is set by the policy ``$policy``; policies are not taken over (WT-Q2)"
@@ -534,7 +535,7 @@ function ConvertTo-IrOptionDef {
     $sheet = 'Get-DhcpServerv4OptionDefinition'
     $code = [int](Get-Prop $Definition 'OptionId')
     $vendor = Get-Prop $Definition 'VendorClass'
-    $column = $(if (Test-Blank $vendor) { "$code" } else { "${code}@$vendor" })
+    $column = $(if (Test-Blank $vendor) { "option_def:$code" } else { "option_def:${code}@$vendor" })
     $type = [string](Get-Prop $Definition 'Type')
     if (-not $script:OptionKinds.ContainsKey($type)) {
         Add-Loss -Entries $Losses -Sheet $sheet -Column $column -Code 'migrate.loss.option_def_type' -Detail "option definition $code has the type ``$type``, which Tenko has no kind for"
@@ -643,7 +644,13 @@ function ConvertTo-IrRange {
 }
 
 function ConvertTo-IrScope {
-    param([object]$Scope, [hashtable]$Raw, [System.Collections.ArrayList]$Losses)
+    # $AllowList is the server's allow list when it is on (ConvertTo-AllowList), $null when it is off.
+    param(
+        [object]$Scope,
+        [hashtable]$Raw,
+        [Parameter(Mandatory)][AllowNull()][hashtable]$AllowList,
+        [System.Collections.ArrayList]$Losses
+    )
     $sheet = 'Get-DhcpServerv4Scope'
     $scopeId = ConvertTo-IpText (Get-Prop $Scope 'ScopeId')
     $mask = ConvertTo-IpText (Get-Prop $Scope 'SubnetMask')
@@ -677,9 +684,8 @@ function ConvertTo-IrScope {
         $item.ddns = ConvertTo-DdnsPolicy -Setting $dns[0] -Scope $scopeId -Losses $Losses
     }
     # The server's allow list applies to every scope: the scope is restricted to it.
-    $allowed = $(if ($Raw.Contains('filter_lists')) { Get-AllowPattern $Raw } else { $null })
-    $item.restricted = ($null -ne $allowed)
-    if ($item.restricted) { Add-AllowListLoss -Reservations $reservations -Allowed $allowed -Losses $Losses }
+    $item.restricted = ($null -ne $AllowList)
+    if ($item.restricted) { Add-AllowListLoss -Reservations $reservations -AllowList $AllowList -Losses $Losses }
     $delay = Get-Prop $Scope 'Delay'
     $item.delay_ms = $(if (Test-Blank $delay) { 0 } else { [uint32]$delay })
     if ($item.delay_ms -ne 0) {
@@ -739,7 +745,7 @@ function Add-PolicyLoss {
     if ($criteria.Count -gt 0) { $detail += ": $($criteria -join " $($condition.ToUpperInvariant()) ")" }
     $detail += '; policies are not taken over (WT-Q2)'
     # A scope's policy is placed in its scope by the address the column starts with.
-    $column = $(if (Test-Blank $scope) { $name } else { "${scope}:$name" })
+    $column = $(if (Test-Blank $scope) { "policy:$name" } else { "${scope}:$name" })
     Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Policy' -Column $column -Code 'migrate.loss.policy' -Detail $detail
 }
 
@@ -773,11 +779,18 @@ function Test-MacPattern {
 
 function Get-EnabledFilterList {
     # The lists Windows applies: 'Allow' (only listed clients are served, on every scope;
-    # with an empty list nobody) and 'Deny' (listed clients are never served).
+    # with an empty list nobody) and 'Deny' (listed clients are never served). Without their
+    # state the run stops: a server that serves only its allow list would read as open.
     param([hashtable]$Raw)
-    $state = $Raw.filter_lists[0]
+    $state = @($Raw['filter_lists'] | Where-Object { $null -ne $_ })
+    if ($state.Count -ne 1) { throw 'Get-DhcpServerv4FilterList returned no state of the filter lists' }
+    $state = $state[0]
     $enabled = @()
-    foreach ($list in 'Allow', 'Deny') { if ([bool](Get-Prop $state $list)) { $enabled += $list } }
+    foreach ($list in 'Allow', 'Deny') {
+        $on = Get-Prop $state $list
+        if ($on -isnot [bool]) { throw "Get-DhcpServerv4FilterList gave no state of the $list list" }
+        if ($on) { $enabled += $list }
+    }
     return , $enabled
 }
 
@@ -786,17 +799,16 @@ function ConvertTo-IrFilterList {
     # deny entry everywhere, the allow list on the restricted scopes). An entry of a disabled
     # list filters nothing on the server and is not carried. An entry Tenko cannot match is
     # a loss that says which way the restriction is not carried.
-    param([hashtable]$Raw, [System.Collections.ArrayList]$Losses)
-    $enabled = Get-EnabledFilterList $Raw
+    param([hashtable]$Raw, [string[]]$Enabled, [System.Collections.ArrayList]$Losses)
     $filters = @()
     foreach ($filter in $Raw.filters) {
         $list = [string](Get-Prop $filter 'List')
-        if ($enabled -notcontains $list) { continue }
+        if ($Enabled -notcontains $list) { continue }
         $address = [string](Get-Prop $filter 'MacAddress')
         $mac = ConvertTo-MacPattern $address
         if ($null -eq $mac) {
             $effect = $(if ($list -eq 'Deny') { 'Tenko would serve the client the server refuses' } else { 'Tenko would not serve the client the server admits' })
-            Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Filter' -Column $address -Code 'migrate.loss.filter' -Detail "the $($list.ToLowerInvariant()) list entry ``$address`` is not a MAC address pattern Tenko can match and is not carried: $effect"
+            Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Filter' -Column "filter:$address" -Code 'migrate.loss.filter' -Detail "the $($list.ToLowerInvariant()) list entry ``$address`` is not a MAC address pattern Tenko can match and is not carried: $effect"
             continue
         }
         $item = [ordered]@{ mac = $mac; kind = $list.ToLowerInvariant() }
@@ -808,28 +820,28 @@ function ConvertTo-IrFilterList {
     return , $filters
 }
 
-function Get-AllowPattern {
-    # The patterns of the allow list when it is enabled, $null when it is not.
-    param([hashtable]$Raw)
-    if ((Get-EnabledFilterList $Raw) -notcontains 'Allow') { return $null }
-    $patterns = @()
-    foreach ($filter in $Raw.filters) {
-        if ([string](Get-Prop $filter 'List') -ne 'Allow') { continue }
-        $mac = ConvertTo-MacPattern (Get-Prop $filter 'MacAddress')
-        if ($null -ne $mac) { $patterns += $mac }
+function ConvertTo-AllowList {
+    # The allow entries of the IR's filters, read once for every scope: the exact addresses
+    # as a set, so that a reservation costs one lookup, and the few patterns with a wildcard.
+    param([object[]]$Filters)
+    $list = @{ exact = [System.Collections.Generic.HashSet[string]]::new(); patterns = @() }
+    foreach ($filter in $Filters) {
+        if ($filter.kind -ne 'allow') { continue }
+        if ($filter.mac.Contains('*')) { $list.patterns += $filter.mac } else { [void]$list.exact.Add($filter.mac) }
     }
-    return , $patterns
+    return $list
 }
 
 function Add-AllowListLoss {
     # Tenko serves a reservation on a restricted scope whatever the allow list says; the
     # server serves only the clients its allow list lists.
-    param([object[]]$Reservations, [string[]]$Allowed, [System.Collections.ArrayList]$Losses)
+    param([object[]]$Reservations, [hashtable]$AllowList, [System.Collections.ArrayList]$Losses)
     foreach ($reservation in $Reservations) {
         $client = $reservation.client
         $listed = $false
         if ($client.Contains('mac')) {
-            foreach ($pattern in $Allowed) { if (Test-MacPattern $pattern $client.mac) { $listed = $true; break } }
+            $listed = $AllowList.exact.Contains($client.mac)
+            foreach ($pattern in $AllowList.patterns) { if (-not $listed) { $listed = Test-MacPattern $pattern $client.mac } }
             $who = $client.mac
         } else {
             $who = "client identifier $($client.client_id)"
@@ -845,7 +857,7 @@ function Add-SuperscopeLoss {
     # The scopes of no superscope come as one row without a name.
     if (Test-Blank $name) { return }
     $scopes = ConvertTo-IpList (Get-Prop $Superscope 'ScopeId')
-    Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Superscope' -Column $name -Code 'migrate.loss.superscope' -Detail "superscope ``$name`` joins the scopes $($scopes -join ', '); superscopes are not taken over (WT-Q2), each scope is prepared alone"
+    Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Superscope' -Column "superscope:$name" -Code 'migrate.loss.superscope' -Detail "superscope ``$name`` joins the scopes $($scopes -join ', '); superscopes are not taken over (WT-Q2), each scope is prepared alone"
 }
 
 function Add-FailoverLoss {
@@ -854,7 +866,7 @@ function Add-FailoverLoss {
     $partner = [string](Get-Prop $Failover 'PartnerServer')
     $mode = [string](Get-Prop $Failover 'Mode')
     $scopes = ConvertTo-IpList (Get-Prop $Failover 'ScopeId')
-    Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Failover' -Column $name -Code 'migrate.loss.failover' -Detail "failover relationship ``$name`` with $partner ($mode) over the scopes $($scopes -join ', '); Windows failover is not interoperable (CON-05) and the shared secret is never read"
+    Add-Loss -Entries $Losses -Sheet 'Get-DhcpServerv4Failover' -Column "failover:$name" -Code 'migrate.loss.failover' -Detail "failover relationship ``$name`` with $partner ($mode) over the scopes $($scopes -join ', '); Windows failover is not interoperable (CON-05) and the shared secret is never read"
 }
 
 function ConvertTo-MirrorSnapshot {
@@ -877,10 +889,14 @@ function ConvertTo-MirrorSnapshot {
     $classes = @()
     foreach ($class in $Raw.classes) { $classes += , (ConvertTo-IrClass $class) }
     $dhcp.classes = $classes
+    # The filter lists before the scopes, which the allow list restricts.
+    $enabled = Get-EnabledFilterList $Raw
+    $filters = ConvertTo-IrFilterList -Raw $Raw -Enabled $enabled -Losses $losses
+    $allowList = $(if ($enabled -contains 'Allow') { ConvertTo-AllowList $filters } else { $null })
     $scopes = @()
     $leases = @()
     foreach ($scope in $Raw.scopes) {
-        $irScope = ConvertTo-IrScope -Scope $scope -Raw $Raw -Losses $losses
+        $irScope = ConvertTo-IrScope -Scope $scope -Raw $Raw -AllowList $allowList -Losses $losses
         $scopes += , $irScope
         $scopeId = ConvertTo-IpText (Get-Prop $scope 'ScopeId')
         foreach ($lease in $Raw.leases[$scopeId]) {
@@ -892,7 +908,7 @@ function ConvertTo-MirrorSnapshot {
     $dhcp.superscopes = @()
     $dhcp.policies = @()
     foreach ($policy in $Raw.policies) { Add-PolicyLoss -Policy $policy -Losses $losses }
-    $dhcp.filters = ConvertTo-IrFilterList -Raw $Raw -Losses $losses
+    $dhcp.filters = $filters
     $dhcp.failover = @()
     $dhcp.leases = $leases
     foreach ($superscope in $Raw.superscopes) { Add-SuperscopeLoss -Superscope $superscope -Losses $losses }

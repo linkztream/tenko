@@ -69,38 +69,44 @@ Describe 'The filter lists' {
             [ordered]@{ ip = '192.0.2.100'; client = [ordered]@{ mac = '00:00:5e:00:53:01' } },
             [ordered]@{ ip = '192.0.2.120'; client = [ordered]@{ mac = '00:00:5e:00:53:20' } }
         )
-        function Get-Raw { param([bool]$Allow, [bool]$Deny, [object[]]$Filters) @{ filter_lists = @([pscustomobject]@{ Allow = $Allow; Deny = $Deny }); filters = $Filters } }
+        function Get-Filter { param([string[]]$Enabled, [object[]]$Filters) ConvertTo-IrFilterList -Raw @{ filters = $Filters } -Enabled $Enabled -Losses $losses }
+    }
+    BeforeEach {
+        $losses = [System.Collections.ArrayList]::new()
     }
 
     It 'carries the entries of both lists when both are on, lowercase with colons' {
-        $losses = [System.Collections.ArrayList]::new()
-        $filters = ConvertTo-IrFilterList -Raw (Get-Raw -Allow $true -Deny $true -Filters $entries) -Losses $losses
+        $filters = Get-Filter -Enabled 'Allow', 'Deny' -Filters $entries
         @($filters | ForEach-Object { "$($_.kind) $($_.mac)" }) | Should -Be @('allow 00:00:5e:00:53:20', 'deny 00:00:5e:00:53:21')
         $filters[0].origin.column | Should -Be '00-00-5E-00-53-20'
         $losses.Count | Should -Be 0
     }
 
-    It 'carries nothing of a list that is off, and restricts nothing then' {
-        $losses = [System.Collections.ArrayList]::new()
-        @(ConvertTo-IrFilterList -Raw (Get-Raw -Allow $false -Deny $true -Filters $entries) -Losses $losses | ForEach-Object { $_.kind }) | Should -Be @('deny')
-        Get-AllowPattern (Get-Raw -Allow $false -Deny $true -Filters $entries) | Should -BeNullOrEmpty
-        (ConvertTo-IrFilterList -Raw (Get-Raw -Allow $false -Deny $false -Filters $null) -Losses $losses).Count | Should -Be 0
+    It 'carries nothing of a list that is off' {
+        @(Get-Filter -Enabled 'Deny' -Filters $entries | ForEach-Object { $_.kind }) | Should -Be @('deny')
+        (Get-Filter -Enabled @() -Filters $null).Count | Should -Be 0
+    }
+
+    It 'stops when the state of the lists is missing, instead of mapping the server as open' {
+        { Get-EnabledFilterList @{ filter_lists = @() } } | Should -Throw '*no state of the filter lists*'
+        { Get-EnabledFilterList @{} } | Should -Throw '*no state of the filter lists*'
+        { Get-EnabledFilterList @{ filter_lists = @([pscustomobject]@{ Allow = $null; Deny = $false }) } } | Should -Throw '*no state of the Allow list*'
+        Get-EnabledFilterList @{ filter_lists = @([pscustomobject]@{ Allow = $true; Deny = $false }) } | Should -Be @('Allow')
     }
 
     It 'reports the reservations the allow list does not list, wildcards included' {
-        $losses = [System.Collections.ArrayList]::new()
-        Add-AllowListLoss -Reservations $reservations -Allowed (Get-AllowPattern (Get-Raw -Allow $true -Deny $false -Filters $entries)) -Losses $losses
+        Add-AllowListLoss -Reservations $reservations -AllowList (ConvertTo-AllowList (Get-Filter -Enabled 'Allow' -Filters $entries)) -Losses $losses
         @($losses | ForEach-Object { $_.location.column }) | Should -Be @('192.0.2.100')
         $losses.Clear()
-        Add-AllowListLoss -Reservations $reservations -Allowed @('00:00:5e:00:53:*') -Losses $losses
+        Add-AllowListLoss -Reservations $reservations -AllowList (ConvertTo-AllowList @([ordered]@{ mac = '00:00:5e:00:53:*'; kind = 'allow' })) -Losses $losses
         $losses.Count | Should -Be 0
     }
 
     It 'reports an entry Tenko cannot match, saying which way the restriction is lost' {
-        $losses = [System.Collections.ArrayList]::new()
         $odd = @([pscustomobject]@{ Description = ''; List = 'Deny'; MacAddress = '00-00-5E-00-53' })
-        (ConvertTo-IrFilterList -Raw (Get-Raw -Allow $false -Deny $true -Filters $odd) -Losses $losses).Count | Should -Be 0
+        (Get-Filter -Enabled 'Deny' -Filters $odd).Count | Should -Be 0
         $losses[0].code | Should -Be 'migrate.loss.filter'
+        $losses[0].location.column | Should -Be 'filter:00-00-5E-00-53'
         $losses[0].detail | Should -Match 'Tenko would serve the client the server refuses'
     }
 
@@ -110,5 +116,39 @@ Describe 'The filter lists' {
         ConvertTo-MacPattern '00-00-5E' | Should -BeNullOrEmpty
         ConvertTo-MacPattern '00-00-5E-00-53-20-01' | Should -BeNullOrEmpty
         ConvertTo-MacPattern 'zz-00-5E-00-53-20' | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'A read that fails' {
+    BeforeAll {
+        $stateDir = Join-Path $TestDrive 'state'
+        [void](New-Item -ItemType Directory -Path $stateDir)
+        $configPath = Join-Path $TestDrive 'config.json'
+        Set-Content -LiteralPath $configPath -Value '{"url":"http://127.0.0.1:9","mirror":"m01","fingerprint":""}' -Encoding ASCII
+        Mock Invoke-MirrorPush { throw 'must not push' }
+        Mock Read-MirrorToken { throw 'must not read the token' }
+        Mock Test-WindowsHost { $false }
+        function Invoke-Run { Invoke-MirrorRun -ConfigPath $configPath -StateDir $stateDir -ServerName 'dc1.corp.example.test' -AllowPlainHttp 3>$null }
+    }
+
+    It 'makes every DhcpServer cmdlet stop on an error' {
+        $PSDefaultParameterValues['*-DhcpServer*:ErrorAction'] | Should -Be 'Stop'
+    }
+
+    It 'stops the run without a push when <_> fails' -ForEach @(
+        'Get-DhcpServerv4FilterList', 'Get-DhcpServerv4Filter', 'Get-DhcpServerv4Scope', 'Get-DhcpServerv4ExclusionRange',
+        'Get-DhcpServerv4Reservation', 'Get-DhcpServerv4OptionValue', 'Get-DhcpServerv4OptionDefinition', 'Get-DhcpServerv4Class',
+        'Get-DhcpServerv4DnsSetting', 'Get-DhcpServerv4Lease', 'Get-DhcpServerv4Policy', 'Get-DhcpServerv4Superscope',
+        'Get-DhcpServerv4Failover'
+    ) {
+        Mock -CommandName $_ -MockWith { Write-Error 'Failed to enumerate on the DHCP server' }
+        { Invoke-Run } | Should -Throw '*reading the DHCP server failed*'
+        Should -Invoke Invoke-MirrorPush -Times 0 -Exactly
+    }
+
+    It 'stops the run without a push when the filter lists return no state' {
+        Mock Get-DhcpServerv4FilterList { }
+        { Invoke-Run } | Should -Throw '*no state of the filter lists*'
+        Should -Invoke Invoke-MirrorPush -Times 0 -Exactly
     }
 }

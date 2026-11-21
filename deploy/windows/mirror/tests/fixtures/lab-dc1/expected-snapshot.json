@@ -262,7 +262,7 @@
         "location": {
           "sheet": "Get-DhcpServerv4Failover",
           "row": null,
-          "column": "dc1-dc2"
+          "column": "failover:dc1-dc2"
         },
         "code": "migrate.loss.failover",
         "detail": "failover relationship `dc1-dc2` with dc2.corp.example.test (LoadBalance) over the scopes 192.0.2.0; Windows failover is not interoperable (CON-05) and the shared secret is never read"

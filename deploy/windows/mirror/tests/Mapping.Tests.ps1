@@ -214,7 +214,7 @@ Describe 'The mapping rules' {
             Add-FailoverLoss -Failover $failover -Losses $losses
             $losses[0].code | Should -Be 'migrate.loss.failover'
             $losses[0].location.sheet | Should -Be 'Get-DhcpServerv4Failover'
-            $losses[0].location.column | Should -Be 'pair'
+            $losses[0].location.column | Should -Be 'failover:pair'
             $losses[0].detail | Should -Match 'dc2\.corp\.example\.test'
             $losses[0].detail | Should -Not -Match 'swordfish'
         }
@@ -222,7 +222,7 @@ Describe 'The mapping rules' {
         It 'reports an offer delay and a BOOTP-only scope' {
             $raw = @{ exclusions = @{ '192.0.2.0' = @() }; reservations = @{ '192.0.2.0' = @() }; reservation_options = @{}; scope_options = @{ '192.0.2.0' = @() }; dns = @{ '192.0.2.0' = @() } }
             $scope = [pscustomobject]@{ ScopeId = '192.0.2.0'; SubnetMask = '255.255.255.0'; Name = 'x'; State = 'InActive'; LeaseDuration = '1.00:00:00'; StartRange = '192.0.2.10'; EndRange = '192.0.2.20'; Delay = 500; Type = 'Bootp' }
-            $ir = ConvertTo-IrScope -Scope $scope -Raw $raw -Losses $losses
+            $ir = ConvertTo-IrScope -Scope $scope -Raw $raw -AllowList $null -Losses $losses
             $ir.active | Should -BeFalse
             $ir.delay_ms | Should -Be 500
             $ir.lease_secs | Should -Be 86400

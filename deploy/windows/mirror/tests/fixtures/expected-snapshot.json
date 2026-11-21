@@ -19,7 +19,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionValue",
           "row": null,
-          "column": "6"
+          "column": "server:6"
         }
       },
       {
@@ -30,7 +30,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionValue",
           "row": null,
-          "column": "15"
+          "column": "server:15"
         }
       },
       {
@@ -41,7 +41,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionValue",
           "row": null,
-          "column": "42"
+          "column": "server:42"
         }
       },
       {
@@ -53,7 +53,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionValue",
           "row": null,
-          "column": "6"
+          "column": "server:6"
         }
       }
     ],
@@ -67,7 +67,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionDefinition",
           "row": null,
-          "column": "128"
+          "column": "option_def:128"
         }
       },
       {
@@ -78,7 +78,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionDefinition",
           "row": null,
-          "column": "129"
+          "column": "option_def:129"
         }
       },
       {
@@ -90,7 +90,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionDefinition",
           "row": null,
-          "column": "150"
+          "column": "option_def:150"
         }
       },
       {
@@ -103,7 +103,7 @@
         "origin": {
           "sheet": "Get-DhcpServerv4OptionDefinition",
           "row": null,
-          "column": "241@Example Phones"
+          "column": "option_def:241@Example Phones"
         }
       }
     ],
@@ -1623,7 +1623,7 @@
         "location": {
           "sheet": "Get-DhcpServerv4OptionDefinition",
           "row": null,
-          "column": "150"
+          "column": "option_def:150"
         },
         "code": "migrate.loss.option_def_default",
         "detail": "the default value `192.0.2.7` of option definition 150 is not carried; Tenko has no option defaults"
@@ -1722,7 +1722,7 @@
         "location": {
           "sheet": "Get-DhcpServerv4Superscope",
           "row": null,
-          "column": "campus"
+          "column": "superscope:campus"
         },
         "code": "migrate.loss.superscope",
         "detail": "superscope `campus` joins the scopes 192.0.2.0; superscopes are not taken over (WT-Q2), each scope is prepared alone"

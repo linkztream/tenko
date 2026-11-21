@@ -63,9 +63,12 @@ the `DhcpServer` module and nothing else, and download nothing.
 
 2. **Check the fingerprint.** The mirror's Settings tab shows the controller URL, the
    mirror id and the SHA-256 fingerprint of the controller's certificate authority as text.
-   Compare the fingerprint with the one the Tenko node printed when it started (its console
-   and its log), not only with the page, since the page is served by the node you are about
-   to pin. The install pins it; the exporter then accepts only a certificate chain that ends
+   Compare the fingerprint with the one you read on the Tenko node's own console, not only
+   with the page, since the page is served by the node you are about to pin. On the node,
+   `openssl x509 -in <data_dir>/tls/ca-root.pem -noout -fingerprint -sha256` prints it at any
+   time (with colons, which the install accepts), and every start of the node prints it on
+   standard output below `internal CA root (install it on admin clients)` as
+   `SHA-256 fingerprint: <hex>`. The install pins it; the exporter then accepts only a certificate chain that ends
    in that certificate authority, and adds nothing to the server's trust store.
 
 3. **Install**, in an elevated PowerShell, from the directory holding both scripts. Type
@@ -133,24 +136,11 @@ On Windows PowerShell 5.1 and on PowerShell 7 alike the check is a small C# clas
 compiled at start (`Add-Type`), because the TLS handshake calls back on a thread where a
 PowerShell script block cannot run on PowerShell 7.
 
-## The two commands at the takeover
+## The takeover
 
-The takeover of a scope in Tenko waits for a push that shows the Windows scope inactive
-(plan section 2.7). The Windows side is one line per scope, run on the DHCP server:
-
-```powershell
-Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -State InActive
-```
-
-The next push, within a minute, carries the leases Windows granted until it stopped
-answering, and the takeover adopts them. The reverse, after Tenko's revert action:
-
-```powershell
-Set-DhcpServerv4Scope -ScopeId 192.0.2.0 -State Active
-```
-
-The mirror keeps running through the parallel period; a Windows scope that turns active
-again while Tenko serves the network is an error finding on the mirror card.
+The takeover is carried out by the takeover script, which makes the Windows servers silent
+at the right moment. Nobody deactivates a Windows scope by hand to prepare one: a
+deactivated scope refuses the clients' next renewal, and they drop their addresses at once.
 
 ## What is exported, and what is lost
 

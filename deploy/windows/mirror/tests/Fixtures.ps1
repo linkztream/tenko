@@ -2,7 +2,8 @@
 # answer them with the recorded output of one fixture set (one file per cmdlet and level, as
 # ConvertTo-Json wrote it; see README.md, "Running the tests"). A cmdlet without a file
 # returns no object at all, as the real cmdlets do. The stubs declare the cmdlets'
-# parameters and use none, hence the suppression.
+# parameters and use none, hence the suppression; they are advanced functions, as the CDXML
+# cmdlets are, so that the error action the exporter sets for them reaches the mocks.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'stubs of the DhcpServer cmdlets')]
 param()
 
@@ -19,19 +20,19 @@ function Read-Fixture {
 }
 
 # The stubs carry the parameters the exporter passes, so that Mock can bind them.
-function Get-DhcpServerv4Scope { param([string]$ScopeId) }
-function Get-DhcpServerv4ExclusionRange { param([string]$ScopeId) }
-function Get-DhcpServerv4Reservation { param([string]$ScopeId) }
-function Get-DhcpServerv4OptionValue { param([string]$ScopeId, [string]$ReservedIP, [switch]$All) }
-function Get-DhcpServerv4OptionDefinition { param([switch]$All) }
-function Get-DhcpServerv4Class { param() }
-function Get-DhcpServerv4DnsSetting { param([string]$ScopeId) }
-function Get-DhcpServerv4Lease { param([string]$ScopeId, [switch]$AllLeases) }
-function Get-DhcpServerv4Policy { param([string]$ScopeId) }
-function Get-DhcpServerv4FilterList { param() }
-function Get-DhcpServerv4Filter { param() }
-function Get-DhcpServerv4Superscope { param() }
-function Get-DhcpServerv4Failover { param() }
+function Get-DhcpServerv4Scope { [CmdletBinding()] param([string]$ScopeId) }
+function Get-DhcpServerv4ExclusionRange { [CmdletBinding()] param([string]$ScopeId) }
+function Get-DhcpServerv4Reservation { [CmdletBinding()] param([string]$ScopeId) }
+function Get-DhcpServerv4OptionValue { [CmdletBinding()] param([string]$ScopeId, [string]$ReservedIP, [switch]$All) }
+function Get-DhcpServerv4OptionDefinition { [CmdletBinding()] param([switch]$All) }
+function Get-DhcpServerv4Class { [CmdletBinding()] param() }
+function Get-DhcpServerv4DnsSetting { [CmdletBinding()] param([string]$ScopeId) }
+function Get-DhcpServerv4Lease { [CmdletBinding()] param([string]$ScopeId, [switch]$AllLeases) }
+function Get-DhcpServerv4Policy { [CmdletBinding()] param([string]$ScopeId) }
+function Get-DhcpServerv4FilterList { [CmdletBinding()] param() }
+function Get-DhcpServerv4Filter { [CmdletBinding()] param() }
+function Get-DhcpServerv4Superscope { [CmdletBinding()] param() }
+function Get-DhcpServerv4Failover { [CmdletBinding()] param() }
 
 function Install-DhcpServerMock {
     param([string]$Set = 'fixtures')
