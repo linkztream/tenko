@@ -295,23 +295,120 @@ fn a_start_behind_the_last_trusted_time_holds_issuing_too() {
 #[test]
 fn a_saved_hold_survives_a_restart_and_waits_again() {
     let mut first = Sim::new(None, 0);
-    first.look(1_000, 60_000);
+    first.look(0, 60_000);
     let saved = first.guard.saved();
     assert_eq!(saved.last_trusted_at, w0());
     assert_eq!(
         saved.held.as_ref().map(|held| (held.reason, held.jump_ms)),
         Some((Reason::Jump, 60_000))
     );
-    // Restarted at once: the clock still 60 s ahead, 61 s after the last trusted look.
-    let mut second = Sim::new(Some(saved), 61_000);
+    // Restarted at once, the clock still 60 s ahead of the last trusted look.
+    let mut second = Sim::new(Some(saved), 60_000);
     let held = second.guard.trusted().unwrap_err();
-    assert_eq!((held.reason, held.jump_ms), (Reason::Jump, 61_000));
+    assert_eq!((held.reason, held.jump_ms), (Reason::Jump, 60_000));
+    assert_eq!(second.guard.forward_hold(), Some(Duration::from_secs(60)));
     assert_eq!(
-        second.look(60_000, 0).trusted().unwrap_err().release,
+        second.look(59_000, 0).trusted().unwrap_err().release,
         Release::Wait
     );
     assert_eq!(second.look(1_000, 0).trusted(), Ok(()));
     assert_eq!(second.guard.plausible().unwrap_err().reason, Reason::Jump);
+}
+
+#[test]
+fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
+    let mut first = Sim::new(None, 0);
+    first.look(1_000, 60_000);
+    // Off for a week, then started with the clock still 60 s ahead.
+    let second = Sim::new(Some(first.guard.saved()), 61_000 + 7 * DAY_MS);
+    let held = second.guard.trusted().unwrap_err();
+    assert_eq!(
+        (held.reason, held.release),
+        (Reason::StartGap, Release::Person)
+    );
+    assert_eq!(second.guard.forward_hold(), None);
+    assert_eq!(
+        second.guard.plausible().unwrap_err().reason,
+        Reason::StartGap,
+        "issuing stays held"
+    );
+}
+
+#[test]
+fn a_restart_after_the_wait_keeps_destruction_released_and_issuing_held() {
+    let mut first = Sim::new(None, 0);
+    first.look(1_000, 60_000);
+    assert_eq!(first.look(60_000, 0).trusted(), Ok(()));
+    let saved = first.guard.saved();
+    assert_eq!(
+        saved.held.as_ref().map(|held| (held.destroy, held.issue)),
+        Some((false, true))
+    );
+    // A restart of two seconds.
+    let mut second = Sim::new(Some(saved), 121_000 + 2_000);
+    assert_eq!(second.guard.trusted(), Ok(()));
+    assert_eq!(second.guard.forward_hold(), None);
+    assert_eq!(second.guard.plausible().unwrap_err().reason, Reason::Jump);
+    assert_eq!(second.look(1_000, 0).trusted(), Ok(()));
+}
+
+#[test]
+fn a_start_gap_that_grew_keeps_issuing_held_across_a_restart() {
+    let gap = Saved {
+        last_trusted_at: at(-90_000),
+        held: None,
+    };
+    let mut first = Sim::new(Some(gap), 0);
+    assert_eq!(first.guard.plausible(), Ok(()));
+    first.look(1_000, 60_000);
+    assert_eq!(
+        first.guard.plausible().unwrap_err().reason,
+        Reason::StartGap
+    );
+    let mut second = Sim::new(Some(first.guard.saved()), 61_000 + 2_000);
+    assert_eq!(
+        second.guard.plausible().unwrap_err().reason,
+        Reason::StartGap
+    );
+    assert_eq!(
+        second.look(1_000, 0).trusted().unwrap_err().reason,
+        Reason::StartGap
+    );
+}
+
+#[test]
+fn a_file_without_the_two_answers_holds_both() {
+    let old = format!(
+        r#"{{"last_trusted_at":"{}","held":{{"reason":"start_gap","jump_ms":90000,"since":"{}"}}}}"#,
+        at(-90_000).to_rfc3339(),
+        at(0).to_rfc3339()
+    );
+    let saved: Saved = serde_json::from_str(&old).expect("an older file");
+    let held = saved.held.as_ref().expect("a hold");
+    assert_eq!((held.destroy, held.issue), (true, true));
+    let sim = Sim::new(Some(saved), 0);
+    assert_eq!(sim.guard.trusted().unwrap_err().reason, Reason::StartGap);
+    assert_eq!(sim.guard.plausible().unwrap_err().reason, Reason::StartGap);
+}
+
+#[test]
+fn a_start_gap_is_not_released_by_a_step_back_of_the_gap() {
+    let saved = Saved {
+        last_trusted_at: at(-7 * DAY_MS),
+        held: None,
+    };
+    let mut sim = Sim::new(Some(saved), 0);
+    assert_eq!(sim.guard.trusted().unwrap_err().release, Release::Person);
+    let held = sim.look(1_000, -7 * DAY_MS).trusted().unwrap_err();
+    assert_eq!(
+        (held.reason, held.release),
+        (Reason::StartGap, Release::Person)
+    );
+    assert_eq!(
+        sim.guard.plausible().unwrap_err().reason,
+        Reason::StartGap,
+        "a step during the hold holds issuing too"
+    );
 }
 
 #[test]
@@ -351,11 +448,19 @@ fn the_test_override_is_per_thread() {
 
     let _gap = testing::hold(Held {
         reason: Reason::StartGap,
-        ..held
+        ..held.clone()
     });
     assert!(plausible_now().is_ok());
     assert_eq!(forward_hold(), None);
     assert_eq!(trusted_now().unwrap_err().reason, Reason::StartGap);
     confirm();
     assert!(trusted_now().is_ok(), "a confirm ends this thread's hold");
+
+    let _issuing = testing::hold_issuing(Held {
+        release: Release::Person,
+        ..held
+    });
+    assert!(trusted_now().is_ok(), "the wait is over");
+    assert_eq!(plausible_now().unwrap_err().release, Release::Person);
+    assert_eq!(forward_hold(), None);
 }

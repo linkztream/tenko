@@ -7,24 +7,28 @@
 //! [`TOLERANCE`] from the previous look's, or from the **mark**: the offset of a look taken
 //! while trusted and refreshed once it is [`WINDOW`] old, so that small steps that add up are
 //! seen too. The jump `J` is the offset now minus the mark's, the offset at which the clock was
-//! last trusted, and it is measured again at every look.
+//! last trusted; the mark stays where it was while the clock is held, and `J` is measured
+//! again at every look.
 //!
 //! While held, [`trusted_now`] refuses, so a round that destroys by the wall clock (expiry,
 //! purges, prunes) waits; [`plausible_now`] refuses what other machines judge by this time
-//! (certificates, signatures). A hold ends when `J` falls back within [`TOLERANCE`], when a
-//! person confirms the clock ([`confirm`]), or, for destruction only, after the node waited
-//! `|J|` of monotonic time without `J` growing further, when `|J|` is at most
-//! [`SELF_RELEASE_MAX`]. Issuing then stays held until a person confirms. Agreement with the
-//! clocks of other nodes is a further way out ([`Release::Reference`]) that this module does
-//! not decide yet.
+//! (certificates, signatures). A hold ends when a person confirms the clock ([`confirm`]), or
+//! when a hold made while the node ran sees `J` fall back within [`TOLERANCE`]. For destruction
+//! only, it also ends after the node waited, in monotonic time, as long as the largest `|J|`
+//! since the wait began, when that is at most [`SELF_RELEASE_MAX`]; a further step of the
+//! clock during a hold holds issuing too, and growth past the tolerance starts the wait again.
+//! Issuing stays held until a person confirms. Agreement with the clocks of other nodes is a
+//! further way out ([`Release::Reference`]) that this module does not decide yet.
 //!
 //! The server binary carries the state across a restart ([`saved`], [`restore`]): a saved hold
-//! is held again from the start of its wait, and a start more than [`TOLERANCE`] away from the
-//! last trusted time is a hold of that gap ([`Reason::StartGap`]). A forward start gap holds
-//! destruction only, and never widens [`forward_hold`]: it is mostly real downtime.
+//! is held again from the start of its wait, both answers as they were, and a start more than
+//! [`TOLERANCE`] away from the last trusted time is a hold of that gap ([`Reason::StartGap`]).
+//! A start gap never widens [`forward_hold`], since it is mostly real downtime, and a forward
+//! one holds destruction only, unless issuing was held already.
 //!
 //! One guard per process, behind one lock: every call looks. Tests drive [`Guard`] with
-//! synthetic instants; [`testing::hold`] holds the clock for the calling thread alone.
+//! synthetic instants; [`testing::hold`] and [`testing::hold_issuing`] hold the clock for the
+//! calling thread alone.
 
 use std::{
     sync::{
@@ -48,7 +52,7 @@ pub const WINDOW: Duration = Duration::from_secs(60);
 /// The largest jump after which destruction resumes by itself, after waiting as long.
 pub const SELF_RELEASE_MAX: Duration = Duration::from_secs(24 * 60 * 60);
 
-/// Finding code of a hold that ends by itself: destruction waits and resumes.
+/// Finding code of a hold that ends by itself.
 pub const JUMPED: &str = "sys.clock.jumped";
 
 /// Finding code of a hold that a person ends (`POST /system/clock/confirm`).
@@ -109,7 +113,12 @@ pub struct Held {
     pub until: Option<Timestamp>,
 }
 
-/// A hold as the server binary keeps it across a restart.
+const fn held_before() -> bool {
+    true
+}
+
+/// A hold as the server binary keeps it across a restart. A file without the two answers
+/// holds both.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SavedHold {
     /// Why.
@@ -118,6 +127,12 @@ pub struct SavedHold {
     pub jump_ms: i64,
     /// When the hold began.
     pub since: Timestamp,
+    /// Whether destruction is held.
+    #[serde(default = "held_before")]
+    pub destroy: bool,
+    /// Whether issuing is held.
+    #[serde(default = "held_before")]
+    pub issue: bool,
 }
 
 /// The guard's state as the server binary keeps it across a restart.
@@ -137,8 +152,8 @@ struct Hold {
     base: i128,
     /// `J` at the last look.
     jump: i128,
-    /// When the wait began, and `|J|` then.
-    wait: (Instant, Timestamp, u128),
+    /// When the wait began, and `J` then.
+    wait: (Instant, Timestamp, i128),
     destroy: bool,
     issue: bool,
 }
@@ -147,32 +162,35 @@ impl Hold {
     fn new(
         reason: Reason,
         since: Timestamp,
-        base: i128,
-        jump: i128,
+        (base, jump): (i128, i128),
         at: (Instant, Timestamp),
+        issue: bool,
     ) -> Self {
         Self {
             reason,
             since,
             base,
             jump,
-            wait: (at.0, at.1, jump.unsigned_abs()),
+            wait: (at.0, at.1, jump),
             destroy: true,
-            // A forward start gap is mostly downtime: what this node issues stays valid.
-            issue: !(reason == Reason::StartGap && jump > 0),
+            issue,
         }
     }
 
+    /// How long destruction waits from the start of the wait: the largest `|J|` since.
+    fn need(&self) -> u128 {
+        self.jump.unsigned_abs().max(self.wait.2.unsigned_abs())
+    }
+
     fn held(&self, release: Release) -> Held {
-        let jump =
-            Duration::from_nanos(u64::try_from(self.jump.unsigned_abs()).unwrap_or(u64::MAX));
+        let need = Duration::from_nanos(u64::try_from(self.need()).unwrap_or(u64::MAX));
         Held {
             reason: self.reason,
             jump_ms: i64::try_from(self.jump / 1_000_000).unwrap_or(i64::MAX),
             since: self.since,
             release,
             until: (release == Release::Wait)
-                .then(|| self.wait.1.checked_add(jump))
+                .then(|| self.wait.1.checked_add(need))
                 .flatten(),
         }
     }
@@ -194,9 +212,11 @@ fn nanos(duration: Duration) -> i128 {
 }
 
 impl Guard {
-    /// A guard whose first look is (`mono`, `wall`), restored from `saved`: a saved hold is
-    /// held again with its wait from the start (at the larger of its jump and the gap since the
-    /// last trusted time), and a gap over [`TOLERANCE`] without one is a [`Reason::StartGap`].
+    /// A guard whose first look is (`mono`, `wall`), restored from `saved`. A saved hold of
+    /// destruction at least as large as the gap since the last trusted time is held again with
+    /// its wait from the start; a larger gap is a [`Reason::StartGap`] hold that keeps a held
+    /// issuing; a short restart keeps a hold of issuing alone as it was. Without a saved hold,
+    /// a gap over [`TOLERANCE`] is a [`Reason::StartGap`].
     pub fn start(saved: Option<Saved>, mono: Instant, wall: Timestamp) -> Self {
         let offset = wall.unix_nanos();
         let mut guard = Self {
@@ -209,21 +229,25 @@ impl Guard {
         };
         let Some(saved) = saved else { return guard };
         let gap = offset - saved.last_trusted_at.unix_nanos();
-        let (reason, since, jump) = match saved.held {
+        let far = gap.unsigned_abs() > TOLERANCE_NS;
+        let (reason, since, jump, destroy, issue) = match saved.held {
             Some(held) => {
                 let jump = i128::from(held.jump_ms) * 1_000_000;
-                let larger = if jump.unsigned_abs() >= gap.unsigned_abs() {
-                    jump
+                if held.destroy && jump.unsigned_abs() >= gap.unsigned_abs() {
+                    (held.reason, held.since, jump, true, held.issue)
+                } else if far {
+                    (Reason::StartGap, wall, gap, true, held.issue || gap < 0)
                 } else {
-                    gap
-                };
-                (held.reason, held.since, larger)
+                    (held.reason, held.since, jump, held.destroy, held.issue)
+                }
             }
-            None if gap.unsigned_abs() > TOLERANCE_NS => (Reason::StartGap, wall, gap),
+            None if far => (Reason::StartGap, wall, gap, true, gap < 0),
             None => return guard,
         };
         guard.last_trusted = saved.last_trusted_at;
-        guard.hold = Some(Hold::new(reason, since, offset - jump, jump, (mono, wall)));
+        let mut hold = Hold::new(reason, since, (offset - jump, jump), (mono, wall), issue);
+        hold.destroy = destroy;
+        guard.hold = (destroy || issue).then_some(hold);
         guard
     }
 
@@ -236,19 +260,21 @@ impl Guard {
         self.last = (before, wall);
         if let Some(hold) = &mut self.hold {
             let jump = offset - hold.base;
-            if jump.unsigned_abs() <= TOLERANCE_NS {
+            // Only a hold made while running knows the offset at which it was trusted.
+            if hold.reason != Reason::StartGap && jump.unsigned_abs() <= TOLERANCE_NS {
                 self.release(offset);
                 return;
             }
             if hold.destroy {
                 hold.jump = jump;
-                let size = jump.unsigned_abs();
-                if size > hold.wait.2 + TOLERANCE_NS {
-                    // It grew: the wait starts again, and what this node issues is held too.
-                    hold.wait = (before, wall, size);
+                if (jump - hold.wait.2).unsigned_abs() > TOLERANCE_NS {
+                    // The clock stepped again: what this node issues is held too.
                     hold.issue = true;
-                } else if size <= SELF_RELEASE_MAX.as_nanos()
-                    && before.saturating_duration_since(hold.wait.0).as_nanos() >= size
+                }
+                if jump.unsigned_abs() > hold.wait.2.unsigned_abs() + TOLERANCE_NS {
+                    hold.wait = (before, wall, jump);
+                } else if hold.need() <= SELF_RELEASE_MAX.as_nanos()
+                    && before.saturating_duration_since(hold.wait.0).as_nanos() >= hold.need()
                 {
                     hold.destroy = false;
                     if !hold.issue {
@@ -268,9 +294,9 @@ impl Guard {
             self.hold = Some(Hold::new(
                 Reason::Jump,
                 wall,
-                base,
-                offset - base,
+                (base, offset - base),
                 (before, wall),
+                true,
             ));
         } else {
             self.last_trusted = wall;
@@ -303,13 +329,13 @@ impl Guard {
     /// [`SELF_RELEASE_MAX`].
     pub fn trusted(&self) -> Result<(), Held> {
         match &self.hold {
-            Some(hold) if hold.destroy => Err(hold.held(
-                if hold.jump.unsigned_abs() <= SELF_RELEASE_MAX.as_nanos() {
+            Some(hold) if hold.destroy => {
+                Err(hold.held(if hold.need() <= SELF_RELEASE_MAX.as_nanos() {
                     Release::Wait
                 } else {
                     Release::Person
-                },
-            )),
+                }))
+            }
             _ => Ok(()),
         }
     }
@@ -345,6 +371,8 @@ impl Guard {
                     reason: held.reason,
                     jump_ms: held.jump_ms,
                     since: held.since,
+                    destroy: hold.destroy,
+                    issue: hold.issue,
                 }
             }),
         }
@@ -388,8 +416,12 @@ pub fn look() {
 ///
 /// The hold while the clock is held for destruction.
 pub fn trusted_now() -> Result<Timestamp, Held> {
-    if let Some(held) = testing::current() {
-        return Err(held);
+    if let Some((held, destroy)) = testing::current() {
+        return if destroy {
+            Err(held)
+        } else {
+            Ok(Timestamp::now())
+        };
     }
     with(|guard| {
         let wall = guard.look();
@@ -404,8 +436,8 @@ pub fn trusted_now() -> Result<Timestamp, Held> {
 ///
 /// The hold while the clock is held for issuing.
 pub fn plausible_now() -> Result<Timestamp, Held> {
-    if let Some(held) = testing::current() {
-        return if held.reason == Reason::StartGap && held.jump_ms > 0 {
+    if let Some((held, destroy)) = testing::current() {
+        return if destroy && held.reason == Reason::StartGap && held.jump_ms > 0 {
             Ok(Timestamp::now())
         } else {
             Err(held)
@@ -420,8 +452,8 @@ pub fn plausible_now() -> Result<Timestamp, Held> {
 /// The forward jump during a runtime hold of destruction, by which the reuse of another
 /// client's address is judged earlier; one atomic load.
 pub fn forward_hold() -> Option<Duration> {
-    if let Some(held) = testing::current() {
-        return (held.reason == Reason::Jump && held.jump_ms > 0)
+    if let Some((held, destroy)) = testing::current() {
+        return (destroy && held.reason == Reason::Jump && held.jump_ms > 0)
             .then(|| Duration::from_millis(held.jump_ms.unsigned_abs()));
     }
     match FORWARD_MS.load(Ordering::Relaxed) {
@@ -453,9 +485,9 @@ pub fn restore(saved: Option<Saved>) {
 }
 
 /// A held clock for one test thread (feature `testing`): [`trusted_now`], [`plausible_now`]
-/// and [`forward_hold`] answer from [`hold`]'s value on the thread that set it, read before the
-/// guard, until the returned [`Override`] is dropped or [`confirm`] runs there. A
-/// `#[tokio::test]` runs on one thread, so other tests never see it.
+/// and [`forward_hold`] answer from the value of [`hold`] or [`hold_issuing`] on the thread
+/// that set it, read before the guard, until the returned [`Override`] is dropped or
+/// [`confirm`] runs there. A `#[tokio::test]` runs on one thread, so other tests never see it.
 #[cfg(any(test, feature = "testing"))]
 pub mod testing {
     use std::{cell::RefCell, marker::PhantomData};
@@ -463,13 +495,25 @@ pub mod testing {
     use super::Held;
 
     thread_local! {
-        static HELD: RefCell<Option<Held>> = const { RefCell::new(None) };
+        static HELD: RefCell<Option<(Held, bool)>> = const { RefCell::new(None) };
     }
 
-    /// Holds the clock on this thread until the value is dropped.
+    /// Holds destruction on this thread, and issuing as `held` says (all but a forward start
+    /// gap), until the value is dropped.
     #[must_use = "the hold ends when the value is dropped"]
     pub fn hold(held: Held) -> Override {
-        HELD.with(|cell| *cell.borrow_mut() = Some(held));
+        set(held, true)
+    }
+
+    /// Holds issuing alone on this thread, as after a wait that ended, until the value is
+    /// dropped.
+    #[must_use = "the hold ends when the value is dropped"]
+    pub fn hold_issuing(held: Held) -> Override {
+        set(held, false)
+    }
+
+    fn set(held: Held, destroy: bool) -> Override {
+        HELD.with(|cell| *cell.borrow_mut() = Some((held, destroy)));
         Override(PhantomData)
     }
 
@@ -483,7 +527,7 @@ pub mod testing {
         }
     }
 
-    pub(super) fn current() -> Option<Held> {
+    pub(super) fn current() -> Option<(Held, bool)> {
         HELD.with(|cell| cell.borrow().clone())
     }
 
@@ -494,7 +538,7 @@ pub mod testing {
 
 #[cfg(not(any(test, feature = "testing")))]
 mod testing {
-    pub(super) fn current() -> Option<super::Held> {
+    pub(super) fn current() -> Option<(super::Held, bool)> {
         None
     }
 
