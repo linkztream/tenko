@@ -44,6 +44,7 @@ export const apiOperations = [
   { id: "verify_audit", method: "get", path: "/api/v1/audit/verify", tags: ["audit"], summary: "Verify the hash chain of the audit log" },
   { id: "get_audit_record", method: "get", path: "/api/v1/audit/{seq}", tags: ["audit"], summary: "Get one audit record" },
   { id: "request_approval", method: "post", path: "/api/v1/auth/approvals", tags: ["auth"], summary: "Ask a person to approve a takeover script" },
+  { id: "clear_approvals", method: "post", path: "/api/v1/auth/approvals/clear", tags: ["auth"], summary: "Deny the waiting approvals, of every source or one" },
   { id: "look_up_approval", method: "post", path: "/api/v1/auth/approvals/lookup", tags: ["auth"], summary: "Find the approval of a typed code" },
   { id: "approve_approval", method: "post", path: "/api/v1/auth/approvals/{id}/approve", tags: ["auth"], summary: "Approve a takeover script's request" },
   { id: "collect_approval", method: "post", path: "/api/v1/auth/approvals/{id}/collect", tags: ["auth"], summary: "Collect the delegated session of an approved request" },

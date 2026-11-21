@@ -1852,8 +1852,8 @@ mod tests {
             }
         }
         // WP13.0: the eleven operations of the providers and the directory sign-in; the six
-        // of the known devices; the five of the takeover script's approvals.
-        assert_eq!(checked, 62, "every endpoint of the four areas");
+        // of the known devices; the six of the takeover script's approvals.
+        assert_eq!(checked, 63, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -3073,6 +3073,7 @@ mod tests {
             "look_up_approval",
             "approve_approval",
             "deny_approval",
+            "clear_approvals",
             // WP13.0: the providers are settings.
             "create_auth_provider",
             "update_auth_provider",
@@ -3186,8 +3187,8 @@ mod tests {
             }
         }
         // WP13.0: the eleven operations of the providers and the directory sign-in; the six
-        // of the known devices; the five of the takeover script's approvals.
-        assert_eq!(operations, 62);
+        // of the known devices; the six of the takeover script's approvals.
+        assert_eq!(operations, 63);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

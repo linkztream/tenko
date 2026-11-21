@@ -7,7 +7,8 @@
 //! | `POST /auth/approvals` | none: the script | Ask for an approval with the plan and the key: an id and a nonce |
 //! | `POST /auth/approvals/lookup` | an administrator's session, fresh | The pending approval of a typed code |
 //! | `POST /auth/approvals/{id}/approve` | an administrator's session, fresh | Approve it, with the code again |
-//! | `POST /auth/approvals/{id}/deny` | an administrator's session | Deny it |
+//! | `POST /auth/approvals/{id}/deny` | an administrator's session | Deny it, or withdraw it before the collect |
+//! | `POST /auth/approvals/clear` | an administrator's session, fresh | Deny every waiting or uncollected approval, or those of one source |
 //! | `POST /auth/approvals/{id}/collect` | none: the script, with the key's signature | The delegated session, once |
 //!
 //! The code covers the SHA-256 of the root of the internal authority, which the API listener
@@ -23,8 +24,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use tenko_auth::approval::{
-    ApprovalRequest, ApprovalTicket, ApprovalView, CodeEntry, CollectRequest, DelegatedSession,
-    MAX_REQUEST_BYTES,
+    ApprovalRequest, ApprovalTicket, ApprovalView, ClearApprovals, ClearedApprovals, CodeEntry,
+    CollectRequest, DelegatedSession, MAX_REQUEST_BYTES,
 };
 use tenko_core::ApprovalId;
 use utoipa_axum::{
@@ -33,7 +34,7 @@ use utoipa_axum::{
 };
 
 use super::{
-    ApiJson, PublicCtx, RouteError, Svc, Unavailable, read_body, secret_json,
+    ApiJson, OptionalJson, PublicCtx, RouteError, Svc, Unavailable, read_body, secret_json,
     unsupported_media_type,
 };
 use crate::{
@@ -53,6 +54,7 @@ pub(super) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(look_up_approval))
         .routes(routes!(approve_approval))
         .routes(routes!(deny_approval))
+        .routes(routes!(clear_approvals))
         .routes(routes!(collect_approval).layer(DefaultBodyLimit::max(MAX_COLLECT_BYTES)))
 }
 
@@ -191,7 +193,7 @@ async fn approve_approval(
     tag = "auth",
     operation_id = "deny_approval",
     summary = "Deny a takeover script's request",
-    description = "An administrator's own session. Audited as `auth.approval.deny`.",
+    description = "An administrator's own session. Denies a waiting request, or withdraws an approval the script has not collected yet. Audited as `auth.approval.deny`.",
     params(("id" = String, Path, description = "Approval identifier (UUID)")),
     responses(
         (status = 204, description = "The request was denied"),
@@ -199,7 +201,7 @@ async fn approve_approval(
         (status = 401, description = "No valid session; a token is refused (`auth.unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not an administrator (`auth.forbidden`), a delegated session (`auth.delegation.refused`), or denied before (`auth.approval.denied`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such approval (`auth.approval.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The approval was approved before (`auth.approval.consumed`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The approval was collected before (`auth.approval.consumed`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 410, description = "The approval waited longer than ten minutes (`auth.approval.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
     ),
@@ -213,6 +215,33 @@ async fn deny_approval(
     let id = id.parse::<ApprovalId>()?;
     service.deny_approval(&ctx, id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Denies every waiting request and every approval not collected yet, or those of one source.
+#[utoipa::path(
+    post,
+    path = "/auth/approvals/clear",
+    tag = "auth",
+    operation_id = "clear_approvals",
+    summary = "Deny the waiting approvals, of every source or one",
+    description = "An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Audited as `auth.approval.deny`, one record per approval.",
+    request_body(content = ClearApprovals, content_type = "application/json"),
+    responses(
+        (status = 200, description = "How many approvals were denied", body = ClearedApprovals),
+        (status = 400, description = "The body is not one object of the schema (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session; a token is refused (`auth.unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), or a delegated session (`auth.delegation.refused`)", body = ProblemDetails, content_type = "application/problem+json"),
+        Unavailable
+    ),
+    security(("session" = []))
+)]
+async fn clear_approvals(
+    Svc(service): Svc,
+    Ctx(ctx): Ctx,
+    OptionalJson(body): OptionalJson<ClearApprovals>,
+) -> Result<Json<ClearedApprovals>, RouteError> {
+    let denied = service.clear_approvals(&ctx, body.source).await?;
+    Ok(Json(ClearedApprovals { denied }))
 }
 
 /// Collects the delegated session of an approved request.

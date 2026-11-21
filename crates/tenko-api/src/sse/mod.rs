@@ -299,7 +299,10 @@ impl Default for EventRoutes {
             .table_prefix("sys.audit_export", Topic::System)
             .namespace("auth", Topic::Admin)
             .namespace("users", Topic::Admin)
-            .silent(TableName::from_static("auth.preferences"));
+            .silent(TableName::from_static("auth.preferences"))
+            // ADR 0038: a request without a credential never reaches an administrator's page.
+            .silent(TableName::from_static("auth.approvals"))
+            .silent(TableName::from_static("auth.approval_plans"));
         routes
     }
 }

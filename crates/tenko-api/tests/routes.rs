@@ -81,6 +81,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("POST", "/auth/approvals/lookup", "look_up_approval"),
     ("POST", "/auth/approvals/{id}/approve", "approve_approval"),
     ("POST", "/auth/approvals/{id}/deny", "deny_approval"),
+    ("POST", "/auth/approvals/clear", "clear_approvals"),
     ("POST", "/auth/approvals/{id}/collect", "collect_approval"),
     // users
     ("GET", "/users", "list_users"),

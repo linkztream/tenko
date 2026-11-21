@@ -445,6 +445,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/approvals/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deny the waiting approvals, of every source or one
+         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Audited as `auth.approval.deny`, one record per approval.
+         */
+        post: operations["clear_approvals"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/approvals/lookup": {
         parameters: {
             query?: never;
@@ -516,7 +536,7 @@ export interface paths {
         put?: never;
         /**
          * Deny a takeover script's request
-         * @description An administrator's own session. Audited as `auth.approval.deny`.
+         * @description An administrator's own session. Denies a waiting request, or withdraws an approval the script has not collected yet. Audited as `auth.approval.deny`.
          */
         post: operations["deny_approval"];
         delete?: never;
@@ -6889,8 +6909,9 @@ export interface components {
             acknowledge?: string[];
         };
         /**
-         * @description What the script reports about itself, shown to the person labeled as reported. ASCII
-         *     only and bounded, so that no direction mark or look-alike character reaches the page.
+         * @description What the script reports about itself, shown to the person labeled as reported and as text
+         *     only. Bounded, and without control or invisible formatting characters, so that no
+         *     direction mark reaches the page.
          */
         ApprovalClient: {
             /** @description The machine's name: a `NetBIOS` or DNS label. */
@@ -7979,6 +8000,19 @@ export interface components {
         };
         /** Format: uuid */
         ClassId: string;
+        /** @description `POST /auth/approvals/clear`: which approvals to deny. */
+        ClearApprovals: {
+            /**
+             * @description Only those from this address's source (the address, or its IPv6 /64); all when
+             *     absent.
+             */
+            source?: string | null;
+        };
+        /** @description The answer to `POST /auth/approvals/clear`. */
+        ClearedApprovals: {
+            /** @description How many waiting or uncollected approvals were denied. */
+            denied: number;
+        };
         /** @description An integration certificate. */
         ClientCertRecord: {
             /** @description The service account it names. */
@@ -19215,6 +19249,15 @@ export interface components {
             /** @description The zone it forwards; `.` for the server's forwarders. */
             zone: string;
         };
+        /** @description Tenko's computer account in the domain, as the run creates and adopts it. */
+        PlanKerberos: {
+            /** @description The account's `sAMAccountName`: 1 to 15 letters, digits or hyphens and a `$`. */
+            account: string;
+            /** @description The realm: the domain in upper case (`CORP.EXAMPLE.TEST`). */
+            realm: string;
+            /** @description Its service principal names, `DNS/<the node's name>` (1 to [`MAX_SPNS`]). */
+            spns: string[];
+        };
         /**
          * @description What a run does on Tenko (the Tenko column of plan section 2.16.1's phases).
          * @enum {string}
@@ -24274,6 +24317,7 @@ export interface components {
             forest_root: string;
             /** @description Windows' conditional forwarders and server forwarders (`.`). */
             forwarders?: components["schemas"]["PlanForwarder"][];
+            kerberos?: components["schemas"]["PlanKerberos"] | null;
             /** @description The member server the exporter runs on. */
             mirror_host: components["schemas"]["PlanServer"];
             /** @description The node's own host name, one label under the domain: its SOA `mname` and NS. */
@@ -28892,6 +28936,66 @@ export interface operations {
             };
         };
     };
+    clear_approvals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClearApprovals"];
+            };
+        };
+        responses: {
+            /** @description How many approvals were denied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClearedApprovals"];
+                };
+            };
+            /** @description The body is not one object of the schema (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session; a token is refused (`auth.unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), or a delegated session (`auth.delegation.refused`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
     look_up_approval: {
         parameters: {
             query?: never;
@@ -29223,7 +29327,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The approval was approved before (`auth.approval.consumed`) */
+            /** @description The approval was collected before (`auth.approval.consumed`) */
             409: {
                 headers: {
                     [name: string]: unknown;

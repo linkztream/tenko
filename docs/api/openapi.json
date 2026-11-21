@@ -3062,6 +3062,83 @@
         "security": []
       }
     },
+    "/api/v1/auth/approvals/clear": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Deny the waiting approvals, of every source or one",
+        "description": "An administrator's own session that signed in within the last five minutes (a passkey under Hardened). Denies every waiting request and every approval the script has not collected, or, with `source`, those whose source is that address's (the address, or its IPv6 /64): the way out when requests the person does not recognize fill the bounds. Audited as `auth.approval.deny`, one record per approval.",
+        "operationId": "clear_approvals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClearApprovals"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "How many approvals were denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClearedApprovals"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The body is not one object of the schema (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session; a token is refused (`auth.unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), or a delegated session (`auth.delegation.refused`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/approvals/lookup": {
       "post": {
         "tags": [
@@ -3417,7 +3494,7 @@
           "auth"
         ],
         "summary": "Deny a takeover script's request",
-        "description": "An administrator's own session. Audited as `auth.approval.deny`.",
+        "description": "An administrator's own session. Denies a waiting request, or withdraws an approval the script has not collected yet. Audited as `auth.approval.deny`.",
         "operationId": "deny_approval",
         "parameters": [
           {
@@ -3475,7 +3552,7 @@
             }
           },
           "409": {
-            "description": "The approval was approved before (`auth.approval.consumed`)",
+            "description": "The approval was collected before (`auth.approval.consumed`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -44011,7 +44088,7 @@
       },
       "ApprovalClient": {
         "type": "object",
-        "description": "What the script reports about itself, shown to the person labeled as reported. ASCII\nonly and bounded, so that no direction mark or look-alike character reaches the page.",
+        "description": "What the script reports about itself, shown to the person labeled as reported and as text\nonly. Bounded, and without control or invisible formatting characters, so that no\ndirection mark reaches the page.",
         "required": [
           "machine",
           "user",
@@ -46706,6 +46783,34 @@
       "ClassId": {
         "type": "string",
         "format": "uuid"
+      },
+      "ClearApprovals": {
+        "type": "object",
+        "description": "`POST /auth/approvals/clear`: which approvals to deny.",
+        "properties": {
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Only those from this address's source (the address, or its IPv6 /64); all when\nabsent."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ClearedApprovals": {
+        "type": "object",
+        "description": "The answer to `POST /auth/approvals/clear`.",
+        "required": [
+          "denied"
+        ],
+        "properties": {
+          "denied": {
+            "type": "integer",
+            "description": "How many waiting or uncollected approvals were denied.",
+            "minimum": 0
+          }
+        }
       },
       "ClientCertRecord": {
         "type": "object",
@@ -74587,6 +74692,33 @@
         },
         "additionalProperties": false
       },
+      "PlanKerberos": {
+        "type": "object",
+        "description": "Tenko's computer account in the domain, as the run creates and adopts it.",
+        "required": [
+          "realm",
+          "account",
+          "spns"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "The account's `sAMAccountName`: 1 to 15 letters, digits or hyphens and a `$`."
+          },
+          "realm": {
+            "type": "string",
+            "description": "The realm: the domain in upper case (`CORP.EXAMPLE.TEST`)."
+          },
+          "spns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its service principal names, `DNS/<the node's name>` (1 to [`MAX_SPNS`])."
+          }
+        },
+        "additionalProperties": false
+      },
       "PlanOperation": {
         "type": "string",
         "description": "What a run does on Tenko (the Tenko column of plan section 2.16.1's phases).",
@@ -86667,6 +86799,17 @@
               "$ref": "#/components/schemas/PlanForwarder"
             },
             "description": "Windows' conditional forwarders and server forwarders (`.`)."
+          },
+          "kerberos": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PlanKerberos",
+                "description": "Tenko's computer account, for zones that take secure updates: the account the run\nadopts, absent when no zone needs one."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "mirror_host": {
             "$ref": "#/components/schemas/PlanServer",

@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 465, "every operation of the document");
+    assert_eq!(all.len(), 466, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -119,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        106,
+        107,
         "the session-only operations"
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        465 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        466 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -643,26 +643,44 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
         .await
         .expect("a view");
     let hash = tenko_auth::secret::hash_secret(&secret);
-    let (mut record, _) =
+    let (record, _) =
         tenko_store::ReadViewExt::get_typed(view.as_ref(), &tenko_auth::model::SESSIONS, &hash)
             .expect("read")
             .expect("the session");
-    let delegated = record.delegation.as_mut().expect("delegated");
-    delegated.approved_at = Timestamp::now()
+    let approved_at = |at: Timestamp| {
+        let mut record = record.clone();
+        record.delegation.as_mut().expect("delegated").approved_at = at;
+        let mut batch = tenko_store::WriteBatch::new(
+            tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+            Timestamp::now(),
+        );
+        batch
+            .put_typed(&tenko_auth::model::SESSIONS, &hash, &record)
+            .expect("encode");
+        env.store.propose(batch)
+    };
+    let six_minutes_ago = Timestamp::now()
         .checked_sub(Duration::from_secs(360))
         .expect("a time");
-    let mut batch = tenko_store::WriteBatch::new(
-        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
-        Timestamp::now(),
-    );
-    batch
-        .put_typed(&tenko_auth::model::SESSIONS, &hash, &record)
-        .expect("encode");
-    env.store.propose(batch).await.expect("commit");
-    let late = mirror("dhcp2.corp.example.test", "192.0.2.30/32");
+    approved_at(six_minutes_ago).await.expect("commit");
+    let second = mirror("dhcp2.corp.example.test", "192.0.2.30/32");
     send(
         &app,
-        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&late)),
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&second)),
+    )
+    .await
+    .assert_problem(403, "auth.delegation.refused");
+    // Within the window again: one mirror per DHCP server of the plan, two in all.
+    approved_at(Timestamp::now()).await.expect("commit");
+    send(
+        &app,
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&second)),
+    )
+    .await
+    .assert_status(201);
+    send(
+        &app,
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&inside)),
     )
     .await
     .assert_problem(403, "auth.delegation.refused");
@@ -703,4 +721,60 @@ async fn the_public_approval_operations_are_bounded_and_paced_per_source() {
     again.assert_problem(429, "auth.approval.limit");
     assert_eq!(again.body["params"]["limit"], "spacing");
     send(&app, ask("192.0.2.21")).await.assert_status(201);
+}
+
+/// The script's own shape of request: no `Origin`, HTTP/1.0, a bearer, from an IPv4 address
+/// that reaches the listener as an IPv4-mapped IPv6 peer. The delegated session it collects
+/// is refused on a `HEAD` of a listed `GET` and on a path that no route matches.
+#[tokio::test]
+async fn the_script_s_own_requests_are_answered_and_bounded() {
+    use axum::http::{Version, header};
+    let (env, admin, app) = served().await;
+    let script = Script::default();
+    let body = script.request();
+    let mapped = "::ffff:192.0.2.10";
+    let plain = |method: &str, path: &str, bearer: Option<&str>, body: Option<&str>| {
+        let mut request = from(mapped, method, path, Anonymous, body);
+        *request.version_mut() = Version::HTTP_10;
+        request.headers_mut().remove(header::ORIGIN);
+        if let Some(token) = bearer {
+            request.headers_mut().insert(
+                header::AUTHORIZATION,
+                format!("Bearer {token}").parse().expect("a header"),
+            );
+        }
+        request
+    };
+    let ticket = send(&app, plain("POST", "/auth/approvals", None, Some(&body))).await;
+    ticket.assert_status(201);
+    let ticket: tenko_auth::approval::ApprovalTicket = ticket.parse();
+    let admin = env
+        .ctx_for(&tenko_core::Credentials::Session(admin))
+        .await
+        .expect("the administrator");
+    let code = tenko_auth::service::SecretString::new(script.code(&body, ticket.id));
+    env.service
+        .approve(&admin, ticket.id, &code, &ROOT_SHA256)
+        .await
+        .expect("approved");
+    let collect = format!("/auth/approvals/{}/collect", ticket.id);
+    let signed = script.collect(&ticket);
+    let collected = send(&app, plain("POST", &collect, None, Some(&signed))).await;
+    collected.assert_status(200);
+    let secret = collected.body["secret"]
+        .as_str()
+        .expect("the secret")
+        .to_owned();
+    send(&app, plain("GET", "/health", Some(&secret), None))
+        .await
+        .assert_status(200);
+    // A HEAD answer has no body: the status says it.
+    send(&app, plain("HEAD", "/health", Some(&secret), None))
+        .await
+        .assert_status(403);
+    let slash = send(&app, plain("POST", "/auth/logout/", Some(&secret), None)).await;
+    assert!(!slash.status.is_success(), "{}", slash.text);
+    send(&app, plain("POST", "/auth/logout", Some(&secret), None))
+        .await
+        .assert_status(204);
 }
