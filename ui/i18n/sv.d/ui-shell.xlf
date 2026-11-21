@@ -137,12 +137,16 @@
         <segment><source>Confirm the clock of {node}?</source><target>Bekräfta klockan på {node}?</target></segment>
       </unit>
       <unit id="shell.clock.confirm.body">
-        <notes><note category="description">Body of the dialog that confirms a node's clock. {now} is the node's time as it last read it.</note></notes>
-        <segment><source>Compare the time with your phone, or run date -u on the host. Tenko then deletes expired data again by this clock: {now}.</source><target>Jämför tiden med din telefon, eller kör date -u på värden. Tenko raderar sedan utgångna data igen efter den här klockan: {now}.</target></segment>
+        <notes><note category="description">Body of the dialog that confirms a node's clock. {utc} is the node's time as it last read it, in UTC; {local} the same time in the browser's time zone, with the zone.</note></notes>
+        <segment><source>Compare this with your phone, or run date -u on the host, which prints UTC. Confirming tells Tenko to trust this clock again. The node's clock read {utc} UTC, which is {local} in your time zone.</source><target>Jämför med din telefon, eller kör date -u på värden, som skriver ut UTC. När du bekräftar litar Tenko på den här klockan igen. Nodens klocka visade {utc} UTC, alltså {local} i din tidszon.</target></segment>
       </unit>
       <unit id="shell.clock.confirm.confirm">
         <notes><note category="description">The button that confirms a node's clock.</note></notes>
         <segment><source>Confirm</source><target>Bekräfta</target></segment>
+      </unit>
+      <unit id="errors.sys.clock.other_node">
+        <notes><note category="description">The confirm of a clock reached another node than the one the finding names. {node} is the node that answered.</note></notes>
+        <segment><source>This is node {node}. Open Tenko on the node the finding names and confirm its clock there.</source><target>Detta är noden {node}. Öppna Tenko på noden som fyndet nämner och bekräfta dess klocka där.</target></segment>
       </unit>
     </group>
   </file>

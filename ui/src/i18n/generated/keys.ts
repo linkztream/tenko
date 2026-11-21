@@ -4728,6 +4728,7 @@ export type MessageKey =
   | "errors.scan.job.target"
   | "errors.scan.stopped"
   | "errors.settings.pin_coupling"
+  | "errors.sys.clock.other_node"
   | "errors.sys.csrf_rejected"
   | "errors.sys.internal"
   | "errors.sys.invalid_request"
@@ -8890,7 +8891,7 @@ export interface MessageArgs {
   "dashboard.finding.health.migrate.mirror.stale": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.token_expiring": { mirrors: string | number };
   "dashboard.finding.health.migrate.mirror.unbound": { mirrors: string | number };
-  "dashboard.finding.health.sys.clock.held": { direction: string; magnitude: string | number; node: string | number; reason: string };
+  "dashboard.finding.health.sys.clock.held": { direction: string; magnitude: string | number; node: string | number; reason: string; stage: string };
   "dashboard.finding.health.sys.clock.jumped": { direction: string; magnitude: string | number; node: string | number; until: string | number };
   "dashboard.finding.health.sys.update.installer_repair": { command: string | number; version: string | number };
   "dashboard.health.alarms_critical": { count: string | number };
@@ -9505,6 +9506,7 @@ export interface MessageArgs {
   "errors.ipam.status.transition": { from: string | number; to: string | number };
   "errors.ipam.topology.invalid": { field: string | number };
   "errors.ipam.vlan.duplicate": { vid: string | number };
+  "errors.sys.clock.other_node": { node: string | number };
   "errors.vault.pin_coupling": { accounts: string | number };
   "errors.vault.reveal.rate_limited": { retry_after: string | number };
   "errors.vault.secret.in_use": { connectors: number; hosts: number };
@@ -10215,7 +10217,7 @@ export interface MessageArgs {
   "setup.welcome.restore": { link: string | number };
   "shell.account.open": { name: string | number };
   "shell.account.who": { method: string | number; role: string | number };
-  "shell.clock.confirm.body": { now: string | number };
+  "shell.clock.confirm.body": { local: string | number; utc: string | number };
   "shell.clock.confirm.title": { node: string | number };
   "shell.keys.goto": { area: string | number };
   "shell.nav.badge.act": { act: string | number; area: string | number; count: number };
@@ -15062,6 +15064,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.scan.job.target",
   "errors.scan.stopped",
   "errors.settings.pin_coupling",
+  "errors.sys.clock.other_node",
   "errors.sys.csrf_rejected",
   "errors.sys.internal",
   "errors.sys.invalid_request",

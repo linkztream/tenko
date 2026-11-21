@@ -17,6 +17,7 @@ import { createSignal, Show } from "solid-js";
 import type { Host } from "../api/types";
 import { errorMessage } from "../api/problem";
 import { may } from "../auth/gate";
+import { isAdmin } from "../auth/session";
 import { toast } from "../components/toast";
 import { DecommissionDialog, decommissionTitle } from "../hosts/DecommissionDialog";
 import { ClockConfirm } from "../shell/ClockConfirm";
@@ -34,7 +35,7 @@ const linkOf = (plan: ActionPlan): LinkPlan | undefined => (plan.kind === "link"
 /** The action as this person may run it: a write they may not do opens the panel instead. */
 function planFor(finding: Finding): ActionPlan | null {
   const plan = actionOf(finding);
-  if (!plan) return null;
+  if (!plan || (plan.kind === "confirm_clock" && !isAdmin())) return null;
   if ((plan.kind === "approve" || plan.kind === "decommission") && !isDecider()) return { kind: "panel", label: t("discovery.findings.action.open") };
   return plan;
 }

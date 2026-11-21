@@ -1,6 +1,7 @@
 // The confirmation of a held clock (`POST /system/clock/confirm`), from the clock's finding: the
-// node's time to compare with, and the confirm. The server needs a sign-in within five minutes
-// and the system administration right; its refusal shows in the dialog.
+// node's time in UTC and in the browser's time zone to compare with, and the confirm. The
+// request names the node of the finding, which alone confirms; the server needs a sign-in
+// within five minutes and the system administration right, and its refusal shows in the dialog.
 //
 // Test ids: `dialog-clock-confirm`, `form-cancel`, `form-submit`.
 import { createResource, createSignal } from "solid-js";
@@ -14,15 +15,15 @@ export function ClockConfirm(props: { node: string; onClose: () => void; onDone?
   const [status] = createResource(() => api.get("/api/v1/system/status").catch(() => null));
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>(null);
-  const now = () => {
+  const read = (options: Intl.DateTimeFormatOptions) => {
     const at = status()?.host?.sampled_at;
-    return at ? formatDateTime(at, { dateStyle: "medium", timeStyle: "medium" }) : "…";
+    return at ? formatDateTime(at, options) : "…";
   };
   const confirm = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api.post("/api/v1/system/clock/confirm");
+      await api.post("/api/v1/system/clock/confirm", { body: { node: props.node } });
       props.onDone?.();
       props.onClose();
     } catch (err) {
@@ -38,7 +39,12 @@ export function ClockConfirm(props: { node: string; onClose: () => void; onDone?
       <h2 class="dialog-title">{title()}</h2>
       <div class="dialog-body">
         <ErrorNotice error={error()} />
-        <p>{t("shell.clock.confirm.body", { now: now() })}</p>
+        <p>
+          {t("shell.clock.confirm.body", {
+            utc: read({ dateStyle: "medium", timeStyle: "medium", timeZone: "UTC" }),
+            local: read({ dateStyle: "medium", timeStyle: "long" }),
+          })}
+        </p>
       </div>
       <div class="dialog-actions">
         <button type="button" class="btn ghost" data-testid="form-cancel" onClick={() => props.onClose()}>

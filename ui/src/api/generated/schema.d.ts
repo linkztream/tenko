@@ -5760,7 +5760,7 @@ export interface paths {
         put?: never;
         /**
          * Confirm that the clock of this node is right
-         * @description Ends a hold of the clock guard on this node: rounds that delete or let expire by the wall clock, and what the node issues, go on by the clock as it is now, during a wait too. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the jump and its reason; answers 204 also when nothing was held.
+         * @description Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node` names the node as its clock finding does; a node of another name refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.
          */
         post: operations["confirm_clock"];
         delete?: never;
@@ -8080,6 +8080,14 @@ export interface components {
              * @description The hardware type (1 for Ethernet).
              */
             htype: number;
+        };
+        /** @description The body of `POST /system/clock/confirm`. */
+        ClockConfirm: {
+            /**
+             * @description The node whose clock is confirmed, as its clock finding names it (the parameter
+             *     `node`): its host name, or its node id when it has none.
+             */
+            node: string;
         };
         /** @description The node transport of a controller, for `GET /system/status`. */
         ClusterStatus: {
@@ -54365,7 +54373,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClockConfirm"];
+            };
+        };
         responses: {
             /** @description The clock is trusted */
             204: {
@@ -54373,6 +54385,15 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
             };
             /** @description No valid session */
             401: {
@@ -54385,6 +54406,15 @@ export interface operations {
             };
             /** @description Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`) */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

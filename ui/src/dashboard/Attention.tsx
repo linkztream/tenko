@@ -14,6 +14,7 @@ import { createSignal, For, Show } from "solid-js";
 import { api } from "../api/client";
 import { createLiveQuery } from "../api/live";
 import { paths } from "../app/paths";
+import { isAdmin } from "../auth/session";
 import { Icon } from "../components/Icon";
 import { TimeAgo } from "../grid/cells";
 import { formatList, t } from "../i18n";
@@ -76,7 +77,11 @@ export function Attention(props: { counts: FindingCounts | null }) {
           {(finding) => {
             const subject = () => findingSubject(finding);
             const evidence = () => findingEvidence(finding);
-            const action = () => findingAction(finding);
+            // The confirm of a clock is offered to an administrator only; the server checks again.
+            const action = () => {
+              const plain = findingAction(finding);
+              return plain && plain.href === undefined && !isAdmin() ? null : plain;
+            };
             return (
               <div class="attention-row act" data-testid="dashboard-finding" data-id={finding.id} data-kind={finding.kind}>
                 <Icon name={findingGlyph(finding.kind)} size="sm" class="act-glyph" />

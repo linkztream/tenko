@@ -92,7 +92,7 @@ export function findingEvidence(finding: Finding): { text: string; mono: boolean
 /** The words of a clock hold: the jump as a duration and the end of its wait as a time. */
 function clockWords(params: Record<string, string>): Record<string, string> {
   if (params.jump_secs === undefined) return params;
-  return { ...params, magnitude: formatDuration(Number(params.jump_secs)), until: params.until ? formatDateTime(params.until) : "" };
+  return { stage: "all", ...params, magnitude: formatDuration(Number(params.jump_secs)), until: params.until ? formatDateTime(params.until) : "" };
 }
 
 /**
