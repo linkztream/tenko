@@ -98,7 +98,7 @@ test.describe("with the internal CA", () => {
     await expect(page.getByTestId("certificates-mode")).toHaveAttribute("data-mode", "internal_ca");
     await expect(page.getByTestId("cert-subject")).toHaveText(cert.subject);
     await expect(page.getByTestId("cert-days")).toHaveAttribute("data-state", "valid");
-    await expect(page.getByTestId("cert-chain")).toHaveText("1 certificate");
+    await expect(page.getByTestId("cert-chain")).toHaveText("2 certificates");
     await expect(page.getByTestId("cert-fingerprint")).toHaveText(cert.sha256.match(/.{1,8}/g)!.join(" "));
     await expect(page.getByTestId("certificates-expiring")).toHaveCount(0);
     await expect(page.getByTestId("ca-fingerprint")).toHaveText(details.internal_ca!.root_sha256!.match(/.{1,8}/g)!.join(" "));
