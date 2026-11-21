@@ -119,11 +119,121 @@ Describe 'The state tree' {
         $null = icacls.exe $dir /grant "*$([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value):(OI)(CI)F"
     }
 
+    It 'accepts the elevated process''s own user as the owner of a file inside the leaf, never of a level, never another user' {
+        $root = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        [void](New-Item -ItemType Directory -Path (Join-Path $root 'Tenko') -Force)
+        Set-Content -LiteralPath (Join-Path $root 'Tenko\state.json') -Value '{}'
+        $me = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        Mock Test-TkElevated { $true }
+        Mock Get-TkPathSecurity { @{ Owner = $(if ($Path -like '*state.json') { $script:fileOwner } else { 'S-1-5-32-544' }); Writers = @('S-1-5-18', 'S-1-5-32-544'); Reparse = $false } }
+        $script:fileOwner = $me
+        Get-ExitCode { $null = Assert-TkTrustedTree -Root $root -Levels @('Tenko') } | Should -Be 0
+        $script:fileOwner = 'S-1-5-21-1-2-3-1105'
+        Get-ExitCode { $null = Assert-TkTrustedTree -Root $root -Levels @('Tenko') } | Should -Be 1
+        $script:fileOwner = $me
+        Mock Test-TkElevated { $false }
+        Get-ExitCode { $null = Assert-TkTrustedTree -Root $root -Levels @('Tenko') } | Should -Be 1
+        Mock Test-TkElevated { $true }
+        Mock Get-TkPathSecurity { @{ Owner = $me; Writers = @('S-1-5-18', 'S-1-5-32-544'); Reparse = $false } }
+        Get-ExitCode { $null = Assert-TkTrustedTree -Root $root -Levels @('Tenko') } | Should -Be 1 -Because 'a level owned by the user is refused'
+    }
+
     It 'keeps the remote work and backup folders out of folders a local user can write' {
         foreach ($name in $script:TkRemote.Keys) {
-            $script:TkRemote[$name].ToString() | Should -Not -Match 'Windows\\Temp|SystemRoot ''Temp|C:\\ProgramData' -Because $name
+            $script:TkRemote[$name].ToString() | Should -Not -Match 'Windows\\Temp|SystemRoot ''Temp|C:\\ProgramData|C:\\Program Files' -Because $name
         }
-        $script:TkRemoteDir | Should -BeLike 'C:\Program Files\Tenko\*'
+    }
+
+    It 'takes the remote base from the server''s own Program Files folder, of that form only' {
+        $script:TkRemoteBases = @{}
+        Mock Invoke-TkRemote -ParameterFilter { $Name -eq 'ReadProgramFiles' } { 'D:\Program Files' }
+        Mock Invoke-TkRemote -ParameterFilter { $Name -eq 'ProtectDirectory' } { $script:protected = $Arguments }
+        Protect-TkRemoteDirectory -Server 'dc1.corp.example.test' -Below @('takeover', 'backup') | Should -Be 'D:\Program Files\Tenko\takeover\backup'
+        $script:protected[0] | Should -Be 'D:\Program Files\Tenko'
+        $script:TkRemoteBases = @{}
+        Mock Invoke-TkRemote -ParameterFilter { $Name -eq 'ReadProgramFiles' } { '\\attacker\share' }
+        { Protect-TkRemoteDirectory -Server 'dc2.corp.example.test' -Below @('takeover') } | Should -Throw '*not <drive>:\Program Files*'
+    }
+}
+
+Describe 'The remote folder block' {
+    # The block's own logic, run here against a test folder: the access lists are what a
+    # server would answer; setting the owner and the list (icacls) needs an elevated process
+    # on the server and is recorded, not run.
+    BeforeEach {
+        $base = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        [void](New-Item -ItemType Directory -Path $base)
+        $script:icacls = @()
+        $acls = @{}
+        function icacls.exe { $script:icacls += , ($args -join ' '); $global:LASTEXITCODE = 0 }
+        Mock Get-Acl { $key = @($LiteralPath)[0]; [pscustomobject]@{ Sddl = $(if ($acls.ContainsKey($key)) { $acls[$key] } else { 'O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)' }) } }
+    }
+
+    It 'creates the script''s levels, sets them to SYSTEM and Administrators, and leaves an existing base''s list' {
+        & $script:TkRemote.ProtectDirectory $base @('takeover', 'backup')
+        Test-Path -LiteralPath (Join-Path $base 'takeover\backup') | Should -BeTrue
+        @($script:icacls | Where-Object { $_.StartsWith("$base ") }).Count | Should -Be 0
+        @($script:icacls | Where-Object { $_ -eq "$(Join-Path $base 'takeover') /setowner *S-1-5-32-544" }).Count | Should -Be 1
+    }
+
+    It 'refuses an existing level that another account owns, that is a link, or that another account may write' {
+        $acls[$base] = 'O:S-1-5-21-1-2-3-1105G:SYD:(A;OICI;FA;;;SY)'
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Throw '*owned by an account other than*'
+        $acls[$base] = 'O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1301bf;;;BU)'
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Throw '*may be written by BU*'
+        $acls[$base] = 'O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;DCLC;;;S-1-5-21-1-2-3-1105)'
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Throw '*may be written by S-1-5-21-1-2-3-1105*'
+        $acls[$base] = 'O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)'
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Not -Throw -Because 'reading and listing is no writing'
+        Mock Get-Item { [pscustomobject]@{ Attributes = 'Directory, ReparsePoint' } }
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Throw '*is a link*'
+    }
+
+    It 'refuses a script level whose list keeps another writer after the change' {
+        [void](New-Item -ItemType Directory -Path (Join-Path $base 'takeover'))
+        $acls[(Join-Path $base 'takeover')] = 'O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FW;;;AU)'
+        { & $script:TkRemote.ProtectDirectory $base @('takeover') } | Should -Throw '*may be written by AU*'
+    }
+}
+
+Describe 'The authorization block' {
+    # Run here with the DHCP cmdlets answered by functions: an entry already in the wanted
+    # state is not touched, so a resume of either direction passes.
+    BeforeEach {
+        $script:entries = @([pscustomobject]@{ DnsName = 'DC1.corp.example.test'; IPAddress = '192.0.2.11' })
+        $script:changes = @()
+        function Get-DhcpServerInDC { $script:entries }
+        function Add-DhcpServerInDC { param($DnsName, $IPAddress) $script:changes += "add $DnsName $IPAddress"; throw 'the server is already authorized' }
+        function Remove-DhcpServerInDC { [CmdletBinding(SupportsShouldProcess)] param($DnsName, $IPAddress) if ($PSCmdlet.ShouldProcess($DnsName)) { $script:changes += "remove $DnsName $IPAddress" } }
+    }
+
+    It 'adds only a server that is not listed, and removes only one that is' {
+        & $script:TkRemote.SetAuthorization 'dc1.corp.example.test' '192.0.2.11' $true
+        & $script:TkRemote.SetAuthorization 'dc2.corp.example.test' '192.0.2.12' $false
+        $script:changes | Should -BeNullOrEmpty
+        & $script:TkRemote.SetAuthorization 'dc1.corp.example.test' '192.0.2.11' $false
+        $script:changes | Should -Be @('remove dc1.corp.example.test 192.0.2.11')
+    }
+}
+
+Describe 'The names listed apart' {
+    It '<name> <type> is <apart>' -ForEach @(
+        @{ name = '_ldap._tcp.dc._msdcs.corp.example.test'; type = 'SRV'; apart = $true }
+        @{ name = '_tcp.corp.example.test'; type = 'NS'; apart = $true }
+        @{ name = '_kerberos._udp.corp.example.test'; type = 'SRV'; apart = $true }
+        @{ name = 'site1._sites.corp.example.test'; type = 'SRV'; apart = $true }
+        @{ name = 'domaindnszones.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'x.forestdnszones.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'corp.example.test'; type = 'NS'; apart = $true }
+        @{ name = 'corp.example.test'; type = 'MX'; apart = $false }
+        @{ name = 'branch.corp.example.test'; type = 'NS'; apart = $true }
+        @{ name = 'alias.corp.example.test'; type = 'DNAME'; apart = $true }
+        @{ name = 'dc1.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'dc1.corp.example.test'; type = 'TXT'; apart = $false }
+        @{ name = 'pc1.corp.example.test'; type = 'A'; apart = $false }
+    ) {
+        Test-TkApartName -Name $name -Type $type -Zone 'corp.example.test' -Controllers @('dc1.corp.example.test') | Should -Be $apart
     }
 }
 

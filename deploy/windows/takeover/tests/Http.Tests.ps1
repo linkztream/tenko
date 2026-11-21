@@ -223,6 +223,18 @@ Describe 'An older node' {
     }
 }
 
+Describe 'The chain build' {
+    It 'fetches no issuer from a URL the leaf names, on PowerShell 7 in the handshake and in the script''s own build' {
+        # Read from the file: on 5.1 the suite replaces Test-TkServerChain by a mock.
+        $tokens = $null; $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Split-Path -Parent $PSScriptRoot) 'Tenko-Takeover.ps1'), [ref]$tokens, [ref]$errors)
+        $functions = @{}
+        foreach ($node in $ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) { $functions[$node.Name] = $node.Extent.Text }
+        $functions['Invoke-TkHttp'] | Should -Match 'CertificateChainPolicy\.DisableCertificateDownloads = \$true'
+        $functions['Test-TkServerChain'] | Should -Match 'ChainPolicy\.DisableCertificateDownloads = \$true'
+    }
+}
+
 Describe 'A slow answer' {
     # Last, since the server keeps sleeping after the client gave up.
     It 'is refused after the time cap' {
