@@ -425,6 +425,106 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask a person to approve a takeover script
+         * @description No credential. The takeover script's request (ADR 0038): the plan of its run, its P-256 public key and what it reports about itself, at most 64 KiB of strict JSON (unknown and duplicate fields refused). Tenko checks the plan against its own limits and answers the approval's id and a nonce, nothing else. Both sides then compute the approval code over the domain, the SHA-256 of the internal authority's root, the SHA-256 of this body as sent, the key and the id; the person types it on the approval page. At most two pending approvals per source address (an IPv6 /64), 64 in all, each for ten minutes; one request per source every 10 s. Audited as `auth.approval.request`, at most once a minute per source. A delegated session never reaches it.
+         */
+        post: operations["request_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/approvals/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Find the approval of a typed code
+         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened). The code is compared in constant time with the code of every pending approval over this node's root; the answer is the request in full: the plan, the machine, user and version as the script reported them, and the source address. Five wrong codes from one browser session within ten minutes lock its lookups for ten minutes. A wrong code is audited as `auth.approval.refuse`, at most once a minute per session.
+         */
+        post: operations["look_up_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/approvals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve a takeover script's request
+         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. Audited as `auth.approval.approve` with the run.
+         */
+        post: operations["approve_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/approvals/{id}/collect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Collect the delegated session of an approved request
+         * @description No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.
+         */
+        post: operations["collect_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/approvals/{id}/deny": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deny a takeover script's request
+         * @description An administrator's own session. Audited as `auth.approval.deny`.
+         */
+        post: operations["deny_approval"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/known-devices": {
         parameters: {
             query?: never;
@@ -3752,7 +3852,7 @@ export interface paths {
         put?: never;
         /**
          * Create a mirrored source
-         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.
+         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.
          */
         post: operations["create_mirror"];
         delete?: never;
@@ -6789,6 +6889,70 @@ export interface components {
             acknowledge?: string[];
         };
         /**
+         * @description What the script reports about itself, shown to the person labeled as reported. ASCII
+         *     only and bounded, so that no direction mark or look-alike character reaches the page.
+         */
+        ApprovalClient: {
+            /** @description The machine's name: a `NetBIOS` or DNS label. */
+            machine: string;
+            /** @description The Windows user: `DOMAIN\sAMAccountName`. */
+            user: string;
+            /** @description The script's version. */
+            version: string;
+        };
+        /** @description `POST /auth/approvals`: a script's request. */
+        ApprovalRequest: {
+            /** @description What the script reports about itself. */
+            client: components["schemas"]["ApprovalClient"];
+            /** @description The script's P-256 public key, the 65-octet uncompressed point in base64url. */
+            key: string;
+            /** @description The plan of the run, which fixes everything the run may create or change. */
+            plan: components["schemas"]["TakeoverPlan"];
+            /** @description What the approval is for. */
+            purpose: components["schemas"]["Purpose"];
+        };
+        /** @description The answer to a request: the id and the nonce the collect signs; nothing else. */
+        ApprovalTicket: {
+            /**
+             * Format: uuid
+             * @description The approval's id, hyphenated lower case.
+             */
+            id: string;
+            /** @description 32 random octets in base64url. */
+            nonce: string;
+        };
+        /** @description An approval as the person reads it before approving. */
+        ApprovalView: {
+            /**
+             * Format: date-time
+             * @description When the request arrived.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When it expires unless collected.
+             */
+            expires_at: string;
+            /**
+             * Format: uuid
+             * @description The id.
+             */
+            id: string;
+            /** @description The plan in full. */
+            plan: components["schemas"]["TakeoverPlan"];
+            /** @description What it is for. */
+            purpose: components["schemas"]["Purpose"];
+            /**
+             * @description The machine, the Windows user and the version, as the script reported them: shown
+             *     labeled as reported, as text.
+             */
+            reported: components["schemas"]["ApprovalClient"];
+            /** @description The source address of the request. */
+            source: string;
+            /** @description `pending`, `approved`, `denied`, `consumed` or `expired`. */
+            state: string;
+        };
+        /**
          * @description The body of an approval: for a proposal that offers names (`choices`), which one the
          *     host takes and what to remember. Every member is optional; without a body the proposed
          *     name applies.
@@ -7924,6 +8088,14 @@ export interface components {
              */
             term: number;
         };
+        /**
+         * @description `POST /auth/approvals/lookup` and `POST /auth/approvals/{id}/approve`: the code the person
+         *     typed, `XXXX-XXXX-XXXX-XXXX` (case, spaces and hyphens do not matter).
+         */
+        CodeEntry: {
+            /** @description The code. */
+            code: components["schemas"]["SecretString"];
+        };
         /** @description Body of `GET /integrations/enrollments`. */
         CodeList: {
             /** @description Every code, newest first. */
@@ -7973,6 +8145,14 @@ export interface components {
             status: number;
             /** @description Short English summary. */
             title: string;
+        };
+        /** @description `POST /auth/approvals/{id}/collect`: the nonce signed with the script's key. */
+        CollectRequest: {
+            /**
+             * @description ECDSA P-256 with SHA-256 over [`super::collect_message`], `r` and `s` as 32 octets
+             *     each (64 octets), base64url.
+             */
+            signature: string;
         };
         /** @description What the analysis found in one column. */
         ColumnAnalysis: {
@@ -8657,6 +8837,33 @@ export interface components {
              */
             poll_interval_secs?: number | null;
         };
+        /** @description The answer to a collect, given once: the delegated session. */
+        DelegatedSession: {
+            /**
+             * Format: uuid
+             * @description The run it acts for.
+             */
+            delegation: string;
+            /**
+             * Format: date-time
+             * @description Its deadline, on Tenko's clock; the idle limit ends it earlier.
+             */
+            expires_at: string;
+            /**
+             * Format: int64
+             * @description The idle limit in seconds: a request at least this often keeps it alive.
+             */
+            idle_secs: number;
+            /** @description The bearer secret (`tnka_…`), for `Authorization: Bearer` only. */
+            secret: components["schemas"]["SecretString"];
+            /**
+             * Format: uuid
+             * @description The session's id, as the session list shows it.
+             */
+            session: string;
+        };
+        /** Format: uuid */
+        DelegationId: string;
         /**
          * @description Which soft-deleted objects a list returns (IPAM-09).
          * @enum {string}
@@ -18989,6 +19196,30 @@ export interface components {
             /** @description When the watcher first saw it. */
             detected_at: components["schemas"]["Timestamp"];
         };
+        /** @description A domain controller of the plan. */
+        PlanController: {
+            /** @description Its addresses as Active Directory reports them. */
+            addresses: string[];
+            /** @description Its name as Active Directory reports it. */
+            name: string;
+            /** @description Whether it is the PDC emulator: the one primary of Tenko's secondary zones. */
+            pdc?: boolean;
+        };
+        /**
+         * @description A forwarder Windows holds: a conditional forwarder for a zone, or the server's forwarders
+         *     for `.`.
+         */
+        PlanForwarder: {
+            /** @description The addresses it forwards to. */
+            servers: string[];
+            /** @description The zone it forwards; `.` for the server's forwarders. */
+            zone: string;
+        };
+        /**
+         * @description What a run does on Tenko (the Tenko column of plan section 2.16.1's phases).
+         * @enum {string}
+         */
+        PlanOperation: "mirrors" | "secondary_zones" | "forwarding_rules" | "update_policy" | "kerberos_adopt" | "prepare" | "flip" | "takeover" | "release";
         /** @description Options of one plan. */
         PlanOptions: {
             /**
@@ -19012,6 +19243,13 @@ export interface components {
              * @description HTTP status the code maps to.
              */
             status: number;
+        };
+        /** @description A server of the plan: a DHCP server or the mirror host. */
+        PlanServer: {
+            /** @description Its address. */
+            address: string;
+            /** @description Its name. */
+            name: string;
         };
         /** @description A human summary of a plan: counts per kind and action, warnings, and English lines. */
         PlanSummary: {
@@ -19460,6 +19698,7 @@ export interface components {
         };
         /** @description Who performs an action. */
         Principal: {
+            delegation?: components["schemas"]["DelegationId"] | null;
             /** @description The user. */
             id: components["schemas"]["UserId"];
             /** @enum {string} */
@@ -19941,6 +20180,11 @@ export interface components {
             /** @description The verified providers, in the order of their names. */
             items: components["schemas"]["PublicProvider"][];
         };
+        /**
+         * @description What an approval is for: one purpose today.
+         * @enum {string}
+         */
+        Purpose: "windows-takeover";
         /** @description One line of a node's query log. */
         QueryLogLine: {
             /** @description When the query arrived. */
@@ -24017,6 +24261,31 @@ export interface components {
             skipped?: components["schemas"]["SkippedItem"][];
             /** @description Where it ended. */
             state: components["schemas"]["TakeoverState"];
+        };
+        /** @description The plan of a run, as the script sends it with the approval request. */
+        TakeoverPlan: {
+            /** @description The domain controllers, exactly one of them the PDC emulator. */
+            controllers: components["schemas"]["PlanController"][];
+            /** @description The DHCP servers. */
+            dhcp_servers: components["schemas"]["PlanServer"][];
+            /** @description The domain (`corp.example.test`). */
+            domain: string;
+            /** @description The forest root, whose `_msdcs` zone the plan may name. */
+            forest_root: string;
+            /** @description Windows' conditional forwarders and server forwarders (`.`). */
+            forwarders?: components["schemas"]["PlanForwarder"][];
+            /** @description The member server the exporter runs on. */
+            mirror_host: components["schemas"]["PlanServer"];
+            /** @description The node's own host name, one label under the domain: its SOA `mname` and NS. */
+            node_name: string;
+            /** @description What the run does on Tenko, phase by phase. */
+            operations: components["schemas"]["PlanOperation"][];
+            /** @description The failover relationship of the DHCP servers, when they have one. */
+            relationship?: string | null;
+            /** @description The DHCPv4 scopes the run takes over. */
+            scopes: string[];
+            /** @description The zones the run takes over. */
+            zones: string[];
         };
         /**
          * @description Where a takeover ended (section 2.7, step 6, and section 2.10).
@@ -28536,6 +28805,444 @@ export interface operations {
             };
             /** @description No record has this sequence number */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    request_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalRequest"];
+            };
+        };
+        responses: {
+            /** @description The approval waits for a person */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalTicket"];
+                };
+            };
+            /** @description The listener does not serve the internal authority's root (`tls.no_internal_ca`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is larger than 64 KiB (`sys.body_too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is not JSON (`sys.invalid_request`) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body does not parse, or the plan is outside Tenko's limits; `params.reason` says which (`auth.approval.plan`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A bound was reached; `params.limit` is `spacing`, `source` or `pending` (`auth.approval.limit`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    look_up_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeEntry"];
+            };
+        };
+        responses: {
+            /** @description The approval the code belongs to */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalView"];
+                };
+            };
+            /** @description No valid session; a token is refused (`auth.unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), a delegated session (`auth.delegation.refused`), or the code matches no pending approval (`auth.approval.code`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The listener does not serve the internal authority's root (`tls.no_internal_ca`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The code matches more than one pending approval (`auth.approval.ambiguous`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The session's lookups are locked after five wrong codes (`auth.approval.limit`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    approve_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CodeEntry"];
+            };
+        };
+        responses: {
+            /** @description The approval, approved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalView"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session; a token is refused (`auth.unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), a delegated session (`auth.delegation.refused`), a wrong code (`auth.approval.code`), or the request was denied (`auth.approval.denied`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such approval (`auth.approval.not_found`), or no internal authority's root (`tls.no_internal_ca`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approval was decided before (`auth.approval.consumed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approval waited longer than ten minutes (`auth.approval.expired`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Another approval of the domain is open, or the session's lookups are locked (`auth.approval.limit`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    collect_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CollectRequest"];
+            };
+        };
+        responses: {
+            /** @description The delegated session, shown once */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DelegatedSession"];
+                };
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approver may no longer administer (`auth.unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The signature does not verify (`auth.approval.signature`), or the request was denied (`auth.approval.denied`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such approval from this address (`auth.approval.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The person has not decided yet (`auth.approval.pending`), or it was collected before (`auth.approval.consumed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approval's time is over (`auth.approval.expired`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The body is larger than 1 KiB (`sys.body_too_large`) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    deny_approval: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Approval identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The request was denied */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The identifier is not a UUID (`sys.invalid_value`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session; a token is refused (`auth.unauthenticated`) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Not an administrator (`auth.forbidden`), a delegated session (`auth.delegation.refused`), or denied before (`auth.approval.denied`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such approval (`auth.approval.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approval was approved before (`auth.approval.consumed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The approval waited longer than ten minutes (`auth.approval.expired`) */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The authentication service is not configured or not ready (`auth.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -44337,7 +45044,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`) */
+            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`) */
             403: {
                 headers: {
                     [name: string]: unknown;

@@ -76,6 +76,12 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/auth/tokens", "list_tokens"),
     ("POST", "/auth/tokens", "create_token"),
     ("DELETE", "/auth/tokens/{id}", "revoke_token"),
+    // The takeover script's approvals (ADR 0038).
+    ("POST", "/auth/approvals", "request_approval"),
+    ("POST", "/auth/approvals/lookup", "look_up_approval"),
+    ("POST", "/auth/approvals/{id}/approve", "approve_approval"),
+    ("POST", "/auth/approvals/{id}/deny", "deny_approval"),
+    ("POST", "/auth/approvals/{id}/collect", "collect_approval"),
     // users
     ("GET", "/users", "list_users"),
     ("POST", "/users", "create_user"),

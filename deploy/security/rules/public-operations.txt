@@ -80,3 +80,10 @@ GET /api/v1/auth/providers/public
 GET /api/v1/auth/oidc/{id}/start
 GET /api/v1/auth/oidc/{id}/callback
 GET /api/v1/auth/negotiate
+
+# The takeover script's approval (ADR 0038): the script asks for an approval with its plan
+# and its key before any person approved it, and collects the delegated session by signing
+# the nonce with that key. Bounded per source and in all; the collect answers only the key's
+# holder at the request's address, once, after a signed-in administrator typed the code.
+POST /api/v1/auth/approvals
+POST /api/v1/auth/approvals/{id}/collect

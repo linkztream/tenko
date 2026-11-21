@@ -113,6 +113,8 @@ const USER_AGENT_LIMIT: usize = 200;
 
 // WP13.0: the sign-in providers and the directory sign-in flows (`auth/providers.rs`).
 mod providers;
+// The takeover script's approvals (`auth/approvals.rs`, ADR 0038).
+mod approvals;
 
 pub(crate) fn routes() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -141,6 +143,8 @@ pub(crate) fn routes() -> OpenApiRouter<AppState> {
         .routes(routes!(revoke_token))
         // WP13.0: the sign-in providers and the directory sign-in flows.
         .merge(providers::routes())
+        // The takeover script's approvals (ADR 0038).
+        .merge(approvals::routes())
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1848,8 +1852,8 @@ mod tests {
             }
         }
         // WP13.0: the eleven operations of the providers and the directory sign-in; the six
-        // of the known devices.
-        assert_eq!(checked, 57, "every endpoint of the four areas");
+        // of the known devices; the five of the takeover script's approvals.
+        assert_eq!(checked, 62, "every endpoint of the four areas");
     }
 
     #[tokio::test]
@@ -3058,10 +3062,17 @@ mod tests {
             "start_oidc_login",
             "finish_oidc_login",
             "negotiate_login",
+            // The takeover script's request and collect (ADR 0038).
+            "request_approval",
+            "collect_approval",
         ];
         // What acts on the session, mints tokens or changes users, settings or factors needs an
         // interactive session: a personal token is refused.
         let session_only = [
+            // The person's lookup, approval and denial of a takeover script (ADR 0038).
+            "look_up_approval",
+            "approve_approval",
+            "deny_approval",
             // WP13.0: the providers are settings.
             "create_auth_provider",
             "update_auth_provider",
@@ -3175,8 +3186,8 @@ mod tests {
             }
         }
         // WP13.0: the eleven operations of the providers and the directory sign-in; the six
-        // of the known devices.
-        assert_eq!(operations, 57);
+        // of the known devices; the five of the takeover script's approvals.
+        assert_eq!(operations, 62);
         // Every schema the operations name exists, and so does everything those name.
         let mut pending: Vec<String> = refs.iter().cloned().collect();
         while let Some(name) = pending.pop() {

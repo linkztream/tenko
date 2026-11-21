@@ -2969,6 +2969,549 @@
         }
       }
     },
+    "/api/v1/auth/approvals": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Ask a person to approve a takeover script",
+        "description": "No credential. The takeover script's request (ADR 0038): the plan of its run, its P-256 public key and what it reports about itself, at most 64 KiB of strict JSON (unknown and duplicate fields refused). Tenko checks the plan against its own limits and answers the approval's id and a nonce, nothing else. Both sides then compute the approval code over the domain, the SHA-256 of the internal authority's root, the SHA-256 of this body as sent, the key and the id; the person types it on the approval page. At most two pending approvals per source address (an IPv6 /64), 64 in all, each for ten minutes; one request per source every 10 s. Audited as `auth.approval.request`, at most once a minute per source. A delegated session never reaches it.",
+        "operationId": "request_approval",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The approval waits for a person",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalTicket"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The listener does not serve the internal authority's root (`tls.no_internal_ca`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than 64 KiB (`sys.body_too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The body does not parse, or the plan is outside Tenko's limits; `params.reason` says which (`auth.approval.plan`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "A bound was reached; `params.limit` is `spacing`, `source` or `pending` (`auth.approval.limit`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/approvals/lookup": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Find the approval of a typed code",
+        "description": "An administrator's own session that signed in within the last five minutes (a passkey under Hardened). The code is compared in constant time with the code of every pending approval over this node's root; the answer is the request in full: the plan, the machine, user and version as the script reported them, and the source address. Five wrong codes from one browser session within ten minutes lock its lookups for ten minutes. A wrong code is audited as `auth.approval.refuse`, at most once a minute per session.",
+        "operationId": "look_up_approval",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The approval the code belongs to",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalView"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session; a token is refused (`auth.unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), a delegated session (`auth.delegation.refused`), or the code matches no pending approval (`auth.approval.code`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The listener does not serve the internal authority's root (`tls.no_internal_ca`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The code matches more than one pending approval (`auth.approval.ambiguous`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The session's lookups are locked after five wrong codes (`auth.approval.limit`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/approvals/{id}/approve": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Approve a takeover script's request",
+        "description": "An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. Audited as `auth.approval.approve` with the run.",
+        "operationId": "approve_approval",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Approval identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeEntry"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The approval, approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session; a token is refused (`auth.unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), a delegated session (`auth.delegation.refused`), a wrong code (`auth.approval.code`), or the request was denied (`auth.approval.denied`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such approval (`auth.approval.not_found`), or no internal authority's root (`tls.no_internal_ca`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The approval was decided before (`auth.approval.consumed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The approval waited longer than ten minutes (`auth.approval.expired`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Another approval of the domain is open, or the session's lookups are locked (`auth.approval.limit`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/approvals/{id}/collect": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Collect the delegated session of an approved request",
+        "description": "No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.",
+        "operationId": "collect_approval",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Approval identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CollectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The delegated session, shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DelegatedSession"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The approver may no longer administer (`auth.unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The signature does not verify (`auth.approval.signature`), or the request was denied (`auth.approval.denied`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such approval from this address (`auth.approval.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The person has not decided yet (`auth.approval.pending`), or it was collected before (`auth.approval.consumed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The approval's time is over (`auth.approval.expired`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is larger than 1 KiB (`sys.body_too_large`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": []
+      }
+    },
+    "/api/v1/auth/approvals/{id}/deny": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Deny a takeover script's request",
+        "description": "An administrator's own session. Audited as `auth.approval.deny`.",
+        "operationId": "deny_approval",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Approval identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The request was denied"
+          },
+          "400": {
+            "description": "The identifier is not a UUID (`sys.invalid_value`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session; a token is refused (`auth.unauthenticated`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not an administrator (`auth.forbidden`), a delegated session (`auth.delegation.refused`), or denied before (`auth.approval.denied`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such approval (`auth.approval.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The approval was approved before (`auth.approval.consumed`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "The approval waited longer than ten minutes (`auth.approval.expired`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The authentication service is not configured or not ready (`auth.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/known-devices": {
       "get": {
         "tags": [
@@ -23878,7 +24421,7 @@
           "migrate"
         ],
         "summary": "Create a mirrored source",
-        "description": "Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
+        "description": "Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
         "operationId": "create_mirror",
         "requestBody": {
           "content": {
@@ -23922,7 +24465,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)",
+            "description": "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -43466,6 +44009,129 @@
           }
         }
       },
+      "ApprovalClient": {
+        "type": "object",
+        "description": "What the script reports about itself, shown to the person labeled as reported. ASCII\nonly and bounded, so that no direction mark or look-alike character reaches the page.",
+        "required": [
+          "machine",
+          "user",
+          "version"
+        ],
+        "properties": {
+          "machine": {
+            "type": "string",
+            "description": "The machine's name: a `NetBIOS` or DNS label."
+          },
+          "user": {
+            "type": "string",
+            "description": "The Windows user: `DOMAIN\\sAMAccountName`."
+          },
+          "version": {
+            "type": "string",
+            "description": "The script's version."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApprovalRequest": {
+        "type": "object",
+        "description": "`POST /auth/approvals`: a script's request.",
+        "required": [
+          "purpose",
+          "plan",
+          "key",
+          "client"
+        ],
+        "properties": {
+          "client": {
+            "$ref": "#/components/schemas/ApprovalClient",
+            "description": "What the script reports about itself."
+          },
+          "key": {
+            "type": "string",
+            "description": "The script's P-256 public key, the 65-octet uncompressed point in base64url."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/TakeoverPlan",
+            "description": "The plan of the run, which fixes everything the run may create or change."
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/Purpose",
+            "description": "What the approval is for."
+          }
+        },
+        "additionalProperties": false
+      },
+      "ApprovalTicket": {
+        "type": "object",
+        "description": "The answer to a request: the id and the nonce the collect signs; nothing else.",
+        "required": [
+          "id",
+          "nonce"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The approval's id, hyphenated lower case."
+          },
+          "nonce": {
+            "type": "string",
+            "description": "32 random octets in base64url."
+          }
+        }
+      },
+      "ApprovalView": {
+        "type": "object",
+        "description": "An approval as the person reads it before approving.",
+        "required": [
+          "id",
+          "purpose",
+          "plan",
+          "reported",
+          "source",
+          "created_at",
+          "expires_at",
+          "state"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the request arrived."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it expires unless collected."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The id."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/TakeoverPlan",
+            "description": "The plan in full."
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/Purpose",
+            "description": "What it is for."
+          },
+          "reported": {
+            "$ref": "#/components/schemas/ApprovalClient",
+            "description": "The machine, the Windows user and the version, as the script reported them: shown\nlabeled as reported, as text."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source address of the request."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `approved`, `denied`, `consumed` or `expired`."
+          }
+        }
+      },
       "ApproveRequest": {
         "type": "object",
         "description": "The body of an approval: for a proposal that offers names (`choices`), which one the\nhost takes and what to remember. Every member is optional; without a body the proposed\nname applies.",
@@ -46290,6 +46956,20 @@
           }
         }
       },
+      "CodeEntry": {
+        "type": "object",
+        "description": "`POST /auth/approvals/lookup` and `POST /auth/approvals/{id}/approve`: the code the person\ntyped, `XXXX-XXXX-XXXX-XXXX` (case, spaces and hyphens do not matter).",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The code."
+          }
+        },
+        "additionalProperties": false
+      },
       "CodeList": {
         "type": "object",
         "description": "Body of `GET /integrations/enrollments`.",
@@ -46425,6 +47105,20 @@
             "description": "Short English summary."
           }
         }
+      },
+      "CollectRequest": {
+        "type": "object",
+        "description": "`POST /auth/approvals/{id}/collect`: the nonce signed with the script's key.",
+        "required": [
+          "signature"
+        ],
+        "properties": {
+          "signature": {
+            "type": "string",
+            "description": "ECDSA P-256 with SHA-256 over [`super::collect_message`], `r` and `s` as 32 octets\neach (64 octets), base64url."
+          }
+        },
+        "additionalProperties": false
       },
       "ColumnAnalysis": {
         "type": "object",
@@ -48191,6 +48885,48 @@
           }
         },
         "additionalProperties": false
+      },
+      "DelegatedSession": {
+        "type": "object",
+        "description": "The answer to a collect, given once: the delegated session.",
+        "required": [
+          "secret",
+          "session",
+          "delegation",
+          "expires_at",
+          "idle_secs"
+        ],
+        "properties": {
+          "delegation": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run it acts for."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Its deadline, on Tenko's clock; the idle limit ends it earlier."
+          },
+          "idle_secs": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The idle limit in seconds: a request at least this often keeps it alive.",
+            "minimum": 0
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretString",
+            "description": "The bearer secret (`tnka_…`), for `Authorization: Bearer` only."
+          },
+          "session": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The session's id, as the session list shows it."
+          }
+        }
+      },
+      "DelegationId": {
+        "type": "string",
+        "format": "uuid"
       },
       "Deleted": {
         "type": "string",
@@ -73803,6 +74539,69 @@
           }
         }
       },
+      "PlanController": {
+        "type": "object",
+        "description": "A domain controller of the plan.",
+        "required": [
+          "name",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Its addresses as Active Directory reports them."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name as Active Directory reports it."
+          },
+          "pdc": {
+            "type": "boolean",
+            "description": "Whether it is the PDC emulator: the one primary of Tenko's secondary zones."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanForwarder": {
+        "type": "object",
+        "description": "A forwarder Windows holds: a conditional forwarder for a zone, or the server's forwarders\nfor `.`.",
+        "required": [
+          "zone",
+          "servers"
+        ],
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses it forwards to."
+          },
+          "zone": {
+            "type": "string",
+            "description": "The zone it forwards; `.` for the server's forwarders."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PlanOperation": {
+        "type": "string",
+        "description": "What a run does on Tenko (the Tenko column of plan section 2.16.1's phases).",
+        "enum": [
+          "mirrors",
+          "secondary_zones",
+          "forwarding_rules",
+          "update_policy",
+          "kerberos_adopt",
+          "prepare",
+          "flip",
+          "takeover",
+          "release"
+        ]
+      },
       "PlanOptions": {
         "type": "object",
         "description": "Options of one plan.",
@@ -73851,6 +74650,25 @@
             "minimum": 0
           }
         }
+      },
+      "PlanServer": {
+        "type": "object",
+        "description": "A server of the plan: a DHCP server or the mirror host.",
+        "required": [
+          "name",
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Its address."
+          },
+          "name": {
+            "type": "string",
+            "description": "Its name."
+          }
+        },
+        "additionalProperties": false
       },
       "PlanSummary": {
         "type": "object",
@@ -75237,6 +76055,17 @@
               "kind"
             ],
             "properties": {
+              "delegation": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/DelegationId",
+                    "description": "The run a takeover script acts for through this session, when the session is a\ndelegated one (ADR 0038): the approver acting through the script. Absent in every\nother session and in records written before it."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "id": {
                 "$ref": "#/components/schemas/UserId",
                 "description": "The user."
@@ -76535,6 +77364,13 @@
             "description": "The verified providers, in the order of their names."
           }
         }
+      },
+      "Purpose": {
+        "type": "string",
+        "description": "What an approval is for: one purpose today.",
+        "enum": [
+          "windows-takeover"
+        ]
       },
       "QueryLogLine": {
         "type": "object",
@@ -85787,6 +86623,89 @@
             "description": "Where it ended."
           }
         }
+      },
+      "TakeoverPlan": {
+        "type": "object",
+        "description": "The plan of a run, as the script sends it with the approval request.",
+        "required": [
+          "domain",
+          "forest_root",
+          "controllers",
+          "zones",
+          "dhcp_servers",
+          "scopes",
+          "mirror_host",
+          "node_name",
+          "operations"
+        ],
+        "properties": {
+          "controllers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanController"
+            },
+            "description": "The domain controllers, exactly one of them the PDC emulator."
+          },
+          "dhcp_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanServer"
+            },
+            "description": "The DHCP servers."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain (`corp.example.test`)."
+          },
+          "forest_root": {
+            "type": "string",
+            "description": "The forest root, whose `_msdcs` zone the plan may name."
+          },
+          "forwarders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanForwarder"
+            },
+            "description": "Windows' conditional forwarders and server forwarders (`.`)."
+          },
+          "mirror_host": {
+            "$ref": "#/components/schemas/PlanServer",
+            "description": "The member server the exporter runs on."
+          },
+          "node_name": {
+            "type": "string",
+            "description": "The node's own host name, one label under the domain: its SOA `mname` and NS."
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlanOperation"
+            },
+            "description": "What the run does on Tenko, phase by phase."
+          },
+          "relationship": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The failover relationship of the DHCP servers, when they have one."
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The DHCPv4 scopes the run takes over."
+          },
+          "zones": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The zones the run takes over."
+          }
+        },
+        "additionalProperties": false
       },
       "TakeoverState": {
         "type": "string",

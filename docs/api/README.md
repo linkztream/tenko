@@ -17,6 +17,50 @@ Every operation states what it needs to be called, so a reader or a client gener
 
 When you add a route, decide from the handler, not from its path. Three tests in `crates/tenko-api/src/routes/tests.rs` hold the document to the server: `every_operation_declares_its_security_requirement` names every public operation, so a new one must be added there on purpose; `an_anonymous_request_is_refused_on_every_operation_but_the_public_ones` calls each operation without credentials; and `a_personal_token_is_refused_exactly_on_the_session_only_operations_without_a_body` calls each operation that takes no request body with an administrator's token.
 
+### A delegated session
+
+A takeover script (ADR 0038) acts through a delegated session: a session of the administrator who approved its request (`POST /auth/approvals`, `.../lookup`, `.../{id}/approve`, `.../{id}/collect`), presented as `Authorization: Bearer tnka_…` from the request's address only. The document does not mark it as a scheme of its own, because it is not one: it is a session that reaches only the (method, route) pairs of `tenko_auth::delegation::TAKEOVER`, each with a condition, and the authentication layer answers every other operation 403 `auth.delegation.refused` before its handler runs. A listed handler checks its body against the run's plan as well. A route is outside the list until it is added there on purpose with its plan check; `a_delegated_session_reaches_its_allow_list_and_nothing_else` in `crates/tenko-api/src/routes/tests.rs` calls every operation of the document with a delegated session and fails on any other answer.
+
+### The takeover script's approval: the contract
+
+What a takeover script and Tenko must agree on byte for byte. The test vector `crates/tenko-auth/tests/fixtures/approval-code.json` gives every input and intermediate value of the code and the collect; the OpenAPI document gives the schemas. Paths are below `/api/v1`. Octet strings in base64url are RFC 4648 section 5 without padding. Every refusal is `application/problem+json` with `code`, `status` and `params`.
+
+| Method and path | Credential | Request body | Answer |
+|---|---|---|---|
+| `POST /auth/approvals` | none | the request below, at most 65,536 octets | 201 `{"id": "<uuid>", "nonce": "<base64url of 32 octets>"}` |
+| `POST /auth/approvals/lookup` | an administrator's session cookie, signed in within 5 minutes | `{"code": "<typed code>"}` | 200 the approval: `id`, `purpose`, `plan`, `reported` (`machine`, `user`, `version`), `source`, `created_at`, `expires_at`, `state` |
+| `POST /auth/approvals/{id}/approve` | the same | `{"code": "<typed code>"}` | 200 the approval, `state` `approved` |
+| `POST /auth/approvals/{id}/deny` | an administrator's session cookie | none | 204 |
+| `POST /auth/approvals/{id}/collect` | none; the request's source address | `{"signature": "<base64url of 64 octets>"}`, at most 1,024 octets | 200 `{"secret": "tnka_<43 characters>", "session": "<uuid>", "delegation": "<uuid>", "expires_at": "<RFC 3339>", "idle_secs": 900}`, once, with `Cache-Control: no-store` |
+
+**The request.** `Content-Type: application/json`, one object with exactly the fields `purpose` (`"windows-takeover"`), `plan`, `key` and `client`; an unknown or repeated field is refused. `key` is the base64url of the 65-octet uncompressed P-256 point (`0x04 || X || Y`). `client` is `{"machine": <a host label, at most 63 ASCII letters, digits and hyphens>, "user": <a NetBIOS domain of at most 15 such characters, "\", an account name of 1 to 20 ASCII letters, digits, ".", "_" or "-">, "version": <1 to 32 ASCII letters, digits, ".", "+" or "-">}`. `plan` is `domain`, `forest_root`, `controllers` (`[{"name", "addresses", "pdc"}]`, 1 to 16, exactly one `pdc: true`, 1 to 8 addresses each), `zones` (1 to 64: the domain, `_msdcs.<forest_root>`, and reverse zones on octet boundaries that cover a scope or lie inside one), `forwarders` (`[{"zone", "servers"}]`, at most 64, 1 to 8 servers each; `"."` for the server forwarders), `dhcp_servers` (`[{"name", "address"}]`, at most 32), `relationship` (optional, 1 to 64 printable ASCII characters), `scopes` (at most 256 IPv4 networks without host bits, `"192.0.2.0/24"`), `mirror_host` (`{"name", "address"}`, not a controller), `node_name` (one host label, not `wpad`, `isatap` or `localhost`) and `operations` (one or more of `mirrors`, `secondary_zones`, `forwarding_rules`, `update_policy`, `kerberos_adopt`, `prepare`, `flip`, `takeover`, `release`, each once). Names are DNS names, compared and hashed in lower case without a trailing dot; nothing is listed twice.
+
+**The code.** `code = Crockford-base32(first 80 bits of SHA-256(C || 0x00 || L || D || R || H || K || I))`, where `C` is the 26 ASCII octets `tenko-takeover-approval-v1`, `D` the plan's domain in canonical form (lower-case ASCII, no trailing dot) and `L` its length in one octet, `R` the 32-octet SHA-256 of the DER of the self-signed root of the TLS chain the script built by signature verification, `H` the 32-octet SHA-256 of the request body exactly as sent (every octet of the HTTP body), `K` the 65 octets of the key and `I` the 16 octets of the approval id in RFC 9562 order. The 80 bits are written as 16 characters of `0123456789ABCDEFGHJKMNPQRSTVWXYZ`, five bits each, most significant first, in four groups of four joined by `-`: `G5E3-J50W-RFA4-J4B6`. Tenko computes it over the SHA-256 of the internal authority's root; in another TLS mode the request, the lookup and the approval answer 404 `tls.no_internal_ca`.
+
+**Typing the code.** Tenko drops spaces and `-`, reads the rest in upper case with `O` as `0` and `I` and `L` as `1`, and then needs exactly 16 characters of the alphabet; input longer than 64 octets is refused. It compares the result in constant time with the code of every pending approval.
+
+**The collect.** The signature is ECDSA P-256 with SHA-256 over `M = C' || 0x00 || I || N`, where `C'` is the 25 ASCII octets `tenko-takeover-collect-v1`, `I` the 16 octets of the id and `N` the 32 octets of the nonce, written as `r || s` of 32 octets each (IEEE P1363, what `ECDsa.SignData` writes). Only a request from the approval request's source address is answered.
+
+**The delegated session.** `Authorization: Bearer tnka_…`, from the approval request's source address only; never a cookie. It lives until `expires_at` (at most eight hours after the approval) and ends after `idle_secs` without a request, both on Tenko's clock; `POST /auth/logout` ends it. It reaches only the operations of `tenko_auth::delegation::TAKEOVER`; every other operation answers 403 `auth.delegation.refused`, and from another address it is 401 `auth.unauthenticated`.
+
+**Codes.**
+
+| Code | Status | When |
+|---|---|---|
+| `auth.approval.plan` | 422 | the request does not parse, or the plan is outside the limits; `params.reason` |
+| `auth.approval.limit` | 429 | `params.limit`: `spacing` (one request per source every 10 s), `source` (two pending per IPv4 address or IPv6 /64), `pending` (64 in all), `lookups` (five wrong codes from one browser session in ten minutes lock it for ten), `domain` (another approval of the domain is approved or has a live session) |
+| `auth.approval.code` | 403 | the typed code matches no pending approval |
+| `auth.approval.ambiguous` | 409 | the typed code matches more than one |
+| `auth.approval.not_found` | 404 | no such approval, or a collect from another address |
+| `auth.approval.signature` | 403 | the collect's signature does not verify, or its body is not one signature of 64 octets |
+| `auth.approval.pending` | 409 | the collect came before the person decided; ask again |
+| `auth.approval.denied` | 403 | the person denied it |
+| `auth.approval.consumed` | 409 | approved or collected before |
+| `auth.approval.expired` | 410 | ten minutes after the request on Tenko's clock, or later than the delegated session could live |
+| `auth.delegation.refused` | 403 | a delegated session outside its allow-list, behind a recent sign-in, or with a body outside its plan |
+| `tls.no_internal_ca` | 404 | the API listener does not serve the internal authority's root |
+| `sys.body_too_large` | 413 | a request body above 64 KiB, a collect body above 1 KiB |
+
 ## Retries and the Idempotency-Key
 
 A `POST` that carries an `Idempotency-Key` header (a key the client chooses) can be retried safely: the server keeps the first successful answer for 24 hours and answers a retry with the same key and the same request (method, path and query, content type and body) with that answer and `Idempotency-Replayed: true`. Keys belong to the principal: a session user and each of the user's personal tokens have their own. The middleware is `crates/tenko-api/src/middleware/idempotency.rs`; its module documentation is the reference.

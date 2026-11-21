@@ -527,14 +527,14 @@ async fn list_mirrors(
     tag = "migrate",
     operation_id = "create_mirror",
     summary = "Create a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
     request_body(content = MirrorCreate, content_type = "application/json"),
     security(("session" = [])),
     responses(
         (status = 201, description = "The mirror and its token", body = MirrorCreated),
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The installation holds 32 mirrors (`migrate.mirror.limit`), or an account of the service account's name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -542,10 +542,24 @@ async fn create_mirror(
     State(app): State<AppState>,
     mirrors: Mirrors,
     ca_root: CaRoot,
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     Ctx(cx): Ctx,
     ApiJson(body): ApiJson<MirrorCreate>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Mirror))?;
+    // ADR 0038: a takeover script's delegated session creates only the mirrors of its plan.
+    if cx.principal.delegation().is_some() {
+        let refused = || ApiError::from(tenko_auth::AuthError::DelegationRefused);
+        let plan = auth.ok_or_else(refused)?.delegation_plan(&cx).await?;
+        if !tenko_auth::delegation::mirror_in_plan(
+            &plan,
+            &body.name,
+            body.kind.as_str(),
+            &body.source_prefixes,
+        ) {
+            return Err(refused());
+        }
+    }
     let service = service(mirrors, "POST", "/migrate/mirrors")?;
     let new = NewMirror {
         name: body.name,

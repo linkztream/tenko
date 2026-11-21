@@ -14,9 +14,10 @@ use tenko_store::Store;
 
 use super::auth::testkit::{Credential, Credential::*, Harness, Reply};
 use crate::{API_BASE, modules::ModuleSet};
+use tenko_auth::testing::approval::{ROOT_SHA256, Script};
 
 /// The operations anybody may call: their handlers take no `Ctx`.
-const PUBLIC: [&str; 20] = [
+const PUBLIC: [&str; 22] = [
     "GET /auth/negotiate",
     "GET /auth/oidc/{id}/callback",
     "GET /auth/oidc/{id}/start",
@@ -29,6 +30,8 @@ const PUBLIC: [&str; 20] = [
     "GET /openapi.json",
     "GET /setup",
     "GET /system/ca-root",
+    "POST /auth/approvals",
+    "POST /auth/approvals/{id}/collect",
     "POST /auth/login/password",
     "POST /auth/login/recovery",
     "POST /auth/login/totp",
@@ -106,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 460, "every operation of the document");
+    assert_eq!(all.len(), 465, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -116,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        103,
+        106,
         "the session-only operations"
     );
     assert_eq!(
@@ -271,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        460 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        465 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -334,4 +337,370 @@ async fn a_personal_token_is_refused_exactly_on_the_session_only_operations_with
         sessions_only > 25,
         "only {sessions_only} session-only operations"
     );
+}
+
+/// The address the takeover script of the tests runs on.
+const SCRIPT: &str = "192.0.2.10";
+
+/// The API listener's router as the server builds it (its authentication layer, the
+/// allow-list of delegated sessions in it), over an installation like [`installation`]'s,
+/// with the internal authority's root of the test script's codes, and the secret of the
+/// administrator's session.
+async fn served() -> (TestEnv, String, axum::Router) {
+    use tenko_cluster::ca::{TlsMode, TlsPolicy, TlsService};
+    let env = TestEnv::new().await;
+    env.clock.set(Timestamp::now());
+    let admin = env
+        .setup(Profile::Home)
+        .await
+        .expect("setup succeeds")
+        .secret
+        .expose()
+        .to_owned();
+    let store: Arc<dyn Store> = env.store.clone();
+    let ipam = IpamService::with_direct_jobs(Arc::clone(&store)).expect("ipam");
+    let mirrors = Arc::new(tenko_migrate::mirror::MirrorService::new(
+        store,
+        Arc::clone(&env.service),
+    ));
+    let mut state = crate::state::AppState::new(env.store.clone());
+    let authenticator: Arc<dyn tenko_core::Authenticator> = env.service.clone();
+    state.auth = Some(authenticator);
+    state.authorizer = Some(env.service.authorizer());
+    let http = crate::middleware::HttpConfig {
+        rate_limit: crate::middleware::RateLimitConfig {
+            enabled: false,
+            ..crate::middleware::RateLimitConfig::default()
+        },
+        ..crate::middleware::HttpConfig::default()
+    };
+    let root = crate::routes::system::CaRootSource::new(
+        TlsService::new(TlsMode::InternalCa, TlsPolicy::default()).expect("tls"),
+        "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n",
+        tenko_auth::encoding::hex_encode(&ROOT_SHA256),
+    );
+    let app = crate::server::app(state, &http, &crate::ui::UiSource::Embedded)
+        .expect("the application")
+        .layer(Extension(ipam))
+        .layer(Extension(mirrors))
+        .layer(Extension(Arc::new(root)))
+        .layer(Extension(Arc::clone(&env.service)));
+    (env, admin, app)
+}
+
+/// A request over TLS from `address`, as the listener hands it on: the session cookie under
+/// its HTTPS name, the origin of the installation, a body sent exactly as given.
+fn from(
+    address: &str,
+    method: &str,
+    path: &str,
+    credential: Credential<'_>,
+    body: Option<&str>,
+) -> axum::http::Request<axum::body::Body> {
+    use axum::http::header;
+    let mut builder = axum::http::Request::builder()
+        .method(method)
+        .uri(format!("{API_BASE}{path}"))
+        .header(header::HOST, tenko_auth::testing::env::HOST)
+        .header(header::ORIGIN, tenko_auth::testing::env::ORIGIN);
+    builder = match credential {
+        Anonymous => builder,
+        Cookie(secret) => builder.header(
+            header::COOKIE,
+            format!("{}={secret}", tenko_auth::service::HOST_SESSION_COOKIE),
+        ),
+        Bearer(token) => builder.header(header::AUTHORIZATION, format!("Bearer {token}")),
+    };
+    let mut request = match body {
+        Some(body) => builder
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(axum::body::Body::from(body.to_owned())),
+        None => builder.body(axum::body::Body::empty()),
+    }
+    .expect("a request");
+    request
+        .extensions_mut()
+        .insert(crate::server::forwarded::ConnInfo {
+            peer: std::net::SocketAddr::new(address.parse().expect("an address"), 50_000),
+            tls: true,
+            mode: Arc::new(tenko_cluster::ca::TlsMode::InternalCa),
+            trusted: false,
+            proxy: None,
+            client: None,
+        });
+    request
+}
+
+async fn send(app: &axum::Router, request: axum::http::Request<axum::body::Body>) -> Reply {
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        super::auth::testkit::send_to(app.clone(), request),
+    )
+    .await
+    .expect("an answer")
+}
+
+fn delegation_refused(reply: &Reply) -> bool {
+    reply.status.as_u16() == 403 && reply.body["code"] == "auth.delegation.refused"
+}
+
+/// ADR 0038 (E145): within its first five minutes, a delegated session is refused on every
+/// operation of the served document outside its allow-list, every `/auth/*` operation and
+/// every account self-service operation among them, before any handler; a listed operation
+/// is not refused for being delegated. Its own sign-out ends it.
+#[tokio::test]
+async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
+    let (env, admin, app) = served().await;
+    let admin = env
+        .ctx_for(&tenko_core::Credentials::Session(admin))
+        .await
+        .expect("the administrator");
+    let session = env
+        .delegate(
+            &admin,
+            &Script::default(),
+            SCRIPT.parse().expect("an address"),
+        )
+        .await
+        .expect("a delegated session");
+    let secret = session.secret.expose().to_owned();
+    let listed: BTreeSet<String> = tenko_auth::delegation::TAKEOVER
+        .iter()
+        .map(|entry| format!("{} {}", entry.method, entry.route))
+        .collect();
+    let all: BTreeSet<String> = operations().into_iter().map(|(key, _, _)| key).collect();
+    assert!(listed.is_subset(&all), "every listed route is an operation");
+    let mut wrong = Vec::new();
+    let mut refused = 0_usize;
+    for (key, _, operation) in operations() {
+        if key == "POST /auth/logout" {
+            continue;
+        }
+        let (method, path) = concrete(&key, &operation);
+        let body = operation.get("requestBody").map(|_| "{}");
+        let reply = send(&app, from(SCRIPT, &method, &path, Bearer(&secret), body)).await;
+        match (listed.contains(&key), delegation_refused(&reply)) {
+            (false, true) => refused += 1,
+            (true, false) => {}
+            _ => wrong.push(format!("{key}: {} {}", reply.status, reply.text)),
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert_eq!(refused, all.len() - listed.len());
+    // From another address it is an unknown session, on a listed operation too (a public one
+    // answers as to anybody).
+    let elsewhere = send(
+        &app,
+        from("192.0.2.99", "POST", "/auth/logout", Bearer(&secret), None),
+    )
+    .await;
+    assert!(refused_as_unauthenticated(&elsewhere), "{}", elsewhere.text);
+    send(
+        &app,
+        from(SCRIPT, "POST", "/auth/logout", Bearer(&secret), None),
+    )
+    .await
+    .assert_status(204);
+    let ended = send(
+        &app,
+        from(SCRIPT, "POST", "/auth/logout", Bearer(&secret), None),
+    )
+    .await;
+    assert!(refused_as_unauthenticated(&ended), "{}", ended.text);
+}
+
+/// Without the server's middleware the extractor of every handler holds the allow-list too.
+#[tokio::test]
+async fn the_request_context_holds_the_allow_list_too() {
+    let (harness, admin) = installation().await;
+    let admin = harness
+        .env
+        .ctx_for(&tenko_core::Credentials::Session(admin))
+        .await
+        .expect("the administrator");
+    let session = harness
+        .env
+        .delegate(
+            &admin,
+            &Script::default(),
+            SCRIPT.parse().expect("an address"),
+        )
+        .await
+        .expect("a delegated session");
+    let mut request = super::auth::testkit::request(
+        "GET",
+        "/auth/session",
+        Bearer(session.secret.expose()),
+        None,
+        &[],
+    );
+    request.extensions_mut().insert(crate::extract::ClientInfo {
+        source_ip: Some(SCRIPT.parse().expect("an address")),
+        ..crate::extract::ClientInfo::default()
+    });
+    harness
+        .send(request)
+        .await
+        .assert_problem(403, "auth.delegation.refused");
+}
+
+/// ADR 0038 over HTTP: the request, the code, the approval, the collect, and the one listed
+/// operation behind a recent sign-in, the mirror creation, for the plan's servers within five
+/// minutes of the approval only.
+#[tokio::test]
+#[allow(clippy::too_many_lines)] // One script from its request to its mirrors.
+async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
+    let (env, admin, app) = served().await;
+    let script = Script::default();
+    let body = script.request();
+    let ticket = send(
+        &app,
+        from(SCRIPT, "POST", "/auth/approvals", Anonymous, Some(&body)),
+    )
+    .await;
+    ticket.assert_status(201);
+    let ticket: tenko_auth::approval::ApprovalTicket = ticket.parse();
+    let code = json!({ "code": script.code(&body, ticket.id) }).to_string();
+    let wrong = json!({ "code": "0000-0000-0000-0000" }).to_string();
+    let lookup = "/auth/approvals/lookup";
+    send(
+        &app,
+        from(SCRIPT, "POST", lookup, Cookie(&admin), Some(&wrong)),
+    )
+    .await
+    .assert_problem(403, "auth.approval.code");
+    let found = send(
+        &app,
+        from(SCRIPT, "POST", lookup, Cookie(&admin), Some(&code)),
+    )
+    .await;
+    found.assert_status(200);
+    assert_eq!(found.body["plan"]["domain"], "corp.example.test");
+    let approve = format!("/auth/approvals/{}/approve", ticket.id);
+    let collect = format!("/auth/approvals/{}/collect", ticket.id);
+    let signed = script.collect(&ticket);
+    send(
+        &app,
+        from(SCRIPT, "POST", &collect, Anonymous, Some(&signed)),
+    )
+    .await
+    .assert_problem(409, "auth.approval.pending");
+    send(
+        &app,
+        from(SCRIPT, "POST", &approve, Cookie(&admin), Some(&code)),
+    )
+    .await
+    .assert_status(200);
+    send(
+        &app,
+        from("192.0.2.99", "POST", &collect, Anonymous, Some(&signed)),
+    )
+    .await
+    .assert_problem(404, "auth.approval.not_found");
+    let collected = send(
+        &app,
+        from(SCRIPT, "POST", &collect, Anonymous, Some(&signed)),
+    )
+    .await;
+    collected.assert_status(200);
+    assert_eq!(collected.header("cache-control"), Some("no-store"));
+    send(
+        &app,
+        from(SCRIPT, "POST", &collect, Anonymous, Some(&signed)),
+    )
+    .await
+    .assert_problem(409, "auth.approval.consumed");
+    let secret = collected.body["secret"]
+        .as_str()
+        .expect("the secret")
+        .to_owned();
+    let mirror = |name: &str, prefix: &str| {
+        json!({ "name": name, "kind": "windows-dhcp", "source_prefixes": [prefix] }).to_string()
+    };
+    let mirrors = "/migrate/mirrors";
+    for outside in [
+        mirror("dhcp9.corp.example.test", "192.0.2.30/32"),
+        mirror("dhcp1.corp.example.test", "192.0.2.0/24"),
+    ] {
+        send(
+            &app,
+            from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&outside)),
+        )
+        .await
+        .assert_problem(403, "auth.delegation.refused");
+    }
+    let inside = mirror("dhcp1.corp.example.test", "192.0.2.30/32");
+    send(
+        &app,
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&inside)),
+    )
+    .await
+    .assert_status(201);
+    // Six minutes after the approval, on Tenko's clock, the mirror creation is closed.
+    let view = env
+        .store
+        .read(tenko_store::ReadConsistency::Local)
+        .await
+        .expect("a view");
+    let hash = tenko_auth::secret::hash_secret(&secret);
+    let (mut record, _) =
+        tenko_store::ReadViewExt::get_typed(view.as_ref(), &tenko_auth::model::SESSIONS, &hash)
+            .expect("read")
+            .expect("the session");
+    let delegated = record.delegation.as_mut().expect("delegated");
+    delegated.approved_at = Timestamp::now()
+        .checked_sub(Duration::from_secs(360))
+        .expect("a time");
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        Timestamp::now(),
+    );
+    batch
+        .put_typed(&tenko_auth::model::SESSIONS, &hash, &record)
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+    let late = mirror("dhcp2.corp.example.test", "192.0.2.30/32");
+    send(
+        &app,
+        from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&late)),
+    )
+    .await
+    .assert_problem(403, "auth.delegation.refused");
+}
+
+/// The two public operations of the approval are bounded: a request body above 64 KiB and a
+/// collect body above 1 KiB are refused, and one source asks at most once every ten seconds
+/// while another source is not held up by it.
+#[tokio::test]
+async fn the_public_approval_operations_are_bounded_and_paced_per_source() {
+    let (_env, _, app) = served().await;
+    let large = format!(
+        "{{{}}}",
+        " ".repeat(tenko_auth::approval::MAX_REQUEST_BYTES)
+    );
+    send(
+        &app,
+        from(SCRIPT, "POST", "/auth/approvals", Anonymous, Some(&large)),
+    )
+    .await
+    .assert_problem(413, "sys.body_too_large");
+    let collect = format!(
+        "/auth/approvals/{}/collect",
+        tenko_core::ApprovalId::generate()
+    );
+    let signature = format!("{{\"signature\":\"{}\"}}", "A".repeat(1_024));
+    send(
+        &app,
+        from(SCRIPT, "POST", &collect, Anonymous, Some(&signature)),
+    )
+    .await
+    .assert_problem(413, "sys.body_too_large");
+    let body = Script::default().request();
+    let ask =
+        |source: &'static str| from(source, "POST", "/auth/approvals", Anonymous, Some(&body));
+    send(&app, ask("192.0.2.20")).await.assert_status(201);
+    let again = send(&app, ask("192.0.2.20")).await;
+    again.assert_problem(429, "auth.approval.limit");
+    assert_eq!(again.body["params"]["limit"], "spacing");
+    send(&app, ask("192.0.2.21")).await.assert_status(201);
 }

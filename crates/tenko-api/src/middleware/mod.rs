@@ -11,7 +11,8 @@
 //!   authentication, so it shields the login path), authentication through the
 //!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request, with the
 //!   session cookie of the request's scheme only, as `Ctx` reads it; the outcome goes to
-//!   [`AuthOutcome`] for `Ctx`), the per-principal rate limit, the quorum
+//!   [`AuthOutcome`] for `Ctx`), the allow-list of a delegated session (ADR 0038, 403
+//!   `auth.delegation.refused` outside it), the per-principal rate limit, the quorum
 //!   gate of an isolated controller ([`quorum`]), the `Idempotency-Key` replay
 //!   ([`idempotency`]), `Cache-Control: no-store` on API responses that set no caching
 //!   themselves, and `Tenko-Staleness` on every answer of a controller without quorum.
@@ -49,7 +50,7 @@ pub use idempotency::IdempotencyConfig;
 pub use rate_limit::{LimitScope, Quota, RateLimitConfig, RateLimiter, RetryAfter};
 
 use crate::{
-    extract::{AuthOutcome, ClientInfo, credentials_of, placeholder_principal},
+    extract::{AuthOutcome, ClientInfo, credentials_of, delegation_admits, placeholder_principal},
     problem::{ApiError, codes},
     server::forwarded::{ConnInfo, UnstatedScheme, resolve},
     state::AppState,
@@ -298,7 +299,22 @@ async fn guard(layers: &Layers, request: &mut Request) -> Option<Response> {
         .as_ref()
         .ok()
         .map(|authenticated| authenticated.principal.subject());
+    let delegated = outcome
+        .as_ref()
+        .ok()
+        .and_then(|authenticated| authenticated.flags.delegation);
     request.extensions_mut().insert(AuthOutcome(outcome));
+    // ADR 0038: before any handler, a delegated session reaches its allow-list only.
+    if let Some(delegated) = delegated
+        && !delegation_admits(
+            request.method(),
+            request.extensions(),
+            &delegated,
+            Timestamp::now(),
+        )
+    {
+        return Some(ApiError::from(tenko_auth::AuthError::DelegationRefused).into_response());
+    }
 
     if let Some(subject) = principal
         && let Err(retry) = layers.limiter.check_principal(&subject, Instant::now())
