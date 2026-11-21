@@ -299,3 +299,8 @@ export function rowClassOf(finding: Pick<Finding, "kind" | "severity">): string 
   if (finding.kind === "unknown_device" || finding.kind === "orphaned_record") return "proposal";
   return undefined;
 }
+
+/** Whether a finding stands for the address `ip` in `vrf` (a conflict proposal and its row of the view). */
+export function isAbout(finding: Pick<Finding, "subject">, vrf: string | null | undefined, ip: string): boolean {
+  return finding.subject.ip === ip && (!vrf || !finding.subject.vrf || finding.subject.vrf === vrf);
+}
