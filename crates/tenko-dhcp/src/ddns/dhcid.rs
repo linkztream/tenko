@@ -60,31 +60,10 @@ pub fn dhcid(client: &ClientKey, fqdn: &DnsName) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     use tenko_core::serde_util::HexBytes;
 
     use super::*;
-
-    fn base64(bytes: &[u8]) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::new();
-        for chunk in bytes.chunks(3) {
-            let b = [
-                chunk[0],
-                *chunk.get(1).unwrap_or(&0),
-                *chunk.get(2).unwrap_or(&0),
-            ];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            for i in 0..4 {
-                if i <= chunk.len() {
-                    out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
-                } else {
-                    out.push('=');
-                }
-            }
-        }
-        out
-    }
 
     fn name(text: &str) -> DnsName {
         DnsName::new(text).expect("name")
@@ -105,7 +84,7 @@ mod tests {
             )),
         };
         assert_eq!(
-            base64(&dhcid(&duid, &name("chi6.example.com"))),
+            STANDARD.encode(dhcid(&duid, &name("chi6.example.com"))),
             "AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA="
         );
         let client_id = ClientKey {
@@ -114,7 +93,7 @@ mod tests {
             client_id: Some(HexBytes(vec![1, 7, 8, 9, 10, 11, 12])),
         };
         assert_eq!(
-            base64(&dhcid(&client_id, &name("chi.example.com"))),
+            STANDARD.encode(dhcid(&client_id, &name("chi.example.com"))),
             "AAEBOSD+XR3Os/0LozeXVqcNc7FwCfQdWL3b/NaiUDlW2No="
         );
         let chaddr = ClientKey {
@@ -123,7 +102,7 @@ mod tests {
             client_id: None,
         };
         assert_eq!(
-            base64(&dhcid(&chaddr, &name("client.example.com"))),
+            STANDARD.encode(dhcid(&chaddr, &name("client.example.com"))),
             "AAABxLmlskllE0MVjd57zHcWmEH3pCQ6VytcKD//7es/deY="
         );
     }

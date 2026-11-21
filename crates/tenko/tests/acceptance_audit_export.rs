@@ -33,6 +33,7 @@ use std::{
     time::Duration,
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use serve_support::{Node, Outcome, api::Api, run_tenko, wait_for_setup_token};
 use sha2::{Digest as _, Sha256};
@@ -117,30 +118,6 @@ fn live_records(api: &Api) -> BTreeMap<u64, Value> {
             None => return records,
         }
     }
-}
-
-/// Standard base64 with padding, decoded.
-fn base64_decode(text: &str) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut accumulator = 0u32;
-    let mut bits = 0u32;
-    for byte in text.bytes().take_while(|b| *b != b'=') {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            other => panic!("`{}` is not standard base64", char::from(other)),
-        };
-        accumulator = (accumulator << 6) | u32::from(value);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(u8::try_from((accumulator >> bits) & 0xFF).expect("a byte"));
-        }
-    }
-    out
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -536,7 +513,9 @@ fn iam_18_a_syslog_tcp_sink_delivers_every_record_with_its_sequence_number_and_c
         assert_eq!(body["type"], "record", "{}", message.raw);
         assert_eq!(body["seq"].as_u64(), Some(*seq));
         assert_eq!(body["hash"].as_str(), Some(hash.as_str()));
-        let cbor = base64_decode(body["cbor"].as_str().expect("the canonical CBOR"));
+        let cbor = STANDARD
+            .decode(body["cbor"].as_str().expect("the canonical CBOR"))
+            .expect("standard base64");
         assert_eq!(
             hex(&Sha256::digest(&cbor)),
             *hash,

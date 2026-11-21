@@ -97,7 +97,6 @@
     {"rule":"is-err","file":"crates/tenko-auth/src/directory.rs","scope":"providers_validate_and_round_trip","text":"assert!(unnamed.validate().is_err())"},
     {"rule":"is-err","file":"crates/tenko-auth/src/directory.rs","scope":"providers_validate_and_round_trip","text":"assert!(wrong_scheme.validate().is_err())"},
     {"rule":"is-err","file":"crates/tenko-auth/src/encoding.rs","scope":"base32_matches_rfc_4648_vectors","text":"assert!(base32_decode(\"MZXW1\").is_err())"},
-    {"rule":"is-err","file":"crates/tenko-auth/src/encoding.rs","scope":"base64url_refuses_malformed_input","text":"assert!(base64url_decode(bad).is_err())"},
     {"rule":"is-err","file":"crates/tenko-auth/src/encoding.rs","scope":"hex_round_trips","text":"assert!(hex_decode(\"abc\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-auth/src/encoding.rs","scope":"hex_round_trips","text":"assert!(hex_decode(\"zz\").is_err())"},
     {"rule":"is-err","file":"crates/tenko-auth/src/hibp/filter.rs","scope":"header_refuses_inconsistent_geometry","text":"assert!(Header::decode(&good[..HEADER_LEN - 1]).is_err())"},

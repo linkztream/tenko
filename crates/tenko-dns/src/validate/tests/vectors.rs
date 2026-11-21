@@ -2,10 +2,10 @@
 //! 6605 section 6 (P-256 and P-384) and RFC 8080 section 6 (Ed25519), through
 //! [`crypto::verify`] and [`rrset::verify`].
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use tenko_core::dns::DnsName;
 
 use crate::{
-    anchors::base64,
     dnssec::{canonical, crypto},
     recursion::ValidationCaps,
     validate::rrset::{self, Budget, Fault, RrSet, Sig},
@@ -44,7 +44,7 @@ fn dnskey(flags: u16, algorithm: u8, key: &str) -> Vec<u8> {
     let mut out = flags.to_be_bytes().to_vec();
     out.push(3);
     out.push(algorithm);
-    out.extend_from_slice(&base64::decode(key).expect("base64 key"));
+    out.extend_from_slice(&STANDARD.decode(key).expect("base64 key"));
     out
 }
 
@@ -69,7 +69,7 @@ fn rrsig(
     out.extend_from_slice(&inception.to_be_bytes());
     out.extend_from_slice(&key_tag.to_be_bytes());
     out.extend_from_slice(&wire(signer));
-    out.extend_from_slice(&base64::decode(signature).expect("base64 signature"));
+    out.extend_from_slice(&STANDARD.decode(signature).expect("base64 signature"));
     out
 }
 

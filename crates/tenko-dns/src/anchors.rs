@@ -6,7 +6,11 @@
 //! `dns.trust_anchors` with the RFC 5011 state machine and the expiry of negative trust
 //! anchors ([`service`]), and the resolver the service asks in process ([`resolver`]).
 
-pub mod base64;
+use base64::{
+    alphabet,
+    engine::{GeneralPurpose, general_purpose::PAD},
+};
+
 pub mod catalog;
 pub mod resolver;
 pub mod rows;
@@ -17,3 +21,11 @@ pub mod xml;
 pub use catalog::CatalogAnchors;
 pub use resolver::NodeResolver;
 pub use service::{AnchorService, AnchorServiceConfig, AnchorWiring};
+
+/// The base64 of DNSKEY keys (RFC 4034 section 2.2) and of the IANA trust anchor file (RFC
+/// 7958): the standard alphabet with padding. Other programs write these texts, so non-zero
+/// trailing bits are ignored, as RFC 4648 section 3.5 lets a decoder do.
+const KEY_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    PAD.with_decode_allow_trailing_bits(true),
+);

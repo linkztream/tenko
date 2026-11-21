@@ -2,7 +2,7 @@
 //! What a sign-in reads from a client that is not signed in yet (`tenko_auth`): the
 //! `clientDataJSON` of a passkey ceremony, the credential id of an assertion, the ceremony id
 //! the browser hands back, a TOTP code, a recovery code, the shape check of a session cookie,
-//! and the hand-written base64url, base32 and hexadecimal decoders all of them use.
+//! and the hand-written base32 and hexadecimal decoders.
 //!
 //! The input is one control octet and text. The control octet picks the ceremony of the
 //! client data (bit 0: `webauthn.get`, else `webauthn.create`), the time of the TOTP check
@@ -17,12 +17,11 @@
 
 use std::sync::LazyLock;
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use libfuzzer_sys::fuzz_target;
 use tenko_auth::{
     challenge::{Ceremonies, CeremonyKey},
-    encoding::{
-        base32_decode, base32_encode, base64url_decode, base64url_encode, hex_decode, hex_encode,
-    },
+    encoding::{base32_decode, base32_encode, hex_decode, hex_encode},
     recovery::{self, GeneratedRecoveryCodes},
     secret::looks_like_session_secret,
     totp::{self, TotpParams},
@@ -66,16 +65,12 @@ fn origin_allowed(origin: &str) -> bool {
 }
 
 fn decoders(text: &str, raw: &[u8]) {
-    if let Ok(bytes) = base64url_decode(text) {
-        assert_eq!(base64url_decode(&base64url_encode(&bytes)), Ok(bytes));
-    }
     if let Ok(bytes) = base32_decode(text) {
         assert_eq!(base32_decode(&base32_encode(&bytes)), Ok(bytes));
     }
     if let Ok(bytes) = hex_decode(text) {
         assert_eq!(hex_decode(&hex_encode(&bytes)), Ok(bytes));
     }
-    assert_eq!(base64url_decode(&base64url_encode(raw)).as_deref(), Ok(raw));
     assert_eq!(base32_decode(&base32_encode(raw)).as_deref(), Ok(raw));
     assert_eq!(hex_decode(&hex_encode(raw)).as_deref(), Ok(raw));
 }
@@ -88,7 +83,7 @@ fn client_data(json: &[u8], ceremony: &str) {
     let data: ClientData = serde_json::from_slice(json).expect("accepted client data reads");
     assert_eq!(data.type_, ceremony);
     assert_eq!(
-        base64url_decode(&data.challenge).as_deref(),
+        URL_SAFE_NO_PAD.decode(&data.challenge).as_deref(),
         Ok(&CHALLENGE[..])
     );
     assert!(origin_allowed(&data.origin));
@@ -103,8 +98,8 @@ fn credential_id(json: &[u8]) {
     if let Ok(id) = assertion_credential_id(&response) {
         assert!(!id.is_empty() && id.len() <= MAX_CREDENTIAL_ID_LEN);
         assert_eq!(response.type_, "public-key");
-        assert_eq!(base64url_decode(&response.raw_id).as_deref(), Ok(&id[..]));
-        assert_eq!(base64url_decode(&response.id).as_deref(), Ok(&id[..]));
+        assert_eq!(URL_SAFE_NO_PAD.decode(&response.raw_id).as_deref(), Ok(&id[..]));
+        assert_eq!(URL_SAFE_NO_PAD.decode(&response.id).as_deref(), Ok(&id[..]));
     }
 }
 
@@ -158,7 +153,7 @@ fuzz_target!(|data: &[u8]| {
     recovery_code(text);
     if looks_like_session_secret(text) {
         assert_eq!(text.len(), 43);
-        assert_eq!(base64url_decode(text).map(|bytes| bytes.len()), Ok(32));
+        assert_eq!(URL_SAFE_NO_PAD.decode(text).map(|bytes| bytes.len()), Ok(32));
     }
     let now = Timestamp::from_unix_nanos(i128::from(NOW) * 1_000_000_000).expect("a time");
     let _ = CEREMONIES.take(text, now);

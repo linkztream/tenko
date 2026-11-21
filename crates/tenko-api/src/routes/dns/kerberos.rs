@@ -32,8 +32,9 @@ use axum::{
     http::{StatusCode, request::Parts},
     response::{IntoResponse, Response},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
-use tenko_auth::{authz::anywhere, encoding::base64url_decode, service::SecretString};
+use tenko_auth::{authz::anywhere, service::SecretString};
 use tenko_core::{
     Action, CodedError, ObjectKind, Timestamp,
     dns::{KeyVersionMeta, KrbAccount, Realm},
@@ -384,16 +385,20 @@ async fn import_dns_kerberos(
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::DnsKey))?;
     let service = kerberos.get()?;
-    let keytab = Zeroizing::new(base64url_decode(body.keytab.expose().trim()).map_err(|_| {
-        ApiError::from_coded_error(
-            CodedError::new(
-                tenko_core::dns::codes::KRB_KEYTAB_INVALID,
-                422,
-                "the keytab is not base64url without padding",
-            )
-            .with_param("reason", "the keytab is not base64url without padding"),
-        )
-    })?);
+    let keytab = Zeroizing::new(
+        URL_SAFE_NO_PAD
+            .decode(body.keytab.expose().trim())
+            .map_err(|_| {
+                ApiError::from_coded_error(
+                    CodedError::new(
+                        tenko_core::dns::codes::KRB_KEYTAB_INVALID,
+                        422,
+                        "the keytab is not base64url without padding",
+                    )
+                    .with_param("reason", "the keytab is not base64url without padding"),
+                )
+            })?,
+    );
     let outcome = service
         .import(
             &cx,
@@ -505,8 +510,9 @@ mod tests {
         body::{Body, to_bytes},
         http::{Request, header},
     };
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
     use serde_json::{Value, json};
-    use tenko_auth::{authz::anywhere, encoding::base64url_encode};
+    use tenko_auth::authz::anywhere;
     use tenko_core::{Action, Authorizer, ObjectKind};
     use tenko_dns::zone::{
         ZoneConfig, ZoneService,
@@ -604,7 +610,7 @@ mod tests {
     fn import() -> Value {
         json!({
             "realm": "CORP.EXAMPLE.TEST",
-            "keytab": base64url_encode(KEYTAB),
+            "keytab": URL_SAFE_NO_PAD.encode(KEYTAB),
             "spns": ["DNS/tenko.corp.example.test"]
         })
     }
@@ -696,6 +702,11 @@ mod tests {
         assert!(!reply.body.to_string().contains("One-Time-Pass-1"));
         let mut bad = import();
         bad["keytab"] = json!("!!!");
+        send(&router, "POST", "/dns/kerberos/import", Some(bad.clone()))
+            .await
+            .assert_problem(422, tenko_core::dns::codes::KRB_KEYTAB_INVALID);
+        // Unpadded only, as the field documents.
+        bad["keytab"] = json!(format!("{}=", URL_SAFE_NO_PAD.encode(KEYTAB)));
         send(&router, "POST", "/dns/kerberos/import", Some(bad))
             .await
             .assert_problem(422, tenko_core::dns::codes::KRB_KEYTAB_INVALID);

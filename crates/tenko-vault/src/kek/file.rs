@@ -3,6 +3,7 @@
 use std::{fs, path::Path, sync::Arc};
 
 use aws_lc_rs::digest;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use zeroize::Zeroizing;
 
 use super::{
@@ -160,24 +161,9 @@ fn parse_key(raw: &[u8]) -> Option<Zeroizing<[u8; DataKey::LEN]>> {
         }
         return Some(key);
     }
-    if text.len() == 44 && text.ends_with(b"=") && !text.ends_with(b"==") {
-        let mut bits: u32 = 0;
-        let mut count = 0u32;
-        let mut out = 0usize;
-        for &c in &text[..43] {
-            bits = (bits << 6) | u32::from(base64_value(c)?);
-            count += 6;
-            if count >= 8 {
-                count -= 8;
-                let byte = u8::try_from((bits >> count) & 0xff).ok()?;
-                *key.get_mut(out)? = byte;
-                out += 1;
-                bits &= (1 << count) - 1;
-            }
-        }
-        return (out == DataKey::LEN).then_some(key);
-    }
-    None
+    // Canonical base64 only (RFC 4648 section 3.5): one spelling per key.
+    (text.len() == 44 && STANDARD.decode_slice(text, &mut key[..]).ok() == Some(DataKey::LEN))
+        .then_some(key)
 }
 
 fn hex_value(c: u8) -> Option<u8> {
@@ -185,17 +171,6 @@ fn hex_value(c: u8) -> Option<u8> {
         b'0'..=b'9' => Some(c - b'0'),
         b'a'..=b'f' => Some(c - b'a' + 10),
         b'A'..=b'F' => Some(c - b'A' + 10),
-        _ => None,
-    }
-}
-
-fn base64_value(c: u8) -> Option<u8> {
-    match c {
-        b'A'..=b'Z' => Some(c - b'A'),
-        b'a'..=b'z' => Some(c - b'a' + 26),
-        b'0'..=b'9' => Some(c - b'0' + 52),
-        b'+' => Some(62),
-        b'/' => Some(63),
         _ => None,
     }
 }
@@ -220,6 +195,8 @@ mod tests {
         // base64 of 0x00..0x1f.
         let b64 = b"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\n";
         assert_eq!(parse_key(b64).expect("b64").as_ref(), expected.as_ref());
+        // The same key with non-zero trailing bits is refused.
+        assert!(parse_key(b"AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh9=").is_none());
         assert!(parse_key(b"short").is_none());
         assert!(parse_key(&[b'z'; 64]).is_none());
     }

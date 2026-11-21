@@ -68,6 +68,7 @@ use aws_lc_rs::{
     aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey},
     hkdf,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
     AuthStrength, Principal, SessionId, SystemComponent, Timestamp, UserId, table::TableDef,
@@ -77,11 +78,7 @@ use tenko_store::{
 };
 use zeroize::Zeroizing;
 
-use crate::{
-    encoding::{base64url_decode, base64url_encode},
-    error::AuthError,
-    random,
-};
+use crate::{error::AuthError, random};
 
 /// How long a ceremony stays open.
 pub const CEREMONY_TTL: Duration = Duration::from_secs(300);
@@ -239,7 +236,7 @@ impl CeremonyKey {
         id.push(SEAL_VERSION);
         id.extend_from_slice(&nonce);
         id.extend_from_slice(&buffer);
-        let id = base64url_encode(&id);
+        let id = URL_SAFE_NO_PAD.encode(&id);
         if id.len() > MAX_ID_LEN {
             return Err(AuthError::internal("ceremony too large"));
         }
@@ -252,7 +249,9 @@ impl CeremonyKey {
         if id.len() > MAX_ID_LEN {
             return Err(AuthError::ChallengeInvalid);
         }
-        let bytes = base64url_decode(id).map_err(|_| AuthError::ChallengeInvalid)?;
+        let bytes = URL_SAFE_NO_PAD
+            .decode(id)
+            .map_err(|_| AuthError::ChallengeInvalid)?;
         let Some((&version, rest)) = bytes.split_first() else {
             return Err(AuthError::ChallengeInvalid);
         };
@@ -664,7 +663,7 @@ impl Ceremonies {
     ///
     /// [`AuthError::Internal`] if the random source fails or the state cannot be encoded.
     pub fn open(&self, pending: Pending, now: Timestamp) -> Result<String, AuthError> {
-        let ceremony = base64url_encode(&random::array::<CEREMONY_KEY_LEN>()?);
+        let ceremony = URL_SAFE_NO_PAD.encode(random::array::<CEREMONY_KEY_LEN>()?);
         let sealed = Sealed {
             ceremony,
             expires_at: now.checked_add(CEREMONY_TTL).unwrap_or(now),
@@ -934,7 +933,9 @@ mod tests {
 
     /// The raw bytes of an id, for tampering.
     fn decode(id: &str) -> Vec<u8> {
-        base64url_decode(id).expect("a sealed id is base64url")
+        URL_SAFE_NO_PAD
+            .decode(id)
+            .expect("a sealed id is base64url")
     }
 
     fn refused(ceremonies: &Ceremonies, id: &str, now: Timestamp) -> bool {
@@ -1191,25 +1192,27 @@ mod tests {
         }
         // A string past the length limit.
         assert!(refused(&a, &"A".repeat(MAX_ID_LEN + 4), now));
+        // The sealed id with padding added: the id is ours, so one spelling only.
+        assert!(refused(&a, &format!("{id}="), now));
 
         let bytes = decode(&id);
         // Truncated, at every length.
         for len in 0..bytes.len() {
             assert!(
-                refused(&a, &base64url_encode(&bytes[..len]), now),
+                refused(&a, &URL_SAFE_NO_PAD.encode(&bytes[..len]), now),
                 "truncated to {len}"
             );
         }
         // Extended.
         let mut longer = bytes.clone();
         longer.push(0);
-        assert!(refused(&a, &base64url_encode(&longer), now));
+        assert!(refused(&a, &URL_SAFE_NO_PAD.encode(&longer), now));
         // A flipped bit in every byte: version, nonce, ciphertext and tag.
         for index in 0..bytes.len() {
             let mut damaged = bytes.clone();
             damaged[index] ^= 0x01;
             assert!(
-                refused(&a, &base64url_encode(&damaged), now),
+                refused(&a, &URL_SAFE_NO_PAD.encode(&damaged), now),
                 "byte {index}"
             );
         }
@@ -1218,7 +1221,7 @@ mod tests {
             let mut other = bytes.clone();
             other[0] = version;
             assert!(
-                refused(&a, &base64url_encode(&other), now),
+                refused(&a, &URL_SAFE_NO_PAD.encode(&other), now),
                 "version {version}"
             );
         }

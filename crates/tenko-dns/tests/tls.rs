@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full};
 use hyper::{Request, StatusCode, client::conn::http1, client::conn::http2};
@@ -277,23 +278,6 @@ async fn closed<S: AsyncRead + Unpin>(stream: &mut S) -> bool {
     }
 }
 
-fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let mut block = [0u8; 3];
-        block[..chunk.len()].copy_from_slice(chunk);
-        let n = (u32::from(block[0]) << 16) | (u32::from(block[1]) << 8) | u32::from(block[2]);
-        for index in 0..=chunk.len() {
-            let six = (n >> (18 - 6 * index)) & 63;
-            out.push(char::from(
-                ALPHABET[usize::try_from(six).expect("six bits")],
-            ));
-        }
-    }
-    out
-}
-
 /// One DoH exchange's outcome.
 struct Http {
     status: StatusCode,
@@ -413,7 +397,10 @@ async fn dot_and_doh_answer_with_the_imported_certificate() {
     let message = query("www.example.test", 1).bytes(0);
     let got = collect(
         sender
-            .send_request(get(&format!("/dns-query?dns={}", base64url(&message))))
+            .send_request(get(&format!(
+                "/dns-query?dns={}",
+                URL_SAFE_NO_PAD.encode(&message)
+            )))
             .await
             .expect("a GET answer"),
     )
@@ -476,10 +463,13 @@ async fn dot_and_doh_answer_with_the_imported_certificate() {
         .await
         .expect("a handshake");
     let mut sender = h1(tls).await;
-    let request = Request::get(format!("/dns-query?dns={}", base64url(&message)))
-        .header(hyper::header::HOST, "localhost")
-        .body(Full::new(Bytes::new()))
-        .expect("a request");
+    let request = Request::get(format!(
+        "/dns-query?dns={}",
+        URL_SAFE_NO_PAD.encode(&message)
+    ))
+    .header(hyper::header::HOST, "localhost")
+    .body(Full::new(Bytes::new()))
+    .expect("a request");
     let got = collect(sender.send_request(request).await.expect("an answer")).await;
     assert_eq!(got.status, StatusCode::OK);
     assert_eq!(decode(&got.body).answers.len(), 1);
@@ -562,7 +552,10 @@ async fn the_limits_and_the_handshake_timeout_hold() {
     let message = query("www.example.test", 1).bytes(0);
     let got = collect(
         sender
-            .send_request(get(&format!("/dns-query?dns={}", base64url(&message))))
+            .send_request(get(&format!(
+                "/dns-query?dns={}",
+                URL_SAFE_NO_PAD.encode(&message)
+            )))
             .await
             .expect("an answer"),
     )
@@ -630,7 +623,10 @@ async fn a_doh_body_that_never_completes_ends_at_the_request_deadline() {
     let message = query("www.example.test", 1).bytes(0);
     let got = collect(
         plain
-            .send_request(get(&format!("/dns-query?dns={}", base64url(&message))))
+            .send_request(get(&format!(
+                "/dns-query?dns={}",
+                URL_SAFE_NO_PAD.encode(&message)
+            )))
             .await
             .expect("an answer"),
     )
@@ -728,10 +724,13 @@ async fn behind_a_proxy_plain_dns_and_http_answer_trusted_peers() {
     .expect("the header");
     let mut sender = h1(tcp).await;
     let message = query("www.example.test", 1).bytes(0);
-    let request = Request::get(format!("/dns-query?dns={}", base64url(&message)))
-        .header(hyper::header::HOST, "dns.example.test")
-        .body(Full::new(Bytes::new()))
-        .expect("a request");
+    let request = Request::get(format!(
+        "/dns-query?dns={}",
+        URL_SAFE_NO_PAD.encode(&message)
+    ))
+    .header(hyper::header::HOST, "dns.example.test")
+    .body(Full::new(Bytes::new()))
+    .expect("a request");
     let got = collect(sender.send_request(request).await.expect("an answer")).await;
     assert_eq!(got.status, StatusCode::OK);
     assert!(seen.has("198.51.100.4", QueryTransport::Doh));

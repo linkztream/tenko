@@ -24,6 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Bytes;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -82,23 +83,6 @@ fn header(answer: &[u8]) -> wire::RawHeader {
 /// Whether `answer` holds the four octets of `address` in a record.
 fn holds(answer: &[u8], address: [u8; 4]) -> bool {
     answer.windows(4).any(|window| window == address)
-}
-
-fn base64url(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let mut block = [0u8; 3];
-        block[..chunk.len()].copy_from_slice(chunk);
-        let n = (u32::from(block[0]) << 16) | (u32::from(block[1]) << 8) | u32::from(block[2]);
-        for index in 0..=chunk.len() {
-            let six = (n >> (18 - 6 * index)) & 63;
-            out.push(char::from(
-                ALPHABET[usize::try_from(six).expect("six bits")],
-            ));
-        }
-    }
-    out
 }
 
 fn client_config(ca: &Path, alpn: &[&[u8]]) -> Arc<ClientConfig> {
@@ -204,7 +188,7 @@ fn doh(address: SocketAddr, ca: &Path, message: &[u8], post: bool) -> Doh {
         } else {
             hyper::Request::get(format!(
                 "https://localhost/dns-query?dns={}",
-                base64url(&message)
+                URL_SAFE_NO_PAD.encode(&message)
             ))
             .body(Full::new(Bytes::new()))
         }
@@ -486,7 +470,7 @@ fn plain_doh(address: SocketAddr, client: [u8; 4], message: &[u8]) -> (u16, Vec<
         format!(
             "GET /dns-query?dns={} HTTP/1.1\r\nHost: dns.example.test\r\nAccept: \
              application/dns-message\r\nConnection: close\r\n\r\n",
-            base64url(message)
+            URL_SAFE_NO_PAD.encode(message)
         )
         .as_bytes(),
     );

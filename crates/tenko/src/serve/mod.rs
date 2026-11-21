@@ -87,6 +87,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{Engine as _, engine::general_purpose::STANDARD_PAD_INDIFFERENT};
 use clap::Args;
 use tenko_api::{
     ServerConfig,
@@ -2421,7 +2422,8 @@ fn read_certificates(path: &std::path::Path) -> Result<Vec<Vec<u8>>, StartError>
     Ok(certificates)
 }
 
-/// The DER bodies of the `CERTIFICATE` blocks of a PEM file.
+/// The DER bodies of the `CERTIFICATE` blocks of a PEM file. The base64 is read as the lax
+/// text of RFC 7468 section 3 allows: standard alphabet, padding written or left out.
 pub(crate) fn pem_certificates(pem: &[u8]) -> Vec<Vec<u8>> {
     let text = String::from_utf8_lossy(pem);
     let mut out = Vec::new();
@@ -2431,7 +2433,7 @@ pub(crate) fn pem_certificates(pem: &[u8]) -> Vec<Vec<u8>> {
             body = Some(String::new());
         } else if line == "-----END CERTIFICATE-----" {
             if let Some(encoded) = body.take()
-                && let Some(der) = base64_decode(&encoded)
+                && let Ok(der) = STANDARD_PAD_INDIFFERENT.decode(&encoded)
             {
                 out.push(der);
             }
@@ -2440,20 +2442,6 @@ pub(crate) fn pem_certificates(pem: &[u8]) -> Vec<Vec<u8>> {
         }
     }
     out
-}
-
-/// Standard base64 (with or without padding); `None` for anything else.
-fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    let url_safe: String = text
-        .trim_end_matches('=')
-        .chars()
-        .map(|c| match c {
-            '+' => '-',
-            '/' => '_',
-            other => other,
-        })
-        .collect();
-    tenko_auth::encoding::base64url_decode(&url_safe).ok()
 }
 
 /// Logs readiness and prints the console notes: where to connect, and the setup token
@@ -2969,7 +2957,13 @@ mod tests {
     fn pem_certificates_are_decoded() {
         let pem = b"-----BEGIN CERTIFICATE-----\nAAEC\nAw==\n-----END CERTIFICATE-----\n";
         assert_eq!(pem_certificates(pem), vec![vec![0, 1, 2, 3]]);
-        assert_eq!(base64_decode("aGVsbG8="), Some(b"hello".to_vec()));
-        assert_eq!(base64_decode("a*"), None);
+        // RFC 7468 lax text: the padding may be left out; the base64url alphabet is not base64.
+        let unpadded = b"-----BEGIN CERTIFICATE-----\nAAEC\nAw\n-----END CERTIFICATE-----\n";
+        assert_eq!(pem_certificates(unpadded), vec![vec![0, 1, 2, 3]]);
+        let url_safe = b"-----BEGIN CERTIFICATE-----\n-_8=\n-----END CERTIFICATE-----\n";
+        assert_eq!(pem_certificates(url_safe), Vec::<Vec<u8>>::new());
+        let extra_padding =
+            b"-----BEGIN CERTIFICATE-----\nAAEC\nAw===\n-----END CERTIFICATE-----\n";
+        assert_eq!(pem_certificates(extra_padding), Vec::<Vec<u8>>::new());
     }
 }

@@ -1,6 +1,7 @@
 //! Self-service: the current session and the user's other sessions, password, TOTP,
 //! WebAuthn credentials, recovery codes and personal tokens.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use tenko_core::{
     Action, ApiTokenId, AuthStrength, ObjectKind, ObjectRef, Principal, RequestCtx, Revision,
     SessionId, UserId, secret::SecretClass,
@@ -21,7 +22,7 @@ use super::{
 };
 use crate::{
     challenge::Pending,
-    encoding::{base32_encode, base64url_decode, base64url_encode, hex_encode},
+    encoding::{base32_encode, hex_encode},
     error::AuthError,
     hibp::BreachOutcome,
     model::{
@@ -102,7 +103,7 @@ pub(super) struct PasswordOwner<'a> {
 
 pub(super) fn credential_info(record: &CredentialRecord) -> CredentialInfo {
     CredentialInfo {
-        id: base64url_encode(&record.credential_id),
+        id: URL_SAFE_NO_PAD.encode(&record.credential_id),
         label: record.label.clone(),
         alg: record.alg,
         aaguid: hex_encode(&record.aaguid),
@@ -968,8 +969,9 @@ impl AuthService {
     pub async fn delete_credential(&self, ctx: &RequestCtx, id: &str) -> Result<(), AuthError> {
         let (user, _, _, session) = self.current(ctx).await?;
         Self::require_fresh(&session, ctx.now)?;
-        let credential_id =
-            base64url_decode(id).map_err(|_| AuthError::NotFound { kind: "credential" })?;
+        let credential_id = URL_SAFE_NO_PAD
+            .decode(id)
+            .map_err(|_| AuthError::NotFound { kind: "credential" })?;
         let view = self.view().await?;
         let credentials = Self::user_credentials(view.as_ref(), user.id)?;
         let Some(record) = credentials

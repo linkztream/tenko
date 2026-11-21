@@ -4,6 +4,7 @@
 //! unpadded base64url strings, as `PublicKeyCredential.parseCreationOptionsFromJSON()` and
 //! `toJSON()` expect in the browser.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -64,7 +65,7 @@ impl CredentialDescriptor {
     pub fn new(id: &[u8], transports: Vec<String>) -> Self {
         Self {
             type_: "public-key".to_owned(),
-            id: crate::encoding::base64url_encode(id),
+            id: URL_SAFE_NO_PAD.encode(id),
             transports: bounded_transports(transports),
         }
     }

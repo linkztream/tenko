@@ -17,6 +17,7 @@ use std::io::ErrorKind;
 
 use aws_lc_rs::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use aws_lc_rs::rand::{SecureRandom, SystemRandom};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use reqwest::header::{CONNECTION, HeaderMap, UPGRADE};
 use reqwest::{StatusCode, Url, Version};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -38,8 +39,6 @@ const LENGTH_16: u8 = 126;
 const LENGTH_64: u8 = 127;
 /// The mask bit of the second frame byte.
 const MASKED: u8 = 0x80;
-/// The base64 alphabet of RFC 4648 section 4.
-const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /// The frame opcodes this client knows (RFC 6455 section 5.2). Every other value is refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,38 +411,12 @@ fn check_control(fin: bool, payload: &[u8]) -> Result<(), WsError> {
     Ok(())
 }
 
-/// Standard base64 with padding.
-pub fn base64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3).saturating_mul(4));
-    for chunk in bytes.chunks(3) {
-        let first = chunk.first().copied().unwrap_or(0);
-        let second = chunk.get(1).copied().unwrap_or(0);
-        let third = chunk.get(2).copied().unwrap_or(0);
-        let sextets = [
-            first >> 2,
-            ((first & 0x03) << 4) | (second >> 4),
-            ((second & 0x0F) << 2) | (third >> 6),
-            third & 0x3F,
-        ];
-        // One byte yields two characters, two bytes three, three bytes four.
-        let used = chunk.len() + 1;
-        for (index, sextet) in sextets.iter().enumerate() {
-            if index < used {
-                out.push(char::from(ALPHABET[usize::from(sextet & 0x3F)]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
 /// The Sec-WebSocket-Accept value for a key: base64 of SHA-1 over key + GUID.
 pub fn accept_for(key: &str) -> String {
     let mut input = Vec::with_capacity(key.len() + GUID.len());
     input.extend_from_slice(key.as_bytes());
     input.extend_from_slice(GUID.as_bytes());
-    base64_encode(digest(&SHA1_FOR_LEGACY_USE_ONLY, &input).as_ref())
+    STANDARD.encode(digest(&SHA1_FOR_LEGACY_USE_ONLY, &input))
 }
 
 /// A WebSocket over an upgraded byte stream.
@@ -648,7 +621,7 @@ pub async fn connect(
     SystemRandom::new().fill(&mut nonce).map_err(|_| {
         ConnectError::Handshake(WsError::Handshake("random source failed".to_owned()))
     })?;
-    let key = base64_encode(&nonce);
+    let key = STANDARD.encode(nonce);
     let response = client
         .get(url)
         .version(Version::HTTP_11)
@@ -1226,25 +1199,6 @@ mod tests {
     }
 
     // ----- handshake helpers -----
-
-    #[test]
-    fn base64_test_vectors() {
-        // RFC 4648 section 10.
-        for (input, expected) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg=="),
-            ("fooba", "Zm9vYmE="),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(base64_encode(input.as_bytes()), expected);
-        }
-        assert_eq!(base64_encode(&[0xFB, 0xFF, 0xBF]), "+/+/");
-        assert_eq!(base64_encode(&[0xFF]), "/w==");
-        assert_eq!(base64_encode(&[0_u8; 16]).len(), 24);
-    }
 
     #[test]
     fn the_accept_value_of_the_rfc_example() {

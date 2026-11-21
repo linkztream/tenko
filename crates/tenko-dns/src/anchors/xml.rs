@@ -5,6 +5,8 @@
 //! carries no entities, namespaces or CDATA): it drives the check of the shipped file
 //! against the generated table and the fuzz target `dns_trust_anchor_xml`.
 
+use base64::Engine as _;
+
 /// One `KeyDigest` element.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyDigest {
@@ -245,8 +247,13 @@ fn key_digest(
             }
             "Digest" => digest_hex = Some(hex(text).ok_or(XmlError("the Digest is hexadecimal"))?),
             "PublicKey" => {
-                digest.public_key =
-                    Some(super::base64::decode(text).ok_or(XmlError("the PublicKey is base64"))?);
+                // XML Schema base64Binary allows white space inside the text.
+                let key: String = text.split_ascii_whitespace().collect();
+                digest.public_key = Some(
+                    super::KEY_BASE64
+                        .decode(key)
+                        .map_err(|_| XmlError("the PublicKey is base64"))?,
+                );
             }
             "Flags" => {
                 digest.flags = Some(
@@ -417,5 +424,23 @@ mod tests {
             reason("<TrustAnchor id=\"x\"><Zone></Zone></TrustAnchor>"),
             "the Zone is not empty"
         );
+    }
+
+    #[test]
+    fn a_public_key_with_line_breaks_reads() {
+        let file = |key: &str| {
+            format!(
+                "<TrustAnchor id=\"x\"><Zone>.</Zone><KeyDigest id=\"k\" validFrom=\"t\"><KeyTag>1</KeyTag><Algorithm>8</Algorithm><DigestType>2</DigestType><Digest>AB</Digest><PublicKey>{key}</PublicKey></KeyDigest></TrustAnchor>"
+            )
+        };
+        let key = |text: &str| {
+            parse(&file(text)).expect("parses").digests[0]
+                .public_key
+                .clone()
+        };
+        assert_eq!(key("\n  TWFu\n  TQ==\n"), Some(b"ManM".to_vec()));
+        // Non-zero trailing bits ("TR==" carries them) are ignored, a misplaced pad is not.
+        assert_eq!(key("TR=="), Some(b"M".to_vec()));
+        assert_eq!(reason(&file("TQ==TWFu")), "the PublicKey is base64");
     }
 }

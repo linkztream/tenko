@@ -48,6 +48,7 @@ serde_json = { workspace = true }
 pnet_datalink = "0.35.0"
 
 [dev-dependencies]
+base64 = { workspace = true }
 # The counting allocator of tests/alloc.rs (the DNS codec's allocation test).
 stats_alloc = { workspace = true }
 # WP7.0: the differential test of the DHCPv4 codec (ADR 0019 point 7); never shipped.

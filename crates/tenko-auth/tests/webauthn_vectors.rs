@@ -4,9 +4,10 @@
 
 use std::collections::BTreeMap;
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use tenko_auth::{
     clock::{Clock, MockClock},
-    encoding::{base64url_encode, hex_decode},
+    encoding::hex_decode,
     webauthn::{
         ALG_EDDSA, ALG_ES256, ALG_RS256, AssertionPolicy, AssertionResponse, AttestationKind,
         AttestationResponse, AuthenticationResponse, RegisteredCredential, RegistrationPolicy,
@@ -65,14 +66,14 @@ const LENIENT_ASSERTION: AssertionPolicy = AssertionPolicy {
 };
 
 fn registration(values: &BTreeMap<String, Vec<u8>>) -> RegistrationResponse {
-    let id = base64url_encode(&values["registration.credential_id"]);
+    let id = URL_SAFE_NO_PAD.encode(&values["registration.credential_id"]);
     RegistrationResponse {
         id: id.clone(),
         raw_id: id,
         type_: "public-key".to_owned(),
         response: AttestationResponse {
-            client_data_json: base64url_encode(&values["registration.clientDataJSON"]),
-            attestation_object: base64url_encode(&values["registration.attestationObject"]),
+            client_data_json: URL_SAFE_NO_PAD.encode(&values["registration.clientDataJSON"]),
+            attestation_object: URL_SAFE_NO_PAD.encode(&values["registration.attestationObject"]),
             transports: Vec::new(),
         },
         authenticator_attachment: None,
@@ -81,15 +82,15 @@ fn registration(values: &BTreeMap<String, Vec<u8>>) -> RegistrationResponse {
 }
 
 fn assertion(values: &BTreeMap<String, Vec<u8>>) -> AuthenticationResponse {
-    let id = base64url_encode(&values["registration.credential_id"]);
+    let id = URL_SAFE_NO_PAD.encode(&values["registration.credential_id"]);
     AuthenticationResponse {
         id: id.clone(),
         raw_id: id,
         type_: "public-key".to_owned(),
         response: AssertionResponse {
-            client_data_json: base64url_encode(&values["authentication.clientDataJSON"]),
-            authenticator_data: base64url_encode(&values["authentication.authenticatorData"]),
-            signature: base64url_encode(&values["authentication.signature"]),
+            client_data_json: URL_SAFE_NO_PAD.encode(&values["authentication.clientDataJSON"]),
+            authenticator_data: URL_SAFE_NO_PAD.encode(&values["authentication.authenticatorData"]),
+            signature: URL_SAFE_NO_PAD.encode(&values["authentication.signature"]),
             user_handle: None,
         },
         authenticator_attachment: None,

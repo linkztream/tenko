@@ -24,6 +24,7 @@ mod der;
 mod error;
 mod types;
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ciborium::Value;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
@@ -40,8 +41,6 @@ pub use types::{
     CredentialDescriptor, CredentialParameter, RegistrationResponse, RequestOptions, RpEntity,
     UserEntity, UserVerification,
 };
-
-use crate::encoding::{base64url_decode, base64url_encode};
 
 /// Default ceremony timeout: five minutes.
 pub const DEFAULT_TIMEOUT_MS: u32 = 300_000;
@@ -263,11 +262,11 @@ impl RelyingParty {
                 name: self.config.rp_name.clone(),
             },
             user: UserEntity {
-                id: base64url_encode(user_handle),
+                id: URL_SAFE_NO_PAD.encode(user_handle),
                 name: user_name.to_owned(),
                 display_name: display_name.to_owned(),
             },
-            challenge: base64url_encode(challenge),
+            challenge: URL_SAFE_NO_PAD.encode(challenge),
             pub_key_cred_params: [ALG_ES256, ALG_EDDSA, ALG_RS256]
                 .into_iter()
                 .map(|alg| CredentialParameter {
@@ -301,7 +300,7 @@ impl RelyingParty {
         policy: &AssertionPolicy,
     ) -> RequestOptions {
         RequestOptions {
-            challenge: base64url_encode(challenge),
+            challenge: URL_SAFE_NO_PAD.encode(challenge),
             timeout: self.config.timeout_ms,
             rp_id: self.config.rp_id.clone(),
             allow_credentials: allow,
@@ -462,7 +461,8 @@ impl RelyingParty {
         if client_data.type_ != ceremony {
             return Err(WebAuthnError::WrongCeremony);
         }
-        let presented = base64url_decode(&client_data.challenge)
+        let presented = URL_SAFE_NO_PAD
+            .decode(&client_data.challenge)
             .map_err(|_| WebAuthnError::Malformed("challenge"))?;
         if aws_lc_rs::constant_time::verify_slices_are_equal(&presented, challenge).is_err() {
             return Err(WebAuthnError::ChallengeMismatch);
@@ -543,7 +543,9 @@ fn origin_matches(allowed: &str, origin: &str) -> bool {
 }
 
 fn decode(text: &str, what: &'static str) -> Result<Vec<u8>, WebAuthnError> {
-    base64url_decode(text).map_err(|_| WebAuthnError::Malformed(what))
+    URL_SAFE_NO_PAD
+        .decode(text)
+        .map_err(|_| WebAuthnError::Malformed(what))
 }
 
 fn truncate(text: &str) -> String {

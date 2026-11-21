@@ -486,29 +486,9 @@ fn a_six_octet_identifier_is_told_apart_by_the_record() {
 /// The DHCID computation against the examples of RFC 4701, section 3.6.
 #[test]
 fn the_dhcid_computation_matches_the_rfc() {
-    fn base64(bytes: &[u8]) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::new();
-        for chunk in bytes.chunks(3) {
-            let b = [
-                chunk[0],
-                *chunk.get(1).unwrap_or(&0),
-                *chunk.get(2).unwrap_or(&0),
-            ];
-            let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-            for i in 0..4 {
-                if i <= chunk.len() {
-                    out.push(char::from(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize]));
-                } else {
-                    out.push('=');
-                }
-            }
-        }
-        out
-    }
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
     assert_eq!(
-        base64(&dhcid(
+        STANDARD.encode(dhcid(
             IdType::Duid,
             &[0, 1, 0, 6, 0x41, 0x2d, 0xf1, 0x66, 1, 2, 3, 4, 5, 6],
             &name("chi6.example.com"),
@@ -516,7 +496,7 @@ fn the_dhcid_computation_matches_the_rfc() {
         "AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA="
     );
     assert_eq!(
-        base64(&dhcid(
+        STANDARD.encode(dhcid(
             IdType::ClientId,
             &[1, 7, 8, 9, 10, 11, 12],
             &name("chi.example.com"),
@@ -524,7 +504,7 @@ fn the_dhcid_computation_matches_the_rfc() {
         "AAEBOSD+XR3Os/0LozeXVqcNc7FwCfQdWL3b/NaiUDlW2No="
     );
     assert_eq!(
-        base64(&dhcid(
+        STANDARD.encode(dhcid(
             IdType::Chaddr,
             &[1, 1, 2, 3, 4, 5, 6],
             &name("client.example.com"),

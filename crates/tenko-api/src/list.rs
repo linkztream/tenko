@@ -34,6 +34,7 @@ use axum::{
     extract::{FromRequestParts, Query},
     http::{Uri, request::Parts},
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use bytes::Bytes;
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -187,7 +188,7 @@ pub fn encode_cursor<T: Serialize>(scope: CursorScope, position: &T) -> String {
     // Serializing plain data into a vector cannot fail; an empty cursor would be refused
     // on the next request, which is the safe outcome should it ever happen.
     let json = serde_json::to_vec(&body).unwrap_or_default();
-    base64url_encode(&json)
+    URL_SAFE_NO_PAD.encode(json)
 }
 
 /// Encodes a cursor holding a raw store key (see [`PageParams::key_cursor`]).
@@ -201,7 +202,9 @@ pub fn encode_key_cursor(scope: CursorScope, key: &[u8]) -> String {
 ///
 /// 400 `sys.invalid_cursor` when the cursor is malformed or from another scope.
 pub fn decode_cursor<T: DeserializeOwned>(scope: CursorScope, cursor: &str) -> Result<T, ApiError> {
-    let json = base64url_decode(cursor).ok_or_else(invalid_cursor)?;
+    let json = URL_SAFE_NO_PAD
+        .decode(cursor)
+        .map_err(|_| invalid_cursor())?;
     let body: CursorBody<T> = serde_json::from_slice(&json).map_err(|_| invalid_cursor())?;
     if body.v != 1 || body.s != format!("{:016x}", scope.0) {
         return Err(invalid_cursor());
@@ -503,46 +506,6 @@ impl<S: Send + Sync> FromRequestParts<S> for Filters {
     }
 }
 
-const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-
-/// Base64url without padding (RFC 4648 section 5).
-pub(crate) fn base64url_encode(input: &[u8]) -> String {
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    for chunk in input.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        let symbols = chunk.len() + 1;
-        for i in 0..symbols {
-            let index = (n >> (18 - 6 * i)) & 0x3F;
-            out.push(char::from(BASE64URL[index as usize]));
-        }
-    }
-    out
-}
-
-/// Decodes base64url without padding; `None` on any invalid input.
-pub(crate) fn base64url_decode(input: &str) -> Option<Vec<u8>> {
-    let input = input.trim_end_matches('=');
-    if input.len() % 4 == 1 {
-        return None;
-    }
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-    for chunk in input.as_bytes().chunks(4) {
-        let mut n: u32 = 0;
-        for (i, symbol) in chunk.iter().enumerate() {
-            let value = BASE64URL.iter().position(|c| c == symbol)?;
-            n |= u32::try_from(value).ok()? << (18 - 6 * i);
-        }
-        let bytes = n.to_be_bytes();
-        out.extend_from_slice(&bytes[1..chunk.len()]);
-    }
-    Some(out)
-}
-
 fn to_hex(bytes: &[u8]) -> String {
     use std::fmt::Write as _;
     let mut out = String::with_capacity(bytes.len() * 2);
@@ -636,24 +599,29 @@ mod tests {
         assert_eq!(PageParams::default().key_cursor(scope).expect("none"), None);
     }
 
+    /// A cursor is ours: only its canonical spelling decodes, not one with padding added or
+    /// with a trailing bit set.
     #[test]
-    fn base64url_matches_rfc_4648_vectors() {
-        for (plain, encoded) in [
-            ("", ""),
-            ("f", "Zg"),
-            ("fo", "Zm8"),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg"),
-            ("fooba", "Zm9vYmE"),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(base64url_encode(plain.as_bytes()), encoded);
-            assert_eq!(base64url_decode(encoded).expect("decode"), plain.as_bytes());
-        }
-        assert_eq!(base64url_encode(&[0xFB, 0xFF]), "-_8");
-        assert_eq!(base64url_decode("-_8").expect("decode"), vec![0xFB, 0xFF]);
-        assert!(base64url_decode("Z").is_none());
-        assert!(base64url_decode("Zm9v+A").is_none());
+    fn a_cursor_in_another_spelling_is_refused() {
+        let scope = CursorScope::new("ipam.prefixes");
+        let (position, cursor) = [7_u32, 70, 700]
+            .map(|n| (n, encode_cursor(scope, &n)))
+            .into_iter()
+            .find(|(_, cursor)| !cursor.len().is_multiple_of(4))
+            .expect("a cursor whose last character has trailing bits");
+        assert_eq!(
+            decode_cursor::<u32>(scope, &cursor).expect("canonical"),
+            position
+        );
+        let error = decode_cursor::<u32>(scope, &format!("{cursor}=")).expect_err("padded");
+        assert_eq!(code(&error), codes::INVALID_CURSOR);
+        // The last character of a canonical spelling has its unused low bits clear, so the
+        // next character of the alphabet is the same bytes with one of those bits set.
+        let mut flipped = cursor.into_bytes();
+        *flipped.last_mut().expect("a character") += 1;
+        let flipped = String::from_utf8(flipped).expect("ASCII");
+        let error = decode_cursor::<u32>(scope, &flipped).expect_err("a trailing bit");
+        assert_eq!(code(&error), codes::INVALID_CURSOR);
     }
 
     #[test]

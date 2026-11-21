@@ -33,6 +33,10 @@ use std::{
 };
 
 use aws_lc_rs::digest;
+use base64::{
+    Engine as _, alphabet,
+    engine::{GeneralPurpose, general_purpose::PAD},
+};
 use rustls::{
     CertificateError, ClientConfig, DigitallySignedStruct, Error as TlsError, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -728,7 +732,9 @@ pub fn pem_certificates(text: &str) -> Result<Vec<Vec<u8>>, String> {
             .chars()
             .filter(|c| !c.is_whitespace())
             .collect();
-        let der = base64_decode(&body)
+        let der = PEM_BASE64
+            .decode(&body)
+            .ok()
             .filter(|der| !der.is_empty())
             .ok_or_else(|| "a certificate is not valid base64".to_owned())?;
         certificates.push(der);
@@ -740,45 +746,12 @@ pub fn pem_certificates(text: &str) -> Result<Vec<Vec<u8>>, String> {
     Ok(certificates)
 }
 
-/// Standard base64 with padding.
-fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    fn value(c: u8) -> Option<u32> {
-        match c {
-            b'A'..=b'Z' => Some(u32::from(c - b'A')),
-            b'a'..=b'z' => Some(u32::from(c - b'a') + 26),
-            b'0'..=b'9' => Some(u32::from(c - b'0') + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let bytes = text.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        return None;
-    }
-    let mut out = Vec::with_capacity(bytes.len() / 4 * 3);
-    for (index, quad) in bytes.chunks(4).enumerate() {
-        let last = index == bytes.len() / 4 - 1;
-        let padding = quad.iter().rev().take_while(|&&c| c == b'=').count();
-        if padding > 2 || (padding > 0 && !last) {
-            return None;
-        }
-        let mut word = 0u32;
-        for &c in &quad[..4 - padding] {
-            word = word << 6 | value(c)?;
-        }
-        word <<= 6 * u32::try_from(padding).unwrap_or(0);
-        let [_, a, b, c] = word.to_be_bytes();
-        out.push(a);
-        if padding < 2 {
-            out.push(b);
-        }
-        if padding < 1 {
-            out.push(c);
-        }
-    }
-    Some(out)
-}
+/// Standard base64 with padding; non-zero trailing bits are ignored, as RFC 4648 section 3.5
+/// lets a decoder do, since other programs write these PEM texts.
+const PEM_BASE64: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::STANDARD,
+    PAD.with_decode_allow_trailing_bits(true),
+);
 
 /// The crypto provider of the pinned configurations: aws-lc-rs, as everywhere in Tenko.
 fn provider() -> Arc<CryptoProvider> {
@@ -990,19 +963,6 @@ mod tests {
     }
 
     #[test]
-    fn base64_decodes_with_padding_and_refuses_garbage() {
-        assert_eq!(base64_decode("").expect("empty"), Vec::<u8>::new());
-        assert_eq!(base64_decode("TWFu").expect("man"), b"Man");
-        assert_eq!(base64_decode("TWE=").expect("ma"), b"Ma");
-        assert_eq!(base64_decode("TQ==").expect("m"), b"M");
-        assert_eq!(base64_decode("TQ"), None);
-        assert_eq!(base64_decode("TQ=a"), None);
-        assert_eq!(base64_decode("TQ==TWFu"), None);
-        assert_eq!(base64_decode("T===").as_deref(), None);
-        assert_eq!(base64_decode("TW*u"), None);
-    }
-
-    #[test]
     fn pem_text_is_read_even_without_line_breaks() {
         let pem = "-----BEGIN CERTIFICATE-----\nTWFu\nTWFu\n-----END CERTIFICATE-----\n";
         assert_eq!(
@@ -1028,6 +988,17 @@ mod tests {
             pem_certificates("-----BEGIN CERTIFICATE-----T*Fu-----END CERTIFICATE-----")
                 .expect_err("base64")
                 .contains("base64")
+        );
+        // Non-zero trailing bits ("TR==" carries them) are ignored; missing padding is not.
+        let wrap =
+            |body: &str| format!("-----BEGIN CERTIFICATE-----{body}-----END CERTIFICATE-----");
+        assert_eq!(
+            pem_certificates(&wrap("TR==")).expect("trailing bits"),
+            vec![b"M".to_vec()]
+        );
+        assert_eq!(
+            pem_certificates(&wrap("TQ")),
+            Err("a certificate is not valid base64".to_owned())
         );
     }
 

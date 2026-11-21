@@ -49,6 +49,7 @@ client = ["dep:reqwest"]
 
 [dependencies]
 async-trait = { workspace = true, optional = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 # XLIFF language packs (src/i18n); outside the server feature for the fuzz target.
 quick-xml = { workspace = true }

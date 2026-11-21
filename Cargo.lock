@@ -3161,6 +3161,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "clap",
  "fs4",
  "futures",
@@ -3225,6 +3226,7 @@ dependencies = [
  "async-trait",
  "aws-lc-rs",
  "axum",
+ "base64 0.23.1",
  "brotli",
  "bytes",
  "flate2",
@@ -3273,6 +3275,7 @@ dependencies = [
  "argon2",
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "bytes",
  "ciborium",
  "futures",
@@ -3310,6 +3313,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "flate2",
  "futures",
  "hyper-util",
@@ -3352,6 +3356,7 @@ version = "0.0.12-rc.7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "bytes",
  "futures",
  "hyper-util",
@@ -3394,6 +3399,7 @@ version = "0.0.12-rc.7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "reqwest",
  "serde",
  "serde_json",
@@ -3467,6 +3473,7 @@ name = "tenko-dhcp"
 version = "0.0.12-rc.7"
 dependencies = [
  "async-trait",
+ "base64 0.23.1",
  "bytes",
  "dhcproto",
  "futures",
@@ -3499,6 +3506,7 @@ dependencies = [
  "arc-swap",
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "bytes",
  "domain",
  "flate2",
@@ -3684,6 +3692,7 @@ version = "0.0.12-rc.7"
 dependencies = [
  "async-trait",
  "aws-lc-rs",
+ "base64 0.23.1",
  "bytes",
  "futures",
  "serde",

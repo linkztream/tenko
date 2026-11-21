@@ -19,9 +19,9 @@
 
 use std::{fmt::Write as _, path::PathBuf};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clap::{Args, Subcommand};
 use serde_json::{Value, json};
-use tenko_auth::encoding::base64url_encode;
 
 use super::{ClientOpts, Failure, Output, Target, key, number, text, usage};
 use crate::client::read_secret;
@@ -290,7 +290,7 @@ async fn import(target: &Target, args: &ImportArgs) -> Result<Output, Failure> {
     }
     let mut body = json!({
         "realm": realm,
-        "keytab": base64url_encode(&bytes),
+        "keytab": URL_SAFE_NO_PAD.encode(&bytes),
         "spns": args.spns,
         "kdcs": args.kdcs,
     });

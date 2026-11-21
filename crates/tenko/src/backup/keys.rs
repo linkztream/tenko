@@ -18,8 +18,8 @@ use aws_lc_rs::{
     agreement::{PrivateKey, X25519},
     encoding::AsBigEndian as _,
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest as _, Sha256};
-use tenko_auth::encoding::{base64url_decode, base64url_encode};
 use zeroize::Zeroizing;
 
 use super::BackupError;
@@ -57,7 +57,7 @@ impl Recipient {
             .trim()
             .strip_prefix(RECIPIENT_PREFIX)
             .ok_or_else(invalid)?;
-        let bytes = base64url_decode(encoded).map_err(|_| invalid())?;
+        let bytes = URL_SAFE_NO_PAD.decode(encoded).map_err(|_| invalid())?;
         let key: [u8; KEY_LEN] = bytes.as_slice().try_into().map_err(|_| invalid())?;
         if key.iter().all(|byte| *byte == 0) {
             return Err(invalid());
@@ -76,7 +76,7 @@ impl Recipient {
 
 impl fmt::Display for Recipient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{RECIPIENT_PREFIX}{}", base64url_encode(&self.0))
+        write!(f, "{RECIPIENT_PREFIX}{}", URL_SAFE_NO_PAD.encode(self.0))
     }
 }
 
@@ -163,8 +163,11 @@ impl BackupKey {
         let encoded = line
             .strip_prefix(KEY_PREFIX)
             .ok_or_else(|| invalid("the key line does not start with `tkbk1:`"))?;
-        let bytes =
-            Zeroizing::new(base64url_decode(encoded).map_err(|_| invalid("bad base64url"))?);
+        let bytes = Zeroizing::new(
+            URL_SAFE_NO_PAD
+                .decode(encoded)
+                .map_err(|_| invalid("bad base64url"))?,
+        );
         let private: [u8; KEY_LEN] = bytes
             .as_slice()
             .try_into()
@@ -190,7 +193,7 @@ impl BackupKey {
              # recipient: {}\n\
              {KEY_PREFIX}{}\n",
             self.recipient,
-            base64url_encode(self.private.as_ref())
+            URL_SAFE_NO_PAD.encode(self.private.as_ref())
         ))
     }
 
@@ -254,6 +257,17 @@ mod tests {
         let key = BackupKey::generate().expect("key");
         let twice = format!("{}{}", key.file_text().as_str(), key.file_text().as_str());
         assert!(BackupKey::parse_file(&twice).is_err());
+        // Both lines are ours: a padded spelling is refused.
+        let padded_key = format!("{}=\n", key.file_text().trim_end());
+        assert!(matches!(
+            BackupKey::parse_file(&padded_key),
+            Err(BackupError::InvalidKey(_))
+        ));
+        let padded_recipient = format!("{}=", key.recipient());
+        assert!(matches!(
+            Recipient::parse(&padded_recipient),
+            Err(BackupError::InvalidKey(_))
+        ));
         for text in [
             "",
             "tkbr1:",

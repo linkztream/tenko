@@ -1185,6 +1185,14 @@ async fn factor_changes_need_a_fresh_authentication() {
     // A new login restores them.
     let renewed = totp_login(&env, "vera", PASSPHRASE, &seed).await;
     let fresh = self::ctx(&env, &renewed).await;
+    // The id is ours: with padding added it names no credential.
+    assert_eq!(
+        env.service
+            .delete_credential(&fresh, &format!("{first_id}="))
+            .await
+            .expect_err("padded"),
+        AuthError::NotFound { kind: "credential" }
+    );
     env.service
         .delete_credential(&fresh, &first_id)
         .await

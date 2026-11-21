@@ -47,6 +47,9 @@ use std::fmt;
 use aws_lc_rs::constant_time::verify_slices_are_equal;
 use aws_lc_rs::digest::{Context, SHA256};
 use aws_lc_rs::rand;
+use base64::{
+    DecodeError, DecodeSliceError, Engine as _, engine::general_purpose::URL_SAFE_NO_PAD,
+};
 use serde::de::{self, Unexpected, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tenko_core::Coded;
@@ -83,9 +86,6 @@ const DIGEST_LEN: usize = 32;
 /// The domain separator that starts the hashed input of a digest. Stored digests depend on
 /// these bytes, so they keep the spelling of 0.0.11.
 const DIGEST_DOMAIN: &[u8] = b"tenko-enrolment-token-v1\0"; // spelling: stored key
-
-/// The base64url alphabet of RFC 4648 section 5.
-const BASE64URL: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
 /// The lowercase hexadecimal digits.
 const HEX_LOWER: &[u8; 16] = b"0123456789abcdef";
@@ -208,7 +208,7 @@ impl EnrollmentToken {
         text.push('.');
         text.push_str(self.id.simple().encode_lower(&mut Uuid::encode_buffer()));
         text.push('.');
-        push_base64url(&mut text, self.secret.as_slice());
+        push_base64url(&mut text, &self.secret);
         if let Some(fingerprint) = &self.ca_fingerprint {
             text.push('.');
             push_base64url(&mut text, &fingerprint.0);
@@ -445,36 +445,11 @@ fn check_prefix(prefix: &str) -> Result<bool, TokenError> {
     }))
 }
 
-/// Appends `bytes` as unpadded base64url.
-fn push_base64url(out: &mut String, bytes: &[u8]) {
-    for chunk in bytes.chunks(3) {
-        let (b0, b1, b2, chars) = match *chunk {
-            [b0, b1, b2] => (b0, b1, b2, 4),
-            [b0, b1] => (b0, b1, 0, 3),
-            [b0] => (b0, 0, 0, 2),
-            _ => continue,
-        };
-        let sextets = Zeroizing::new([
-            b0 >> 2,
-            ((b0 & 0x03) << 4) | (b1 >> 4),
-            ((b1 & 0x0f) << 2) | (b2 >> 6),
-            b2 & 0x3f,
-        ]);
-        for &sextet in sextets.iter().take(chars) {
-            out.push(char::from(BASE64URL[usize::from(sextet)]));
-        }
-    }
-}
-
-/// The 6-bit value of a base64url character, or `None` for any other byte.
-const fn sextet_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'A'..=b'Z' => Some(byte - b'A'),
-        b'a'..=b'z' => Some(byte - b'a' + 26),
-        b'0'..=b'9' => Some(byte - b'0' + 52),
-        b'-' => Some(62),
-        b'_' => Some(63),
-        _ => None,
+/// Appends 32 bytes as unpadded base64url, through a buffer that is wiped when it is dropped.
+fn push_base64url(out: &mut String, bytes: &[u8; SECRET_LEN]) {
+    let mut text = Zeroizing::new([0_u8; SECRET_TEXT_LEN]);
+    if URL_SAFE_NO_PAD.encode_slice(bytes, &mut *text) == Ok(SECRET_TEXT_LEN) {
+        out.push_str(std::str::from_utf8(&*text).unwrap_or_default());
     }
 }
 
@@ -494,37 +469,20 @@ enum Base64Fault {
 /// Decodes the 43 characters of 32 bytes, a secret or a fingerprint; refuses padding, other
 /// characters and any spelling that is not the canonical one.
 fn decode_base64url_32(text: &str) -> Result<Zeroizing<[u8; SECRET_LEN]>, Base64Fault> {
-    let text = text.as_bytes();
-    if text.contains(&b'=') {
+    if text.contains('=') {
         return Err(Base64Fault::Padded);
     }
     if text.len() != SECRET_TEXT_LEN {
         return Err(Base64Fault::Length);
     }
-    let mut sextets = Zeroizing::new([0_u8; SECRET_TEXT_LEN]);
-    for (slot, &byte) in sextets.iter_mut().zip(text) {
-        *slot = sextet_value(byte).ok_or(Base64Fault::Alphabet)?;
-    }
     let mut secret = Zeroizing::new([0_u8; SECRET_LEN]);
-    for (group, dest) in sextets.chunks(4).zip(secret.chunks_mut(3)) {
-        match (group, dest) {
-            ([s0, s1, s2, s3], [o0, o1, o2]) => {
-                *o0 = (*s0 << 2) | (*s1 >> 4);
-                *o1 = (*s1 << 4) | (*s2 >> 2);
-                *o2 = (*s2 << 6) | *s3;
-            }
-            ([s0, s1, s2], [o0, o1]) => {
-                // The two unused low bits of the last character must be zero.
-                if *s2 & 0x03 != 0 {
-                    return Err(Base64Fault::NonCanonical);
-                }
-                *o0 = (*s0 << 2) | (*s1 >> 4);
-                *o1 = (*s1 << 4) | (*s2 >> 2);
-            }
-            _ => return Err(Base64Fault::Length),
+    match URL_SAFE_NO_PAD.decode_slice(text, &mut *secret) {
+        Ok(_) => Ok(secret),
+        Err(DecodeSliceError::DecodeError(DecodeError::InvalidLastSymbol { .. })) => {
+            Err(Base64Fault::NonCanonical)
         }
+        Err(_) => Err(Base64Fault::Alphabet),
     }
-    Ok(secret)
 }
 
 /// The value of a hexadecimal digit of either case.
@@ -798,27 +756,6 @@ mod tests {
     }
 
     #[test]
-    fn encoder_matches_the_rfc_4648_vectors_without_padding() {
-        let vectors = [
-            ("", ""),
-            ("f", "Zg"),
-            ("fo", "Zm8"),
-            ("foo", "Zm9v"),
-            ("foob", "Zm9vYg"),
-            ("fooba", "Zm9vYmE"),
-            ("foobar", "Zm9vYmFy"),
-        ];
-        for (plain, encoded) in vectors {
-            let mut out = String::new();
-            push_base64url(&mut out, plain.as_bytes());
-            assert_eq!(out, encoded, "encoding {plain:?}");
-        }
-        let mut out = String::new();
-        push_base64url(&mut out, &[0xfb, 0xff, 0xbf]);
-        assert_eq!(out, "-_-_");
-    }
-
-    #[test]
     fn secrets_round_trip_for_edge_patterns() {
         let mut counting = [0_u8; SECRET_LEN];
         for (index, byte) in counting.iter_mut().enumerate() {
@@ -1022,7 +959,7 @@ mod tests {
     #[test]
     fn only_alphabet_positions_divisible_by_four_end_a_secret() {
         let head = &KNOWN_SECRET_TEXT[..42];
-        for (index, &last) in BASE64URL.iter().enumerate() {
+        for (index, last) in base64::alphabet::URL_SAFE.as_str().bytes().enumerate() {
             let text = with_secret(&format!("{head}{}", char::from(last)));
             let parsed = EnrollmentToken::parse(&text);
             assert_eq!(

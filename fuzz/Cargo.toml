@@ -12,6 +12,8 @@ cargo-fuzz = true
 [workspace]
 
 [dependencies]
+# The base64url of `auth_sign_in_inputs`.
+base64 = "0.23"
 bytes = "1"
 # The request headers of `api_request_headers`.
 http = "1"

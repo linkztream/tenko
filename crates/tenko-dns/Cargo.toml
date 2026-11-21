@@ -17,6 +17,7 @@ arc-swap = { workspace = true }
 # The zone service (src/zone): the inline jobs of every write and the TSIG secrets.
 async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 # The wire codec (src/codec) only: zone files are read and written by Tenko's own code
 # (src/zone/zonefile.rs), so the `zonefile` feature is a dev-dependency feature below.

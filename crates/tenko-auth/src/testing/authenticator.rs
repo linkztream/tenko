@@ -30,12 +30,12 @@ use aws_lc_rs::{
         RSA_PKCS1_SHA256, RsaKeyPair,
     },
 };
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ciborium::Value;
 use serde::Serialize;
 use sha2::{Digest as _, Sha256};
 
 use crate::{
-    encoding::{base64url_decode, base64url_encode},
     random,
     webauthn::{
         ALG_EDDSA, ALG_ES256, ALG_RS256, AssertionResponse, AttestationResponse,
@@ -237,8 +237,9 @@ impl SoftAuthenticator {
                 .any(|parameter| parameter.alg == cose_alg),
             "the creation options do not accept algorithm {cose_alg}"
         );
-        let user_handle =
-            base64url_decode(&options.user.id).expect("user.id of the options is base64url");
+        let user_handle = URL_SAFE_NO_PAD
+            .decode(&options.user.id)
+            .expect("user.id of the options is base64url");
         let key = CredentialKey::generate(self.alg);
         let credential_id = random::array::<32>()
             .expect("the system random source works")
@@ -263,15 +264,15 @@ impl SoftAuthenticator {
             (text("authData"), Value::Bytes(auth_data)),
         ]));
 
-        let encoded_id = base64url_encode(&credential_id);
+        let encoded_id = URL_SAFE_NO_PAD.encode(&credential_id);
         let cross_platform = self.attestation == SoftAttestation::PackedCertificate;
         let response = RegistrationResponse {
             id: encoded_id.clone(),
             raw_id: encoded_id,
             type_: "public-key".to_owned(),
             response: AttestationResponse {
-                client_data_json: base64url_encode(&client_data_json),
-                attestation_object: base64url_encode(&attestation_object),
+                client_data_json: URL_SAFE_NO_PAD.encode(&client_data_json),
+                attestation_object: URL_SAFE_NO_PAD.encode(&attestation_object),
                 transports: vec![transport(cross_platform).to_owned()],
             },
             authenticator_attachment: Some(attachment(cross_platform).to_owned()),
@@ -333,17 +334,17 @@ impl SoftAuthenticator {
             flip_bit(&mut signature);
         }
 
-        let encoded_id = base64url_encode(&credential.id);
+        let encoded_id = URL_SAFE_NO_PAD.encode(&credential.id);
         let cross_platform = self.attestation == SoftAttestation::PackedCertificate;
         AuthenticationResponse {
             id: encoded_id.clone(),
             raw_id: encoded_id,
             type_: "public-key".to_owned(),
             response: AssertionResponse {
-                client_data_json: base64url_encode(&client_data_json),
-                authenticator_data: base64url_encode(&auth_data),
-                signature: base64url_encode(&signature),
-                user_handle: Some(base64url_encode(&credential.user_handle)),
+                client_data_json: URL_SAFE_NO_PAD.encode(&client_data_json),
+                authenticator_data: URL_SAFE_NO_PAD.encode(&auth_data),
+                signature: URL_SAFE_NO_PAD.encode(&signature),
+                user_handle: Some(URL_SAFE_NO_PAD.encode(&credential.user_handle)),
             },
             authenticator_attachment: Some(attachment(cross_platform).to_owned()),
             client_extension_results: serde_json::json!({}),
@@ -370,7 +371,7 @@ impl SoftAuthenticator {
         options
             .allow_credentials
             .iter()
-            .filter_map(|descriptor| base64url_decode(&descriptor.id).ok())
+            .filter_map(|descriptor| URL_SAFE_NO_PAD.decode(&descriptor.id).ok())
             .find_map(|id| {
                 self.credentials
                     .iter()
@@ -476,7 +477,10 @@ fn client_data_json(
         top_origin: Option<&'a str>,
     }
 
-    let challenge = tweaks.challenge.as_deref().map(base64url_encode);
+    let challenge = tweaks
+        .challenge
+        .as_deref()
+        .map(|bytes| URL_SAFE_NO_PAD.encode(bytes));
     serde_json::to_vec(&ClientData {
         type_: tweaks.ceremony_type.as_deref().unwrap_or(default_type),
         challenge: challenge.as_deref().unwrap_or(default_challenge),

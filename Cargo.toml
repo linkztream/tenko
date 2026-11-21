@@ -78,6 +78,8 @@ tenko-vault = { path = "crates/tenko-vault" }
 
 # Store and encoding.
 arc-swap = "1.9.2"
+# Base64 text (RFC 4648); already in the graph through `pem` and `hyper-util`.
+base64 = "0.23"
 bytes = { version = "1.12.1", features = ["serde"] }
 ciborium = "0.2.2"
 openraft = { version = "=0.9.25", features = ["serde", "storage-v2", "generic-snapshot-data"] }

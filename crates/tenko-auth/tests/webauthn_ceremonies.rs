@@ -3,11 +3,12 @@
 //! hardware-key rules hold, and every check of the verifier refuses what it should with
 //! the exact error.
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use ciborium::Value;
 use sha2::{Digest as _, Sha256};
 use tenko_auth::{
     clock::{Clock as _, MockClock},
-    encoding::{base64url_decode, base64url_encode, hex_decode, hex_encode},
+    encoding::{hex_decode, hex_encode},
     testing::authenticator::{SoftAttestation, SoftAuthenticator, SoftKeyAlg, Tweaks},
     webauthn::{
         ALG_EDDSA, ALG_ES256, ALG_RS256, AssertionPolicy, AttestationKind, AuthenticationResponse,
@@ -269,7 +270,9 @@ fn member<'a>(map: &'a [(Value, Value)], name: &str) -> &'a Value {
 }
 
 fn attestation_object(response: &RegistrationResponse) -> Vec<(Value, Value)> {
-    let bytes = base64url_decode(&response.response.attestation_object).expect("base64url");
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&response.response.attestation_object)
+        .expect("base64url");
     let value: Value = ciborium::de::from_reader(bytes.as_slice()).expect("CBOR");
     value.into_map().expect("the attestation object is a map")
 }
@@ -284,7 +287,7 @@ fn integer_of(value: &Value) -> i64 {
 }
 
 fn text_of(encoded: &str) -> String {
-    String::from_utf8(base64url_decode(encoded).expect("base64url")).expect("UTF-8")
+    String::from_utf8(URL_SAFE_NO_PAD.decode(encoded).expect("base64url")).expect("UTF-8")
 }
 
 // --- Registration then assertion, for every algorithm and attestation --------------------
@@ -450,7 +453,7 @@ fn discoverable_login_returns_the_user_handle() {
         let response = authenticator.assert(&options, ORIGIN);
         assert_eq!(
             response.response.user_handle.as_deref(),
-            Some(base64url_encode(USER_ID).as_str())
+            Some(URL_SAFE_NO_PAD.encode(USER_ID).as_str())
         );
         // The service finds the credential by id, then verifies and checks the handle.
         let id = assertion_credential_id(&response).expect("credential id");
@@ -573,7 +576,7 @@ fn check_registration_wire_format(alg: SoftKeyAlg, attestation: SoftAttestation)
     assert_eq!(auth_data[33..37], [0, 0, 0, 0]);
     assert_eq!(auth_data[37..53], authenticator.aaguid());
     assert_eq!(auth_data[53..55], [0, 32]);
-    let credential_id = base64url_decode(&response.id).expect("id");
+    let credential_id = URL_SAFE_NO_PAD.decode(&response.id).expect("id");
     assert_eq!(auth_data[55..87], credential_id[..]);
     check_cose_key(alg, &auth_data[87..]);
 
@@ -658,10 +661,12 @@ fn assertion_responses_follow_the_wire_format() {
             text_of(&response.response.client_data_json),
             format!(
                 r#"{{"type":"webauthn.get","challenge":"{}","origin":"{ORIGIN}","crossOrigin":false}}"#,
-                base64url_encode(&AUTHENTICATION_CHALLENGE)
+                URL_SAFE_NO_PAD.encode(AUTHENTICATION_CHALLENGE)
             )
         );
-        let auth_data = base64url_decode(&response.response.authenticator_data).expect("base64url");
+        let auth_data = URL_SAFE_NO_PAD
+            .decode(&response.response.authenticator_data)
+            .expect("base64url");
         assert_eq!(
             auth_data.len(),
             37,
@@ -702,7 +707,9 @@ fn tweaks_change_only_what_they_name() {
         ..Tweaks::default()
     };
     let response = fixture.response(ORIGIN, &tweaks, AssertionPolicy::default());
-    let auth_data = base64url_decode(&response.response.authenticator_data).expect("base64url");
+    let auth_data = URL_SAFE_NO_PAD
+        .decode(&response.response.authenticator_data)
+        .expect("base64url");
     assert_eq!(auth_data[32], Flags::USER_PRESENT | Flags::BACKUP_ELIGIBLE);
     assert_eq!(auth_data[33..37], [1, 2, 3, 4]);
 }
@@ -919,7 +926,7 @@ fn creation_and_request_options_follow_the_policy() {
         Some("cross-platform")
     );
     assert_eq!(options.hints, ["security-key"]);
-    assert_eq!(options.user.id, base64url_encode(USER_ID));
+    assert_eq!(options.user.id, URL_SAFE_NO_PAD.encode(USER_ID));
 
     assert_eq!(
         request_options(&rp, Vec::new(), AssertionPolicy::default()).hints,
@@ -1334,7 +1341,7 @@ fn mismatching_credential_ids_are_refused() {
 
     // `id` and `rawId` differ.
     let mut mismatched = good.clone();
-    mismatched.id = base64url_encode(&[7; 32]);
+    mismatched.id = URL_SAFE_NO_PAD.encode([7; 32]);
     assert!(matches!(
         assertion_credential_id(&mismatched),
         Err(WebAuthnError::Malformed(_))
@@ -1346,6 +1353,14 @@ fn mismatching_credential_ids_are_refused() {
         matches!(refused, WebAuthnError::Malformed(_)),
         "{refused:?}"
     );
+
+    // `id` with padding added: WebAuthn's base64url omits it, so this is no id.
+    let mut padded = good.clone();
+    padded.id = format!("{}=", good.id);
+    assert!(matches!(
+        assertion_credential_id(&padded),
+        Err(WebAuthnError::Malformed(_))
+    ));
 
     // The credential type is not `public-key`.
     let mut wrong_type = good.clone();
@@ -1393,7 +1408,7 @@ fn registration_credential_ids_must_agree() {
 
     // `id` and `rawId` differ.
     let mut mismatched = good.clone();
-    mismatched.id = base64url_encode(&[7; 32]);
+    mismatched.id = URL_SAFE_NO_PAD.encode([7; 32]);
     let refused = finish_registration(&rp, &mismatched, policy).expect_err("id differs");
     assert!(
         matches!(refused, WebAuthnError::Malformed(_)),
@@ -1402,7 +1417,7 @@ fn registration_credential_ids_must_agree() {
 
     // `id` and `rawId` agree but are not the credential id in the attested data.
     let mut foreign = good.clone();
-    foreign.id = base64url_encode(&[7; 32]);
+    foreign.id = URL_SAFE_NO_PAD.encode([7; 32]);
     foreign.raw_id = foreign.id.clone();
     assert_eq!(
         finish_registration(&rp, &foreign, policy).expect_err("another id"),
@@ -1471,7 +1486,7 @@ fn the_attestation_signature_covers_the_client_data() {
     );
     let client_data = text_of(&response.response.client_data_json)
         .replace("\"crossOrigin\":false", "\"crossOrigin\":false,\"extra\":1");
-    response.response.client_data_json = base64url_encode(client_data.as_bytes());
+    response.response.client_data_json = URL_SAFE_NO_PAD.encode(client_data.as_bytes());
     let refused = finish_registration(&rp, &response, policy).expect_err("different client data");
     assert!(
         matches!(refused, WebAuthnError::AttestationInvalid(_)),
@@ -1551,7 +1566,7 @@ fn with_attestation_object(
     let mut bytes = Vec::new();
     ciborium::ser::into_writer(&Value::Map(object), &mut bytes).expect("CBOR encodes");
     let mut edited = response.clone();
-    edited.response.attestation_object = base64url_encode(&bytes);
+    edited.response.attestation_object = URL_SAFE_NO_PAD.encode(&bytes);
     edited
 }
 
@@ -1726,11 +1741,13 @@ fn malformed_attestation_objects_are_refused() {
     // Not a map, trailing bytes and garbage.
     let mut array = Vec::new();
     ciborium::ser::into_writer(&Value::Array(Vec::new()), &mut array).expect("CBOR encodes");
-    let mut trailing = base64url_decode(&honest.response.attestation_object).expect("base64url");
+    let mut trailing = URL_SAFE_NO_PAD
+        .decode(&honest.response.attestation_object)
+        .expect("base64url");
     trailing.push(0);
     for bytes in [array, trailing, vec![0xff; 12], Vec::new()] {
         let mut response = honest.clone();
-        response.response.attestation_object = base64url_encode(&bytes);
+        response.response.attestation_object = URL_SAFE_NO_PAD.encode(&bytes);
         malformed(&response);
     }
     // The attested-credential-data flag must agree with the data that follows.
@@ -1765,8 +1782,10 @@ fn an_assertion_with_attested_credential_data_is_refused() {
     // Truncated authenticator data.
     let mut fixture = Fixture::plain();
     let mut response = fixture.response(ORIGIN, &Tweaks::default(), AssertionPolicy::default());
-    let data = base64url_decode(&response.response.authenticator_data).expect("base64url");
-    response.response.authenticator_data = base64url_encode(&data[..36]);
+    let data = URL_SAFE_NO_PAD
+        .decode(&response.response.authenticator_data)
+        .expect("base64url");
+    response.response.authenticator_data = URL_SAFE_NO_PAD.encode(&data[..36]);
     let refused = fixture
         .verify(&response, AssertionPolicy::default())
         .expect_err("truncated");

@@ -29,6 +29,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{
+    Engine as _, alphabet,
+    engine::{GeneralPurpose, general_purpose::NO_PAD},
+};
 use bytes::Bytes;
 use http_body_util::{BodyExt as _, Full, LengthLimitError, Limited};
 use hyper::{
@@ -306,47 +310,37 @@ pub fn dns_param(query: &str) -> Option<&str> {
     let value = query
         .split('&')
         .find_map(|pair| pair.strip_prefix("dns="))?;
-    let mut value = value.trim_end_matches('=');
-    // Padding a client percent-encoded. The comparison runs on bytes: the query may hold
-    // UTF-8, and a cut of the `&str` inside a character would panic. The three bytes are
-    // ASCII when they match, so the shorter value still ends on a character boundary.
-    while let Some(rest) = value.len().checked_sub(3)
-        && value.as_bytes()[rest..].eq_ignore_ascii_case(b"%3D")
-    {
-        value = &value[..rest];
-    }
-    Some(value)
-}
-
-/// Decodes base64url (RFC 4648 section 5) into `out`; trailing `=` padding is allowed.
-/// Returns `false` for any other character or an impossible length.
-pub fn decode_base64url(text: &str, out: &mut Vec<u8>) -> bool {
-    let text = text.trim_end_matches('=');
-    out.clear();
-    if text.len() % 4 == 1 || text.len() > MAX_MESSAGE_LEN.div_ceil(3) * 4 {
-        return false;
-    }
-    out.reserve(text.len() / 4 * 3 + 2);
-    let mut acc: u32 = 0;
-    let mut bits = 0u32;
-    for byte in text.bytes() {
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'-' => 62,
-            b'_' => 63,
-            _ => return false,
-        };
-        acc = (acc << 6) | u32::from(value);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((acc >> bits).to_le_bytes()[0]);
-            acc &= (1 << bits) - 1;
+    // Padding, written plain or percent-encoded in any mix. The comparison runs on bytes: the
+    // query may hold UTF-8, and a cut of the `&str` inside a character would panic. The three
+    // bytes are ASCII when they match, so the shorter value still ends on a character boundary.
+    let mut value = value;
+    loop {
+        if let Some(rest) = value.strip_suffix('=') {
+            value = rest;
+        } else if let Some(rest) = value.len().checked_sub(3)
+            && value.as_bytes()[rest..].eq_ignore_ascii_case(b"%3D")
+        {
+            value = &value[..rest];
+        } else {
+            return Some(value);
         }
     }
-    true
+}
+
+/// The `dns` parameter's base64url: unpadded, as RFC 8484 section 6 writes it ([`dns_param`]
+/// strips the padding some clients add); non-zero trailing bits are ignored, as RFC 4648
+/// section 3.5 lets a decoder do.
+const DNS_PARAM: GeneralPurpose = GeneralPurpose::new(
+    &alphabet::URL_SAFE,
+    NO_PAD.with_decode_allow_trailing_bits(true),
+);
+
+/// Decodes the unpadded base64url of the `dns` parameter into `out`. Returns `false` for a
+/// character outside the alphabet, padding, an impossible length or a text longer than a
+/// DNS message can be.
+pub fn decode_base64url(text: &str, out: &mut Vec<u8>) -> bool {
+    out.clear();
+    text.len() <= MAX_MESSAGE_LEN.div_ceil(3) * 4 && DNS_PARAM.decode_vec(text, out).is_ok()
 }
 
 /// The freshness of an answer for `Cache-Control` (RFC 8484 section 5.1): the smallest
@@ -380,25 +374,9 @@ pub fn max_age(answer: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 
-    fn encode(bytes: &[u8]) -> String {
-        const ALPHABET: &[u8; 64] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-        let mut out = String::new();
-        for chunk in bytes.chunks(3) {
-            let mut block = [0u8; 3];
-            block[..chunk.len()].copy_from_slice(chunk);
-            let n = (u32::from(block[0]) << 16) | (u32::from(block[1]) << 8) | u32::from(block[2]);
-            for index in 0..=chunk.len() {
-                let six = (n >> (18 - 6 * index)) & 63;
-                out.push(char::from(
-                    ALPHABET[usize::try_from(six).expect("six bits")],
-                ));
-            }
-        }
-        out
-    }
+    use super::*;
 
     #[test]
     fn base64url_round_trips_and_refuses_junk() {
@@ -413,20 +391,27 @@ mod tests {
             let bytes: Vec<u8> = (0..len)
                 .map(|i| u8::try_from(i * 37 % 256).expect("byte"))
                 .collect();
-            let text = encode(&bytes);
+            let text = URL_SAFE_NO_PAD.encode(&bytes);
             assert!(decode_base64url(&text, &mut out), "{text}");
             assert_eq!(out, bytes);
-            assert!(decode_base64url(&format!("{text}=="), &mut out));
         }
         assert!(!decode_base64url("AAA+", &mut out));
         assert!(!decode_base64url("AAAAA", &mut out));
         assert!(!decode_base64url("AA=A", &mut out));
+        assert!(!decode_base64url("AA==", &mut out));
+        // Padding is the parameter reader's to strip; trailing bits ("xI" carries them) pass.
+        assert!(decode_base64url(
+            dns_param("dns=xI%3D%3D").expect("the parameter"),
+            &mut out
+        ));
+        assert_eq!(out, [0xc4]);
     }
 
     #[test]
     fn the_dns_parameter_is_found() {
         assert_eq!(dns_param("ct=x&dns=AAAB"), Some("AAAB"));
         assert_eq!(dns_param("dns=AAAB%3D%3d"), Some("AAAB"));
+        assert_eq!(dns_param("dns=AAAB=%3D="), Some("AAAB"));
         assert_eq!(dns_param("dnsx=AAAB"), None);
     }
 

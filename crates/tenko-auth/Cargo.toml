@@ -20,6 +20,7 @@ arc-swap = { workspace = true }
 argon2 = { workspace = true }
 async-trait = { workspace = true }
 aws-lc-rs = { workspace = true }
+base64 = { workspace = true }
 bytes = { workspace = true }
 ciborium = { workspace = true }
 # The change stream of the store (the unlock watch).

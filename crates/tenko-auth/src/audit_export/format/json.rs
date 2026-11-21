@@ -10,6 +10,7 @@
 //! [`parse_line`] reads a line back; `tenko audit verify --file` and the fuzz target
 //! `audit_export_jsonl` use it.
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 use tenko_core::{
@@ -110,7 +111,7 @@ pub fn line(origin: &Origin, event: &Event<'_>) -> Result<Line, CodecError> {
     Ok(match event {
         Event::Record(record) => Line::Record(Box::new(RecordLine {
             record: (*record).clone(),
-            cbor: base64_encode(&hashed_bytes(record)?),
+            cbor: STANDARD.encode(hashed_bytes(record)?),
         })),
         Event::Checkpoint(Checkpoint {
             head,
@@ -176,7 +177,9 @@ pub fn parse_line(text: &str) -> Result<Line, LineError> {
         serde_json::from_str(text).map_err(|error| LineError::Malformed(error.to_string()))?;
     if let Line::Record(record_line) = &line {
         let seq = record_line.record.seq;
-        let cbor = base64_decode(&record_line.cbor).ok_or(LineError::Base64(seq))?;
+        let cbor = STANDARD
+            .decode(&record_line.cbor)
+            .map_err(|_| LineError::Base64(seq))?;
         let digest: [u8; 32] = Sha256::digest(&cbor).into();
         if Digest(digest) != record_line.record.hash {
             return Err(LineError::CborHash(seq));
@@ -187,72 +190,6 @@ pub fn parse_line(text: &str) -> Result<Line, LineError> {
         }
     }
     Ok(line)
-}
-
-const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/// Standard base64 with padding (RFC 4648 section 4).
-pub fn base64_encode(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let word = chunk
-            .iter()
-            .enumerate()
-            .fold(0u32, |word, (i, &b)| word | u32::from(b) << (16 - 8 * i));
-        for i in 0..4 {
-            if i <= chunk.len() {
-                let index = (word >> (18 - 6 * i)) & 0x3f;
-                out.push(char::from(ALPHABET[index as usize]));
-            } else {
-                out.push('=');
-            }
-        }
-    }
-    out
-}
-
-/// Decodes standard base64 with padding; `None` for anything else.
-pub fn base64_decode(text: &str) -> Option<Vec<u8>> {
-    fn value(c: u8) -> Option<u32> {
-        match c {
-            b'A'..=b'Z' => Some(u32::from(c - b'A')),
-            b'a'..=b'z' => Some(u32::from(c - b'a') + 26),
-            b'0'..=b'9' => Some(u32::from(c - b'0') + 52),
-            b'+' => Some(62),
-            b'/' => Some(63),
-            _ => None,
-        }
-    }
-    let bytes = text.as_bytes();
-    if !bytes.len().is_multiple_of(4) {
-        return None;
-    }
-    let quads = bytes.len() / 4;
-    let mut out = Vec::with_capacity(quads * 3);
-    for (index, quad) in bytes.chunks(4).enumerate() {
-        let padding = quad.iter().rev().take_while(|&&c| c == b'=').count();
-        if padding > 2 || (padding > 0 && index + 1 != quads) {
-            return None;
-        }
-        let mut word = 0u32;
-        for &c in &quad[..4 - padding] {
-            word = word << 6 | value(c)?;
-        }
-        word <<= 6 * padding;
-        let [_, a, b, c] = word.to_be_bytes();
-        // Non-canonical padding bits would let two texts decode to the same bytes.
-        if (padding == 1 && c != 0) || (padding == 2 && (b != 0 || c != 0)) {
-            return None;
-        }
-        out.push(a);
-        if padding < 2 {
-            out.push(b);
-        }
-        if padding < 1 {
-            out.push(c);
-        }
-    }
-    Some(out)
 }
 
 #[cfg(test)]
@@ -323,9 +260,11 @@ mod tests {
             Err(LineError::CborFields(AuditSeq(1)))
         );
         let mut value: serde_json::Value = serde_json::from_str(&text).expect("json");
-        let mut cbor = base64_decode(value["cbor"].as_str().expect("cbor")).expect("base64");
+        let mut cbor = STANDARD
+            .decode(value["cbor"].as_str().expect("cbor"))
+            .expect("base64");
         cbor[3] ^= 1;
-        value["cbor"] = serde_json::json!(base64_encode(&cbor));
+        value["cbor"] = serde_json::json!(STANDARD.encode(&cbor));
         assert_eq!(
             parse_line(&value.to_string()),
             Err(LineError::CborHash(AuditSeq(1)))
@@ -337,22 +276,5 @@ mod tests {
         );
         assert!(matches!(parse_line("{}"), Err(LineError::Malformed(_))));
         assert!(matches!(parse_line("[1]"), Err(LineError::Malformed(_))));
-    }
-
-    #[test]
-    fn base64_round_trips_and_refuses_garbage() {
-        for len in 0..40usize {
-            let bytes: Vec<u8> = (0..len)
-                .map(|i| u8::try_from(i * 37 % 256).expect("byte"))
-                .collect();
-            let text = base64_encode(&bytes);
-            assert_eq!(base64_decode(&text), Some(bytes));
-        }
-        assert_eq!(base64_encode(b"Man"), "TWFu");
-        assert_eq!(base64_encode(b"Ma"), "TWE=");
-        assert_eq!(base64_encode(b"M"), "TQ==");
-        for bad in ["T", "TQ=", "TQ==TQ==", "TR==", "TWF=", "TW!u", "===="] {
-            assert_eq!(base64_decode(bad), None, "{bad}");
-        }
     }
 }

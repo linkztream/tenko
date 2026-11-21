@@ -11,7 +11,9 @@ use tenko_core::{
 
 use std::fmt::Write as _;
 
-use super::base64;
+use base64::Engine as _;
+
+use super::KEY_BASE64;
 use crate::dnssec::crypto;
 
 fn invalid(reason: &str) -> DnsError {
@@ -102,7 +104,9 @@ pub fn parse_dnskey(text: &str) -> Result<Vec<u8>, DnsError> {
         .next()
         .and_then(|field| field.parse().ok())
         .ok_or_else(|| invalid("the DNSKEY algorithm is a number"))?;
-    let key = base64::decode(&fields.collect::<Vec<_>>().join(""))
+    let key = KEY_BASE64
+        .decode(fields.collect::<String>())
+        .ok()
         .filter(|key| !key.is_empty())
         .ok_or_else(|| invalid("the DNSKEY key is base64"))?;
     if protocol != 3 {
@@ -176,7 +180,7 @@ pub fn dnskey_text(rdata: &[u8]) -> String {
         u16::from_be_bytes([rdata[0], rdata[1]]),
         rdata[2],
         rdata[3],
-        base64::encode(&rdata[4..])
+        KEY_BASE64.encode(&rdata[4..])
     )
 }
 
@@ -226,6 +230,16 @@ mod tests {
         for bad in ["", "257 3", "257 2 15 AA==", "257 3 15 !!"] {
             assert!(parse_dnskey(bad).is_err(), "{bad}");
         }
+        // Other programs write these: white space inside the key and non-zero trailing bits
+        // ("AB==" carries them) still read.
+        assert_eq!(
+            parse_dnskey("257 3 15 l02Woi0iS8Aa25FQkUd9 RMzZHJpBoRQwAQEX1SxZJA4=").expect("spaced"),
+            parse_dnskey("257 3 15 l02Woi0iS8Aa25FQkUd9RMzZHJpBoRQwAQEX1SxZJA4=").expect("dnskey")
+        );
+        assert_eq!(
+            parse_dnskey("257 3 15 AB==").expect("trailing bits"),
+            [1, 1, 3, 15, 0]
+        );
     }
 
     #[test]

@@ -7,14 +7,11 @@
 
 use std::fmt;
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroizing;
 
-use crate::{
-    encoding::{base32_encode, base64url_decode, base64url_encode},
-    error::AuthError,
-    random,
-};
+use crate::{encoding::base32_encode, error::AuthError, random};
 
 /// Prefix of personal API tokens, so secret scanners can recognize them.
 pub const TOKEN_PREFIX: &str = "tnk_";
@@ -99,12 +96,17 @@ pub fn hash_secret(secret: &str) -> Vec<u8> {
 /// [`AuthError::Internal`] if the random source fails.
 pub fn new_session_secret() -> Result<BearerSecret, AuthError> {
     let bytes = Zeroizing::new(random::array::<32>()?);
-    Ok(BearerSecret(Zeroizing::new(base64url_encode(&*bytes))))
+    Ok(BearerSecret(Zeroizing::new(
+        URL_SAFE_NO_PAD.encode(&bytes[..]),
+    )))
 }
 
 /// Whether a presented cookie value has the shape of a session secret.
 pub fn looks_like_session_secret(value: &str) -> bool {
-    value.len() == 43 && base64url_decode(value).is_ok_and(|bytes| bytes.len() == 32)
+    value.len() == 43
+        && URL_SAFE_NO_PAD
+            .decode(value)
+            .is_ok_and(|bytes| bytes.len() == 32)
 }
 
 /// A new personal API token: `tnk_` and 256 random bits, base64url.
@@ -151,7 +153,7 @@ fn prefixed_secret(prefix: &str) -> Result<BearerSecret, AuthError> {
     let bytes = Zeroizing::new(random::array::<32>()?);
     let mut text = Zeroizing::new(String::with_capacity(48));
     text.push_str(prefix);
-    text.push_str(&base64url_encode(&*bytes));
+    text.push_str(&URL_SAFE_NO_PAD.encode(&bytes[..]));
     Ok(BearerSecret(text))
 }
 
