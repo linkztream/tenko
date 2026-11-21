@@ -230,6 +230,7 @@ describe("the mirror page", () => {
     expect((await screen.findByTestId("mirror-value-id")).textContent).toBe(MIRROR);
     expect(screen.getByTestId("mirror-value-fingerprint").textContent).toBe("ab".repeat(32));
     expect(screen.getByTestId("mirror-value-url").textContent).toBe(window.location.origin);
+    expect(screen.getByTestId("mirror-values-hint").getAttribute("aria-describedby")).toBeTruthy();
     expect(screen.getByTestId("mirror-settings").textContent).not.toContain("Install-TenkoDhcpMirror");
     const partner = screen.getByTestId("mirror-partner") as HTMLSelectElement;
     await waitFor(() => expect(partner.options).toHaveLength(2));

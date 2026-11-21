@@ -86,11 +86,11 @@ test("backs up now with a passphrase and lists the run", async ({ page, api, sig
   expect(after.last_failed ?? null).toBeNull();
   await expect(row.getByTestId("backup-run-file")).toHaveText(run.file ?? "");
 
-  // Restore is a command on a new host, not a button.
+  // Restore is a command on a new host, not a button; the dialog shows the values it needs.
   await row.getByTestId("backup-restore-open").click();
   const restore = page.getByTestId("dialog-backup-restore");
-  await expect(restore.getByTestId("backup-restore-command")).toContainText("tenko backup restore");
-  await expect(restore.getByTestId("backup-restore-command")).toContainText(run.file ?? "");
+  await expect(restore.getByTestId("backup-restore-file")).toHaveText(run.file ?? "");
+  await expect(restore.getByTestId("backup-restore-dir")).not.toBeEmpty();
   await restore.getByTestId("form-cancel").click();
   await expect(restore).toBeHidden();
 });

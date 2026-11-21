@@ -230,16 +230,28 @@
         <segment><source>Backup written: {file}</source><target>Säkerhetskopian skrevs: {file}</target></segment>
       </unit>
       <unit id="backup.restore.open">
-        <segment><source>Restore command</source><target>Återställningskommando</target></segment>
+        <segment><source>Restore values</source><target>Värden för återställning</target></segment>
       </unit>
       <unit id="backup.restore.open_named">
-        <segment><source>Restore command for {file}</source><target>Återställningskommando för {file}</target></segment>
+        <segment><source>Restore values for {file}</source><target>Värden för återställning av {file}</target></segment>
       </unit>
       <unit id="backup.restore.title">
         <segment><source>Restore {file}</source><target>Återställ {file}</target></segment>
       </unit>
       <unit id="backup.restore.body">
-        <segment><source>Restore it on a new host with this command, then start Tenko there. Copy the file from the controller that wrote it first; the page cannot download it.</source><target>Återställ den på en ny värd med det här kommandot och starta sedan Tenko där. Kopiera först filen från kontrollern som skrev den; sidan kan inte ladda ned den.</target></segment>
+        <segment><source>Restore it on a new host with the command in docs/backup.md, section 6 (Restoring), using these values, then start Tenko there. Copy the file from the controller that wrote it first; the page cannot download it.</source><target>Återställ den på en ny värd med kommandot i docs/backup.md, avsnitt 6 (Restoring), med de här värdena och starta sedan Tenko där. Kopiera först filen från kontrollern som skrev den; sidan kan inte ladda ned den.</target></segment>
+      </unit>
+      <unit id="backup.restore.file">
+        <segment><source>File name</source><target>Filnamn</target></segment>
+      </unit>
+      <unit id="backup.restore.dir">
+        <segment><source>Directory on the controller that wrote it</source><target>Katalog på kontrollern som skrev den</target></segment>
+      </unit>
+      <unit id="backup.restore.written">
+        <segment><source>Written</source><target>Skrevs</target></segment>
+      </unit>
+      <unit id="backup.restore.copy_value">
+        <segment><source>Copy {name}</source><target>Kopiera {name}</target></segment>
       </unit>
       <unit id="backup.restore.slots">
         <segment><source>The backup opens with: {slots}. Check it first with tenko backup verify.</source><target>Säkerhetskopian öppnas med: {slots}. Kontrollera den först med tenko backup verify.</target></segment>

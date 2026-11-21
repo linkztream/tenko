@@ -113,6 +113,12 @@
       <unit id="common.ca_root.help">
         <segment><source>Install it on the computers you administer from, so their browsers trust this installation.</source><target>Installera det på datorerna du administrerar från, så att deras webbläsare litar på denna installation.</target></segment>
       </unit>
+      <unit id="common.hint.values_label">
+        <segment><source>Why values and not a command?</source><target>Varför värden och inget kommando?</target></segment>
+      </unit>
+      <unit id="common.hint.values">
+        <segment><source>Tenko never asks an administrator to run text that a server produced. A server that had been taken over could put anything into such a command and so gain the administrator's rights. The command is in the documentation. Security comes first in Tenko's design.</source><target>Tenko ber aldrig en administratör köra text som en server har skapat. En server som hade tagits över kunde lägga vad som helst i ett sådant kommando och på så sätt få administratörens behörighet. Kommandot finns i dokumentationen. Säkerhet kommer först i Tenkos utformning.</target></segment>
+      </unit>
     </group>
     <group id="profile">
       <unit id="profile.home.name">

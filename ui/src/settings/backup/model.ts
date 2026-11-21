@@ -165,17 +165,6 @@ export function warningText(warning: BackupWarning): string {
   return tDynamic(key, warning.params ?? {}) ?? warning.detail;
 }
 
-/**
- * The command that restores a backup on a new host (restore is a command, not a button;
- * docs/backup.md, section 6). The file lies in the target directory of the controller that wrote it.
- */
-export function restoreCommand(run: Pick<BackupRun, "file" | "target_dir">): string {
-  const dir = run.target_dir;
-  const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
-  const path = `${dir.replace(/[\\/]+$/, "")}${sep}${run.file ?? ""}`;
-  return `tenko backup restore ${path} --config <tenko.toml of the new host>`;
-}
-
 /** Bytes as KiB, MiB or GiB with one decimal. */
 export function sizeText(bytes: number): string {
   const units = ["B", "KiB", "MiB", "GiB", "TiB"];

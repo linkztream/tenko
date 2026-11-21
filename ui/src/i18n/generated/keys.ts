@@ -962,11 +962,15 @@ export type MessageKey =
   | "backup.lede"
   | "backup.now"
   | "backup.restore.body"
+  | "backup.restore.copy_value"
+  | "backup.restore.dir"
+  | "backup.restore.file"
   | "backup.restore.note"
   | "backup.restore.open"
   | "backup.restore.open_named"
   | "backup.restore.slots"
   | "backup.restore.title"
+  | "backup.restore.written"
   | "backup.restored.body"
   | "backup.restored.nodes"
   | "backup.restored.title"
@@ -1312,6 +1316,8 @@ export type MessageKey =
   | "common.ca_root.help"
   | "common.count.items"
   | "common.greeting"
+  | "common.hint.values"
+  | "common.hint.values_label"
   | "common.loading"
   | "common.never"
   | "common.no"
@@ -8724,6 +8730,7 @@ export interface MessageArgs {
   "backup.create.done": { file: string | number };
   "backup.create.error.short": { min: number };
   "backup.create.passphrase_help": { min: number };
+  "backup.restore.copy_value": { name: string | number };
   "backup.restore.open_named": { file: string | number };
   "backup.restore.slots": { slots: string | number };
   "backup.restore.title": { file: string | number };
@@ -11271,11 +11278,15 @@ export const messageKeys: readonly MessageKey[] = [
   "backup.lede",
   "backup.now",
   "backup.restore.body",
+  "backup.restore.copy_value",
+  "backup.restore.dir",
+  "backup.restore.file",
   "backup.restore.note",
   "backup.restore.open",
   "backup.restore.open_named",
   "backup.restore.slots",
   "backup.restore.title",
+  "backup.restore.written",
   "backup.restored.body",
   "backup.restored.nodes",
   "backup.restored.title",
@@ -11621,6 +11632,8 @@ export const messageKeys: readonly MessageKey[] = [
   "common.ca_root.help",
   "common.count.items",
   "common.greeting",
+  "common.hint.values",
+  "common.hint.values_label",
   "common.loading",
   "common.never",
   "common.no",

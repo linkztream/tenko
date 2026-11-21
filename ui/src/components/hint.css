@@ -1,0 +1,13 @@
+/* The "?" of a Hint and the text that shows beside it on hover and on focus. */
+.hint { position: relative; display: inline-block; vertical-align: middle; }
+.hint-btn {
+  inline-size: 1.5em; block-size: 1.5em; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%;
+  background: var(--surface); color: var(--ink-2); font: inherit; font-size: var(--fs-13); line-height: 1; cursor: help;
+}
+.hint-text {
+  position: absolute; z-index: var(--z-overlay); inset-block-start: 100%; inset-inline-start: 0; margin-block-start: var(--sp-2);
+  inline-size: min(320px, 80vw); padding: var(--sp-4); border: 1px solid var(--line-strong); border-radius: var(--r-3);
+  background: var(--surface); box-shadow: var(--shadow-float); color: var(--ink-2); font-size: var(--fs-13); font-weight: var(--fw-regular);
+  visibility: hidden;
+}
+.hint:hover .hint-text, .hint:focus-within .hint-text { visibility: visible; }

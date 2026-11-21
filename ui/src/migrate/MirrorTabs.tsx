@@ -7,6 +7,7 @@ import { createResource, createSignal, For, Show, untrack } from "solid-js";
 import { copyText } from "../auth/account/shared";
 import { isAdmin } from "../auth/session";
 import { ConfirmDialog } from "../components/Dialog";
+import { Hint } from "../components/Hint";
 import { ErrorNotice } from "../components/Notice";
 import { t } from "../i18n";
 import { ackLosses, deleteMirror, getDiff, getLosses, listMirrors, replaceMirrorToken, sourceList, updateMirror, type MirrorChange, type MirrorCreated, type MirrorItem } from "./api";
@@ -248,7 +249,9 @@ export function SettingsTab(props: { mirror: MirrorItem; onChange: () => void; o
         </select>
         <span class="help">{t("migrate.settings.partner_help")}</span>
       </div>
-      <h2 class="section-title">{t("migrate.settings.values")}</h2>
+      <h2 class="section-title">
+        {t("migrate.settings.values")} <Hint label={t("common.hint.values_label")} text={t("common.hint.values")} testid="mirror-values-hint" />
+      </h2>
       <p class="muted">{t("migrate.settings.values_help")}</p>
       <dl class="kv">
         <For each={values()}>

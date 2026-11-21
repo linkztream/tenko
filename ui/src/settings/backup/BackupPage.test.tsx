@@ -16,7 +16,6 @@ import {
   draftOf,
   intervalText,
   needsRecipient,
-  restoreCommand,
   scheduleText,
   settingsBody,
   sizeText,
@@ -252,13 +251,16 @@ describe("the backup page", () => {
     expect(backupState.settings.keep).toBe(7);
   });
 
-  it("shows the command that restores a backup on a new host", async () => {
+  it("shows the values a restore needs as text and no command", async () => {
     await openPage();
     fireEvent.click(screen.getByTestId("backup-restore-open"));
     const dialog = await screen.findByTestId("dialog-backup-restore");
-    expect(within(dialog).getByTestId("backup-restore-command").textContent).toMatch(
-      /^tenko backup restore \/var\/lib\/tenko\/backups\/tenko-backup-.*-n1\.tkbk --config <tenko\.toml of the new host>$/,
-    );
+    expect(within(dialog).getByTestId("backup-restore-file").textContent).toMatch(/^tenko-backup-.*-n1\.tkbk$/);
+    expect(within(dialog).getByTestId("backup-restore-dir").textContent).toBe("/var/lib/tenko/backups");
+    expect(within(dialog).getByTestId("backup-restore-written").textContent).not.toBe("");
+    expect(dialog.querySelector("code")).toBeNull();
+    expect(dialog.textContent).not.toContain("--config");
+    expect(within(dialog).getByTestId("backup-restore-hint").getAttribute("aria-describedby")).toBeTruthy();
     expect(dialog.textContent).toContain("a passphrase");
   });
 
@@ -348,12 +350,5 @@ describe("the backup model", () => {
     expect(intervalText(48)).not.toBe(intervalText(47));
     expect(scheduleText({ enabled: false, interval_hours: 24 })).toBe("Off");
     expect(scheduleText({ enabled: true, interval_hours: 6 })).toMatch(/^Every 6/);
-  });
-
-  it("builds the restore command from the directory and the file", () => {
-    expect(restoreCommand({ file: "b.tkbk", target_dir: "/srv/backups/" })).toBe("tenko backup restore /srv/backups/b.tkbk --config <tenko.toml of the new host>");
-    expect(restoreCommand({ file: "b.tkbk", target_dir: "C:\\Tenko\\backups\\" })).toBe(
-      "tenko backup restore C:\\Tenko\\backups\\b.tkbk --config <tenko.toml of the new host>",
-    );
   });
 });

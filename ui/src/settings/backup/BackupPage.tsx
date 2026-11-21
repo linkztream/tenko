@@ -13,6 +13,7 @@ import { paths } from "../../app/paths";
 import { copyText } from "../../auth/account/shared";
 import { signOut } from "../../auth/session";
 import { Dialog } from "../../components/Dialog";
+import { Hint } from "../../components/Hint";
 import { Icon } from "../../components/Icon";
 import { ErrorNotice, Notice } from "../../components/Notice";
 import { PageHead } from "../../components/PageHead";
@@ -32,7 +33,6 @@ import {
   needsRecipient,
   outcomeText,
   reasonText,
-  restoreCommand,
   scheduleText,
   settingsBody,
   sizeText,
@@ -533,23 +533,38 @@ function CreateDialog(props: { recipient: boolean; onDone: (run: BackupRun) => v
   );
 }
 
-/** The command that restores a backup on a new host. */
+/** The values a restore on a new host needs, as text: the command is in the documentation. */
 function RestoreDialog(props: { run: BackupRun; onClose: () => void }) {
-  const command = () => restoreCommand(props.run);
+  const values = (): [string, string, string][] => [
+    ["file", t("backup.restore.file"), props.run.file ?? ""],
+    ["dir", t("backup.restore.dir"), props.run.target_dir],
+    ["written", t("backup.restore.written"), formatDateTime(props.run.finished_at)],
+  ];
   return (
     <Dialog label={t("backup.restore.title", { file: props.run.file ?? "" })} onClose={props.onClose} class="dialog wide" testid="dialog-backup-restore">
-      <h2 class="dialog-title">{t("backup.restore.title", { file: props.run.file ?? "" })}</h2>
+      <h2 class="dialog-title">
+        {t("backup.restore.title", { file: props.run.file ?? "" })} <Hint label={t("common.hint.values_label")} text={t("common.hint.values")} testid="backup-restore-hint" />
+      </h2>
       <div class="dialog-body">
         <p>{t("backup.restore.body")}</p>
-        <div class="form-row">
-          <code class="bk-command" data-testid="backup-restore-command">
-            {command()}
-          </code>
-          <button type="button" class="btn sm" onClick={() => void copyText(command())}>
-            <Icon name="copy" size="sm" />
-            {t("common.action.copy")}
-          </button>
-        </div>
+        <dl class="kv">
+          <For each={values()}>
+            {([key, label, value]) => (
+              <>
+                <dt>{label}</dt>
+                <dd class="form-row">
+                  <span class="mono grow bk-break" data-testid={`backup-restore-${key}`}>
+                    {value}
+                  </span>
+                  <button type="button" class="btn sm" aria-label={t("backup.restore.copy_value", { name: label })} onClick={() => void copyText(value)}>
+                    <Icon name="copy" size="sm" />
+                    {t("common.action.copy")}
+                  </button>
+                </dd>
+              </>
+            )}
+          </For>
+        </dl>
         <p class="muted">{t("backup.restore.slots", { slots: slotsText(props.run.slots) })}</p>
         <p class="muted">{t("backup.restore.note")}</p>
       </div>

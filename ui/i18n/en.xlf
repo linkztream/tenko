@@ -113,6 +113,12 @@
       <unit id="common.ca_root.help">
         <segment><source>Install it on the computers you administer from, so their browsers trust this installation.</source></segment>
       </unit>
+      <unit id="common.hint.values_label">
+        <segment><source>Why values and not a command?</source></segment>
+      </unit>
+      <unit id="common.hint.values">
+        <segment><source>Tenko never asks an administrator to run text that a server produced. A server that had been taken over could put anything into such a command and so gain the administrator's rights. The command is in the documentation. Security comes first in Tenko's design.</source></segment>
+      </unit>
     </group>
     <group id="profile">
       <unit id="profile.home.name">
