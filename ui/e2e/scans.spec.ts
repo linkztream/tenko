@@ -84,7 +84,13 @@ test("the scans page has no scans and lists the probe; Stop all scans sets every
     await test.step("no scans, and the probe as the server reports it", async () => {
       // The probe is in sync a moment after it starts, and the page reads the list once:
       // wait for that state before the page loads, so the page and the API show the same.
-      await expect.poll(async () => (await probes(api))[0]?.in_sync).toBe(true);
+      // A probe that has reported nothing yet also counts as in sync, so wait for its report.
+      await expect
+        .poll(async () => {
+          const probe = (await probes(api))[0];
+          return probe?.in_sync === true && probe.applied != null;
+        })
+        .toBe(true);
       await page.goto("/scans");
       await expect(page.getByTestId("page-scans")).toBeVisible();
       await expect(page.getByTestId("scans-empty")).toBeVisible();
