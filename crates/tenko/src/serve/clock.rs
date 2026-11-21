@@ -45,12 +45,22 @@ pub(crate) fn restore(data_dir: &Path, api: bool) {
     log_change(None, current().as_ref(), &way_out(&path, api));
 }
 
-/// The hold now, and whether it holds destruction (`false`: issuing alone).
-fn current() -> Option<(Held, bool)> {
-    clock::trusted_now()
-        .err()
-        .map(|held| (held, true))
-        .or_else(|| clock::plausible_now().err().map(|held| (held, false)))
+/// A hold as the sampler sees it: the hold, and whether it holds destruction and issuing.
+type Now = (Held, bool, bool);
+
+/// The hold now; the hold of destruction when there is one, else that of issuing alone.
+fn current() -> Option<Now> {
+    let issuing = clock::plausible_now().err();
+    match clock::trusted_now() {
+        Err(held) => Some((held, true, issuing.is_some())),
+        Ok(_) => issuing.map(|held| (held, false, true)),
+    }
+}
+
+/// Whether a hold ends by itself with nothing for a person to see: a start gap whose wait
+/// holds destruction alone.
+fn silent((held, destroy, issue): &Now) -> bool {
+    *destroy && !issue && held.reason == Reason::StartGap && held.release == Release::Wait
 }
 
 /// What ends a hold that needs a person on this node.
@@ -104,10 +114,11 @@ fn due(written: Option<(Option<&SavedHold>, Duration)>, held: Option<&SavedHold>
 
 /// Looks every second until `stop`, keeps the file and the findings of `state` (a controller's
 /// API, `None` on a node without one) current, and writes the file once more at the end.
+/// `node` is the name a person reads, `id` the node id the confirm names.
 pub(crate) async fn run(
     data_dir: PathBuf,
     state: Option<AppState>,
-    node: String,
+    (node, id): (String, String),
     mut stop: watch::Receiver<bool>,
 ) {
     let path = data_dir.join(FILE);
@@ -128,7 +139,7 @@ pub(crate) async fn run(
         let now = current();
         log_change(held.as_ref(), now.as_ref(), &out);
         if let Some(state) = &state {
-            let warning = notice(&node, now.as_ref());
+            let warning = notice(&node, &id, now.as_ref());
             for code in [clock::JUMPED, clock::HELD] {
                 match &warning {
                     Some(warning) if warning.code == code => state.set_notice(warning.clone()),
@@ -151,31 +162,33 @@ pub(crate) async fn run(
     write(&path, &clock::saved());
 }
 
-/// One line at each change of what is held: info for a start gap that ends by itself, warn for
-/// any other hold, with `out`, the way out that needs a person on this node.
-fn log_change(before: Option<&(Held, bool)>, now: Option<&(Held, bool)>, out: &str) {
-    match (before.map(|(_, destroy)| *destroy), now) {
-        (Some(was), Some((_, destroy))) if was == *destroy => {}
-        (_, Some((held, true)))
-            if held.reason == Reason::StartGap && held.release == Release::Wait =>
-        {
+/// One line at each change of what is held: info for a start gap that ends by itself with
+/// nothing to see, warn for any other hold, with `out`, the way out that needs a person on this
+/// node.
+fn log_change(before: Option<&Now>, now: Option<&Now>, out: &str) {
+    let answers = |now: &Now| (now.1, now.2);
+    match (before.map(answers), now) {
+        (Some(was), Some(now)) if was == answers(now) => {}
+        (_, Some(now)) if silent(now) => {
             tracing::info!(
-                gap_secs = held.jump_ms / 1_000,
-                until = ?held.until,
+                gap_secs = now.0.jump_ms / 1_000,
+                until = ?now.0.until,
                 "the clock is away from the last time it trusted; it is trusted again by itself then"
             );
         }
-        (_, Some((held, true))) => tracing::warn!(
+        (_, Some((held, true, _))) => tracing::warn!(
             reason = held.reason.as_str(),
             jump_ms = held.jump_ms,
             until = ?held.until,
             "the clock is held; {}",
             match held.release {
-                Release::Wait => "it is trusted again by itself then".to_owned(),
+                Release::Wait => {
+                    "it is trusted again to judge what has expired by itself then".to_owned()
+                }
                 _ => format!("it is trusted again when {out}"),
             }
         ),
-        (_, Some((held, false))) => tracing::warn!(
+        (_, Some((held, false, _))) => tracing::warn!(
             reason = held.reason.as_str(),
             jump_ms = held.jump_ms,
             "the clock is trusted again to judge what has expired, not to issue what other \
@@ -186,14 +199,15 @@ fn log_change(before: Option<&(Held, bool)>, now: Option<&(Held, bool)>, out: &s
     }
 }
 
-/// The finding of a hold: [`clock::JUMPED`] while it ends by itself, [`clock::HELD`] while a
+/// The finding of a hold: [`clock::JUMPED`] while destruction waits, [`clock::HELD`] while a
 /// person ends it (issuing alone after a wait included), none for a start gap that ends by
-/// itself.
-fn notice(node: &str, held: Option<&(Held, bool)>) -> Option<StatusWarning> {
-    let (held, destroy) = held?;
-    let code = match (*destroy, held.release, held.reason) {
-        (false, ..) | (_, Release::Person, _) => clock::HELD,
-        (_, _, Reason::StartGap) => return None,
+/// itself with nothing to see.
+fn notice(node: &str, id: &str, now: Option<&Now>) -> Option<StatusWarning> {
+    let now = now?;
+    let (held, destroy, issue) = now;
+    let code = match (*destroy, held.release) {
+        _ if silent(now) => return None,
+        (false, _) | (_, Release::Person) => clock::HELD,
         _ => clock::JUMPED,
     };
     let secs = held.jump_ms.unsigned_abs().div_ceil(1_000);
@@ -210,30 +224,37 @@ fn notice(node: &str, held: Option<&(Held, bool)>) -> Option<StatusWarning> {
         let nanos = until.unix_nanos();
         Timestamp::from_unix_nanos(nanos - nanos.rem_euclid(1_000_000_000)).ok()
     });
+    let stage = match (destroy, issue) {
+        (true, true) => "all",
+        (true, false) => "expiry",
+        _ => "issuing",
+    };
     let mut params = std::collections::BTreeMap::from([
         ("node".to_owned(), node.to_owned()),
+        ("node_id".to_owned(), id.to_owned()),
         ("reason".to_owned(), held.reason.as_str().to_owned()),
         ("direction".to_owned(), direction.to_owned()),
         ("jump_secs".to_owned(), secs.to_string()),
-        (
-            "stage".to_owned(),
-            if *destroy { "all" } else { "issuing" }.to_owned(),
-        ),
+        ("stage".to_owned(), stage.to_owned()),
     ]);
-    let next = match (until, *destroy) {
+    let next = match (until, stage) {
         (Some(until), _) => {
             params.insert("until".to_owned(), until.to_rfc3339());
             format!(
-                "Tenko trusts it again by itself at {until}, or at once when an administrator \
-                 confirms the clock"
+                "Tenko trusts it again to judge what has expired by itself at {until}, or at \
+                 once when an administrator confirms the clock"
             )
         }
-        (None, true) => {
+        (None, "issuing") => "Tenko trusts it again to judge what has expired, but not to \
+                              issue what other machines check until an administrator \
+                              confirms the clock"
+            .to_owned(),
+        (None, "expiry") => "Tenko trusts it again to judge what has expired only when an \
+                             administrator confirms the clock"
+            .to_owned(),
+        (None, _) => {
             "Tenko trusts it again only when an administrator confirms the clock".to_owned()
         }
-        (None, false) => "Tenko trusts it again to judge what has expired, but not to issue \
-                          what other machines check until an administrator confirms the clock"
-            .to_owned(),
     };
     Some(StatusWarning {
         code: code.to_owned(),
@@ -280,6 +301,7 @@ mod tests {
             since: Timestamp::UNIX_EPOCH,
             destroy: true,
             issue: true,
+            forward_ms: 60_000,
         };
         assert!(due(None, None), "the first look");
         assert!(!due(Some((None, Duration::from_secs(59))), None));
@@ -308,7 +330,7 @@ mod tests {
         run(
             dir.path().to_owned(),
             Some(AppState::default()),
-            "n1".to_owned(),
+            ("n1".to_owned(), "7".to_owned()),
             stopped,
         )
         .await;
@@ -318,23 +340,49 @@ mod tests {
         assert_eq!(round, saved);
     }
 
+    fn show(now: &Now) -> Option<StatusWarning> {
+        notice("n1", "7", Some(now))
+    }
+
     #[test]
     fn a_start_gap_within_a_day_raises_no_finding() {
-        assert_eq!(notice("n1", None), None);
-        let short = (held(Reason::StartGap, 90_000, Release::Wait), true);
-        assert_eq!(notice("n1", Some(&short)), None);
-        let long = (held(Reason::StartGap, 90_000_000, Release::Person), true);
-        let long = notice("n1", Some(&long)).expect("a person confirms");
+        assert_eq!(notice("n1", "7", None), None);
+        let short = (held(Reason::StartGap, 90_000, Release::Wait), true, false);
+        assert_eq!(show(&short), None);
+        let long = (
+            held(Reason::StartGap, 90_000_000, Release::Person),
+            true,
+            false,
+        );
+        let long = show(&long).expect("a person confirms");
         assert_eq!(long.code, clock::HELD);
-        assert_eq!(long.params["reason"], "start_gap");
-        assert_eq!(long.params["jump_secs"], "90000");
+        assert_eq!(
+            (
+                long.params["reason"].as_str(),
+                long.params["jump_secs"].as_str(),
+                long.params["stage"].as_str(),
+                long.params["node_id"].as_str()
+            ),
+            ("start_gap", "90000", "expiry", "7")
+        );
         assert!(!long.params.contains_key("until"));
     }
 
     #[test]
+    fn a_start_gap_that_holds_issuing_is_shown_during_its_wait() {
+        // A backward start gap, a restart during a hold of a jump, a start gap that grew.
+        for jump_ms in [-90_000, 91_000, 150_000] {
+            let gap = (held(Reason::StartGap, jump_ms, Release::Wait), true, true);
+            let warning = show(&gap).expect("issuing is held");
+            assert_eq!(warning.code, clock::JUMPED, "{jump_ms}");
+            assert_eq!(warning.params["stage"], "all");
+        }
+    }
+
+    #[test]
     fn a_wait_is_a_warning_and_a_person_is_act_now() {
-        let wait = (held(Reason::Jump, -3_600_500, Release::Wait), true);
-        let wait = notice("n1", Some(&wait)).expect("a wait");
+        let wait = (held(Reason::Jump, -3_600_500, Release::Wait), true, true);
+        let wait = show(&wait).expect("a wait");
         assert_eq!(wait.code, clock::JUMPED);
         assert_eq!(severity_of(&wait.code), FindingSeverity::Warning);
         assert_eq!(
@@ -345,8 +393,8 @@ mod tests {
             ),
             ("back", "3601", "2027-01-15T08:00:00Z")
         );
-        let person = (held(Reason::Jump, 90_000_000, Release::Person), true);
-        let person = notice("n1", Some(&person)).expect("a person");
+        let person = (held(Reason::Jump, 90_000_000, Release::Person), true, true);
+        let person = show(&person).expect("a person");
         assert_eq!(person.code, clock::HELD);
         assert_eq!(severity_of(&person.code), FindingSeverity::Error);
         assert_eq!(
@@ -360,20 +408,14 @@ mod tests {
 
     #[test]
     fn issuing_held_after_the_wait_is_act_now_with_its_own_stage() {
-        let issuing = (held(Reason::Jump, 60_000, Release::Person), false);
-        let issuing = notice("n1", Some(&issuing)).expect("a person");
+        let issuing = (held(Reason::Jump, 60_000, Release::Person), false, true);
+        let issuing = show(&issuing).expect("a person");
         assert_eq!(issuing.code, clock::HELD);
         assert_eq!(issuing.params["stage"], "issuing");
         assert!(
             issuing.detail.contains("not to issue"),
             "{}",
             issuing.detail
-        );
-        let gap = (held(Reason::StartGap, -60_000, Release::Person), false);
-        assert_eq!(
-            notice("n1", Some(&gap)).map(|warning| warning.code),
-            Some(clock::HELD.to_owned()),
-            "a start gap that holds issuing is shown too"
         );
     }
 

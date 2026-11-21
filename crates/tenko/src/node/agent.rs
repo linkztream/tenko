@@ -198,7 +198,7 @@ async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     let clock = tokio::spawn(crate::serve::clock::run(
         resolved.data_dir.clone(),
         None,
-        identity.name.clone(),
+        (identity.name.clone(), identity.node.to_string()),
         stopped.clone(),
     ));
     let task = tokio::spawn(Arc::clone(&agent).run(stopped));

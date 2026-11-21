@@ -2144,7 +2144,10 @@ async fn start(
     running.tasks.push(tokio::spawn(clock::run(
         resolved.data_dir.clone(),
         Some(warnings_state.clone()),
-        crate::node::enroll::host_name().unwrap_or_else(|| resolved.node_id.to_string()),
+        (
+            crate::node::enroll::host_name().unwrap_or_else(|| resolved.node_id.to_string()),
+            resolved.node_id.to_string(),
+        ),
         running.stop.subscribe(),
     )));
     // node-roles: the follower of the stored role set stops with the server.

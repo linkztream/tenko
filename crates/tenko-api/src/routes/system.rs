@@ -33,8 +33,8 @@
 //!
 //! `POST /system/clock/confirm` ends a hold of the clock guard (`tenko_core::clock`): an
 //! administrator of the system, on a session that signed in within five minutes, says the
-//! clock of the node the finding names is right. Only that node confirms; another refuses with
-//! 409 `sys.clock.other_node`. It is audited as `sys.clock.confirm` with the node, the jump and
+//! clock of the node the finding names, by its node id, is right. Only that node confirms;
+//! another refuses with 409 `sys.clock.other_node`. It is audited as `sys.clock.confirm` with the node, the jump and
 //! its reason, answers 204 whether or not a hold was in force, and works during a wait too. The
 //! server binary raises the conditions `sys.clock.jumped` and `sys.clock.held` while the clock
 //! is held.
@@ -591,9 +591,9 @@ pub const CLOCK_OTHER_NODE: &str = "sys.clock.other_node";
 #[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClockConfirm {
-    /// The node whose clock is confirmed, as its clock finding names it (the parameter
-    /// `node`): its host name, or its node id when it has none.
-    pub node: String,
+    /// The node id of the node whose clock is confirmed, as its clock finding carries it (the
+    /// parameter `node_id`).
+    pub node_id: String,
 }
 
 /// Warning code of a data directory whose file system is running out of room.
@@ -1232,7 +1232,7 @@ async fn openapi_document() -> Response {
     tag = "system",
     operation_id = "confirm_clock",
     summary = "Confirm that the clock of this node is right",
-    description = "Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node` names the node as its clock finding does; a node of another name refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.",
+    description = "Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node_id` names the node as its clock finding does; a node of another id refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.",
     request_body(content = ClockConfirm, content_type = "application/json"),
     security(("session" = [])),
     responses(
@@ -1240,7 +1240,7 @@ async fn openapi_document() -> Response {
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node's name)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "This server has no authentication service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -1253,30 +1253,29 @@ async fn confirm_clock(
 ) -> Result<StatusCode, ApiError> {
     state.authorize(&ctx.principal, Action::Administer, &system_object())?;
     super::needs_a_fresh_session(auth, &ctx, "/system/clock/confirm").await?;
-    // The name the clock finding gives this node.
+    // The id decides, since two machines may share a host name; the name is what a person reads.
     let node = &state.platform.node;
-    let this = node
-        .name
-        .clone()
-        .or_else(|| node.id.map(|id| id.to_string()))
-        .unwrap_or_default();
-    if body.node != this {
+    let id = node.id.map(|id| id.to_string());
+    let name = node.name.clone().or_else(|| id.clone()).unwrap_or_default();
+    if id.as_deref() != Some(body.node_id.as_str()) {
         return Err(ApiError::new(
             CLOCK_OTHER_NODE,
             409,
             format!(
-                "this is node {this}, not {}: confirm the clock on the node the finding names",
-                body.node
+                "this is node {name}, not node id {}: confirm the clock on the node the finding \
+                 names",
+                body.node_id
             ),
         )
-        .with_param("node", this.clone()));
+        .with_param("node", name));
     }
     let held = clock::trusted_now()
         .err()
         .or_else(|| clock::plausible_now().err());
     let mut draft = AuditDraft::success(CLOCK_CONFIRM, vec![system_object()])
         .with_source_ip(ctx.source_ip)
-        .with_context("node", this);
+        .with_context("node", name)
+        .with_context("node_id", body.node_id);
     if let Some(held) = held {
         draft = draft
             .with_context("reason", held.reason.as_str())
@@ -1642,9 +1641,10 @@ mod tests {
         );
     }
 
-    /// Holds the clock on this thread; a viewer, a token, an old sign-in and another node's name
-    /// are refused and leave it held; an administrator's fresh session that names this node
-    /// ends it, audited with the node and the jump, and a second confirm answers the same.
+    /// Holds the clock on this thread; a viewer, a token, an old sign-in and another node id
+    /// (of a node with the same host name) are refused and leave it held; an administrator's
+    /// fresh session that names this node's id ends it, audited with the node and the jump, and
+    /// a second confirm answers the same.
     #[tokio::test]
     async fn confirming_the_clock_needs_a_fresh_session_and_is_audited() {
         use tenko_auth::settings::Profile;
@@ -1690,7 +1690,7 @@ mod tests {
             release: Release::Wait,
             until: None,
         });
-        let this = serde_json::json!({ "node": "n1" });
+        let this = serde_json::json!({ "node_id": "7" });
 
         for (who, code) in [
             (Cookie(&viewer), "auth.forbidden"),
@@ -1706,7 +1706,7 @@ mod tests {
                 "POST",
                 PATH,
                 Cookie(&h.admin),
-                Some(&serde_json::json!({ "node": "n2" })),
+                Some(&serde_json::json!({ "node_id": "8" })),
             )
             .await;
         other.assert_problem(409, CLOCK_OTHER_NODE);
@@ -1728,8 +1728,13 @@ mod tests {
         assert_eq!(
             confirms,
             vec![
-                serde_json::json!({ "node": "n1", "reason": "jump", "jump_ms": "7200000" }),
-                serde_json::json!({ "node": "n1" }),
+                serde_json::json!({
+                    "node": "n1",
+                    "node_id": "7",
+                    "reason": "jump",
+                    "jump_ms": "7200000"
+                }),
+                serde_json::json!({ "node": "n1", "node_id": "7" }),
             ],
             "every confirm is audited"
         );
