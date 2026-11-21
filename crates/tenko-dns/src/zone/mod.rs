@@ -395,8 +395,8 @@ pub struct ZoneService {
     staging: Arc<ImportStaging>,
     config: ZoneConfig,
     direct: Option<Arc<DirectJobs>>,
-    /// A flip or a release runs on this node ([`flip`]): one at a time.
-    flipping: std::sync::atomic::AtomicBool,
+    /// The flips and releases that run on this node ([`flip`]).
+    flips: flip::Permits,
 }
 
 impl std::fmt::Debug for ZoneService {
@@ -440,7 +440,7 @@ impl ZoneService {
             staging,
             config,
             direct: None,
-            flipping: std::sync::atomic::AtomicBool::new(false),
+            flips: flip::Permits::default(),
         })
     }
 
@@ -463,7 +463,7 @@ impl ZoneService {
             staging,
             config,
             direct: Some(direct),
-            flipping: std::sync::atomic::AtomicBool::new(false),
+            flips: flip::Permits::default(),
         })
     }
 

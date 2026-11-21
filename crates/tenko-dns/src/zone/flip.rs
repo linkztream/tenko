@@ -32,8 +32,10 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::atomic::Ordering,
+    sync::Arc,
 };
+
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use tenko_core::{
     ObjectRef, RequestCtx, Revision,
@@ -69,8 +71,14 @@ pub const FLIP_MAX_RECORDS: usize = 50_000;
 /// batch takes, so that the change set written from them fits with its journal entry.
 pub const FLIP_MAX_BYTES: usize = 8 << 20;
 
-/// The code of a flip or a release while another one runs on the node (429).
+/// The code of a flip or a release while another one runs on the node, or of a dry run
+/// while [`DRY_RUNS`] run (429).
 pub const FLIP_BUSY: &str = "dns.zone.flip.busy";
+
+/// The dry runs of a release a node plans at once, beside its one flip or release: two, so
+/// that a dry run neither waits for a flip nor holds one back, and canceled ones cannot pile
+/// up beyond two plans.
+pub const DRY_RUNS: usize = 2;
 
 /// RRsets read per store read. One: a stored RRset is bounded only by the store batch that
 /// wrote it (16 MiB, up to 4,096 records of up to 65,535 octets each), so a read of more
@@ -114,11 +122,13 @@ fn check_kind(zone: &Zone, from: ZoneKind) -> ZoneResult<()> {
     )
 }
 
-/// The RRsets of a zone that `keep` takes, page by page, refused past the bounds.
+/// The RRsets of a zone that `keep` takes, page by page, refused past the bounds; the scan
+/// ends once it holds `want` of them.
 fn scan(
     view: &dyn ReadView,
     zone: ZoneId,
     keep: impl Fn(&RrSet) -> bool,
+    want: usize,
 ) -> ZoneResult<Vec<Stored>> {
     let (mut out, mut records, mut bytes) = (Vec::new(), 0usize, 0usize);
     let mut cursor = None;
@@ -147,21 +157,34 @@ fn scan(
                 ));
             }
         }
-        if last {
+        if last || out.len() >= want {
             return Ok(out);
         }
     }
 }
 
-/// The DHCP names among `rrsets` of the zone `apex`: below the apex, with a DHCID RRset and
-/// nothing but A, AAAA and DHCID.
-fn dhcp_names<'a>(
-    apex: &DnsName,
-    rrsets: impl IntoIterator<Item = &'a RrSet>,
-) -> BTreeSet<&'a DnsName> {
+/// The DHCP names of a copy of the zone `apex`: below the apex, with a DHCID RRset and
+/// nothing but A, AAAA and DHCID, and not the target of an NS or SRV record of the copy (a
+/// server's name freezes whatever DHCID its primary serves there).
+fn dhcp_names<'a>(apex: &DnsName, rrsets: &'a [Stored]) -> ZoneResult<BTreeSet<&'a DnsName>> {
+    let mut servers = BTreeSet::new();
+    for (rrset, _) in rrsets {
+        if matches!(rrset.rtype, Rtype::NS | Rtype::SRV) {
+            for data in rrset.records()? {
+                match data {
+                    RecordData::Ns { host } => servers.insert(host),
+                    RecordData::Srv { target, .. } => servers.insert(target),
+                    _ => false,
+                };
+            }
+        }
+    }
     let mut names: BTreeMap<&DnsName, bool> = BTreeMap::new();
     let mut other = BTreeSet::new();
-    for rrset in rrsets.into_iter().filter(|rrset| &rrset.name != apex) {
+    for (rrset, _) in rrsets
+        .iter()
+        .filter(|(rrset, _)| &rrset.name != apex && !servers.contains(&rrset.name))
+    {
         match rrset.rtype {
             DHCID => {
                 names.insert(&rrset.name, true);
@@ -174,20 +197,21 @@ fn dhcp_names<'a>(
             }
         }
     }
-    names
+    Ok(names
         .into_iter()
         .filter(|(name, dhcid)| *dhcid && !other.contains(name))
         .map(|(name, _)| name)
-        .collect()
+        .collect())
 }
 
-/// Whether PTR targets are DHCP names, each target looked up once: in the zone itself, or
-/// in the zone of the same tenant with the longest apex above it.
+/// Whether PTR targets are frozen DHCP names, each target looked up once: in the zone
+/// itself, or in the zone of the same tenant with the longest apex above it, which must be a
+/// primary zone a flip froze the name in (the forward zones flip first).
 struct Targets<'a> {
     view: &'a dyn ReadView,
     zone: ZoneId,
     own: &'a BTreeSet<&'a DnsName>,
-    apexes: BTreeMap<DnsName, ZoneId>,
+    apexes: BTreeMap<DnsName, (ZoneId, ZoneKind)>,
     seen: BTreeMap<DnsName, bool>,
 }
 
@@ -199,31 +223,37 @@ impl Targets<'_> {
         let mut suffix = Some(target.clone());
         let mut holder = None;
         while let Some(name) = suffix {
-            if let Some(id) = self.apexes.get(&name) {
-                holder = Some((*id, name));
+            if let Some(found) = self.apexes.get(&name) {
+                holder = Some(*found);
                 break;
             }
             suffix = name.parent();
         }
         let found = match holder {
-            None => false,
             Some((id, _)) if id == self.zone => self.own.contains(target),
-            Some((id, apex)) => {
-                let node = node(self.view, id, &ScopeName::DEFAULT, target)?;
-                !dhcp_names(&apex, node.iter().map(|(rrset, _)| rrset)).is_empty()
-            }
+            Some((id, ZoneKind::Primary)) => node(self.view, id, &ScopeName::DEFAULT, target)?
+                .iter()
+                .any(|(rrset, _)| rrset.rtype == DHCID && rrset.origin == Origin::Transfer),
+            _ => false,
         };
         self.seen.insert(target.clone(), found);
         Ok(found)
     }
 }
 
-/// Whether a type belongs to a signed zone.
-fn is_dnssec(rtype: Rtype) -> bool {
+/// Whether an RRset of the zone `apex` belongs to a signed zone (a DS at the apex counts,
+/// one below it is a delegation's).
+fn is_signed(rrset: &RrSet, apex: &DnsName) -> bool {
     matches!(
-        rtype,
-        Rtype::RRSIG | Rtype::NSEC | Rtype::NSEC3 | Rtype::NSEC3PARAM | Rtype::DNSKEY
-    )
+        rrset.rtype,
+        Rtype::RRSIG
+            | Rtype::NSEC
+            | Rtype::NSEC3
+            | Rtype::NSEC3PARAM
+            | Rtype::DNSKEY
+            | Rtype::CDS
+            | Rtype::CDNSKEY
+    ) || (rrset.rtype == Rtype::DS && &rrset.name == apex)
 }
 
 /// The RRsets by origin, in the order of the origins, for the report and the audit record.
@@ -239,6 +269,40 @@ impl Counts {
     }
 }
 
+/// Refuses a copy a flip cannot keep: none yet, a signed one, or one a transfer wrote in
+/// part.
+fn check_copy(view: &dyn ReadView, before: &Zone, rrsets: &[Stored]) -> ZoneResult<()> {
+    if !rrsets.iter().any(|(rrset, _)| rrset.rtype == Rtype::SOA) {
+        return Err(ZoneError::zone_invalid(
+            "kind",
+            "the zone holds no copy yet; a flip keeps the records of a transfer",
+        ));
+    }
+    if rrsets
+        .iter()
+        .any(|(rrset, _)| is_signed(rrset, &before.name))
+    {
+        return Err(ZoneError::zone_invalid(
+            "dnssec",
+            "the copy is signed, and a flip changes the SOA and the NS set its signatures cover; only an unsigned zone flips",
+        ));
+    }
+    // A transfer writes its stamp with its last batch: a `transfer` RRset newer than the
+    // stamp, or one without a stamp at all, was written by a transfer that did not finish.
+    let refreshed = view
+        .get_typed(&TRANSFER_STATE, &before.id)?
+        .map(|(stamp, _)| stamp.refreshed);
+    if rrsets.iter().any(|(rrset, _)| {
+        rrset.origin == Origin::Transfer && refreshed.is_none_or(|at| rrset.updated.at > at)
+    }) {
+        return Err(ZoneError::zone_invalid(
+            "kind",
+            "the last transfer of the zone was written in part; transfer it again before the flip",
+        ));
+    }
+    Ok(())
+}
+
 /// Plans a flip to primary into `batch`: the origins, the apex, the serial step.
 fn to_primary(
     view: &dyn ReadView,
@@ -249,28 +313,7 @@ fn to_primary(
     (stamp, limits): (&Stamp, JournalLimits),
     (batch, counts): (&mut WriteBatch, &mut Counts),
 ) -> ZoneResult<u32> {
-    if !rrsets.iter().any(|(rrset, _)| rrset.rtype == Rtype::SOA) {
-        return Err(ZoneError::zone_invalid(
-            "kind",
-            "the zone holds no copy yet; a flip keeps the records of a transfer",
-        ));
-    }
-    if rrsets.iter().any(|(rrset, _)| is_dnssec(rrset.rtype)) {
-        return Err(ZoneError::zone_invalid(
-            "dnssec",
-            "the copy is signed, and a flip changes the SOA and the NS set its signatures cover; only an unsigned zone flips",
-        ));
-    }
-    if let Some((stamp, _)) = view.get_typed(&TRANSFER_STATE, &before.id)?
-        && rrsets.iter().any(|(rrset, _)| {
-            rrset.origin == Origin::Transfer && rrset.updated.at > stamp.refreshed
-        })
-    {
-        return Err(ZoneError::zone_invalid(
-            "kind",
-            "the last transfer of the zone was written in part; transfer it again before the flip",
-        ));
-    }
+    check_copy(view, before, rrsets)?;
     zone.source = None;
     zone.soa = soa.clone();
     // The flip takes a member out of its catalog's hands.
@@ -282,7 +325,7 @@ fn to_primary(
         zone.description = None;
     }
     zone.validate()?;
-    let own = dhcp_names(&before.name, rrsets.iter().map(|(rrset, _)| rrset));
+    let own = dhcp_names(&before.name, rrsets)?;
     let mut targets = Targets {
         view,
         zone: before.id,
@@ -290,7 +333,7 @@ fn to_primary(
         apexes: ZoneService::zones(view)?
             .into_iter()
             .filter(|row| row.zone.tenant == before.tenant)
-            .map(|row| (row.zone.name, row.zone.id))
+            .map(|row| (row.zone.name, (row.zone.id, row.zone.kind)))
             .collect(),
         seen: BTreeMap::new(),
     };
@@ -384,7 +427,7 @@ fn plan_flip(
     let serial = match flip {
         ZoneFlip::Primary { soa, ns } => {
             check_kind(&before, ZoneKind::Secondary)?;
-            let rrsets = scan(view, id, |_| true)?;
+            let rrsets = scan(view, id, |_| true, usize::MAX)?;
             to_primary(
                 view,
                 &mut zone,
@@ -413,8 +456,13 @@ fn plan_flip(
                 primaries: primaries.clone(),
             });
             zone.validate()?;
-            for (rrset, _) in scan(view, id, |_| true)? {
-                counts.add(rrset.origin);
+            // The counters, not a scan: a zone that grew past the bounds since its flip still
+            // flips back, and its records stay as they are until the next transfer.
+            for (origin, rrsets) in ZoneService::summary(view, &before)?.origins {
+                let rrsets = u32::try_from(rrsets).unwrap_or(u32::MAX);
+                counts
+                    .0
+                    .insert(origin_index(origin), FlipOriginCount { origin, rrsets });
             }
             let staged = batch.mutations.len();
             if ownership::stage_zone_owners_delete(&mut batch, view, id, FLIP_MAX)? {
@@ -468,7 +516,25 @@ fn plan_release(
     let row = ZoneService::zone(view, id)?;
     let zone = row.zone;
     check_kind(&zone, ZoneKind::Primary)?;
-    let frozen = scan(view, id, |rrset| rrset.origin == Origin::Transfer)?;
+    // The store selects by name, not by origin: the origin counters say how many frozen
+    // RRsets there are, so the scan stops at the last one, and a zone past the bound is
+    // refused before anything is read.
+    let held = ZoneService::summary(view, &zone)?
+        .origins
+        .into_iter()
+        .find(|(origin, _)| *origin == Origin::Transfer)
+        .map_or(0, |(_, count)| usize::try_from(count).unwrap_or(usize::MAX));
+    if held > FLIP_MAX {
+        return Err(ZoneError::zone_invalid(
+            "rrsets",
+            &format!("a release acts on at most {FLIP_MAX} frozen RRsets"),
+        ));
+    }
+    let frozen = if held == 0 {
+        Vec::new()
+    } else {
+        scan(view, id, |rrset| rrset.origin == Origin::Transfer, held)?
+    };
     let names: BTreeSet<&DnsName> = frozen.iter().map(|(rrset, _)| &rrset.name).collect();
     let result = (
         names.into_iter().cloned().collect(),
@@ -521,19 +587,51 @@ fn plan_release(
     ))
 }
 
-/// The node's one flip or release; the next one is refused while it runs.
-struct Running<'a>(&'a std::sync::atomic::AtomicBool);
+/// The plans of flips and releases a node runs: one flip or release that writes, and up to
+/// [`DRY_RUNS`] dry runs beside it. A plan holds its permit itself, so a request that ends
+/// (a client gone, a timeout) frees it only when its plan has ended too.
+pub(crate) struct Permits {
+    writes: Arc<Semaphore>,
+    dry_runs: Arc<Semaphore>,
+}
 
-impl Drop for Running<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
+impl Default for Permits {
+    fn default() -> Self {
+        Self {
+            writes: Arc::new(Semaphore::new(1)),
+            dry_runs: Arc::new(Semaphore::new(DRY_RUNS)),
+        }
     }
 }
 
-/// Runs a plan on a blocking thread.
+impl Permits {
+    fn take(&self, dry_run: bool) -> ZoneResult<Arc<OwnedSemaphorePermit>> {
+        let pool = if dry_run {
+            &self.dry_runs
+        } else {
+            &self.writes
+        };
+        let permit = Arc::clone(pool).try_acquire_owned().map_err(|_| {
+            ZoneError::new(
+                FLIP_BUSY,
+                429,
+                "a flip or a release of a zone runs on this node; start this one when it has ended",
+            )
+        })?;
+        Ok(Arc::new(permit))
+    }
+}
+
+/// Runs a plan on a blocking thread, which holds `permit` until the plan ends.
 async fn blocking<T: Send + 'static>(
+    permit: &Arc<OwnedSemaphorePermit>,
     plan: impl FnOnce() -> ZoneResult<T> + Send + 'static,
 ) -> ZoneResult<T> {
+    let permit = Arc::clone(permit);
+    let plan = move || {
+        let _permit = permit;
+        plan()
+    };
     tokio::task::spawn_blocking(plan).await.map_err(|error| {
         ZoneError::new(
             tenko_core::error::codes::INTERNAL,
@@ -544,17 +642,6 @@ async fn blocking<T: Send + 'static>(
 }
 
 impl ZoneService {
-    fn running(&self) -> ZoneResult<Running<'_>> {
-        if self.flipping.swap(true, Ordering::AcqRel) {
-            return Err(ZoneError::new(
-                FLIP_BUSY,
-                429,
-                "a flip or a release of a zone runs on this node; start this one when it has ended",
-            ));
-        }
-        Ok(Running(&self.flipping))
-    }
-
     /// Flips a zone between secondary and primary in place (the module's rules).
     ///
     /// # Errors
@@ -570,12 +657,14 @@ impl ZoneService {
         flip: &ZoneFlip,
     ) -> ZoneResult<ZoneFlipReport> {
         flip.validate()?;
-        let _running = self.running()?;
+        let permit = self.flips.take(false)?;
         let limits = self.config.journal;
         let ((kind, serial, origins), written) = self
             .execute_async(cx, |view| {
                 let (cx, flip) = (cx.clone(), flip.clone());
-                blocking(move || plan_flip(view.as_ref(), &cx, id, &flip, limits))
+                blocking(&permit, move || {
+                    plan_flip(view.as_ref(), &cx, id, &flip, limits)
+                })
             })
             .await?;
         let written = written.ok_or_else(internal_nothing_written)?;
@@ -603,12 +692,14 @@ impl ZoneService {
         id: ZoneId,
         release: ZoneRelease,
     ) -> ZoneResult<ZoneReleaseReport> {
-        let _running = self.running()?;
+        let permit = self.flips.take(release.dry_run)?;
         let limits = self.config.journal;
         let ((names, rrsets), written) = self
             .execute_async(cx, |view| {
                 let cx = cx.clone();
-                blocking(move || plan_release(view.as_ref(), &cx, id, release, limits))
+                blocking(&permit, move || {
+                    plan_release(view.as_ref(), &cx, id, release, limits)
+                })
             })
             .await?;
         Ok(ZoneReleaseReport {
@@ -624,31 +715,223 @@ impl ZoneService {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    };
 
-    use tenko_core::SystemComponent;
+    use tenko_core::{
+        SystemComponent, TableName,
+        dns::{DnssecPolicy, SerialPolicy, SoaDefaults, TransferPolicy, UpdatePolicy},
+    };
+    use tenko_store::{
+        ChangeStream, Committed, DerivedIndex, Leadership, MemStore, ReadConsistency, Store,
+        StoreError, StoreStatus, Versioned, WatchFilter,
+    };
 
     use super::*;
+    use crate::zone::NewZone;
+
+    /// A store whose reads of a zone row wait, while armed, until the test lets them go.
+    struct Held {
+        inner: Arc<MemStore>,
+        armed: AtomicBool,
+        entered: Mutex<mpsc::Sender<()>>,
+        release: Mutex<mpsc::Receiver<()>>,
+    }
+
+    struct HeldView {
+        inner: Arc<dyn ReadView>,
+        store: Arc<Held>,
+    }
+
+    impl ReadView for HeldView {
+        fn revision(&self) -> Revision {
+            self.inner.revision()
+        }
+
+        fn get(&self, table: &TableName, key: &[u8]) -> Result<Option<Versioned>, StoreError> {
+            if table == ZONES.name() && self.store.armed.load(Ordering::SeqCst) {
+                let _ = self.store.entered.lock().expect("entered").send(());
+                let _ = self.store.release.lock().expect("release").recv();
+            }
+            self.inner.get(table, key)
+        }
+
+        fn scan(
+            &self,
+            table: &TableName,
+            range: tenko_store::KeyRange,
+            limit: usize,
+            reverse: bool,
+        ) -> Result<Vec<(bytes::Bytes, Versioned)>, StoreError> {
+            self.inner.scan(table, range, limit, reverse)
+        }
+
+        fn counter(&self, counter: &tenko_core::CounterKey) -> Result<u64, StoreError> {
+            self.inner.counter(counter)
+        }
+    }
+
+    struct HeldStore(Arc<Held>);
+
+    #[async_trait::async_trait]
+    impl Store for HeldStore {
+        async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+            self.0.inner.propose(batch).await
+        }
+
+        async fn read(
+            &self,
+            consistency: ReadConsistency,
+        ) -> Result<Arc<dyn ReadView>, StoreError> {
+            Ok(Arc::new(HeldView {
+                inner: self.0.inner.read(consistency).await?,
+                store: Arc::clone(&self.0),
+            }))
+        }
+
+        fn watch(
+            &self,
+            from: Option<Revision>,
+            filter: WatchFilter,
+        ) -> Result<ChangeStream, StoreError> {
+            self.0.inner.watch(from, filter)
+        }
+
+        fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+            self.0.inner.register_index(index)
+        }
+
+        fn status(&self) -> StoreStatus {
+            self.0.inner.status()
+        }
+
+        fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>> {
+            self.0.inner.leadership()
+        }
+    }
+
+    fn cx() -> RequestCtx {
+        RequestCtx::system(SystemComponent::Dns)
+    }
+
+    fn name(text: &str) -> DnsName {
+        DnsName::new(text).expect("name")
+    }
+
+    async fn primary(zones: &ZoneService) -> ZoneId {
+        zones
+            .create(
+                &cx(),
+                NewZone {
+                    name: name("example.test"),
+                    kind: ZoneKind::Primary,
+                    tenant: None,
+                    scopes: Vec::new(),
+                    serial: SerialPolicy::default(),
+                    soa: SoaDefaults::new(
+                        name("ns1.example.test"),
+                        name("hostmaster.example.test"),
+                    ),
+                    name_servers: vec![name("ns1.example.test")],
+                    transfer: TransferPolicy::default(),
+                    update: UpdatePolicy::default(),
+                    dnssec: DnssecPolicy::default(),
+                    source: None,
+                    description: None,
+                    reverse_of: None,
+                    catalog: false,
+                },
+            )
+            .await
+            .expect("zone")
+            .zone
+            .id
+    }
 
     #[tokio::test]
-    async fn a_node_runs_one_flip_or_release_at_a_time() {
+    async fn a_node_runs_one_write_and_a_few_dry_runs_at_a_time() {
         let zones = ZoneService::with_direct_jobs(
-            Arc::new(tenko_store::MemStore::default()),
+            Arc::new(MemStore::default()),
             None,
             super::super::ZoneConfig::default(),
         );
-        let cx = RequestCtx::system(SystemComponent::Dns);
-        let held = zones.running().expect("the first runs");
+        let id = primary(&zones).await;
+        let write = zones.flips.take(false).expect("the write runs");
         let busy = zones
-            .release(&cx, ZoneId::generate(), ZoneRelease::default())
+            .release(&cx(), id, ZoneRelease::default())
             .await
-            .expect_err("the second waits");
+            .expect_err("a second write waits");
         assert!(busy.is(FLIP_BUSY), "{busy:?}");
-        drop(held);
-        let gone = zones
-            .release(&cx, ZoneId::generate(), ZoneRelease::default())
+        let dry = ZoneRelease {
+            delete: false,
+            dry_run: true,
+        };
+        zones
+            .release(&cx(), id, dry)
             .await
-            .expect_err("no such zone");
-        assert!(gone.is(codes::ZONE_NOT_FOUND), "{gone:?}");
+            .expect("a dry run beside the write");
+        drop(write);
+        let held: Vec<_> = (0..DRY_RUNS)
+            .map(|_| zones.flips.take(true).expect("a dry run"))
+            .collect();
+        let busy = zones
+            .release(&cx(), id, dry)
+            .await
+            .expect_err("one dry run more waits");
+        assert!(busy.is(FLIP_BUSY), "{busy:?}");
+        zones
+            .release(&cx(), id, ZoneRelease::default())
+            .await
+            .expect("a write beside the dry runs");
+        drop(held);
+    }
+
+    /// A request that ends while its plan runs (a client gone) keeps its permit until the
+    /// plan has ended: the plan waits in a store read the test holds.
+    #[tokio::test]
+    async fn a_request_dropped_mid_plan_frees_its_permit_when_the_plan_ends() {
+        let (entered, on_enter) = mpsc::channel();
+        let (let_go, release) = mpsc::channel();
+        let held = Arc::new(Held {
+            inner: Arc::new(MemStore::default()),
+            armed: AtomicBool::new(false),
+            entered: Mutex::new(entered),
+            release: Mutex::new(release),
+        });
+        let zones = ZoneService::with_direct_jobs(
+            Arc::new(HeldStore(Arc::clone(&held))),
+            None,
+            super::super::ZoneConfig::default(),
+        );
+        let id = primary(&zones).await;
+        held.armed.store(true, Ordering::SeqCst);
+        let request = {
+            let zones = Arc::clone(&zones);
+            tokio::spawn(async move { zones.release(&cx(), id, ZoneRelease::default()).await })
+        };
+        tokio::task::spawn_blocking(move || on_enter.recv())
+            .await
+            .expect("joined")
+            .expect("the plan reads");
+        held.armed.store(false, Ordering::SeqCst);
+        request.abort();
+        assert!(request.await.is_err_and(|error| error.is_cancelled()));
+        let busy = zones
+            .release(&cx(), id, ZoneRelease::default())
+            .await
+            .expect_err("the plan still runs");
+        assert!(busy.is(FLIP_BUSY), "{busy:?}");
+        let_go.send(()).expect("let the plan go");
+        tenko_core::testing::wait_until_async("the permit is back", || async {
+            zones.flips.writes.available_permits() == 1
+        })
+        .await;
+        zones
+            .release(&cx(), id, ZoneRelease::default())
+            .await
+            .expect("a write after the plan ended");
     }
 }
