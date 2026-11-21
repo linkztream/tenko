@@ -1,6 +1,7 @@
-# Shared by the suites: certificates made in memory (nothing touches a trust store) and a TLS
-# server on a loopback port in a runspace of its own, which answers each connection with the
-# bytes the suite sets and records what it was sent.
+# Shared by the suites: certificates made in memory (no trust store is touched; a served chain
+# passes through the user's intermediate store and leaves it on close) and a TLS server on a
+# loopback port in a runspace of its own, which answers each connection with the bytes the
+# suite sets and records what it was sent.
 
 function Get-TestCertificate {
     # A certificate authority, or a leaf it signs (with its private key, to serve TLS).
@@ -37,7 +38,7 @@ function Get-TestCertificate {
 function Open-TestTlsServer {
     # Returns the control table: set .answer (bytes) and .delayMs, read .request (bytes).
     param([System.Security.Cryptography.X509Certificates.X509Certificate2]$Certificate, [System.Security.Cryptography.X509Certificates.X509Certificate2[]]$Chain = @())
-    $control = [hashtable]::Synchronized(@{ queue = [System.Collections.Queue]::Synchronized([System.Collections.Queue]::new()); log = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new()); stop = $false; answer = [byte[]]@(); delayMs = 0; request = $null; requests = 0; port = 0; ready = $false; error = '' })
+    $control = [hashtable]::Synchronized(@{ queue = [System.Collections.Queue]::Synchronized([System.Collections.Queue]::new()); certs = [System.Collections.Queue]::Synchronized([System.Collections.Queue]::new()); log = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new()); served = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new()); stop = $false; answer = [byte[]]@(); delayMs = 0; request = $null; requests = 0; port = 0; ready = $false; error = '' })
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
     $listener.Start()
     $control.port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
@@ -55,12 +56,19 @@ function Open-TestTlsServer {
                 try { $client = $control.listener.AcceptTcpClient() } catch { break }
                 try {
                     $ssl = [System.Net.Security.SslStream]::new($client.GetStream(), $false)
-                    if ($chain.Count -gt 0) {
+                    # A connection may present another identity than the server's own (.certs).
+                    $serve = $certificate; $with = $chain
+                    if ($control.certs.Count -gt 0) { $next = $control.certs.Dequeue(); $serve = $next.Cert; $with = $next.Chain }
+                    $with = @($with | Where-Object { $null -ne $_ })
+                    if ($with.Count -gt 0) {
+                        # .NET on Windows adds these to the user's intermediate store (CurrentUser\CA) to
+                        # send them; Close-TestTlsServer takes them out again.
+                        foreach ($c in $with) { [void]$control.served.Add($c.Thumbprint) }
                         $options = [System.Net.Security.SslServerAuthenticationOptions]::new()
-                        $options.ServerCertificateContext = [System.Net.Security.SslStreamCertificateContext]::Create($certificate, [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new($chain), $true)
+                        $options.ServerCertificateContext = [System.Net.Security.SslStreamCertificateContext]::Create($serve, [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new([System.Security.Cryptography.X509Certificates.X509Certificate2[]]$with), $true)
                         $ssl.AuthenticateAsServerAsync($options, [System.Threading.CancellationToken]::None).Wait()
                     } else {
-                        $ssl.AuthenticateAsServer($certificate)
+                        $ssl.AuthenticateAsServer($serve)
                     }
                     $buffer = [System.IO.MemoryStream]::new()
                     $chunk = [byte[]]::new(8192)
@@ -104,6 +112,9 @@ function Close-TestTlsServer {
     try { [void]$Control.worker.EndInvoke($Control.handle) } catch { Write-Verbose 'the server ended' }
     $Control.worker.Dispose()
     $Control.runspace.Dispose()
+    $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('CA', 'CurrentUser')
+    $store.Open('ReadWrite')
+    try { foreach ($c in @($store.Certificates | Where-Object { $Control.served -contains $_.Thumbprint })) { $store.Remove($c) } } finally { $store.Dispose() }
 }
 
 function Get-TestAnswer {

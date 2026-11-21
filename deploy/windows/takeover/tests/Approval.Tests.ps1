@@ -9,6 +9,22 @@ BeforeAll {
     $collect = $vector.collect
 }
 
+Describe 'The vector' {
+    It 'is the server''s own, and says which copy is newer when they differ' -Skip:(-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '../../../../crates/tenko-auth/tests/fixtures/approval-code.json'))) {
+        # Runner: a tree that holds the server's fixture (it lands with the server's approval).
+        $mine = Join-Path $PSScriptRoot 'fixtures/approval-code.json'
+        $server = Join-Path $PSScriptRoot '../../../../crates/tenko-auth/tests/fixtures/approval-code.json'
+        $a = (Get-Content -LiteralPath $mine -Raw) -replace "`r", ''
+        $b = (Get-Content -LiteralPath $server -Raw) -replace "`r", ''
+        if ($a -ne $b) {
+            $when = @{}
+            foreach ($path in $mine, $server) { $when[$path] = [string](git -C (Split-Path -Parent $path) log -1 --format=%cI -- $path 2>$null) }
+            $newer = $(if ($when[$server] -gt $when[$mine]) { "the server's ($server, $($when[$server]))" } else { "this suite's ($mine, $($when[$mine]))" })
+            $a | Should -Be $b -Because "the two vectors differ; the newer is ${newer}: make them one"
+        }
+    }
+}
+
 Describe 'The code' {
     It 'is the vector''s code over the vector''s inputs, with every intermediate value' {
         $body = [System.Text.Encoding]::UTF8.GetBytes($code.request_body)

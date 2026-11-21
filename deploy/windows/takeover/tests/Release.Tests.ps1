@@ -106,22 +106,21 @@ Describe 'The start line' {
         [void](New-Item -ItemType Directory -Path (Join-Path $programs 'Tenko\takeover') -Force)
         $target = Join-Path $programs 'Tenko\takeover\Tenko-Takeover.ps1'
         Copy-Item -LiteralPath $built -Destination $target
-        $saved = $env:ProgramFiles
+        # The folder and PowerShell come from the platform, not from the environment: the test
+        # points the line's two names at its own folder and a recorder, and changes nothing else.
+        $startLine | Should -Match ([regex]::Escape('$f=[Environment]::GetFolderPath(''ProgramFiles'')+''\Tenko\takeover\Tenko-Takeover.ps1''; '))
+        $startLine | Should -Match ([regex]::Escape('& "$PSHOME\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $f'))
+        $line = $startLine.Replace('[Environment]::GetFolderPath(''ProgramFiles'')', "'$programs'").Replace('& "$PSHOME\powershell.exe"', 'Write-Started')
         $script:started = @()
-        function powershell.exe { $script:started += , $args }
+        function Write-Started { $script:started += , $args }
         Mock Unblock-File { }
-        try {
-            $env:ProgramFiles = $programs
-            & ([scriptblock]::Create($startLine))
-            $script:started.Count | Should -Be 1
-            ($script:started[0] -join ' ') | Should -Be "-NoProfile -ExecutionPolicy Bypass -File $target"
-            Add-Content -LiteralPath $target -Value '# changed'
-            $script:started = @()
-            $errors = @(& ([scriptblock]::Create($startLine)) 2>&1)
-            $script:started.Count | Should -Be 0
-            "$errors" | Should -Match "does not match the release digest; nothing was run\. Its SHA-256 is $((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)"
-        } finally {
-            $env:ProgramFiles = $saved
-        }
+        & ([scriptblock]::Create($line))
+        $script:started.Count | Should -Be 1
+        ($script:started[0] -join ' ') | Should -Be "-NoProfile -ExecutionPolicy Bypass -File $target"
+        Add-Content -LiteralPath $target -Value '# changed'
+        $script:started = @()
+        $errors = @(& ([scriptblock]::Create($line)) 2>&1)
+        $script:started.Count | Should -Be 0
+        "$errors" | Should -Match "does not match the release digest; nothing was run\. Its SHA-256 is $((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)"
     }
 }

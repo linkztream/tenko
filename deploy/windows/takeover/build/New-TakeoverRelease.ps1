@@ -68,14 +68,15 @@ function Get-FileDigest {
 }
 
 function Get-StartLine {
-    # The one line that checks the file's digest and only then starts it.
+    # The one line that checks the file's digest and only then starts it: the folder and
+    # PowerShell as the platform names them, never by an environment variable a user sets.
     param([string]$Digest)
-    return '$f="$env:ProgramFiles\Tenko\takeover\Tenko-Takeover.ps1"; if ((Get-FileHash $f -Algorithm SHA256).Hash -eq ''' + $Digest.ToUpperInvariant() + ''') { Unblock-File $f; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f } else { Write-Error (''Tenko-Takeover.ps1 does not match the release digest; nothing was run. Its SHA-256 is '' + (Get-FileHash $f -Algorithm SHA256).Hash) }'
+    return '$f=[Environment]::GetFolderPath(''ProgramFiles'')+''\Tenko\takeover\Tenko-Takeover.ps1''; if ((Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash -eq ''' + $Digest.ToUpperInvariant() + ''') { Unblock-File -LiteralPath $f; & "$PSHOME\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File $f } else { Write-Error (''Tenko-Takeover.ps1 does not match the release digest; nothing was run. Its SHA-256 is '' + (Get-FileHash -LiteralPath $f -Algorithm SHA256).Hash) }'
 }
 
 function Get-FetchLine {
     param([string]$Digest, [string]$Tag)
-    return '$d="$env:ProgramFiles\Tenko\takeover"; $null = New-Item -ItemType Directory -Force $d; curl.exe -fsSL -o "$d\Tenko-Takeover.ps1" https://github.com/linkztream/tenko/releases/download/' + $Tag + '/Tenko-Takeover.ps1; ' + (Get-StartLine $Digest)
+    return '$d=[Environment]::GetFolderPath(''ProgramFiles'')+''\Tenko\takeover''; $null = New-Item -ItemType Directory -Force $d; curl.exe -fsSL -o "$d\Tenko-Takeover.ps1" https://github.com/linkztream/tenko/releases/download/' + $Tag + '/Tenko-Takeover.ps1; ' + (Get-StartLine $Digest)
 }
 
 if ($Notes) {

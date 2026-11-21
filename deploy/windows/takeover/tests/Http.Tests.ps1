@@ -3,7 +3,8 @@
 # name matched, and the check run as a script block on both editions. A TLS server on a
 # loopback port answers what each test sets. Windows PowerShell's server side (Schannel)
 # sends the leaf alone, so there the chain is checked by its own tests below and the
-# handshake's check is answered for the server's chain; PowerShell 7 sends the whole chain.
+# handshake's check is answered for the server's chain; PowerShell 7 sends the whole chain,
+# which on Windows passes through the user's intermediate store while the server runs.
 
 BeforeDiscovery {
     $core = $PSVersionTable.PSEdition -eq 'Core'
@@ -18,13 +19,16 @@ BeforeAll {
     $otherCa = Get-TestCertificate -Subject 'Interceptor CA' -Ca
     $otherLeaf = Get-TestCertificate -Subject 'localhost' -Issuer $otherCa -Names 'localhost'
     $caPin = ConvertTo-TkHex (Get-TkSha256 $ca.RawData)
+    $otherPin = ConvertTo-TkHex (Get-TkSha256 $otherCa.RawData)
     $core = $PSVersionTable.PSEdition -eq 'Core'
     $server = Open-TestTlsServer -Certificate $leaf -Chain $(if ($core) { @($ca) } else { @() })
+    $mocked = @($leaf.Thumbprint, $otherLeaf.Thumbprint)
     if (-not $core) {
         # The handshake's check only (Schannel reports the leaf's chain as untrusted there);
         # the chain's own tests below pass other errors and reach the real function.
-        Mock Test-TkServerChain -ParameterFilter { ($Errors -band [System.Net.Security.SslPolicyErrors]::RemoteCertificateChainErrors) -ne 0 } {
-            @{ Ok = ($Pinned -eq '' -or $Pinned -eq $caPin); RootSha256 = $caPin; Failure = 'the chain ends in another root than the pinned one'; MachineTrusted = $false }
+        Mock Test-TkServerChain -ParameterFilter { $mocked -contains $Leaf.Thumbprint -and ($Errors -band [System.Net.Security.SslPolicyErrors]::RemoteCertificateChainErrors) -ne 0 } {
+            $root = $(if ($Leaf.Thumbprint -eq $otherLeaf.Thumbprint) { $otherPin } else { $caPin })
+            @{ Ok = ($Pinned -eq '' -or $Pinned -eq $root); RootSha256 = $root; Failure = 'the chain ends in another root than the pinned one'; MachineTrusted = $false }
         }
     }
     function Use-TestConnection {
@@ -113,6 +117,11 @@ Describe 'The answer' {
         $answer.Detail.Contains([string][char]0x202e) | Should -BeFalse
     }
 
+    It 'names a refusal of the delegated session as such' {
+        $server.answer = Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.delegation.refused","status":403,"detail":"outside the allow-list"}'
+        { Invoke-Tenko -Method POST -Path '/dns/zones' -Body ([ordered]@{ name = 'corp.example.test' }) } | Should -Throw "*auth.delegation.refused*does not open POST /dns/zones to a takeover's session*"
+    }
+
     It 'reads the CA root as PEM only where asked' {
         $pem = "-----BEGIN CERTIFICATE-----`n$([Convert]::ToBase64String($ca.RawData))`n-----END CERTIFICATE-----`n"
         $server.answer = Get-TestAnswer -Body $pem -Type 'application/x-pem-file'
@@ -157,7 +166,7 @@ Describe 'The TLS check' {
 
     It 'refuses a leaf that does not match the host name, and a leaf that is its own root' {
         (Test-TkServerChain -Leaf $leaf -Presented @($ca) -Errors 'RemoteCertificateNameMismatch' -Pinned '').Failure | Should -Match 'host name'
-        (Test-TkServerChain -Leaf $ca -Presented @() -Errors 'None' -Pinned '').Failure | Should -Match 'leaf itself'
+        (Test-TkServerChain -Leaf $ca -Presented @($ca) -Errors 'None' -Pinned '').Failure | Should -Match 'leaf'
         (Test-TkServerChain -Leaf $null -Presented @() -Errors 'None' -Pinned '').Ok | Should -BeFalse
     }
 
@@ -167,6 +176,50 @@ Describe 'The TLS check' {
         Use-TestConnection -Pinned $caPin
         (Invoke-TkHttp -Method GET -Path '/api/v1/health' -NoSession).Status | Should -Be 200
         $script:TkConn.LastTls.Ok | Should -BeTrue
+    }
+}
+
+Describe 'The approval''s pin' {
+    It 'refuses a collect that reaches another root than the approval request, and collects nothing' {
+        Use-TestConnection
+        $script:TkVersion = '0.0.0-test'
+        $nonce = ConvertTo-TkBase64Url ([byte[]](1..32))
+        $server.queue.Clear(); $server.certs.Clear()
+        $server.queue.Enqueue((Get-TestAnswer -Status 201 -Body "{`"id`":`"0190d1c2-0000-7000-8000-00000000a001`",`"nonce`":`"$nonce`"}"))
+        $server.queue.Enqueue((Get-TestAnswer -Body '{"secret":"tnka_0123456789abcdefABCDEF","delegation":"0190d1c2-0000-7000-8000-00000000d001"}'))
+        # The approval request reaches Tenko's chain; the first collect an interceptor's.
+        $server.certs.Enqueue(@{ Cert = $leaf; Chain = $(if ($core) { @($ca) } else { @() }) })
+        $server.certs.Enqueue(@{ Cert = $otherLeaf; Chain = $(if ($core) { @($otherCa) } else { @() }) })
+        $before = $server.requests
+        $failure = $null
+        try { [void](Request-TkApproval -Plan ([ordered]@{ domain = 'corp.example.test' }) -Domain 'corp.example.test' 6>$null) } catch { $failure = $_.Exception }
+        $failure | Should -Not -BeNullOrEmpty
+        $failure.Message | Should -Match 'another TLS root than the approval request'
+        $failure.Data['tk.exit'] | Should -Be 4
+        ($server.requests - $before) | Should -Be 1 -Because 'nothing was sent over the interceptor''s connection'
+        $script:TkConn.Session | Should -BeNullOrEmpty
+        $server.queue.Clear(); $server.certs.Clear()
+    }
+}
+
+Describe 'An older node' {
+    # A server that presents its leaf alone, as Tenko's API listener did before it presented
+    # its root: refused on both editions, by the real check, with a sentence that says why.
+    BeforeAll {
+        # An authority of its own: the main server's passes through the user's intermediate
+        # store, where the client's chain engine would find it.
+        $oldCa = Get-TestCertificate -Subject 'Older CA' -Ca
+        $old = Open-TestTlsServer -Certificate (Get-TestCertificate -Subject 'localhost' -Issuer $oldCa -Names 'localhost' -Addresses '127.0.0.1')
+        $old.answer = Get-TestAnswer
+    }
+    AfterAll {
+        Close-TestTlsServer $old
+    }
+
+    It 'is refused, naming the root it did not present' {
+        Use-TestConnection
+        $script:TkConn.Port = $old.port
+        { Invoke-TkHttp -Method GET -Path '/api/v1/health' -NoSession } | Should -Throw '*presented its leaf certificate alone, without the root*older node*'
     }
 }
 
