@@ -333,6 +333,7 @@ mod tests {
             id: account,
             session: SessionId::generate(),
             strength: AuthStrength::Password,
+            delegation: None,
         };
         for (principal, status, code) in [
             (

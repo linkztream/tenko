@@ -34,6 +34,7 @@ pub fn person() -> RequestCtx {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: tenko_core::AuthStrength::Passkey,
+        delegation: None,
     })
 }
 

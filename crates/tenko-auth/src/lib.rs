@@ -27,6 +27,8 @@
 //! | [`clock`] | the time source |
 //! | [`error`] | [`AuthError`] and its codes |
 //! | [`client_cert`] | integration client certificates: records, enrollment codes, enrollment, revocation, the index of the integration listener (ADR 0035) |
+//! | [`approval`] | approvals of a takeover script: the request, the code, the collect (ADR 0038) |
+//! | [`delegation`] | what a delegated session reaches: the allow-list of the authentication layer (ADR 0038) |
 
 #![forbid(unsafe_code)]
 
@@ -56,6 +58,9 @@ pub mod settings;
 pub mod testing;
 pub mod totp;
 pub mod webauthn;
+// The takeover script's approval and its delegated session (ADR 0038).
+pub mod approval;
+pub mod delegation;
 
 pub use error::AuthError;
 pub use service::{AuthConfig, AuthService, LoginOutcome, NewSession};

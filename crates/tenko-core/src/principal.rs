@@ -10,7 +10,10 @@ use utoipa::ToSchema;
 
 use crate::{
     error::Coded,
-    id::{ApiTokenId, NodeId, PrefixId, RequestId, SessionId, SiteId, TenantId, UserId, VrfId},
+    id::{
+        ApiTokenId, DelegationId, NodeId, PrefixId, RequestId, SessionId, SiteId, TenantId, UserId,
+        VrfId,
+    },
     names::IdempotencyKey,
     object::{ObjectKind, ObjectRef},
     timestamp::Timestamp,
@@ -28,6 +31,11 @@ pub enum Principal {
         session: SessionId,
         /// How strongly the session was authenticated.
         strength: AuthStrength,
+        /// The run a takeover script acts for through this session, when the session is a
+        /// delegated one (ADR 0038): the approver acting through the script. Absent in every
+        /// other session and in records written before it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delegation: Option<DelegationId>,
     },
     /// A personal API token (IAM-10).
     Token {
@@ -75,6 +83,14 @@ impl Principal {
     pub fn strength(&self) -> Option<AuthStrength> {
         match self {
             Principal::User { strength, .. } => Some(*strength),
+            _ => None,
+        }
+    }
+
+    /// The run a delegated session acts for (ADR 0038); `None` for every other principal.
+    pub fn delegation(&self) -> Option<DelegationId> {
+        match self {
+            Principal::User { delegation, .. } => *delegation,
             _ => None,
         }
     }
@@ -546,6 +562,7 @@ mod tests {
             id: UserId::generate(),
             session: SessionId::generate(),
             strength: AuthStrength::Passkey,
+            delegation: None,
         }
     }
 

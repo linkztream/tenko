@@ -870,6 +870,9 @@ pub mod tables {
     }
 }
 
+// The plan a takeover script asks a person to approve (ADR 0038).
+pub mod plan;
+
 #[cfg(test)]
 mod tests {
     use super::*;

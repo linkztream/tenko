@@ -1079,6 +1079,7 @@ mod tests {
             source: SessionSource::Local,
             directory_checked_at: None,
             generation: 0,
+            delegation: None,
         };
         let bytes = SESSIONS.encode(&session).expect("cbor");
         assert!(!bytes.windows(7).any(|w| w == source_key));

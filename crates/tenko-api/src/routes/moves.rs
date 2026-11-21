@@ -318,6 +318,7 @@ mod tests {
                 id: UserId::generate(),
                 session: SessionId::generate(),
                 strength: AuthStrength::Passkey,
+                delegation: None,
             });
             self.service
                 .execute(

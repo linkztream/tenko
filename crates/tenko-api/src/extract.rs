@@ -109,6 +109,12 @@ where
                     }
                     .into());
                 }
+                // ADR 0038: a delegated session reaches the routes of its allow-list only.
+                if let Some(delegated) = &authenticated.flags.delegation
+                    && !delegation_admits(&parts.method, &parts.extensions, delegated, now)
+                {
+                    return Err(tenko_auth::AuthError::DelegationRefused.into());
+                }
                 parts.extensions.insert(authenticated);
                 principal
             }
@@ -133,6 +139,24 @@ fn is_mirror_push(method: &axum::http::Method, path: &str, mirror: tenko_core::M
             .and_then(|rest| rest.strip_suffix("/snapshot"))
             .and_then(|id| id.parse::<tenko_core::MirrorId>().ok())
             == Some(mirror)
+}
+
+/// Whether a delegated session (ADR 0038) reaches the matched route of a request, as the
+/// allow-list `tenko_auth::delegation::TAKEOVER` says: a request whose route is unknown is
+/// refused.
+pub(crate) fn delegation_admits(
+    method: &axum::http::Method,
+    extensions: &axum::http::Extensions,
+    delegated: &tenko_core::auth::Delegated,
+    now: Timestamp,
+) -> bool {
+    extensions
+        .get::<axum::extract::MatchedPath>()
+        .map(axum::extract::MatchedPath::as_str)
+        .is_some_and(|route| {
+            let route = route.strip_prefix(crate::API_BASE).unwrap_or(route);
+            tenko_auth::delegation::admits(delegated, method.as_str(), route, now)
+        })
 }
 
 /// The routes an account that must change its password may still use: the password change
@@ -508,6 +532,7 @@ mod tests {
                         id: self.user,
                         session: SessionId::generate(),
                         strength,
+                        delegation: None,
                     },
                     user: Some(self.user),
                     roles: BTreeSet::from(["admin".to_owned()]),
@@ -546,6 +571,7 @@ mod tests {
                         id: self.0,
                         session: SessionId::generate(),
                         strength: AuthStrength::Password,
+                        delegation: None,
                     },
                     user: Some(self.0),
                     roles: BTreeSet::from(["viewer".to_owned()]),

@@ -575,6 +575,7 @@ fn session(roles: &[&str], password_change_required: bool) -> (Principal, AuthOu
         id: UserId::from(uuid::Uuid::from_u128(1)),
         session: SessionId::from(uuid::Uuid::from_u128(2)),
         strength: AuthStrength::Password,
+        delegation: None,
     };
     let authenticated = Authenticated {
         principal: principal.clone(),

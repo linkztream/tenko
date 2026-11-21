@@ -142,6 +142,7 @@ impl TestEngine {
             id: fixed::<UserId>(USER),
             session: fixed::<SessionId>(SESSION),
             strength: AuthStrength::Passkey,
+            delegation: None,
         })
         .at(self.clock.now())
     }

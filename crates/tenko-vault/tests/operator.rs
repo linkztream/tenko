@@ -47,6 +47,7 @@ fn person_with(id: UserId) -> RequestCtx {
         id,
         session: SessionId::generate(),
         strength: AuthStrength::Password,
+        delegation: None,
     })
     .at(ctx().now)
 }

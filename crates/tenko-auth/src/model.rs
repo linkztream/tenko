@@ -809,6 +809,13 @@ pub struct SessionRecord {
     /// The account's generation when it was issued ([`UserRecord::admits`]).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub generation: u64,
+    /// The run a delegated session acts for (ADR 0038), whose secret is a `tnka_` bearer
+    /// secret and never a cookie. Its `authenticated_at` is the Unix epoch, so that no check
+    /// of a recent sign-in ever passes it; the approval's time is here. Absent in every other
+    /// session: a build without the field reads such a session as an ordinary one, which its
+    /// secret's form never reaches (the cookie lookup refuses a `tnka_` value).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delegation: Option<tenko_core::auth::Delegated>,
 }
 
 /// A device that completed a sign-in of the account: its browser holds a mark whose
@@ -1008,6 +1015,7 @@ mod tests {
             source: SessionSource::Local,
             directory_checked_at: None,
             generation: 0,
+            delegation: None,
         };
         let new = SESSIONS.encode(&record).expect("cbor").to_vec();
         // The bytes 0.0.11 wrote: the same map with the CBOR text key of the old name

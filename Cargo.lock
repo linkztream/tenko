@@ -3292,6 +3292,7 @@ dependencies = [
  "tempfile",
  "tenko-auth",
  "tenko-core",
+ "tenko-net",
  "tenko-store",
  "tenko-vault",
  "thiserror 2.0.21",

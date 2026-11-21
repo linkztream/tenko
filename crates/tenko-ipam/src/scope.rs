@@ -2141,6 +2141,7 @@ impl Requester {
                 id,
                 session: SessionId::from_uuid(uuid::Uuid::nil()),
                 strength,
+                delegation: None,
             },
             Self::Token { id, owner } => Principal::Token { id, owner },
             Self::System { component } => Principal::system(component),
@@ -3834,6 +3835,7 @@ mod tests {
             id: user,
             session: SessionId::generate(),
             strength: AuthStrength::Passkey,
+            delegation: None,
         };
         let requester = Requester::of(&principal).expect("a person");
         let encoded = tenko_core::codec::to_cbor(&requester).expect("encode");
@@ -3844,6 +3846,7 @@ mod tests {
                 id,
                 session,
                 strength,
+                ..
             } => {
                 assert_eq!(id, user);
                 assert_eq!(strength, AuthStrength::Passkey);

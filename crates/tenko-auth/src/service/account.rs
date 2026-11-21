@@ -263,19 +263,29 @@ impl AuthService {
             .map(|(installation, _)| installation.host_name))
     }
 
-    /// The user and session record of a session principal.
+    /// The user and session record of a session principal: the account self-service of the
+    /// session's own person, which a delegated session never reaches (ADR 0038).
     async fn current(
         &self,
         ctx: &RequestCtx,
     ) -> Result<(UserRecord, Revision, Vec<u8>, crate::model::SessionRecord), AuthError> {
+        if ctx.principal.delegation().is_some() {
+            return Err(AuthError::DelegationRefused);
+        }
         let (user_id, session_id, _) = Self::session_principal(ctx)?;
         Self::live_session(self.view().await?.as_ref(), user_id, session_id)
     }
 
+    /// Checks that `session` authenticated within the last five minutes. A delegated session
+    /// (ADR 0038) is never fresh: it is refused whatever its age, so no account self-service
+    /// operation and no other operation behind a recent sign-in is reached through it.
     pub(super) fn require_fresh(
         session: &crate::model::SessionRecord,
         now: tenko_core::Timestamp,
     ) -> Result<(), AuthError> {
+        if session.delegation.is_some() {
+            return Err(AuthError::DelegationRefused);
+        }
         if now.saturating_since(session.authenticated_at) > FRESH_AUTHENTICATION {
             return Err(AuthError::StepUpRequired { required: "fresh" });
         }
@@ -293,6 +303,27 @@ impl AuthService {
     pub async fn require_fresh_session(&self, ctx: &RequestCtx) -> Result<(), AuthError> {
         let (_, _, _, session) = self.current(ctx).await?;
         Self::require_fresh(&session, ctx.now)
+    }
+
+    /// The freshness the creation of a mirror needs (ADR 0038 decision 5): a session that
+    /// signed in within the last five minutes, or a delegated session within
+    /// [`crate::delegation::MIRROR_WINDOW`] of its approval, on this controller's clock.
+    ///
+    /// # Errors
+    ///
+    /// As [`AuthService::require_fresh_session`]; [`AuthError::DelegationRefused`] for a
+    /// delegated session past the window.
+    pub(super) async fn require_fresh_or_within_approval(
+        &self,
+        ctx: &RequestCtx,
+    ) -> Result<(), AuthError> {
+        let (user, session, _) = Self::session_principal(ctx)?;
+        let (_, _, _, session) = Self::live_session(self.view().await?.as_ref(), user, session)?;
+        match &session.delegation {
+            Some(delegated) if crate::delegation::within_approval(delegated, ctx.now) => Ok(()),
+            Some(_) => Err(AuthError::DelegationRefused),
+            None => Self::require_fresh(&session, ctx.now),
+        }
     }
 
     /// Checks that a person acting through a session authenticated within the last five
@@ -374,8 +405,12 @@ impl AuthService {
     ///
     /// [`AuthError::NotFound`] for a session of another user, or a store error.
     pub async fn revoke_session(&self, ctx: &RequestCtx, id: SessionId) -> Result<(), AuthError> {
-        // Ending sessions is interactive: a personal token may not end its owner's sessions.
+        // Ending sessions is interactive: a personal token may not end its owner's sessions,
+        // and a delegated session ends only itself, by signing out (ADR 0038).
         let (user, _, _) = Self::session_principal(ctx)?;
+        if ctx.principal.delegation().is_some() {
+            return Err(AuthError::DelegationRefused);
+        }
         let view = self.view().await?;
         let found = Self::load_session(view.as_ref(), user, id)?
             .ok_or(AuthError::NotFound { kind: "session" })?;

@@ -219,6 +219,7 @@ async fn scenario() {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::Password,
+        delegation: None,
     };
     let (stop_tx, stop_rx) = watch::channel(false);
     let mut controllers = Vec::new();

@@ -8,7 +8,8 @@
 //! The token may be bound to source prefixes, by the source binding every scoped token has
 //! (IAM-21): a push from elsewhere is refused like an unknown token. Minting needs an
 //! interactive session that signed in within the last five minutes, as every scoped token of
-//! a service account does: the token outlives the session.
+//! a service account does: the token outlives the session. A takeover script's delegated
+//! session creates one within five minutes of its approval instead (ADR 0038).
 
 use tenko_core::{ApiTokenId, MirrorId, ObjectRef, Principal, RequestCtx, UserId};
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
@@ -63,7 +64,7 @@ impl AuthService {
         terms: &MirrorTokenTerms,
     ) -> Result<MirrorCredentials, AuthError> {
         let (creator, _, strength) = Self::session_principal(ctx)?;
-        self.require_fresh_session(ctx).await?;
+        self.require_fresh_or_within_approval(ctx).await?;
         let name = valid_user_name(&tenko_core::migrate::Mirror::account_name(mirror))?;
         let key = UserRecord::name_key(&name);
         if view.get_typed(&USER_NAMES, &key)?.is_some() {

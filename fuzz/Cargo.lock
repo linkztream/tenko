@@ -3077,6 +3077,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tenko-core",
+ "tenko-net",
  "tenko-store",
  "tenko-vault",
  "thiserror 2.0.21",
@@ -3405,6 +3406,10 @@ dependencies = [
  "tracing",
  "utoipa",
 ]
+
+[[package]]
+name = "tenko-net"
+version = "0.0.12-rc.7"
 
 [[package]]
 name = "tenko-scan"

@@ -250,6 +250,7 @@ async fn fill_sessions(env: &TestEnv, user: UserId, count: usize) {
             source: tenko_auth::directory::SessionSource::Local,
             directory_checked_at: None,
             generation: 0,
+            delegation: None,
         };
         batch.put_typed(&SESSIONS, &hash, &record).expect("encode");
         batch

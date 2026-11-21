@@ -339,6 +339,11 @@ export type MessageKey =
   | "account.totp.title"
   | "account.totp.verify"
   | "audit.action.auth.access.denied"
+  | "audit.action.auth.approval.approve"
+  | "audit.action.auth.approval.collect"
+  | "audit.action.auth.approval.deny"
+  | "audit.action.auth.approval.refuse"
+  | "audit.action.auth.approval.request"
   | "audit.action.auth.break_glass.set"
   | "audit.action.auth.client_cert.code_create"
   | "audit.action.auth.client_cert.code_withdraw"
@@ -10656,6 +10661,11 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.title",
   "account.totp.verify",
   "audit.action.auth.access.denied",
+  "audit.action.auth.approval.approve",
+  "audit.action.auth.approval.collect",
+  "audit.action.auth.approval.deny",
+  "audit.action.auth.approval.refuse",
+  "audit.action.auth.approval.request",
   "audit.action.auth.break_glass.set",
   "audit.action.auth.client_cert.code_create",
   "audit.action.auth.client_cert.code_withdraw",

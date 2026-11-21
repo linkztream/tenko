@@ -197,6 +197,10 @@ id_type! {
     MirrorId,
     /// Identifier of a recorded takeover of a scope.
     TakeoverId,
+    /// Identifier of an approval a person gives to a takeover script (ADR 0038).
+    ApprovalId,
+    /// Identifier of a delegation: the run a delegated session acts for (ADR 0038).
+    DelegationId,
 }
 
 /// Raft node identifier, assigned at enrollment.

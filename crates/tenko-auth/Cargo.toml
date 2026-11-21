@@ -40,6 +40,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 tenko-core = { workspace = true }
+# The network of a reverse zone, for the limits of a takeover plan.
+tenko-net = { workspace = true }
 tenko-store = { workspace = true }
 tenko-vault = { workspace = true }
 thiserror = { workspace = true }

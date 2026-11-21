@@ -39,6 +39,8 @@ pub mod types;
 mod renewal;
 // WP14.1: the service account and the token of a mirrored source (ADR 0033).
 mod mirror;
+// The takeover script's approval and its delegated session (ADR 0038).
+mod approval;
 
 pub use admin::{OfflineUnlock, unlock_offline};
 pub use devices::{
@@ -259,6 +261,8 @@ pub struct AuthService {
     ceremonies: Ceremonies,
     setup_token: Mutex<Option<SetupTokenVerifier>>,
     relying_party: ArcSwapOption<RelyingParty>,
+    /// The in-memory paces of approvals (`crate::approval`).
+    approval_paces: crate::approval::Paces,
 }
 
 impl std::fmt::Debug for AuthService {
@@ -422,6 +426,7 @@ impl AuthService {
             index,
             setup_token: Mutex::new(None),
             relying_party: ArcSwapOption::empty(),
+            approval_paces: crate::approval::Paces::default(),
         });
         let installation = service.view().await?.get_typed(&INSTALLATION, &())?;
         service.configure_relying_party(installation.as_ref().map(|(i, _)| i))?;
@@ -547,6 +552,7 @@ impl AuthService {
                 id,
                 session,
                 strength,
+                ..
             } => Ok((id, session, strength)),
             _ => Err(AuthError::Unauthenticated),
         }
@@ -632,6 +638,7 @@ impl AuthService {
             source: crate::directory::SessionSource::Local,
             directory_checked_at: None,
             generation: user.sessions_generation,
+            delegation: None,
         };
         let hash = secret.hash();
         batch.put_typed(&SESSIONS, &hash, &record)?;
@@ -748,7 +755,15 @@ impl AuthService {
     ) -> Result<Authenticated, AuthError> {
         match credentials {
             Credentials::None => Err(AuthError::Unauthenticated),
-            Credentials::Session(secret) => self.authenticate_session(secret, now).await,
+            Credentials::Session(secret) => {
+                self.authenticate_session(secret, Presented::Cookie, now)
+                    .await
+            }
+            // ADR 0038: a delegated session's secret is a bearer secret, never a token.
+            Credentials::Bearer(token) if token.starts_with(crate::secret::DELEGATION_PREFIX) => {
+                self.authenticate_session(token, Presented::Delegated(source_ip), now)
+                    .await
+            }
             Credentials::Bearer(token) => {
                 self.authenticate_token(token, source_ip, None, now).await
             }
@@ -759,12 +774,29 @@ impl AuthService {
         }
     }
 
+    /// A session from its cookie, or a delegated session from its bearer secret (ADR 0038):
+    /// each form finds only its own kind of session, and a delegated one only from its
+    /// approval's source.
     async fn authenticate_session(
         &self,
         secret: &str,
+        presented: Presented,
         now: Timestamp,
     ) -> Result<Authenticated, AuthError> {
         let (hash, mut session, revision, view) = self.session_of(secret, now).await?;
+        match presented {
+            Presented::Cookie if session.delegation.is_some() => {
+                return Err(AuthError::Unauthenticated);
+            }
+            Presented::Delegated(_) if session.delegation.is_none() => {
+                return Err(AuthError::Unauthenticated);
+            }
+            Presented::Delegated(source) if source.is_none() || source != session.source_ip => {
+                self.audit_delegated_source(&session, source, now).await;
+                return Err(AuthError::Unauthenticated);
+            }
+            _ => {}
+        }
         let settings = self.settings();
         let user = match Self::session_holds(view.as_ref(), &session, &settings, now) {
             Err(AuthError::SessionExpired) => {
@@ -778,11 +810,7 @@ impl AuthService {
             }
             held => held?.0,
         };
-        let idle = if session.break_glass {
-            BREAK_GLASS_IDLE
-        } else {
-            settings.session.idle()
-        };
+        let (_, idle) = lifetimes(&session, &settings);
         // Without quorum the refresh would wait for a leader and fail, and every later
         // request of the session would wait again (OPS-26): the refresh waits for the quorum.
         if now.saturating_since(session.last_seen_at) >= refresh_interval(idle)
@@ -794,6 +822,7 @@ impl AuthService {
                 id: user.id,
                 session: session.id,
                 strength: session.strength,
+                delegation: session.delegation.map(|delegated| delegated.id),
             };
             let mut batch = WriteBatch::new(principal, now);
             batch.expect_typed(&SESSIONS, &hash, Some(revision));
@@ -811,6 +840,7 @@ impl AuthService {
                 id: user.id,
                 session: session.id,
                 strength: session.strength,
+                delegation: session.delegation.map(|delegated| delegated.id),
             },
             user: Some(user.id),
             roles: role_names(&user.roles),
@@ -821,6 +851,7 @@ impl AuthService {
                 mfa_enrollment_required: session.strength < self.required_for(&user),
                 break_glass: session.break_glass,
                 mirror: None,
+                delegation: session.delegation,
             },
         })
     }
@@ -902,7 +933,9 @@ impl AuthService {
     /// has not reached this one yet) the leader's commit index, within the bound of
     /// [`AuthService::confirmed_view_for_miss`].
     async fn session_of(&self, secret: &str, now: Timestamp) -> Result<FoundSession, AuthError> {
-        if !looks_like_session_secret(secret) {
+        if !looks_like_session_secret(secret)
+            && !crate::secret::looks_like_delegation_secret(secret)
+        {
             return Err(AuthError::Unauthenticated);
         }
         let hash = hash_secret(secret);
@@ -949,8 +982,19 @@ impl AuthService {
         if now >= expires_at {
             return Err(AuthError::SessionExpired);
         }
+        if let Some(delegated) = &session.delegation
+            && now
+                .checked_add(crate::approval::CLOCK_TOLERANCE)
+                .is_none_or(|now| now < session.last_seen_at || now < delegated.approved_at)
+        {
+            // ADR 0038: a clock set back ends a delegated session rather than extending it.
+            return Err(AuthError::SessionExpired);
+        }
         let (user, _) = Self::holder(view, session.user, Issued::Session(session.generation))?;
-        if user.is_service() || (session.break_glass && !user.break_glass) {
+        if user.is_service()
+            || (session.break_glass && !user.break_glass)
+            || (session.delegation.is_some() && !user.roles.contains(&RoleName::Admin))
+        {
             return Err(AuthError::Unauthenticated);
         }
         Ok((user, expires_at))
@@ -1211,16 +1255,29 @@ impl Authenticator for AuthService {
     }
 }
 
+/// The absolute and the idle lifetime of a session under the current settings: a
+/// break-glass session's own, a delegated session's capped by [`crate::delegation::LIFETIME`]
+/// and [`crate::delegation::IDLE`] (ADR 0038), else TGL-04's.
+fn lifetimes(session: &SessionRecord, settings: &SecuritySettings) -> (Duration, Duration) {
+    let (absolute, idle) = (settings.session.absolute(), settings.session.idle());
+    if session.break_glass {
+        (BREAK_GLASS_SESSION, BREAK_GLASS_IDLE)
+    } else if session.delegation.is_some() {
+        (
+            absolute.min(crate::delegation::LIFETIME),
+            idle.min(crate::delegation::IDLE),
+        )
+    } else {
+        (absolute, idle)
+    }
+}
+
 /// The effective end of a session and its absolute end under the current settings.
 fn effective_expiry(
     session: &SessionRecord,
     settings: &SecuritySettings,
 ) -> (Timestamp, Timestamp) {
-    let (absolute, idle) = if session.break_glass {
-        (BREAK_GLASS_SESSION, BREAK_GLASS_IDLE)
-    } else {
-        (settings.session.absolute(), settings.session.idle())
-    };
+    let (absolute, idle) = lifetimes(session, settings);
     let absolute_end = session.expires_at.min(
         session
             .created_at
@@ -1234,6 +1291,14 @@ fn effective_expiry(
             .unwrap_or(session.idle_expires_at),
     );
     (absolute_end.min(idle_end), absolute_end)
+}
+
+/// How a session's secret arrived: as the session cookie, or as a delegated session's bearer
+/// secret from a client address (ADR 0038).
+#[derive(Debug, Clone, Copy)]
+enum Presented {
+    Cookie,
+    Delegated(Option<IpAddr>),
 }
 
 /// A session found by its secret: its hash, the record, its revision and the view it was

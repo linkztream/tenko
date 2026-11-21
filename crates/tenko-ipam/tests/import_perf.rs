@@ -86,6 +86,7 @@ async fn ten_thousand_rows_preview_and_apply_in_time() {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::Passkey,
+        delegation: None,
     });
 
     let started = Instant::now();

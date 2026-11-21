@@ -95,6 +95,22 @@ pub struct AuthFlags {
     /// The request is authenticated with the token of this mirrored source, which reaches
     /// that mirror's push and nothing else (ADR 0033 decision 3).
     pub mirror: Option<crate::MirrorId>,
+    /// The request is authenticated with a delegated session (ADR 0038), which reaches only
+    /// the routes of its allow-list (`tenko_auth::delegation`).
+    pub delegation: Option<Delegated>,
+}
+
+/// What a delegated session carries beyond an ordinary one (ADR 0038): the run it acts for,
+/// the approval it came from and when the person approved it, on the approving controller's
+/// clock. Stored on the session record and copied into [`AuthFlags`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Delegated {
+    /// The run.
+    pub id: crate::DelegationId,
+    /// The approval.
+    pub approval: crate::ApprovalId,
+    /// When the person approved.
+    pub approved_at: Timestamp,
 }
 
 /// The outcome of a successful authentication.

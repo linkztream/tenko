@@ -74,11 +74,13 @@ fn entries() -> Vec<Entry> {
             id: alice,
             session: SessionId::generate(),
             strength: AuthStrength::Passkey,
+            delegation: None,
         },
         Principal::User {
             id: UserId::generate(),
             session: SessionId::generate(),
             strength: AuthStrength::Password,
+            delegation: None,
         },
         Principal::Token {
             id: ApiTokenId::generate(),

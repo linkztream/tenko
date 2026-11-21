@@ -3196,6 +3196,7 @@ async fn a_stale_revision_and_an_unknown_account_have_their_own_codes() {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::HardwareKey,
+        delegation: None,
     })
     .at(env.now());
     let unauthenticated = env

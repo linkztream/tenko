@@ -62,6 +62,26 @@ pub fn looks_like_api_token(text: &str) -> bool {
 /// Prefix of the renewal secrets of scoped tokens (IAM-20): never a bearer token.
 pub const RENEWAL_PREFIX: &str = "tnr_";
 
+/// Prefix of a delegated session's secret (ADR 0038): a bearer secret, never a cookie, and
+/// never a token, so neither the token lookup nor the cookie lookup accepts one.
+pub const DELEGATION_PREFIX: &str = "tnka_";
+
+/// A new delegated session's secret: `tnka_` and 256 random bits, base64url.
+///
+/// # Errors
+///
+/// [`AuthError::Internal`] if the random source fails.
+pub fn new_delegation_secret() -> Result<BearerSecret, AuthError> {
+    prefixed_secret(DELEGATION_PREFIX)
+}
+
+/// Whether a presented bearer value has the shape of a delegated session's secret.
+pub fn looks_like_delegation_secret(value: &str) -> bool {
+    value
+        .strip_prefix(DELEGATION_PREFIX)
+        .is_some_and(looks_like_session_secret)
+}
+
 /// A secret as the client receives it. `Debug` redacts it; there is no `Display`.
 #[derive(Clone, PartialEq, Eq)]
 pub struct BearerSecret(Zeroizing<String>);

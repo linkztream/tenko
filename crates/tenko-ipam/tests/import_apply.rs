@@ -88,6 +88,7 @@ fn person() -> RequestCtx {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::Passkey,
+        delegation: None,
     })
 }
 
@@ -454,6 +455,7 @@ async fn credential_columns_need_the_vault_and_a_strong_enough_account() {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::Pin,
+        delegation: None,
     };
     let gate = credential_gate(Some(&StepUp), &pin);
     assert!(matches!(

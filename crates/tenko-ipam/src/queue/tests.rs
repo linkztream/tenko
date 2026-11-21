@@ -186,6 +186,7 @@ impl World {
                 id: author_id,
                 session,
                 strength: AuthStrength::Password,
+                delegation: None,
             },
             session,
             address,

@@ -180,6 +180,13 @@ pub enum AuthError {
         /// The limit.
         max_keys: usize,
     },
+    /// A delegated session (ADR 0038) reached an operation outside its allow-list, an
+    /// operation that needs a recent sign-in, or a body outside its run's plan.
+    #[error("a delegated session may not do this")]
+    DelegationRefused,
+    /// An approval of a takeover script was refused (ADR 0038).
+    #[error("{0}")]
+    Approval(crate::approval::Refusal),
     /// The service is not configured (no relying party, no host name yet).
     #[error("authentication is not available: {0}")]
     Unavailable(&'static str),
@@ -273,6 +280,8 @@ impl Coded for AuthError {
             Self::ScopeUnavailable => "auth.scope.unavailable",
             Self::PreferenceTooLarge { .. } => "auth.preference.too_large",
             Self::PreferenceLimit { .. } => "auth.preference.limit",
+            Self::DelegationRefused => "auth.delegation.refused",
+            Self::Approval(refusal) => refusal.code(),
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
             Self::Internal(_) => "auth.internal",
@@ -292,7 +301,9 @@ impl Coded for AuthError {
             | Self::BreakGlassHardwareKeyOnly
             | Self::PasswordChangeRequired
             | Self::GrantExceedsOwn
-            | Self::TokenRenewalRefused { .. } => 403,
+            | Self::TokenRenewalRefused { .. }
+            | Self::DelegationRefused => 403,
+            Self::Approval(refusal) => refusal.http_status(),
             Self::Denied(denied) => denied.http_status(),
             Self::PasswordPolicy(_)
             | Self::TotpCodeMismatch
@@ -355,6 +366,7 @@ impl Coded for AuthError {
                 ("field", (*field).to_owned()),
                 ("reason", reason.clone().into_owned()),
             ]),
+            Self::Approval(refusal) => refusal.params(),
             Self::Store(error) => error.params(),
             _ => BTreeMap::new(),
         }
@@ -440,6 +452,8 @@ mod tests {
             AuthError::NotFound { kind: "preference" },
             AuthError::PreferenceTooLarge { max_bytes: 16_384 },
             AuthError::PreferenceLimit { max_keys: 64 },
+            AuthError::DelegationRefused,
+            AuthError::Approval(crate::approval::Refusal::Consumed),
         ] {
             let code = error.code();
             assert!(

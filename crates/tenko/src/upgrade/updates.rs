@@ -1786,6 +1786,7 @@ mod tests {
             id: UserId::generate(),
             session: SessionId::generate(),
             strength: AuthStrength::Password,
+            delegation: None,
         })
     }
 

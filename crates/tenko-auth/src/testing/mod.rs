@@ -3,6 +3,8 @@
 
 pub mod authenticator;
 pub mod env;
+// A takeover script (ADR 0038).
+pub mod approval;
 
 pub use authenticator::{SoftAttestation, SoftAuthenticator, SoftKeyAlg, Tweaks};
 pub use env::TestEnv;

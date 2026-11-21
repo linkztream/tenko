@@ -632,6 +632,7 @@ fn principal(id: UserId) -> Principal {
         id,
         session: SessionId::generate(),
         strength: AuthStrength::HardwareKey,
+        delegation: None,
     }
 }
 

@@ -120,6 +120,9 @@ impl AuthService {
         let (user_id, session_id, strength) = Self::session_principal(ctx)?;
         let view = self.view().await?;
         let (user, _, _, session) = Self::live_session(view.as_ref(), user_id, session_id)?;
+        if session.delegation.is_some() {
+            return Err(AuthError::DelegationRefused);
+        }
         let policy = self.settings().secret_reveal();
         check_step_up(policy, strength, session.authenticated_at, ctx.now)?;
         Ok(RevealGrant {

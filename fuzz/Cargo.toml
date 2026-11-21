@@ -502,3 +502,10 @@ path = "fuzz_targets/migrate_mirror_snapshot.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "auth_approval"
+path = "fuzz_targets/auth_approval.rs"
+test = false
+doc = false
+bench = false

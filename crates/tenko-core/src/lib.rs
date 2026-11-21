@@ -89,9 +89,9 @@ pub mod timestamp;
 pub use auth::{AuthFailure, AuthFlags, Authenticated, Authenticator, Credentials};
 pub use error::{Coded, CodedError, FieldError, InvalidValue};
 pub use id::{
-    AddressId, ApiTokenId, AuditSeq, ConnectorId, CustomFieldId, HostId, ImportId, InterfaceId,
-    JobId, MirrorId, NodeId, ObservationId, PrefixId, ProposalId, RangeId, RequestId, Revision,
-    SecretId, SessionId, SiteId, TakeoverId, TenantId, UserId, VlanId, VrfId,
+    AddressId, ApiTokenId, ApprovalId, AuditSeq, ConnectorId, CustomFieldId, DelegationId, HostId,
+    ImportId, InterfaceId, JobId, MirrorId, NodeId, ObservationId, PrefixId, ProposalId, RangeId,
+    RequestId, Revision, SecretId, SessionId, SiteId, TakeoverId, TenantId, UserId, VlanId, VrfId,
 };
 pub use names::{CounterKey, IdempotencyKey, MessageKey, TableName};
 pub use net::MacAddr;

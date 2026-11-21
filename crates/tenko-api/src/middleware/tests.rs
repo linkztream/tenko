@@ -56,6 +56,7 @@ impl Authenticator for OneSession {
                             id: user,
                             session: SessionId::from_uuid(Uuid::from_u128(8)),
                             strength: AuthStrength::Password,
+                            delegation: None,
                         },
                         user: Some(user),
                         roles: BTreeSet::new(),

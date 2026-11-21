@@ -210,6 +210,7 @@ fn with_strength(principal: &Principal, strength: AuthStrength) -> Principal {
             id: *id,
             session: *session,
             strength,
+            delegation: None,
         },
         other => other.clone(),
     }
@@ -803,6 +804,7 @@ async fn a_deleted_account_is_refused_as_unauthenticated() {
         id: UserId::generate(),
         session: SessionId::generate(),
         strength: AuthStrength::HardwareKey,
+        delegation: None,
     };
     assert_eq!(
         reason(decide(&f, &stranger, Action::Read, ObjectKind::Prefix)),
@@ -953,6 +955,7 @@ async fn scope_agrees_with_check_for_every_principal_action_and_kind() {
                 id: UserId::generate(),
                 session: SessionId::generate(),
                 strength: AuthStrength::HardwareKey,
+                delegation: None,
             },
         ),
     ];

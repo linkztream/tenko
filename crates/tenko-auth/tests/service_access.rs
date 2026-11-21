@@ -333,6 +333,7 @@ fn person(id: UserId, strength: AuthStrength) -> Principal {
         id,
         session: SessionId::generate(),
         strength,
+        delegation: None,
     }
 }
 

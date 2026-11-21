@@ -146,6 +146,26 @@
         <notes><note category="description">What the audit action auth.setup.complete is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Complete the first-run setup</source></segment>
       </unit>
+      <unit id="audit.action.auth.approval.approve">
+        <notes><note category="description">What the audit action auth.approval.approve is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Approve a takeover script</source></segment>
+      </unit>
+      <unit id="audit.action.auth.approval.collect">
+        <notes><note category="description">What the audit action auth.approval.collect is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start the delegated session of a takeover script</source></segment>
+      </unit>
+      <unit id="audit.action.auth.approval.deny">
+        <notes><note category="description">What the audit action auth.approval.deny is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Deny a takeover script</source></segment>
+      </unit>
+      <unit id="audit.action.auth.approval.refuse">
+        <notes><note category="description">What the audit action auth.approval.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse the code or session of a takeover script</source></segment>
+      </unit>
+      <unit id="audit.action.auth.approval.request">
+        <notes><note category="description">What the audit action auth.approval.request is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Ask approval for a takeover script</source></segment>
+      </unit>
       <unit id="audit.action.auth.client_cert.code_create">
         <notes><note category="description">What the audit action auth.client_cert.code_create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create an integration enrollment code</source></segment>
