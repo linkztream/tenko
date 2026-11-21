@@ -344,10 +344,16 @@ pub const OLD_BOOTSTRAP: &str = "/usr/local/bin/tenko";
 /// unit's start-up step and the server run one version, the one `current` names: one line
 /// per gap, none when the node has the shape of ADR 0023 item 3. The gate is `<root>` with
 /// mode 0750 exactly (no group write: the members must not replace what the service runs)
-/// and a group other than the data directory's. Read only; root's paths
-/// are looked at, never changed. `cli_link` and `bootstrap` are [`CLI_LINK`] and
-/// [`OLD_BOOTSTRAP`] outside tests.
-pub fn installer_gaps(data_dir: &Path, cli_link: &Path, bootstrap: &Path) -> Vec<String> {
+/// and a group other than the data directory's. The installed unit `unit` is read too
+/// ([`unit_gaps`]); an unreadable one adds nothing. Read only; root's paths
+/// are looked at, never changed. `cli_link`, `bootstrap` and `unit` are [`CLI_LINK`],
+/// [`OLD_BOOTSTRAP`] and the installer's unit outside tests.
+pub fn installer_gaps(
+    data_dir: &Path,
+    cli_link: &Path,
+    bootstrap: &Path,
+    unit: &Path,
+) -> Vec<String> {
     let layout = Layout::new(data_dir);
     let mut gaps = Vec::new();
     if fs::symlink_metadata(bootstrap).is_ok_and(|metadata| metadata.is_file()) {
@@ -386,6 +392,47 @@ pub fn installer_gaps(data_dir: &Path, cli_link: &Path, bootstrap: &Path) -> Vec
                 layout.root().display()
             ));
         }
+    }
+    if let Ok(text) = fs::read_to_string(unit) {
+        gaps.extend(unit_gaps(&text));
+    }
+    gaps
+}
+
+/// What the unit `text` lacks that the shipped unit (`deploy/systemd/tenko.service`) has and
+/// the service needs, as an installer up to 0.0.11 wrote it: the `capset` allowance and
+/// `AF_NETLINK`, without which `ip` cannot read the routes and neighbors. Only the unit's own
+/// lines are read; a drop-in is not.
+fn unit_gaps(text: &str) -> Vec<String> {
+    let values = |key: &'static str| {
+        text.lines().filter_map(move |line| {
+            line.trim()
+                .strip_prefix(key)?
+                .trim_start()
+                .strip_prefix('=')
+                .map(str::trim)
+        })
+    };
+    // A value that starts with `~` is a deny list.
+    let allows = |key: &'static str, word: &str| {
+        values(key).any(|value| {
+            !value.starts_with('~') && value.split_whitespace().any(|item| item == word)
+        })
+    };
+    let mut gaps = Vec::new();
+    if !allows("SystemCallFilter", "capset") {
+        gaps.push(
+            "the unit's system call filter refuses capset(2), so `ip` exits without output and \
+             the default routes and the neighbor tables cannot be read"
+                .to_owned(),
+        );
+    }
+    if !allows("RestrictAddressFamilies", "AF_NETLINK") {
+        gaps.push(
+            "the unit refuses the address family AF_NETLINK, through which `ip` reads the \
+             routes and the neighbor tables"
+                .to_owned(),
+        );
     }
     gaps
 }
@@ -507,6 +554,33 @@ mod tests {
 
     fn version(text: &str) -> ReleaseVersion {
         text.parse().expect("version")
+    }
+
+    /// The shipped unit, read where it lies, so that the check and the file cannot drift.
+    const SHIPPED_UNIT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../deploy/systemd/tenko.service"
+    );
+
+    /// A unit as an installer up to 0.0.11 wrote it refuses `capset` and `AF_NETLINK`; the
+    /// shipped unit lacks nothing.
+    #[test]
+    fn the_unit_gaps_name_what_an_old_unit_lacks() {
+        let shipped = fs::read_to_string(SHIPPED_UNIT).expect("the shipped unit");
+        assert_eq!(unit_gaps(&shipped), Vec::<String>::new());
+        let old = shipped
+            .replace("\nSystemCallFilter=capset\n", "\n")
+            .replace(" AF_NETLINK\n", "\n");
+        let gaps = unit_gaps(&old);
+        assert_eq!(gaps.len(), 2, "{gaps:?}");
+        assert!(gaps[0].contains("capset(2)"), "{gaps:?}");
+        assert!(gaps[1].contains("AF_NETLINK"), "{gaps:?}");
+        // A deny list does not allow what it names.
+        let denied = shipped.replace(
+            "\nSystemCallFilter=capset\n",
+            "\nSystemCallFilter=~@debug capset\n",
+        );
+        assert!(unit_gaps(&denied)[0].contains("capset(2)"));
     }
 
     #[test]
@@ -648,7 +722,7 @@ mod tests {
         fs::write(&bootstrap, b"old binary").expect("bootstrap");
         let link = data.join("cli-tenko");
 
-        let gaps = installer_gaps(&data, &link, &bootstrap);
+        let gaps = installer_gaps(&data, &link, &bootstrap, Path::new(SHIPPED_UNIT));
         assert!(
             gaps[0].starts_with(&bootstrap.display().to_string()),
             "{gaps:?}"
@@ -663,13 +737,13 @@ mod tests {
             std::os::unix::fs::symlink(layout.current_binary(), &link).expect("link");
             fs::set_permissions(&data, fs::Permissions::from_mode(0o700)).expect("0700");
             fs::set_permissions(layout.root(), fs::Permissions::from_mode(0o750)).expect("0750");
-            let gaps = installer_gaps(&data, &link, &bootstrap);
+            let gaps = installer_gaps(&data, &link, &bootstrap, Path::new(SHIPPED_UNIT));
             assert_eq!(gaps.len(), 2, "{gaps:?}");
             assert!(gaps[0].contains("(mode 0711)"), "{gaps:?}");
             // `updates/` keeps the account's own group: a test cannot give it another one.
             assert!(gaps[1].contains("group tenko-cli, mode 0750"), "{gaps:?}");
             fs::set_permissions(&data, fs::Permissions::from_mode(0o711)).expect("0711");
-            let gaps = installer_gaps(&data, &link, &bootstrap);
+            let gaps = installer_gaps(&data, &link, &bootstrap, Path::new(SHIPPED_UNIT));
             assert_eq!(gaps.len(), 1, "only the gate is left: {gaps:?}");
         }
         fs::remove_dir_all(&data).expect("clean up");

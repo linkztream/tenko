@@ -111,7 +111,7 @@
       </unit>
       <unit id="dashboard.finding.health.sys.update.installer_repair">
         <notes><note category="description">A node set up by an older installer: the version the server runs and the one root command that brings the node to one version (docs/upgrades.md section 9.5).</note></notes>
-        <segment><source>The server runs {version}, but this node is not yet set up to run one version. Run {command} once as root.</source><target>Servern kör {version}, men noden är ännu inte inrättad för att köra en enda version. Kör {command} en gång som root.</target></segment>
+        <segment><source>The server runs {version}, but the installer's files on this node are older than the server. Run {command} once as root.</source><target>Servern kör {version}, men installationsprogrammets filer på den här noden är äldre än servern. Kör {command} en gång som root.</target></segment>
       </unit>
       <unit id="dashboard.finding.health.auth.token.expiring">
         <notes><note category="description">Service-account tokens with fewer than 14 days left (IAM-20): how many, and the first end. No names: the token list of the account shows which.</note></notes>

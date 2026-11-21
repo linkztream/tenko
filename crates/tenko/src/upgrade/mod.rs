@@ -266,9 +266,9 @@ const INSTALLER_UNIT: &str = "/etc/systemd/system/tenko.service";
 /// The status notice of a Linux server that runs from the layout under the installer's
 /// systemd unit while the installer's part of the shape is missing ([`layout::installer_gaps`]): an
 /// installation by an installer up to 0.0.11 keeps a binary of its own on `PATH`, which the
-/// unit's start-up step runs, and the service cannot change root's files. Nothing for a
-/// container, a server outside the layout and other systems. Reads metadata and one link;
-/// opens and runs nothing.
+/// unit's start-up step runs, and the service cannot change root's files; its unit refuses
+/// what `ip` needs, and the updater never writes the unit. Nothing for a container, a server
+/// outside the layout and other systems. Reads metadata, one link and the unit; runs nothing.
 pub fn installer_notice(data_dir: &Path) -> Option<tenko_api::dto::system::StatusWarning> {
     if !cfg!(target_os = "linux")
         || !restart::supervised()
@@ -281,6 +281,7 @@ pub fn installer_notice(data_dir: &Path) -> Option<tenko_api::dto::system::Statu
         data_dir,
         Path::new(layout::CLI_LINK),
         Path::new(layout::OLD_BOOTSTRAP),
+        Path::new(INSTALLER_UNIT),
     );
     (!gaps.is_empty()).then(|| repair_notice(&running_version(), &gaps))
 }
@@ -293,8 +294,8 @@ fn repair_notice(
     tenko_api::dto::system::StatusWarning {
         code: INSTALLER_REPAIR.to_owned(),
         detail: format!(
-            "the server runs {version}, but the installer has not set this node up for one \
-             version: {}; run `{REPAIR_COMMAND}` once as root (docs/upgrades.md, section 9.5)",
+            "the server runs {version}, but the installer's part of this node is older: {}; \
+             run `{REPAIR_COMMAND}` once as root (docs/upgrades.md, section 9.5)",
             gaps.join("; ")
         ),
         params: [
