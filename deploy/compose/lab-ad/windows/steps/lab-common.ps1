@@ -192,7 +192,14 @@ function Protect-Lab {
         if (-not (Test-Path -LiteralPath $dir)) { continue }
         & "$env:SystemRoot\System32\icacls.exe" $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
         if ($LASTEXITCODE -ne 0) { Fail "icacls could not set the access rights of $dir" }
-        $wide = @((Get-Acl -LiteralPath $dir).Access | Where-Object {
+        # The owner may always rewrite the rights, and files already there keep their own.
+        & "$env:SystemRoot\System32\icacls.exe" $dir /setowner '*S-1-5-32-544' /T /C | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "icacls could not give $dir to Administrators" }
+        & "$env:SystemRoot\System32\icacls.exe" (Join-Path $dir '*') /reset /T /C | Out-Null
+        $acl = Get-Acl -LiteralPath $dir
+        $owner = ([Security.Principal.NTAccount]$acl.Owner).Translate([Security.Principal.SecurityIdentifier]).Value
+        if ($owner -notin $ok) { Fail "$dir is owned by $($acl.Owner); only SYSTEM or Administrators may own it" }
+        $wide = @($acl.Access | Where-Object {
                 $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $ok })
         if ($wide) { Fail "$dir is open to $(($wide | ForEach-Object { $_.IdentityReference }) -join ', '); only SYSTEM and Administrators may have access" }
     }
