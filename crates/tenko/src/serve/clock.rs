@@ -8,10 +8,11 @@
 //! clean stop. At start a missing file is a new installation, which starts trusted; an
 //! unreadable one is treated the same, with a warning.
 //!
-//! The findings of a controller: `sys.clock.jumped` (a warning) while destruction waits after a
-//! jump and resumes by itself; `sys.clock.held` (to act on) while a person must confirm the
-//! clock, after a jump or a start gap of more than a day. A start gap within a day is the
-//! downtime of a restart: one line in the log, no finding.
+//! The findings of a controller: `sys.clock.jumped` (a warning) while a hold of destruction ends
+//! by itself; `sys.clock.held` (to act on) while a person must confirm the clock: after a jump
+//! or a start gap of more than a day, and after a wait that ended while issuing is still held.
+//! A start gap within a day that holds destruction alone is the downtime of a restart: one line
+//! in the log, no finding.
 //!
 //! How a hold ends without the confirm in the web UI: a hold of at most a day ends by itself
 //! after the wait. A longer one, on a controller whose UI cannot be reached and on every node
@@ -36,11 +37,33 @@ pub(super) const FILE: &str = "clock.json";
 /// How often the file is written while nothing changes.
 const WRITE_EVERY: Duration = Duration::from_secs(60);
 
-/// Restores the guard from the file of `data_dir`; called before any round can run.
-pub(crate) fn restore(data_dir: &Path) {
+/// Restores the guard from the file of `data_dir`; called before any round can run. `api`
+/// says whether this process serves the confirm (a controller).
+pub(crate) fn restore(data_dir: &Path, api: bool) {
     let path = data_dir.join(FILE);
     clock::restore(read(&path));
-    log_change(None, clock::trusted_now().err().as_ref(), &path);
+    log_change(None, current().as_ref(), &way_out(&path, api));
+}
+
+/// The hold now, and whether it holds destruction (`false`: issuing alone).
+fn current() -> Option<(Held, bool)> {
+    clock::trusted_now()
+        .err()
+        .map(|held| (held, true))
+        .or_else(|| clock::plausible_now().err().map(|held| (held, false)))
+}
+
+/// What ends a hold that needs a person on this node.
+fn way_out(path: &Path, api: bool) -> String {
+    let root = format!(
+        "root stops the service, deletes {} and starts it",
+        path.display()
+    );
+    if api {
+        format!("an administrator confirms the clock in the web UI, or {root}")
+    } else {
+        root
+    }
 }
 
 /// The state the file holds; `None` for a missing file, and for an unreadable one with a
@@ -70,9 +93,12 @@ fn write(path: &Path, saved: &Saved) {
     }
 }
 
-/// Whether the file is due: never written, the hold changed, or a minute passed.
+/// Whether the file is due: never written, the hold or what it holds changed, or a minute
+/// passed.
 fn due(written: Option<(Option<&SavedHold>, Duration)>, held: Option<&SavedHold>) -> bool {
-    let key = |held: Option<&SavedHold>| held.map(|held| (held.reason, held.since));
+    let key = |held: Option<&SavedHold>| {
+        held.map(|held| (held.reason, held.since, held.destroy, held.issue))
+    };
     written.is_none_or(|(was, age)| key(was) != key(held) || age >= WRITE_EVERY)
 }
 
@@ -85,9 +111,10 @@ pub(crate) async fn run(
     mut stop: watch::Receiver<bool>,
 ) {
     let path = data_dir.join(FILE);
+    let out = way_out(&path, state.is_some());
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    let mut held = clock::trusted_now().err();
+    let mut held = current();
     let mut written: Option<(Option<SavedHold>, Instant)> = None;
     loop {
         tokio::select! {
@@ -98,8 +125,8 @@ pub(crate) async fn run(
         if *stop.borrow() {
             break;
         }
-        let now = clock::trusted_now().err();
-        log_change(held.as_ref(), now.as_ref(), &path);
+        let now = current();
+        log_change(held.as_ref(), now.as_ref(), &out);
         if let Some(state) = &state {
             let warning = notice(&node, now.as_ref());
             for code in [clock::JUMPED, clock::HELD] {
@@ -124,43 +151,49 @@ pub(crate) async fn run(
     write(&path, &clock::saved());
 }
 
-/// One line when a hold of destruction begins (warn; info for a start gap that ends by itself)
-/// and one when it ends; `path` is the file that root deletes to end a hold.
-fn log_change(before: Option<&Held>, now: Option<&Held>, path: &Path) {
-    match (before, now) {
-        (None, Some(held)) if held.reason == Reason::StartGap && held.release == Release::Wait => {
+/// One line at each change of what is held: info for a start gap that ends by itself, warn for
+/// any other hold, with `out`, the way out that needs a person on this node.
+fn log_change(before: Option<&(Held, bool)>, now: Option<&(Held, bool)>, out: &str) {
+    match (before.map(|(_, destroy)| *destroy), now) {
+        (Some(was), Some((_, destroy))) if was == *destroy => {}
+        (_, Some((held, true)))
+            if held.reason == Reason::StartGap && held.release == Release::Wait =>
+        {
             tracing::info!(
                 gap_secs = held.jump_ms / 1_000,
                 until = ?held.until,
-                "the clock is away from the last time it trusted; expired data is kept until then"
+                "the clock is away from the last time it trusted; it is trusted again by itself then"
             );
         }
-        (None, Some(held)) => tracing::warn!(
+        (_, Some((held, true))) => tracing::warn!(
             reason = held.reason.as_str(),
             jump_ms = held.jump_ms,
             until = ?held.until,
-            "the clock is held: expired data is kept; {}",
+            "the clock is held; {}",
             match held.release {
-                Release::Wait => "it resumes by itself".to_owned(),
-                _ => format!(
-                    "an administrator confirms the clock in the web UI of a controller, or root \
-                     stops the service, deletes {} and starts it",
-                    path.display()
-                ),
+                Release::Wait => "it is trusted again by itself then".to_owned(),
+                _ => format!("it is trusted again when {out}"),
             }
         ),
+        (_, Some((held, false))) => tracing::warn!(
+            reason = held.reason.as_str(),
+            jump_ms = held.jump_ms,
+            "the clock is trusted again to judge what has expired, not to issue what other \
+             machines check; it is trusted for that when {out}"
+        ),
         (Some(_), None) => tracing::info!("the clock is trusted again"),
-        _ => {}
+        (None, None) => {}
     }
 }
 
-/// The finding of a hold of destruction: [`clock::JUMPED`] while it ends by itself,
-/// [`clock::HELD`] while a person ends it, none for a start gap that ends by itself.
-fn notice(node: &str, held: Option<&Held>) -> Option<StatusWarning> {
-    let held = held?;
-    let code = match (held.release, held.reason) {
-        (Release::Person, _) => clock::HELD,
-        (_, Reason::StartGap) => return None,
+/// The finding of a hold: [`clock::JUMPED`] while it ends by itself, [`clock::HELD`] while a
+/// person ends it (issuing alone after a wait included), none for a start gap that ends by
+/// itself.
+fn notice(node: &str, held: Option<&(Held, bool)>) -> Option<StatusWarning> {
+    let (held, destroy) = held?;
+    let code = match (*destroy, held.release, held.reason) {
+        (false, ..) | (_, Release::Person, _) => clock::HELD,
+        (_, _, Reason::StartGap) => return None,
         _ => clock::JUMPED,
     };
     let secs = held.jump_ms.unsigned_abs().div_ceil(1_000);
@@ -182,17 +215,29 @@ fn notice(node: &str, held: Option<&Held>) -> Option<StatusWarning> {
         ("reason".to_owned(), held.reason.as_str().to_owned()),
         ("direction".to_owned(), direction.to_owned()),
         ("jump_secs".to_owned(), secs.to_string()),
+        (
+            "stage".to_owned(),
+            if *destroy { "all" } else { "issuing" }.to_owned(),
+        ),
     ]);
-    let next = match until {
-        Some(until) => {
+    let next = match (until, *destroy) {
+        (Some(until), _) => {
             params.insert("until".to_owned(), until.to_rfc3339());
-            format!("resumes by itself at {until}")
+            format!(
+                "Tenko trusts it again by itself at {until}, or at once when an administrator \
+                 confirms the clock"
+            )
         }
-        None => "waits until a person confirms the clock".to_owned(),
+        (None, true) => {
+            "Tenko trusts it again only when an administrator confirms the clock".to_owned()
+        }
+        (None, false) => "Tenko trusts it again to judge what has expired, but not to issue \
+                          what other machines check until an administrator confirms the clock"
+            .to_owned(),
     };
     Some(StatusWarning {
         code: code.to_owned(),
-        detail: format!("{what}; Tenko keeps expired data there and {next}"),
+        detail: format!("{what}; {next}"),
         params,
     })
 }
@@ -233,6 +278,8 @@ mod tests {
             reason: Reason::Jump,
             jump_ms: 60_000,
             since: Timestamp::UNIX_EPOCH,
+            destroy: true,
+            issue: true,
         };
         assert!(due(None, None), "the first look");
         assert!(!due(Some((None, Duration::from_secs(59))), None));
@@ -245,6 +292,14 @@ mod tests {
         assert!(
             !due(Some((Some(&hold), Duration::ZERO)), Some(&moved)),
             "the same hold"
+        );
+        let waited = SavedHold {
+            destroy: false,
+            ..hold.clone()
+        };
+        assert!(
+            due(Some((Some(&hold), Duration::ZERO)), Some(&waited)),
+            "the wait ended"
         );
 
         let dir = TempDir::new("clock-stop");
@@ -266,15 +321,10 @@ mod tests {
     #[test]
     fn a_start_gap_within_a_day_raises_no_finding() {
         assert_eq!(notice("n1", None), None);
-        assert_eq!(
-            notice("n1", Some(&held(Reason::StartGap, 90_000, Release::Wait))),
-            None
-        );
-        let long = notice(
-            "n1",
-            Some(&held(Reason::StartGap, 90_000_000, Release::Person)),
-        )
-        .expect("a person confirms");
+        let short = (held(Reason::StartGap, 90_000, Release::Wait), true);
+        assert_eq!(notice("n1", Some(&short)), None);
+        let long = (held(Reason::StartGap, 90_000_000, Release::Person), true);
+        let long = notice("n1", Some(&long)).expect("a person confirms");
         assert_eq!(long.code, clock::HELD);
         assert_eq!(long.params["reason"], "start_gap");
         assert_eq!(long.params["jump_secs"], "90000");
@@ -283,8 +333,8 @@ mod tests {
 
     #[test]
     fn a_wait_is_a_warning_and_a_person_is_act_now() {
-        let wait =
-            notice("n1", Some(&held(Reason::Jump, -3_600_500, Release::Wait))).expect("a wait");
+        let wait = (held(Reason::Jump, -3_600_500, Release::Wait), true);
+        let wait = notice("n1", Some(&wait)).expect("a wait");
         assert_eq!(wait.code, clock::JUMPED);
         assert_eq!(severity_of(&wait.code), FindingSeverity::Warning);
         assert_eq!(
@@ -295,10 +345,44 @@ mod tests {
             ),
             ("back", "3601", "2027-01-15T08:00:00Z")
         );
-        let person =
-            notice("n1", Some(&held(Reason::Jump, 90_000_000, Release::Person))).expect("a person");
+        let person = (held(Reason::Jump, 90_000_000, Release::Person), true);
+        let person = notice("n1", Some(&person)).expect("a person");
         assert_eq!(person.code, clock::HELD);
         assert_eq!(severity_of(&person.code), FindingSeverity::Error);
-        assert_eq!(person.params["direction"], "forward");
+        assert_eq!(
+            (
+                person.params["direction"].as_str(),
+                person.params["stage"].as_str()
+            ),
+            ("forward", "all")
+        );
+    }
+
+    #[test]
+    fn issuing_held_after_the_wait_is_act_now_with_its_own_stage() {
+        let issuing = (held(Reason::Jump, 60_000, Release::Person), false);
+        let issuing = notice("n1", Some(&issuing)).expect("a person");
+        assert_eq!(issuing.code, clock::HELD);
+        assert_eq!(issuing.params["stage"], "issuing");
+        assert!(
+            issuing.detail.contains("not to issue"),
+            "{}",
+            issuing.detail
+        );
+        let gap = (held(Reason::StartGap, -60_000, Release::Person), false);
+        assert_eq!(
+            notice("n1", Some(&gap)).map(|warning| warning.code),
+            Some(clock::HELD.to_owned()),
+            "a start gap that holds issuing is shown too"
+        );
+    }
+
+    #[test]
+    fn the_way_out_on_a_node_without_the_api_is_root_alone() {
+        let path = Path::new("/srv/tenko/clock.json");
+        assert!(way_out(path, true).starts_with("an administrator confirms the clock"));
+        let root = way_out(path, false);
+        assert!(root.starts_with("root stops the service"), "{root}");
+        assert!(!root.contains("web UI"), "{root}");
     }
 }

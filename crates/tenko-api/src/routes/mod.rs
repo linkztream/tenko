@@ -322,5 +322,30 @@ pub(crate) fn not_implemented(method: &str, path: &str) -> ApiError {
     ApiError::not_implemented(method, &format!("{API_BASE}{path}"))
 }
 
+/// An interactive session that signed in within five minutes, for the `POST` at `path`: a
+/// token is refused with 403 `auth.forbidden`, an older sign-in with 403
+/// `auth.step_up_required`, and a server without the authentication service answers 501.
+pub(crate) async fn needs_a_fresh_session(
+    auth: Option<axum::Extension<std::sync::Arc<tenko_auth::AuthService>>>,
+    cx: &tenko_core::RequestCtx,
+    path: &str,
+) -> Result<(), ApiError> {
+    if !matches!(cx.principal, tenko_core::Principal::User { .. }) {
+        return Err(ApiError::from_coded_error(
+            tenko_core::CodedError::new(
+                "auth.forbidden",
+                403,
+                "this needs an interactive session; a token is refused",
+            )
+            .with_title("Forbidden"),
+        ));
+    }
+    let Some(axum::Extension(auth)) = auth else {
+        return Err(not_implemented("POST", path));
+    };
+    auth.require_fresh_session(cx).await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

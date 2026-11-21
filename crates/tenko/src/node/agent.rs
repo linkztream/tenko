@@ -145,7 +145,7 @@ pub fn serve(
 async fn run(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> u8 {
     let started = Instant::now();
     // The clock guard as the previous run left it, before any round can destroy by the clock.
-    crate::serve::clock::restore(&resolved.data_dir);
+    crate::serve::clock::restore(&resolved.data_dir, false);
     let paths = NodePaths::new(&resolved.data_dir);
     let mut config = AgentConfig::new(paths.clone(), version());
     let mut buffer = BufferConfig::new(paths.buffer());

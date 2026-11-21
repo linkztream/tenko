@@ -990,7 +990,7 @@ async fn start(
     let mut steps = Steps::new();
     create_data_dir(&resolved.data_dir)?;
     // The clock guard as the previous run left it, before any round can destroy by the clock.
-    clock::restore(&resolved.data_dir);
+    clock::restore(&resolved.data_dir, true);
     // A forced step of the cluster recovery that did not finish: the store may be renamed
     // aside, and a start now would make a new installation out of nothing.
     crate::cluster::recover::check_start(&resolved.data_dir, &resolved.layout().store())?;

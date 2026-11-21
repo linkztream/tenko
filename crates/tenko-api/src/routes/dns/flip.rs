@@ -24,7 +24,7 @@ use axum::{
 };
 use tenko_auth::AuthService;
 use tenko_core::{
-    Action, CodedError, ObjectRef, Principal, RequestCtx,
+    Action, ObjectRef,
     dns::{SecondarySource, ZoneFlip, ZoneId, ZoneRelease},
 };
 
@@ -37,31 +37,11 @@ use super::{
 use crate::{
     extract::Ctx,
     problem::{ApiError, ProblemDetails},
-    routes::{auth::ApiJson, not_implemented},
+    routes::{auth::ApiJson, needs_a_fresh_session},
     state::AppState,
 };
 
 type Auth = Option<Extension<Arc<AuthService>>>;
-
-/// An interactive session that signed in within five minutes: a token is refused with 403
-/// `auth.forbidden`, an older sign-in with 403 `auth.step_up_required`.
-async fn needs_a_fresh_session(auth: Auth, cx: &RequestCtx, path: &str) -> Result<(), ApiError> {
-    if !matches!(cx.principal, Principal::User { .. }) {
-        return Err(ApiError::from_coded_error(
-            CodedError::new(
-                "auth.forbidden",
-                403,
-                "this needs an interactive session; a token is refused",
-            )
-            .with_title("Forbidden"),
-        ));
-    }
-    let Some(Extension(auth)) = auth else {
-        return Err(not_implemented("POST", path));
-    };
-    auth.require_fresh_session(cx).await?;
-    Ok(())
-}
 
 #[utoipa::path(
     post,

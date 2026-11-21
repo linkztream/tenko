@@ -33,9 +33,11 @@
 //!
 //! `POST /system/clock/confirm` ends a hold of the clock guard (`tenko_core::clock`): an
 //! administrator of the system, on a session that signed in within five minutes, says the
-//! node's clock is right. It is audited as `sys.clock.confirm` with the jump and its reason,
-//! answers 204 whether or not a hold was in force, and works during a wait too. The server
-//! binary raises the conditions `sys.clock.jumped` and `sys.clock.held` while the clock is held.
+//! clock of the node the finding names is right. Only that node confirms; another refuses with
+//! 409 `sys.clock.other_node`. It is audited as `sys.clock.confirm` with the node, the jump and
+//! its reason, answers 204 whether or not a hold was in force, and works during a wait too. The
+//! server binary raises the conditions `sys.clock.jumped` and `sys.clock.held` while the clock
+//! is held.
 
 use std::sync::{Arc, atomic::Ordering};
 
@@ -47,7 +49,7 @@ use axum::{
 };
 use tenko_cluster::ca::{TlsMode, TlsService};
 use tenko_core::{
-    Action, CodedError, ObjectKind, ObjectRef, Principal, Timestamp,
+    Action, CodedError, ObjectKind, ObjectRef, Timestamp,
     audit::{AuditAction, AuditDraft},
     clock,
 };
@@ -581,6 +583,18 @@ pub const CLOCK_SKEW_TOLERANCE_MS: i64 = clock::TOLERANCE.as_millis() as i64;
 
 /// The audit action of a confirmed clock.
 const CLOCK_CONFIRM: AuditAction = AuditAction::from_static("sys.clock.confirm");
+
+/// Stable code of a confirm that names another node than the one that answers.
+pub const CLOCK_OTHER_NODE: &str = "sys.clock.other_node";
+
+/// The body of `POST /system/clock/confirm`.
+#[derive(Debug, Clone, serde::Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClockConfirm {
+    /// The node whose clock is confirmed, as its clock finding names it (the parameter
+    /// `node`): its host name, or its node id when it has none.
+    pub node: String,
+}
 
 /// Warning code of a data directory whose file system is running out of room.
 pub const DISK_LOW: &str = "node.disk.low";
@@ -1218,12 +1232,15 @@ async fn openapi_document() -> Response {
     tag = "system",
     operation_id = "confirm_clock",
     summary = "Confirm that the clock of this node is right",
-    description = "Ends a hold of the clock guard on this node: rounds that delete or let expire by the wall clock, and what the node issues, go on by the clock as it is now, during a wait too. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the jump and its reason; answers 204 also when nothing was held.",
+    description = "Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node` names the node as its clock finding does; a node of another name refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.",
+    request_body(content = ClockConfirm, content_type = "application/json"),
     security(("session" = [])),
     responses(
         (status = 204, description = "The clock is trusted"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "This server has no authentication service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 503, description = "The store is unavailable (`sys.store.no_quorum`, `sys.store.timeout`, `sys.store.shutting_down`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -1232,27 +1249,34 @@ async fn confirm_clock(
     State(state): State<AppState>,
     auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     Ctx(ctx): Ctx,
+    super::auth::ApiJson(body): super::auth::ApiJson<ClockConfirm>,
 ) -> Result<StatusCode, ApiError> {
     state.authorize(&ctx.principal, Action::Administer, &system_object())?;
-    if !matches!(ctx.principal, Principal::User { .. }) {
-        return Err(ApiError::from_coded_error(
-            CodedError::new(
-                "auth.forbidden",
-                403,
-                "this needs an interactive session; a token is refused",
-            )
-            .with_title("Forbidden"),
-        ));
+    super::needs_a_fresh_session(auth, &ctx, "/system/clock/confirm").await?;
+    // The name the clock finding gives this node.
+    let node = &state.platform.node;
+    let this = node
+        .name
+        .clone()
+        .or_else(|| node.id.map(|id| id.to_string()))
+        .unwrap_or_default();
+    if body.node != this {
+        return Err(ApiError::new(
+            CLOCK_OTHER_NODE,
+            409,
+            format!(
+                "this is node {this}, not {}: confirm the clock on the node the finding names",
+                body.node
+            ),
+        )
+        .with_param("node", this.clone()));
     }
-    let Some(Extension(auth)) = auth else {
-        return Err(super::not_implemented("POST", "/system/clock/confirm"));
-    };
-    auth.require_fresh_session(&ctx).await?;
     let held = clock::trusted_now()
         .err()
         .or_else(|| clock::plausible_now().err());
-    let mut draft =
-        AuditDraft::success(CLOCK_CONFIRM, vec![system_object()]).with_source_ip(ctx.source_ip);
+    let mut draft = AuditDraft::success(CLOCK_CONFIRM, vec![system_object()])
+        .with_source_ip(ctx.source_ip)
+        .with_context("node", this);
     if let Some(held) = held {
         draft = draft
             .with_context("reason", held.reason.as_str())
@@ -1618,30 +1642,47 @@ mod tests {
         );
     }
 
-    /// Holds the clock on this thread; a viewer, a token and an old sign-in are refused and
-    /// leave it held; an administrator's fresh session ends it, audited with the jump, and a
-    /// second confirm answers the same.
+    /// Holds the clock on this thread; a viewer, a token, an old sign-in and another node's name
+    /// are refused and leave it held; an administrator's fresh session that names this node
+    /// ends it, audited with the node and the jump, and a second confirm answers the same.
     #[tokio::test]
     async fn confirming_the_clock_needs_a_fresh_session_and_is_audited() {
+        use tenko_auth::settings::Profile;
         use tenko_core::clock::{Held, Reason, Release, testing};
-        use tenko_store::{ReadViewExt as _, Store as _};
 
-        use crate::routes::auth::testkit::{Credential::*, Harness};
+        use crate::routes::{auth::testkit::Credential::*, secrets::tests::Harness};
 
         const PATH: &str = "/system/clock/confirm";
-        let (h, admin) = Harness::installed().await;
-        h.create_user(&admin, "vera", "739158", &["viewer"]).await;
-        let viewer = h.login("vera", "739158").await;
+        let mut h = Harness::new(Profile::Home).await;
+        let mut state = AppState::with_options(
+            h.env.store.clone(),
+            crate::state::StateOptions {
+                node: NodeStatus {
+                    id: Some(tenko_core::NodeId(7)),
+                    name: Some("n1".to_owned()),
+                    ..NodeStatus::default()
+                },
+                ..crate::state::StateOptions::default()
+            },
+        );
+        state.auth = Some(h.env.service.clone() as Arc<dyn tenko_core::Authenticator>);
+        state.authorizer = Some(h.env.service.authorizer());
+        h.router = crate::api(state).0.layer(Extension(h.env.service.clone()));
+        h.create_user("vera", &["viewer"]).await;
+        let viewer = h.login("vera", h.user_password()).await;
         let token = h
             .call(
                 "POST",
                 "/auth/tokens",
-                Cookie(&admin),
+                Cookie(&h.admin),
                 Some(&serde_json::json!({ "name": "ci", "expires_in_days": 30 })),
             )
             .await;
         token.assert_status(201);
         let token = token.body["token"].as_str().expect("token").to_owned();
+        let old = h
+            .aged_admin_session(std::time::Duration::from_secs(600))
+            .await;
         let _hold = testing::hold(Held {
             reason: Reason::Jump,
             jump_ms: 7_200_000,
@@ -1649,68 +1690,48 @@ mod tests {
             release: Release::Wait,
             until: None,
         });
+        let this = serde_json::json!({ "node": "n1" });
 
-        h.call("POST", PATH, Cookie(&viewer), None)
-            .await
-            .assert_problem(403, "auth.forbidden");
-        h.call("POST", PATH, Bearer(&token), None)
-            .await
-            .assert_problem(403, "auth.forbidden");
-        // The administrator's sign-in ten minutes back.
-        let key = tenko_auth::secret::hash_secret(&admin);
-        let view = h
-            .env
-            .store
-            .read(ReadConsistency::Local)
-            .await
-            .expect("view");
-        let (mut session, _) = view
-            .get_typed(&tenko_auth::model::SESSIONS, &key)
-            .expect("read")
-            .expect("the session");
-        let fresh = session.authenticated_at;
-        session.authenticated_at = fresh
-            .checked_sub(std::time::Duration::from_secs(600))
-            .expect("a time");
-        let put = |record: &tenko_auth::model::SessionRecord| {
-            let mut batch = WriteBatch::new(
-                Principal::system(tenko_core::SystemComponent::Auth),
-                Timestamp::now(),
-            );
-            batch
-                .put_typed(&tenko_auth::model::SESSIONS, &key, record)
-                .expect("encode");
-            batch
-        };
-        h.env.store.propose(put(&session)).await.expect("aged");
-        h.call("POST", PATH, Cookie(&admin), None)
-            .await
-            .assert_problem(403, "auth.step_up_required");
+        for (who, code) in [
+            (Cookie(&viewer), "auth.forbidden"),
+            (Bearer(&token), "auth.forbidden"),
+            (Cookie(&old), "auth.step_up_required"),
+        ] {
+            h.call("POST", PATH, who, Some(&this))
+                .await
+                .assert_problem(403, code);
+        }
+        let other = h
+            .call(
+                "POST",
+                PATH,
+                Cookie(&h.admin),
+                Some(&serde_json::json!({ "node": "n2" })),
+            )
+            .await;
+        other.assert_problem(409, CLOCK_OTHER_NODE);
+        assert_eq!(other.body["params"]["node"], "n1");
         assert_eq!(clock::trusted_now().unwrap_err().jump_ms, 7_200_000);
 
-        session.authenticated_at = fresh;
-        h.env.store.propose(put(&session)).await.expect("fresh");
-        h.call("POST", PATH, Cookie(&admin), None)
-            .await
-            .assert_status(204);
-        assert!(clock::trusted_now().is_ok(), "the hold ended");
-        h.call("POST", PATH, Cookie(&admin), None)
-            .await
-            .assert_status(204);
+        for _ in 0..2 {
+            h.call("POST", PATH, Cookie(&h.admin), Some(&this))
+                .await
+                .assert_status(204);
+            assert!(clock::trusted_now().is_ok(), "the hold ended");
+        }
         let confirms: Vec<_> = h
-            .audit()
+            .audit_of("sys.clock.confirm")
             .await
             .into_iter()
-            .filter(|draft| draft.action.as_str() == "sys.clock.confirm")
-            .map(|draft| draft.details.context)
+            .map(|record| record["draft"]["details"]["context"].clone())
             .collect();
-        assert_eq!(confirms.len(), 2, "every confirm is audited");
-        assert_eq!(confirms[0]["reason"], "jump");
-        assert_eq!(confirms[0]["jump_ms"], "7200000");
-        assert!(
-            confirms[1].is_empty(),
-            "nothing was held: {:?}",
-            confirms[1]
+        assert_eq!(
+            confirms,
+            vec![
+                serde_json::json!({ "node": "n1", "reason": "jump", "jump_ms": "7200000" }),
+                serde_json::json!({ "node": "n1" }),
+            ],
+            "every confirm is audited"
         );
     }
 }

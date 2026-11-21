@@ -37140,11 +37140,31 @@
           "system"
         ],
         "summary": "Confirm that the clock of this node is right",
-        "description": "Ends a hold of the clock guard on this node: rounds that delete or let expire by the wall clock, and what the node issues, go on by the clock as it is now, during a wait too. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the jump and its reason; answers 204 also when nothing was held.",
+        "description": "Tells the node that answers to trust its clock again as it is now, also during a wait: the person checked its time. `node` names the node as its clock finding does; a node of another name refuses with `sys.clock.other_node`. Administer the system, on an interactive session that signed in within five minutes: a token is refused with `auth.forbidden`, an older sign-in with `auth.step_up_required`. Audited as `sys.clock.confirm` with the node, the jump and its reason; answers 204 also when nothing was held.",
         "operationId": "confirm_clock",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClockConfirm"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "204": {
             "description": "The clock is trusted"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           },
           "401": {
             "description": "No valid session",
@@ -37158,6 +37178,16 @@
           },
           "403": {
             "description": "Not allowed, or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The body names another node than the one that answers (`sys.clock.other_node`, parameter `node`: this node)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -46998,6 +47028,20 @@
             "minimum": 0
           }
         }
+      },
+      "ClockConfirm": {
+        "type": "object",
+        "description": "The body of `POST /system/clock/confirm`.",
+        "required": [
+          "node"
+        ],
+        "properties": {
+          "node": {
+            "type": "string",
+            "description": "The node whose clock is confirmed, as its clock finding names it (the parameter\n`node`): its host name, or its node id when it has none."
+          }
+        },
+        "additionalProperties": false
       },
       "ClusterStatus": {
         "type": "object",
