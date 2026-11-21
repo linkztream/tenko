@@ -1,0 +1,3 @@
+# The released script is stored and checked out byte for byte: ASCII with CRLF line ends,
+# so that a copy pasted into a file has the release digest (CI checks it).
+Tenko-Takeover.ps1 -text
