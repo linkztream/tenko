@@ -50,7 +50,9 @@
 #   NoExecPaths= and ExecPaths= exactly the lists below, plus the data directory's entries
 #   where the drop-in data-dir.conf is staged;
 #   ReadWritePaths= exactly none, or the data directory where data-dir.conf is staged, and
-#   every path it names also in NoExecPaths=.
+#   every path it names also in NoExecPaths=;
+#   RestartSec= at most one second, StartLimitIntervalSec= above zero and StartLimitBurst=
+#   above 2 (the restart's pause and the bound of a crash loop).
 # Widening any of them is a deliberate change of this file in the same commit.
 #
 # Exit status: 0 every score is below its gate and every setting holds, 1 a score reached its
@@ -163,15 +165,16 @@ stage() {
 failed=0
 rows=()
 
-# service_lines <root>: the [Service] assignments of the staged unit and then of its drop-ins
-# in the order of their names, as the service manager reads them, one "Key=value" per line.
+# service_lines <root> [<section>]: the assignments of the section ([Service] by default) of
+# the staged unit and then of its drop-ins in the order of their names, as the service
+# manager reads them, one "Key=value" per line.
 service_lines() {
-  local root="$1" file LC_ALL=C
+  local root="$1" want="${2:-[Service]}" file LC_ALL=C
   for file in "$root/etc/systemd/system/tenko.service" "$root/etc/systemd/system/tenko.service.d"/*.conf; do
     [[ -f "$file" ]] || continue
-    awk '/^[[:space:]]*[#;]/ { next }
+    awk -v want="$want" '/^[[:space:]]*[#;]/ { next }
       /^[[:space:]]*\[/ { section = $0; gsub(/[[:space:]]/, "", section); next }
-      section == "[Service]" && /=/ { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }' "$file"
+      section == want && /=/ { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print }' "$file"
   done
 }
 
@@ -265,6 +268,17 @@ settings_problems() {
   ((data_dir)) && want="$EXAMPLE_DATA_DIR"
   got="$(list_value "$lines" ReadWritePaths)"
   [[ "$got" == "$want" ]] || echo "ReadWritePaths= is '$got', not '$want'"
+  # A restart (an update, a module change) answers no query between the exit and the next
+  # start, so the delay is at most one second. A crash loop is bounded by counting starts:
+  # the start limit stays set, with a burst above the second start, at which the attempt
+  # record of an update switches back (docs/upgrades.md section 8.6).
+  got="$(last_value "$lines" RestartSec)"
+  [[ "$got" =~ ^(0|1|[01]s|[0-9]{1,3}ms)$ ]] || echo "RestartSec= is '$got', not at most one second"
+  lines="$(service_lines "$root" "[Unit]")"
+  got="$(last_value "$lines" StartLimitIntervalSec)"
+  [[ "$got" =~ ^[1-9][0-9]*s?$ ]] || echo "StartLimitIntervalSec= is '$got', not a time above zero"
+  got="$(last_value "$lines" StartLimitBurst)"
+  [[ "$got" =~ ^[0-9]+$ ]] && ((got > 2)) || echo "StartLimitBurst= is '$got', not above 2"
   return 0
 }
 
@@ -306,6 +320,9 @@ self_test() {
     's|^PrivateTmp=yes|PrivateTmp=no|'
     's|^ProtectSystem=strict|ProtectSystem=full|'
     's|^NoNewPrivileges=yes|&\nDynamicUser=yes|'
+    's|^RestartSec=1s|RestartSec=5s|'
+    's|^StartLimitIntervalSec=300|StartLimitIntervalSec=0|'
+    's|^StartLimitBurst=5|StartLimitBurst=2|'
   )
   root="$(stage self-test)"
   probe="$(settings_problems "$root" 0)"

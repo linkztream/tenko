@@ -2176,6 +2176,7 @@ ExecStartPre=-/var/lib/tenko/updates/current/tenko upgrade layout --data-dir /va
 ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.toml
 StateDirectoryMode=0711
 Restart=on-failure
+RestartSec=1s
 SuccessExitStatus=12
 RestartForceExitStatus=12
 RestartPreventExitStatus=2 3 4
@@ -2364,6 +2365,16 @@ other run of the installer of this release, an upgrade or a rerun, does the same
 `--dry-run` shows the steps first. A data directory that the operator moved is given with
 `--data-dir`, as at installation; the installer writes the unit's drop-in, the link and the
 gate for that place.
+
+**A unit older than the server.** An update from the UI never writes the unit either (ADR
+0023). The unit of an installer up to 0.0.11 refuses the system call `capset(2)` and the
+address family `AF_NETLINK`, so `ip` exits with status 1 and prints nothing: the node logs
+"the default routes cannot be read" at every start, and the topology's root and the scan
+methods `arp` and `nd` do not work. A unit with `RestartSec=5s`, which every installer wrote
+before the delay became one second, keeps DNS and DHCP unanswered about four seconds longer
+at each restart. The finding `sys.update.installer_repair` names each of these gaps in the
+installed unit `/etc/systemd/system/tenko.service` (drop-ins are not read), and the same
+`install.sh --repair` writes the unit of this release.
 
 **Installed before the layout existed.** Such an installation runs the executable it was
 installed with and shows notices only. On Linux, run the installer of this release, which

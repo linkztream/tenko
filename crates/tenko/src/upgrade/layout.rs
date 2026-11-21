@@ -401,8 +401,9 @@ pub fn installer_gaps(
 
 /// What the unit `text` lacks that the shipped unit (`deploy/systemd/tenko.service`) has and
 /// the service needs, as an installer up to 0.0.11 wrote it: the `capset` allowance and
-/// `AF_NETLINK`, without which `ip` cannot read the routes and neighbors. Only the unit's own
-/// lines are read; a drop-in is not.
+/// `AF_NETLINK`, without which `ip` cannot read the routes and neighbors, and the restart
+/// delay of one second instead of the old `5s`. Only the unit's own lines are read; a
+/// drop-in is not.
 fn unit_gaps(text: &str) -> Vec<String> {
     let values = |key: &'static str| {
         text.lines().filter_map(move |line| {
@@ -432,6 +433,11 @@ fn unit_gaps(text: &str) -> Vec<String> {
             "the unit refuses the address family AF_NETLINK, through which `ip` reads the \
              routes and the neighbor tables"
                 .to_owned(),
+        );
+    }
+    if values("RestartSec").any(|value| value == "5s") {
+        gaps.push(
+            "the unit waits 5 seconds instead of one before it starts the server again".to_owned(),
         );
     }
     gaps
@@ -562,19 +568,21 @@ mod tests {
         "/../../deploy/systemd/tenko.service"
     );
 
-    /// A unit as an installer up to 0.0.11 wrote it refuses `capset` and `AF_NETLINK`; the
-    /// shipped unit lacks nothing.
+    /// A unit as an installer up to 0.0.11 wrote it refuses `capset` and `AF_NETLINK` and
+    /// waits five seconds before a restart; the shipped unit lacks nothing.
     #[test]
     fn the_unit_gaps_name_what_an_old_unit_lacks() {
         let shipped = fs::read_to_string(SHIPPED_UNIT).expect("the shipped unit");
         assert_eq!(unit_gaps(&shipped), Vec::<String>::new());
         let old = shipped
             .replace("\nSystemCallFilter=capset\n", "\n")
-            .replace(" AF_NETLINK\n", "\n");
+            .replace(" AF_NETLINK\n", "\n")
+            .replace("\nRestartSec=1s\n", "\nRestartSec=5s\n");
         let gaps = unit_gaps(&old);
-        assert_eq!(gaps.len(), 2, "{gaps:?}");
+        assert_eq!(gaps.len(), 3, "{gaps:?}");
         assert!(gaps[0].contains("capset(2)"), "{gaps:?}");
         assert!(gaps[1].contains("AF_NETLINK"), "{gaps:?}");
+        assert!(gaps[2].contains("5 seconds"), "{gaps:?}");
         // A deny list does not allow what it names.
         let denied = shipped.replace(
             "\nSystemCallFilter=capset\n",

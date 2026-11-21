@@ -87,7 +87,12 @@ ExecStart=/var/lib/tenko/updates/current/tenko serve --config /etc/tenko/tenko.t
 Environment=TENKO_DATA_DIR=/var/lib/tenko
 
 Restart=on-failure
-RestartSec=5s
+# One second from an exit to the next start, so that a restart after an update or a module
+# change leaves DNS and DHCP unanswered as briefly as possible. A crash loop is bounded by
+# counting starts, not by this delay: the start limit above, and the attempt record of an
+# update, which switches back to the previous version at the second start of a version that
+# did not become ready (docs/upgrades.md section 8.6). The delay only spaces the starts.
+RestartSec=1s
 # 12: stopped to be restarted (an installed update, a module change, a switch back).
 # Status 12 is a deliberate stop, so it counts as a success: the journal does not log
 # "Failed with result 'exit-code'" before the restart that RestartForceExitStatus= makes.
