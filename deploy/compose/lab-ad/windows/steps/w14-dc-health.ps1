@@ -20,6 +20,10 @@ Invoke-Step -AsDomainAdmin -Inner:$Inner -AdminMinutes 45 -Pass "dcdiag and repa
     # SystemLog and DFSREvent judge the event logs of the last day, not the state: every start
     # of a controller during the run (its powered-off snapshots, the promotion) leaves errors
     # there. Their output is kept for a person, and the state of SYSVOL is read instead.
+    # A dcdiag that did not run prints no failed test either: require that some test passed.
+    if (-not (Select-String -Path (Join-Path $StepDir 'w14-dcdiag-all.txt') -Pattern 'passed test' -Quiet)) {
+        Fail 'dcdiag ran no test: w14-dcdiag-all.txt has no passed test'
+    }
     $failed = @(Select-String -Path (Join-Path $StepDir 'w14-dcdiag-all.txt') -Pattern 'failed test' |
             Where-Object { $_.Line -notmatch 'failed test (SystemLog|DFSREvent)\s*$' })
     if ($failed.Count -gt 0) { Fail "dcdiag: $(($failed | ForEach-Object { $_.Line.Trim() }) -join '; ')" }

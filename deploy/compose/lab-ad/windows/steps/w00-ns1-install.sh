@@ -75,8 +75,8 @@ setsid -w runuser -u tenko -- cat /var/lib/tenko/tls/ca-root.pem </dev/null 2>/d
 grep -qx -- '-----BEGIN CERTIFICATE-----' "$CA" || fail "the node's CA root could not be read"
 cp "$CA" "$STEP_DIR/ca-root.pem"
 openssl x509 -in "$CA" -noout -fingerprint -sha256 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f' >"$STEP_DIR/ca-root-sha256.txt"
-for ((i = 0; i < 60; i++)); do curl -fsS --cacert "$CA" "$TENKO_URL/api/v1/health/ready" >/dev/null && break; sleep 5; done
-curl -fsS --cacert "$CA" "$TENKO_URL/api/v1/health/ready" >/dev/null || fail "the API is not ready after five minutes"
+for ((i = 0; i < 60; i++)); do curl -fsS --max-time 10 --cacert "$CA" "$TENKO_URL/api/v1/health/ready" >/dev/null && break; sleep 5; done
+curl -fsS --max-time 10 --cacert "$CA" "$TENKO_URL/api/v1/health/ready" >/dev/null || fail "the API is not ready after five minutes"
 
 say "the administrator's second factor"
 rm -f "$LAB/totp-last-step"

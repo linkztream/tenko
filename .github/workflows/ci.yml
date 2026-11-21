@@ -778,10 +778,11 @@ jobs:
               echo "::error::Less than 1 GiB of memory is left; the largest processes:"
               ps -eo pid,rss,args --sort=-rss | head -n 4 | cut -c 1-160 || true
               kill -KILL "$(ps -eo pid= --sort=-rss | awk 'NR == 1 { print $1 }')" || true
+              break # one kill only: a second would reach the runner's own processes
             fi
           done &
           watchdog=$!
-          trap 'kill "$watchdog"' EXIT
+          trap 'kill "$watchdog" 2>/dev/null || true' EXIT
           failed=()
           while IFS= read -r target; do
             [ -n "$target" ] || continue

@@ -63,8 +63,15 @@ function Assert-File([string]$Path, [string]$From) {
 function Invoke-Native([string]$File, [scriptblock]$Command, [int[]]$Allow = @(0), [switch]$AnyStatus) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    try { $output = @(& $Command 2>&1 | ForEach-Object { "$_" }) } finally { $ErrorActionPreference = $previous }
+    # A command that cannot start leaves the status of the earlier native command behind: clear it.
+    $global:LASTEXITCODE = $null
+    try { $raw = @(& $Command 2>&1) } finally { $ErrorActionPreference = $previous }
     $status = $LASTEXITCODE
+    $output = @($raw | ForEach-Object { "$_" })
+    if ($null -eq $status -and @($raw | Where-Object { $_ -is [Management.Automation.ErrorRecord] }).Count) {
+        $output | Out-File -Append -Encoding utf8 (Join-Path $StepDir $File)
+        Fail "{$Command} did not run: $($output -join ' ') ($File)"
+    }
     $output | Out-File -Append -Encoding utf8 (Join-Path $StepDir $File)
     $output | Out-Host
     if (-not $AnyStatus -and $Allow -notcontains $status) { Fail "{$Command} exited with $status ($File)" }
@@ -176,6 +183,21 @@ function Assert-Clock {
     if ($offset -gt 120) { Fail "the clock is $([int]$offset) s away from dc1's (more than two minutes): Kerberos would fail" }
 }
 
+# Protect-Lab: SYSTEM and the domain administrator run what is in C:\lab\run, so only SYSTEM
+# and Administrators may hold any right on C:\lab and C:\lab\run (and, by inheritance, on
+# every step directory). Sets that, then reads it back and refuses to run when it is wider.
+function Protect-Lab {
+    $ok = 'S-1-5-18', 'S-1-5-32-544'
+    foreach ($dir in $Lab, (Join-Path $Lab 'run')) {
+        if (-not (Test-Path -LiteralPath $dir)) { continue }
+        & "$env:SystemRoot\System32\icacls.exe" $dir /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' | Out-Null
+        if ($LASTEXITCODE -ne 0) { Fail "icacls could not set the access rights of $dir" }
+        $wide = @((Get-Acl -LiteralPath $dir).Access | Where-Object {
+                $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value -notin $ok })
+        if ($wide) { Fail "$dir is open to $(($wide | ForEach-Object { $_.IdentityReference }) -join ', '); only SYSTEM and Administrators may have access" }
+    }
+}
+
 # Invoke-AsDomainAdmin <script> <minutes>: runs the script again with -Inner as
 # CORP\Administrator through a one-shot scheduled task and fails unless that part passed.
 function Invoke-AsDomainAdmin([string]$Script, [int]$Minutes) {
@@ -221,6 +243,7 @@ function Invoke-Step {
     $suffix = if ($Inner) { '-admin' } else { '' }
     Start-Transcript -Path (Join-Path $StepDir "step$suffix.log") -Append | Out-Null
     try {
+        if (-not $Inner) { Protect-Lab }
         foreach ($name in $Secrets + @(if ($AsDomainAdmin) { 'domain_admin_password' })) { Read-Secret $name | Out-Null }
         if (-not ($Inner -or $NoClock)) { Assert-Clock }
         if ($AsDomainAdmin -and -not $Inner) {

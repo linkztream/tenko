@@ -760,6 +760,9 @@ always has `step.log` (everything the script printed) and `verdict.txt`; after a
 and Application logs since the step began) or `journal-tenko.txt` on `ns1`. A part that runs
 as `CORP\Administrator` (below) adds `step-admin.log` and `verdict-admin.txt`. Inputs that
 the job copies in go to `C:\lab\in\` and `/root/lab/in/`, outside every step directory.
+SYSTEM and `CORP\Administrator` run what is in `C:\lab\run`, so every Windows step first sets
+`C:\lab` and `C:\lab\run` to SYSTEM and Administrators only (inheritance removed), reads the
+rights back and refuses to run when anyone else has access.
 When the files are filed, the step directory of an entry goes to `results/<W step>/<id>/`
 (for example `results/w5/12-w05-dc1-register/`), except the captures:
 

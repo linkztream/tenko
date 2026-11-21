@@ -128,7 +128,7 @@ auth_config() {
 # integration listener with its client certificate, the others the API listener.
 api() {
   local auth="$1" method="$2" path="$3" body="${4:-}" out url="$TENKO_URL" ca="$CA"
-  local args=(-sS --fail-with-body -K - -X "$method")
+  local args=(-sS --max-time 30 --fail-with-body -K - -X "$method")
   if [[ "$auth" == reader ]]; then
     url="$READER_URL"
     ca="$(secret tenko_reader_ca.pem)"

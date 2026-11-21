@@ -30,7 +30,7 @@ assert_clock
 # the answer goes to the file.
 unbound_read() {
   printf 'header = "Authorization: Bearer %s"\n' "$(<"$(secret tenko_unbound_token)")" |
-    curl -sS --cacert "$CA" -K - -o "$1" -w '%{http_code}' "$TENKO_URL/api/v1/dns/zones"
+    curl -sS --max-time 10 --cacert "$CA" -K - -o "$1" -w '%{http_code}' "$TENKO_URL/api/v1/dns/zones"
 }
 
 say "the audit export sink"
