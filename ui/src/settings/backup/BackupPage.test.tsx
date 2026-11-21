@@ -261,6 +261,7 @@ describe("the backup page", () => {
     expect(dialog.querySelector("code")).toBeNull();
     expect(dialog.textContent).not.toContain("--config");
     expect(within(dialog).getByTestId("backup-restore-hint").getAttribute("aria-describedby")).toBeTruthy();
+    await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByTestId("form-cancel")));
     expect(dialog.textContent).toContain("a passphrase");
   });
 

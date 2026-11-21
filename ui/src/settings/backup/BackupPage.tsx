@@ -540,8 +540,15 @@ function RestoreDialog(props: { run: BackupRun; onClose: () => void }) {
     ["dir", t("backup.restore.dir"), props.run.target_dir],
     ["written", t("backup.restore.written"), formatDateTime(props.run.finished_at)],
   ];
+  let closeButton!: HTMLButtonElement;
   return (
-    <Dialog label={t("backup.restore.title", { file: props.run.file ?? "" })} onClose={props.onClose} class="dialog wide" testid="dialog-backup-restore">
+    <Dialog
+      label={t("backup.restore.title", { file: props.run.file ?? "" })}
+      onClose={props.onClose}
+      class="dialog wide"
+      testid="dialog-backup-restore"
+      initialFocus={() => closeButton}
+    >
       <h2 class="dialog-title">
         {t("backup.restore.title", { file: props.run.file ?? "" })} <Hint label={t("common.hint.values_label")} text={t("common.hint.values")} testid="backup-restore-hint" />
       </h2>
@@ -569,7 +576,7 @@ function RestoreDialog(props: { run: BackupRun; onClose: () => void }) {
         <p class="muted">{t("backup.restore.note")}</p>
       </div>
       <div class="dialog-actions">
-        <button type="button" class="btn primary" data-testid="form-cancel" onClick={() => props.onClose()}>
+        <button type="button" class="btn primary" data-testid="form-cancel" ref={closeButton} onClick={() => props.onClose()}>
           {t("common.action.close")}
         </button>
       </div>
