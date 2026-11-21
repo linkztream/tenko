@@ -77,7 +77,6 @@ $script:TkHttpMaxBytes = 4MB               # an answer; resource bound, not a pr
 $script:TkJsonMaxDepth = 64
 $script:TkAckWaitSec = 300                 # Tenko answers a client within 5 minutes of its scopes on
 $script:TkPasswordChangeSec = 600          # Tenko changes its account's password within 10 minutes
-$script:TkReconfirmSec = 900               # the console asks again before the silence after 15 minutes
 $script:TkMinLeaseSec = 3600               # a scope under an hour refuses the DHCP window
 $script:TkPollSec = 5
 $script:TkReplicaWaitSec = 300             # a controller's replica shows an authorization change within 5 minutes
@@ -694,10 +693,16 @@ function Get-TkTlsCallback {
         # and hands the presented certificates over as the chain's elements only, which may
         # also hold a certificate authority of this machine's stores: the pin and the code
         # bind whichever root the chain ends in, so another root than the node's fails there.
+        # Windows PowerShell 5.1 hands over what Schannel received; an empty list there is
+        # refused, never completed from the platform's chain.
         $presented = @()
         if ($null -ne $chain) {
             $presented = @($chain.ChainPolicy.ExtraStore)
-            if ($presented.Count -eq 0) { $presented = @($chain.ChainElements | ForEach-Object { $_.Certificate }) }
+            if ($presented.Count -eq 0 -and $PSVersionTable.PSEdition -eq 'Core') { $presented = @($chain.ChainElements | ForEach-Object { $_.Certificate }) }
+        }
+        if ($presented.Count -eq 0 -and $PSVersionTable.PSEdition -ne 'Core' -and $null -ne $certificate) {
+            $script:TkConn.LastTls = @{ Ok = $false; Failure = 'Windows PowerShell handed the check no certificate the server presented (an empty extra store); the script takes no chain the platform completed on its own'; RootSha256 = ''; MachineTrusted = $false }
+            return $false
         }
         if (($errors -band [System.Net.Security.SslPolicyErrors]::RemoteCertificateNotAvailable) -ne 0) {
             $script:TkConn.LastTls = @{ Ok = $false; Failure = 'the server presented no certificate'; RootSha256 = ''; MachineTrusted = $false }
@@ -894,11 +899,16 @@ function ConvertTo-TkUuidByte {
     return , (ConvertFrom-TkHex ($Id -replace '-', ''))
 }
 
-function Get-TkApprovalCode {
+function Get-TkApprovalPreimage {
+    # context || 0x00 || len(domain) || domain || root_sha256 || request_sha256 || key || id
     param([string]$Domain, [byte[]]$RootSha256, [byte[]]$RequestSha256, [byte[]]$Key, [string]$Id)
     $domainBytes = [System.Text.Encoding]::ASCII.GetBytes($Domain.ToLowerInvariant().TrimEnd('.'))
-    $preimage = Join-TkByte @($script:TkCodeContext, ([byte[]]@(0, $domainBytes.Length)), $domainBytes, $RootSha256, $RequestSha256, $Key, (ConvertTo-TkUuidByte $Id))
-    $digest = Get-TkSha256 $preimage
+    return , (Join-TkByte @($script:TkCodeContext, ([byte[]]@(0, $domainBytes.Length)), $domainBytes, $RootSha256, $RequestSha256, $Key, (ConvertTo-TkUuidByte $Id)))
+}
+
+function Get-TkApprovalCode {
+    param([string]$Domain, [byte[]]$RootSha256, [byte[]]$RequestSha256, [byte[]]$Key, [string]$Id)
+    $digest = Get-TkSha256 (Get-TkApprovalPreimage -Domain $Domain -RootSha256 $RootSha256 -RequestSha256 $RequestSha256 -Key $Key -Id $Id)
     $code = [System.Text.StringBuilder]::new()
     for ($i = 0; $i -lt 16; $i++) {
         $value = 0
@@ -975,7 +985,16 @@ function Request-TkApproval {
             }
             if ($answer.Status -eq 200) { break }
             if ($answer.Status -eq 409 -and $answer.Code -eq 'auth.approval.pending') { Start-Sleep -Seconds $script:TkPollSec; continue }
-            Exit-TkTakeover 1 "the approval was not given: $($answer.Status) $($answer.Code) $($answer.Detail)"
+            # An approval denied, withdrawn, or whose approver can no longer give it, is never
+            # collected again: a new approval is the way on.
+            $why = switch ($answer.Code) {
+                'auth.approval.denied' { 'the approval was denied or withdrawn in Tenko''s UI, or the administrator who gave it signed out everywhere, was disabled or lost the administrator role' }
+                'auth.approval.expired' { 'the approval expired before it was collected' }
+                default { "Tenko refused to hand over the approval ($($answer.Status) $($answer.Code): $($answer.Detail))" }
+            }
+            Write-TkNote "$why."
+            if ('y', 'yes' -contains (Read-TkAnswer 'Ask for a new approval, with a new code? [y/N]').Trim().ToLowerInvariant()) { return (Request-TkApproval -Plan $Plan -Domain $Domain) }
+            Exit-TkTakeover 1 "$why; nothing was collected: run the script again for a new approval"
         }
         $secret = Get-TkField $answer.Json 'secret'
         $run = [string](Get-TkField $answer.Json 'delegation')
@@ -1170,10 +1189,10 @@ $script:TkRemote = @{
     }
     ReadComputers         = {
         param([string[]]$Controllers)
-        Get-ADComputer -Filter 'Enabled -eq $true' -Properties DNSHostName, OperatingSystem, IPv4Address, TrustedForDelegation | ForEach-Object {
+        Get-ADComputer -Filter 'Enabled -eq $true' -Properties DNSHostName, OperatingSystem, IPv4Address, TrustedForDelegation, 'mS-DS-CreatorSID' | ForEach-Object {
             $name = ([string]$_.DNSHostName).ToLowerInvariant()
             if ($name -and $Controllers -notcontains $name) {
-                @{ Name = $name; Server = ([string]$_.OperatingSystem -like '*Server*'); IPv4 = [string]$_.IPv4Address; Sid = [string]$_.SID; Delegation = [bool]$_.TrustedForDelegation }
+                @{ Name = $name; Server = ([string]$_.OperatingSystem -like '*Server*'); IPv4 = [string]$_.IPv4Address; Sid = [string]$_.SID; Delegation = [bool]$_.TrustedForDelegation; Creator = [string]$_.'mS-DS-CreatorSID' }
             }
         }
     }
@@ -1229,6 +1248,7 @@ $script:TkRemote = @{
                 Type          = [string]$zone.ZoneType
                 Ds            = [bool]$zone.IsDsIntegrated
                 Scope         = [string]$zone.ReplicationScope
+                Partition     = $(if ([string]$zone.ReplicationScope -eq 'Custom') { [string]$zone.DirectoryPartitionName } else { '' })
                 Update        = [string]$zone.DynamicUpdate
                 Reverse       = [bool]$zone.IsReverseLookupZone
                 Transfer      = [string]$zone.SecureSecondaries
@@ -1367,18 +1387,17 @@ $script:TkRemote = @{
         if ($Secondaries.Count -gt 0) { $arguments.SecondaryServers = $Secondaries }
         if ($NotifyServers.Count -gt 0) { $arguments.NotifyServers = $NotifyServers }
         Set-DnsServerPrimaryZone @arguments
-        $zone = Get-DnsServerZone -Name $Zone
-        @{ Transfer = [string]$zone.SecureSecondaries; Notify = [string]$zone.Notify; Secondaries = @($zone.SecondaryServers | ForEach-Object { [string]$_ }); NotifyServers = @($zone.NotifyServers | ForEach-Object { [string]$_ }) }
+        $found = Get-DnsServerZone -Name $Zone
+        @{ Transfer = [string]$found.SecureSecondaries; Notify = [string]$found.Notify; Secondaries = @($found.SecondaryServers | ForEach-Object { [string]$_ }); NotifyServers = @($found.NotifyServers | ForEach-Object { [string]$_ }) }
     }
     NewAccount            = {
-        # A user or a group managed service account the run creates. One that exists is the
-        # run's own only by the SID the state file recorded, or by the run's mark, which the
-        # state file holds before the creation and the object carries from it (a sitting that
-        # ended between the two); any other is refused, never adopted.
+        # A user or a group managed service account the run creates, its mark in the
+        # description. One that exists is used only by the SID the script resolved as the
+        # run's own (Resolve-TkRunObject); any other is refused, never adopted.
         param([string]$Name, [bool]$Gmsa, [string]$Domain, [string]$MirrorHost, [securestring]$Password, [string]$KnownSid, [bool]$DhcpUsers, [string]$Mark)
-        $account = Get-ADObject -Filter "sAMAccountName -eq '$(if ($Gmsa) { "$Name$" } else { $Name })'" -Properties objectSid, description
+        $account = Get-ADObject -Filter "sAMAccountName -eq '$(if ($Gmsa) { "$Name$" } else { $Name })'" -Properties objectSid
         if ($null -ne $account) {
-            if ([string]$account.objectSid -ne $KnownSid -and -not ($Mark -and [string]$account.description -ceq $Mark)) { throw "the account $Name exists and carries neither the SID nor the mark of this run: it is not used and never removed" }
+            if ([string]$account.objectSid -ne $KnownSid) { throw "the account $Name exists and is not the run's own: it is not used and never removed" }
         } elseif ($Gmsa) {
             New-ADServiceAccount -Name $Name -Description $Mark -DNSHostName "$Name.$Domain" -PrincipalsAllowedToRetrieveManagedPassword $MirrorHost -KerberosEncryptionType AES128, AES256
         } else {
@@ -1453,11 +1472,12 @@ $script:TkRemote = @{
         $(if ($null -ne $now -and $now.UserName) { [string]$now.DomainName + '\' + [string]$now.UserName } else { '' })
     }
     NewTenkoAccount       = {
-        # Tenko's computer account: no privileged group, no delegation, AES only, one SPN. One
-        # that exists and carries neither the recorded SID nor the run's mark is refused.
+        # Tenko's computer account: no privileged group, no delegation, AES only, one SPN, its
+        # mark in the description. One that exists and is not the SID the script resolved as
+        # the run's own is refused.
         param([string]$Name, [string]$Path, [string]$Spn, [securestring]$Password, [string]$KnownSid, [string]$Mark)
-        $existing = Get-ADComputer -Filter "SamAccountName -eq '$Name$'" -Properties description
-        if ($null -ne $existing -and [string]$existing.SID -ne $KnownSid -and -not ($Mark -and [string]$existing.description -ceq $Mark)) { throw "the computer account $Name$ exists and carries neither the SID nor the mark of this run: it is not used and never removed" }
+        $existing = Get-ADComputer -Filter "SamAccountName -eq '$Name$'"
+        if ($null -ne $existing -and [string]$existing.SID -ne $KnownSid) { throw "the computer account $Name$ exists and is not the run's own: it is not used and never removed" }
         # The run's own account found again gets this sitting's one-time password.
         if ($null -ne $existing) { Set-ADAccountPassword -Identity $existing.DistinguishedName -NewPassword $Password -Reset }
         else {
@@ -1477,6 +1497,22 @@ $script:TkRemote = @{
             AccountOps  = @(Get-ADGroupMember -Identity 'S-1-5-32-548' -ErrorAction SilentlyContinue).Count
         }
     }
+    ReadRunObject         = {
+        # An object of the run's name as the directory holds it: its SID or id, its mark, the
+        # creator a quota computer names, its access list and Account Operators' size.
+        param([string]$Kind, [string]$Name)
+        $dn = ''
+        if ($Kind -eq 'gpo') {
+            $gpo = Get-GPO -Name $Name -ErrorAction SilentlyContinue
+            if ($null -eq $gpo) { return }
+            $id = [string]$gpo.Id; $mark = [string]$gpo.Description; $creator = ''; $dn = [string]$gpo.Path
+        } else {
+            $object = Get-ADObject -Filter "sAMAccountName -eq '$Name'" -Properties objectSid, description, 'mS-DS-CreatorSID'
+            if ($null -eq $object) { return }
+            $id = [string]$object.objectSid; $mark = [string]$object.description; $creator = [string]$object.'mS-DS-CreatorSID'; $dn = [string]$object.DistinguishedName
+        }
+        @{ Id = $id; Mark = $mark; Creator = $creator; Sddl = [string](Get-Acl -Path ('AD:\' + $dn)).Sddl; AccountOps = @(Get-ADGroupMember -Identity 'S-1-5-32-548' -ErrorAction SilentlyContinue).Count }
+    }
     ReadPwdLastSet        = {
         param([string]$Sid)
         [string](Get-ADComputer -Identity $Sid -Properties pwdLastSet).pwdLastSet
@@ -1487,11 +1523,11 @@ $script:TkRemote = @{
         [bool](Get-ADComputer -Identity $Sid).Enabled
     }
     NewGpo                = {
-        # The run's own object, by its id once made or by the run's mark; one of that name
-        # with neither is refused.
+        # The run's own object, by the id the script resolved as the run's own, its mark in
+        # the comment; one of that name with another id is refused.
         param([string]$Name, [string]$DomainDn, [string[]]$Members, [string]$KnownId, [string]$Mark)
         $gpo = Get-GPO -Name $Name -ErrorAction SilentlyContinue
-        if ($null -ne $gpo -and [string]$gpo.Id -ne $KnownId -and -not ($Mark -and [string]$gpo.Description -ceq $Mark)) { throw "a group policy object named '$Name' exists and carries neither the id nor the mark of this run" }
+        if ($null -ne $gpo -and [string]$gpo.Id -ne $KnownId) { throw "a group policy object named '$Name' exists and is not the run's own" }
         if ($null -eq $gpo) { $gpo = New-GPO -Name $Name -Comment $Mark }
         $null = Set-GPRegistryValue -Guid $gpo.Id -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient' -ValueName 'RegistrationEnabled' -Type DWord -Value 0
         $null = Set-GPPermission -Guid $gpo.Id -TargetName 'Authenticated Users' -TargetType Group -PermissionLevel GpoRead -Replace
@@ -1525,15 +1561,15 @@ $script:TkRemote = @{
                 # Any other type by every property of its data, so that a change shows.
                 default { (@($data.CimInstanceProperties | ForEach-Object { [string]$_.Name + '=' + [string]$_.Value }) -join ';') }
             }
-            @{ Name = ([string]$_.HostName).ToLowerInvariant(); Type = [string]$_.RecordType; Data = $text }
+            @{ Name = ([string]$_.HostName).ToLowerInvariant(); Type = [string]$_.RecordType; Data = $text; Ttl = [string][int]$_.TimeToLive.TotalSeconds }
         }
     }
     ConvertToSecondary    = {
         param([string]$Zone, [string]$Master, [string]$File, [bool]$Convert)
-        $zone = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
+        $found = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
         if ($Convert) {
-            if ($null -ne $zone -and [string]$zone.ZoneType -ne 'Secondary') { ConvertTo-DnsServerSecondaryZone -Name $Zone -MasterServers $Master -ZoneFile $File -Force }
-        } elseif ($null -eq $zone) {
+            if ($null -ne $found -and [string]$found.ZoneType -ne 'Secondary') { ConvertTo-DnsServerSecondaryZone -Name $Zone -MasterServers $Master -ZoneFile $File -Force }
+        } elseif ($null -eq $found) {
             Add-DnsServerSecondaryZone -Name $Zone -MasterServers $Master -ZoneFile $File
         }
         $null = dnscmd /ZoneResetSecondaries $Zone /NoXfr /NoNotify
@@ -1548,7 +1584,11 @@ $script:TkRemote = @{
     ReadSoa               = {
         param([string]$Zone)
         $soa = Get-DnsServerResourceRecord -ZoneName $Zone -RRType Soa -Name '@' | Select-Object -First 1
-        @{ Mname = ([string]$soa.RecordData.PrimaryServer).ToLowerInvariant(); Rname = ([string]$soa.RecordData.ResponsiblePerson).ToLowerInvariant() }
+        $data = $soa.RecordData
+        @{
+            Mname  = ([string]$data.PrimaryServer).ToLowerInvariant(); Rname = ([string]$data.ResponsiblePerson).ToLowerInvariant()
+            Timers = "$([int]$data.RefreshInterval.TotalSeconds) $([int]$data.RetryDelay.TotalSeconds) $([int]$data.ExpireLimit.TotalSeconds) $([int]$data.MinimumTimeToLive.TotalSeconds) $([int]$soa.TimeToLive.TotalSeconds)"
+        }
     }
     FreezeZone            = {
         # The first step back on the PDC emulator: its secondary becomes a file-backed primary
@@ -1556,12 +1596,12 @@ $script:TkRemote = @{
         # reaches the directory. A zone this step finds directory-integrated is done; one it
         # does not find is a restore that ended halfway.
         param([string]$Zone, [string]$File)
-        $zone = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
-        if ($null -eq $zone) { return @{ Type = 'Missing'; Ds = $false; Update = '' } }
-        if ([string]$zone.ZoneType -eq 'Secondary') { ConvertTo-DnsServerPrimaryZone -Name $Zone -ZoneFile $File -Force }
-        $zone = Get-DnsServerZone -Name $Zone
-        if (-not $zone.IsDsIntegrated) { Set-DnsServerPrimaryZone -Name $Zone -DynamicUpdate None; $zone = Get-DnsServerZone -Name $Zone }
-        @{ Type = [string]$zone.ZoneType; Ds = [bool]$zone.IsDsIntegrated; Update = [string]$zone.DynamicUpdate }
+        $found = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
+        if ($null -eq $found) { return @{ Type = 'Missing'; Ds = $false; Update = '' } }
+        if ([string]$found.ZoneType -eq 'Secondary') { ConvertTo-DnsServerPrimaryZone -Name $Zone -ZoneFile $File -Force }
+        $found = Get-DnsServerZone -Name $Zone
+        if (-not $found.IsDsIntegrated) { Set-DnsServerPrimaryZone -Name $Zone -DynamicUpdate None; $found = Get-DnsServerZone -Name $Zone }
+        @{ Type = [string]$found.ZoneType; Ds = [bool]$found.IsDsIntegrated; Update = [string]$found.DynamicUpdate }
     }
     ApplyZoneFix          = {
         # On the frozen copy: at each name to set back, the records of the given types replaced
@@ -1598,31 +1638,35 @@ $script:TkRemote = @{
         # load, it finds the zone missing and loads it; after the load, it finds it done.
         param([string]$Zone, [string]$Backup, [string]$Staged, [string]$Digest)
         $dir = Join-Path $env:SystemRoot 'System32\dns'
-        $zone = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
-        if ($null -ne $zone -and -not $zone.IsDsIntegrated -and [string]$zone.ZoneFile -eq $Staged) { return }
+        $found = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
+        if ($null -ne $found -and -not $found.IsDsIntegrated -and [string]$found.ZoneFile -eq $Staged) { return }
         $target = Join-Path $dir $Staged
         if (-not (Test-Path -LiteralPath $target) -or (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $Digest) { Copy-Item -LiteralPath (Join-Path $dir $Backup) -Destination $target -Force }
         if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $Digest) { throw "$target is not the export of phase 2 (its SHA-256 differs from the copy this run holds)" }
-        if ($null -ne $zone) { Remove-DnsServerZone -Name $Zone -Force }
+        if ($null -ne $found) { Remove-DnsServerZone -Name $Zone -Force }
         Add-DnsServerPrimaryZone -Name $Zone -ZoneFile $Staged -LoadExisting
     }
     IntegrateZone         = {
-        # The checked copy into the directory, then the zone's own update setting.
-        param([string]$Zone, [string]$Scope, [string]$Update)
-        if (-not (Get-DnsServerZone -Name $Zone).IsDsIntegrated) { ConvertTo-DnsServerPrimaryZone -Name $Zone -ReplicationScope $Scope -Force }
+        # The checked copy into the directory partition the discovery read, then the zone's own
+        # update setting.
+        param([string]$Zone, [string]$Scope, [string]$Partition, [string]$Update)
+        if (-not (Get-DnsServerZone -Name $Zone).IsDsIntegrated) {
+            if ($Scope -eq 'Custom') { ConvertTo-DnsServerPrimaryZone -Name $Zone -ReplicationScope Custom -DirectoryPartitionName $Partition -Force }
+            else { ConvertTo-DnsServerPrimaryZone -Name $Zone -ReplicationScope $Scope -Force }
+        }
         Set-DnsServerPrimaryZone -Name $Zone -DynamicUpdate $Update
-        $zone = Get-DnsServerZone -Name $Zone
-        @{ Type = [string]$zone.ZoneType; Ds = [bool]$zone.IsDsIntegrated; Update = [string]$zone.DynamicUpdate }
+        $found = Get-DnsServerZone -Name $Zone
+        @{ Type = [string]$found.ZoneType; Ds = [bool]$found.IsDsIntegrated; Update = [string]$found.DynamicUpdate }
     }
     RemoveSecondary       = {
         param([string]$Zone)
-        $zone = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
-        if ($null -ne $zone -and [string]$zone.ZoneType -eq 'Secondary') { Remove-DnsServerZone -Name $Zone -Force }
+        $found = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
+        if ($null -ne $found -and [string]$found.ZoneType -eq 'Secondary') { Remove-DnsServerZone -Name $Zone -Force }
     }
     ReadZone              = {
         param([string]$Zone)
-        $zone = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
-        if ($null -ne $zone) { @{ Type = [string]$zone.ZoneType; Ds = [bool]$zone.IsDsIntegrated; Update = [string]$zone.DynamicUpdate } }
+        $found = Get-DnsServerZone -Name $Zone -ErrorAction SilentlyContinue
+        if ($null -ne $found) { @{ Type = [string]$found.ZoneType; Ds = [bool]$found.IsDsIntegrated; Update = [string]$found.DynamicUpdate } }
     }
     StopDhcp              = {
         # DHCPServer, never Dhcp (the DHCP client a controller needs for its own registration).
@@ -1942,9 +1986,9 @@ function Get-TkDiscovery {
                 if ($controller -eq $pdc) { $r.forwarders += , [ordered]@{ zone = $row.Name; servers = @($row.Masters) } }
                 continue
             }
-            if (-not $zoneSet.Contains($row.Name)) { $zoneSet[$row.Name] = [ordered]@{ name = $row.Name; type = $row.Type; ds = $row.Ds; scope = $row.Scope; update = $row.Update; reverse = $row.Reverse; aging = $row.Aging; servers = [ordered]@{} } }
+            if (-not $zoneSet.Contains($row.Name)) { $zoneSet[$row.Name] = [ordered]@{ name = $row.Name; type = $row.Type; ds = $row.Ds; scope = $row.Scope; partition = [string](Get-TkField $row 'Partition'); update = $row.Update; reverse = $row.Reverse; aging = $row.Aging; servers = [ordered]@{} } }
             $zoneSet[$row.Name].servers[$controller] = [ordered]@{ transfer = $row.Transfer; notify = $row.Notify; secondaries = @($row.Secondaries); notify_servers = @($row.NotifyServers); serial = $row.Serial; type = $row.Type }
-            $r.values += @($row.Secondaries) + @($row.NotifyServers) + @($row.Transfer, $row.Notify, $row.Update, $row.Scope)
+            $r.values += @($row.Secondaries) + @($row.NotifyServers) + @($row.Transfer, $row.Notify, $row.Update, $row.Scope, [string](Get-TkField $row 'Partition'))
         }
     }
     foreach ($controller in $controllers) { if (-not (@($zoneSet.Values) | Where-Object { $_.servers.Contains($controller.name) })) { $r.warnings += "$($controller.name) serves no zone (it was never enlisted in the DNS application partitions)" } }
@@ -1965,6 +2009,9 @@ function Get-TkDiscovery {
     foreach ($entry in @(Invoke-TkRemote -Server $pdc -Name ReadDhcpInDirectory)) {
         $own = @($controllers | Where-Object { $_.name -eq $entry.Name -and @($_.addresses) -contains $entry.Address }).Count -gt 0 -or
         @($computers | Where-Object { $_.Name -eq $entry.Name -and $_.IPv4 -eq $entry.Address }).Count -gt 0
+        # A computer any domain user may create (the machine account quota) is no DHCP server.
+        $quota = @($computers | Where-Object { $_.Name -eq $entry.Name -and $_.Creator } | Select-Object -First 1)
+        if ($quota.Count -gt 0) { Exit-TkTakeover 1 "the DHCP authorization list names $($entry.Name), whose computer object $(ConvertTo-TkSafeText $quota[0].Creator) created under the machine account quota: such an object is no DHCP server of the plan; remove the entry or the object and run again" }
         if ($own) { $authorized += $entry } else { $r.warnings += "the DHCP authorization list names $($entry.Name) ($($entry.Address)), which is no computer of $Domain at that address: it is not contacted" }
     }
     $listed = @($authorized | ForEach-Object { $_.Name } | Sort-Object)
@@ -2013,6 +2060,10 @@ function Get-TkDiscovery {
             $r.refusals += "The zone $($zone.name) takes secure updates only. This release of Tenko cannot yet take over a zone that takes secure updates only without weakening it, because its secure updates (the Kerberos line of the identity plan) are not complete. Nothing was changed. Take over this domain with a release whose notes say the Kerberos line is complete."
         }
         if ($zone.aging) { $r.warnings += "the zone $($zone.name) has aging enabled: a server-level scavenging switched on later writes in it" }
+        # The reverse puts a zone back into the partition it was read in.
+        if (-not $zone.ds -or 'Domain', 'Forest', 'Legacy', 'Custom' -notcontains [string]$zone.scope -or ($zone.scope -eq 'Custom' -and -not $zone.partition)) {
+            $r.refusals += "The zone $($zone.name) is $(if ($zone.ds) { "replicated to '$($zone.scope)'" } else { 'not directory-integrated' }): its reverse could not put it back where it is. Nothing was changed."
+        }
     }
 
     # What a compromised DNS authority with a domain computer account could use.
@@ -2099,6 +2150,8 @@ function Get-TkPlan {
     $plan.mirror_host = [ordered]@{ name = $Readings.mirror_host.name; address = $Readings.mirror_host.address }
     $plan.node_name = $NodeName
     $plan.operations = $operations
+    # Tenko's computer account, exactly when the run adopts one.
+    if ($operations -contains 'kerberos_adopt') { $plan.kerberos = [ordered]@{ realm = $Readings.domain.ToUpperInvariant(); account = "$($NodeName.ToUpperInvariant())$"; spns = @("DNS/$NodeName.$($Readings.domain)") } }
     return $plan
 }
 
@@ -2245,20 +2298,60 @@ function Get-TkMirrorToken {
 }
 
 function Get-TkRunMark {
-    # The run's mark: recorded in the state file before the run creates its first object, and
-    # written into each object it creates, so that a sitting that ended between a creation
-    # and the record of its SID knows the object as its own.
-    param([hashtable]$State)
-    $mark = [string](Get-TkField $State.Data.values 'mark')
-    if ($mark -cnotmatch '^Tenko takeover [0-9a-f]{32}$') {
-        $bytes = [byte[]]::new(16)
+    # The mark of one object of the run: SHA-256 over a secret that only the state file holds
+    # and the object's name, so that the mark one object carries fits no other name. The
+    # secret is recorded before the run creates its first object.
+    param([hashtable]$State, [string]$Name)
+    $secret = [string](Get-TkField $State.Data.values 'mark_secret')
+    if ($secret -cnotmatch '^[0-9a-f]{64}$') {
+        $bytes = [byte[]]::new(32)
         $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
         try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-        $mark = 'Tenko takeover ' + (ConvertTo-TkHex $bytes)
-        $State.Data.values.mark = $mark
+        $secret = ConvertTo-TkHex $bytes
+        $State.Data.values.mark_secret = $secret
         Save-TkState $State
     }
-    return $mark
+    return 'Tenko takeover ' + (ConvertTo-TkHex (Get-TkSha256 ([System.Text.Encoding]::UTF8.GetBytes("$secret|$($Name.ToLowerInvariant())"))))
+}
+
+function Get-TkForeignWriter {
+    # The entries of an object's access list that may write it or hold a control right over
+    # it, outside the closed list: SYSTEM, Administrators, SELF, the object itself, the
+    # domain's Domain, Enterprise, Key and Enterprise Key Admins, Account Operators while
+    # empty, and a computer object's default groups for their default attributes only. The
+    # rights to change a password knowing the old one and to apply a group policy are no
+    # control over the object.
+    param([string]$Sddl, [string]$DomainSid, [string]$Self, [int]$AccountOps)
+    $trusted = @($script:TkTrustedSids) + @('S-1-3-0', $Self) + @($(if ($AccountOps -eq 0) { 'S-1-5-32-548' }))
+    $harmless = @('ab721a53-1e2f-11d0-9819-00aa0040529b', 'edacfd8f-ffb3-11d1-b41d-00a0c968f939')
+    $scoped = @{}
+    foreach ($key in $script:TkScopedSids.Keys) { $scoped[$key] = $script:TkScopedSids[$key] }
+    foreach ($rid in $script:TkScopedRids.Keys) { $scoped["$DomainSid-$rid"] = $script:TkScopedRids[$rid] }
+    foreach ($entry in (ConvertFrom-TkSddl -Sddl $Sddl -DomainSid $DomainSid)) {
+        if (Test-TkSidIn -Sid $entry.Sid -Sids $trusted -Rids $script:TkTrustedRids -DomainSid $DomainSid) { continue }
+        if ($entry.Write -and -not $entry.Control -and $scoped.ContainsKey($entry.Sid) -and $scoped[$entry.Sid] -contains $entry.Object) { continue }
+        if ($entry.Write -or ($entry.Control -and $harmless -notcontains $entry.Object)) { $entry }
+    }
+}
+
+function Resolve-TkRunObject {
+    # An object of the run's name that exists: the run's own by the SID or id the state file
+    # recorded, or, after a sitting that ended between the creation and that record, by its
+    # mark, and then only while no one made it under the machine account quota, the Domain
+    # Admins of this domain own it, and no one outside the closed list may write it. Anything
+    # else is refused, never adopted. Returns the id to go on with.
+    param([hashtable]$State, [string]$Kind, [string]$Name, [string]$Known)
+    $r = $State.Data.readings
+    $found = Invoke-TkRemote -Server $r.pdc -Name ReadRunObject -Arguments @($Kind, $Name) | Select-Object -Last 1
+    if ($null -eq $found -or -not [string]$found.Id -or [string]$found.Id -eq $Known) { return $Known }
+    $what = $(if ($Kind -eq 'gpo') { "the group policy object '$Name'" } else { "the account $Name" })
+    if ([string]$found.Mark -cne (Get-TkRunMark -State $State -Name $Name)) { Exit-TkTakeover 1 "$what exists and carries neither the SID nor the mark of this run: it is not used and never removed" }
+    if ([string]$found.Creator) { Exit-TkTakeover 1 "$what carries this run's mark but was created by $(ConvertTo-TkSafeText $found.Creator) under the machine account quota: it is not used and never removed" }
+    $owner = $(if ([string]$found.Sddl -match '^O:([^:]+?)G:') { $Matches[1] } else { '' })
+    if ($owner -ne 'DA' -and $owner -ne "$($r.domain_sid)-512") { Exit-TkTakeover 1 "$what carries this run's mark but is owned by $(ConvertTo-TkSafeText $owner), not by the Domain Admins of $($r.domain): it is not used and never removed" }
+    $writers = @(Get-TkForeignWriter -Sddl ([string]$found.Sddl) -DomainSid $r.domain_sid -Self ([string]$found.Id) -AccountOps ([int]$found.AccountOps) | ForEach-Object { $_.Sid } | Select-Object -Unique)
+    if ($writers.Count -gt 0) { Exit-TkTakeover 1 "$what carries this run's mark but may be written by $($writers -join ', '): it is not used and never removed" }
+    return [string]$found.Id
 }
 
 function Add-TkRunAccount {
@@ -2266,8 +2359,9 @@ function Add-TkRunAccount {
     # SID or its mark), with a new password where it has one. The SID is recorded at once.
     param([hashtable]$State, [string]$Key, [string]$Name, [bool]$Gmsa, [bool]$DhcpUsers)
     $r = $State.Data.readings
-    $known = [string](Get-TkField $State.Data.values $Key)
-    $mark = Get-TkRunMark $State
+    $account = $(if ($Gmsa) { "$Name$" } else { $Name })
+    $mark = Get-TkRunMark -State $State -Name $account
+    $known = Resolve-TkRunObject -State $State -Kind 'account' -Name $account -Known ([string](Get-TkField $State.Data.values $Key))
     $password = $(if ($Gmsa) { $null } else { Get-TkRandomSecret })
     $sid = Assert-TkSid ([string](Invoke-TkRemote -Server $r.pdc -Name NewAccount -Arguments @($Name, $Gmsa, $r.domain, ($r.mirror_host.name.Split('.')[0] + '$'), $password, $known, $DhcpUsers, $mark) | Select-Object -Last 1))
     $State.Data.values[$Key] = $sid
@@ -2415,7 +2509,9 @@ function Get-TkPhase2 {
         @{ Name = 'gpo'
             Do = {
                 $members = @($r.members | Where-Object { $_ } | ForEach-Object { $_.Split('.')[0] })
-                $State.Data.values.gpo = [string](Invoke-TkRemote -Server $pdc -Name NewGpo -Arguments @($script:TkGpoName, $r.domain_dn, [string[]]$members, [string](Get-TkField $State.Data.values 'gpo'), (Get-TkRunMark $State)) | Select-Object -Last 1)
+                $mark = Get-TkRunMark -State $State -Name $script:TkGpoName
+                $known = Resolve-TkRunObject -State $State -Kind 'gpo' -Name $script:TkGpoName -Known ([string](Get-TkField $State.Data.values 'gpo'))
+                $State.Data.values.gpo = [string](Invoke-TkRemote -Server $pdc -Name NewGpo -Arguments @($script:TkGpoName, $r.domain_dn, [string[]]$members, $known, $mark) | Select-Object -Last 1)
                 Save-TkState $State
             }
             Undo = { if ($State.Data.values.Contains('gpo')) { [void](Invoke-TkRemote -Server $pdc -Name RemoveGpo -Arguments @($State.Data.values.gpo)) } }
@@ -2479,7 +2575,9 @@ function Invoke-TkTenkoAccount {
     $node = $State.Data.tenko.node
     if ($node -cnotmatch $script:TkLabelPattern) { Exit-TkTakeover 4 "the node's name in the state file is not a host label" }
     $password = Get-TkRandomSecret
-    $account = Invoke-TkRemote -Server $r.pdc -Name NewTenkoAccount -Arguments @($node, $r.computers, "DNS/$node.$($r.domain)", $password, [string](Get-TkField $State.Data.values 'tenko_account_sid'), (Get-TkRunMark $State)) | Select-Object -Last 1
+    $mark = Get-TkRunMark -State $State -Name "$node$"
+    $known = Resolve-TkRunObject -State $State -Kind 'account' -Name "$node$" -Known ([string](Get-TkField $State.Data.values 'tenko_account_sid'))
+    $account = Invoke-TkRemote -Server $r.pdc -Name NewTenkoAccount -Arguments @($node, $r.computers, "DNS/$node.$($r.domain)", $password, $known, $mark) | Select-Object -Last 1
     $sid = Assert-TkSid $account.Sid
     $State.Data.values.tenko_account_sid = $sid
     Save-TkState $State
@@ -2489,19 +2587,12 @@ function Invoke-TkTenkoAccount {
     if (@($account.Spns).Count -ne 1 -or $account.Spns[0] -ne "DNS/$node.$($r.domain)") { throw "Tenko's account carries the names $(@($account.Spns) -join ', ')" }
     # By SID against a closed list, the account itself included; a computer object's default
     # groups only for the attributes they hold by default.
-    $trusted = @($script:TkTrustedSids) + @($sid) + @($(if ($account.AccountOps -eq 0) { 'S-1-5-32-548' }))
-    $scoped = @{}
-    foreach ($key in $script:TkScopedSids.Keys) { $scoped[$key] = $script:TkScopedSids[$key] }
-    foreach ($rid in $script:TkScopedRids.Keys) { $scoped["$($r.domain_sid)-$rid"] = $script:TkScopedRids[$rid] }
-    foreach ($entry in (ConvertFrom-TkSddl -Sddl $account.Sddl -DomainSid $r.domain_sid)) {
-        if ($entry.Write -and -not $entry.Control -and $scoped.ContainsKey($entry.Sid) -and $scoped[$entry.Sid] -contains $entry.Object) { continue }
-        if (($entry.Write -or $entry.Control) -and -not (Test-TkSidIn -Sid $entry.Sid -Sids $trusted -Rids $script:TkTrustedRids -DomainSid $r.domain_sid)) {
-            Write-Warning "$($entry.Sid) may $(if ($entry.Write) { 'write' } else { 'reset the password of' }) Tenko's account"
-        }
+    foreach ($entry in (Get-TkForeignWriter -Sddl $account.Sddl -DomainSid $r.domain_sid -Self $sid -AccountOps $account.AccountOps)) {
+        Write-Warning "$($entry.Sid) may $(if ($entry.Write) { 'write' } else { 'reset the password of' }) Tenko's account"
     }
     if ($account.AccountOps -gt 0) { Write-Warning "Account Operators is not empty: its members may reset Tenko's account" }
     $before = $account.PwdLastSet
-    [void](Invoke-Tenko -Method POST -Path '/dns/kerberos/adopt' -Body ([ordered]@{ realm = $r.domain.ToUpperInvariant(); name = "$node$"; password = $password; spns = @("DNS/$node.$($r.domain)") }))
+    [void](Invoke-Tenko -Method POST -Path '/dns/kerberos/adopt' -Body ([ordered]@{ realm = $r.domain.ToUpperInvariant(); name = "$($node.ToUpperInvariant())$"; password = $password; spns = @("DNS/$node.$($r.domain)") }))
     $password.Dispose()
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     while ($watch.Elapsed.TotalSeconds -lt $script:TkPasswordChangeSec) {
@@ -2528,8 +2619,8 @@ function Confirm-TkWindow {
     }
     $by = ConvertTo-TkSafeText (Get-TkField $window 'started_by')
     $at = ConvertTo-TkSafeText (Get-TkField $window 'started_at')
-    Write-TkNote "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4) and the DHCP window (phase 5)."
-    if (-not (Confirm-TkTyped 'Type the domain''s name to go on' $State.Data.domain)) { Exit-TkTakeover 3 'the window was not confirmed at the console; nothing was changed' }
+    Write-TkNote "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4), then the DHCP window (phase 5), which asks once more right before Windows stops answering."
+    if (-not (Confirm-TkTyped 'Type the domain''s name to start the DNS window' $State.Data.domain)) { Exit-TkTakeover 3 'the window was not confirmed at the console; nothing was changed' }
     $script:TkWindowWatch = [System.Diagnostics.Stopwatch]::StartNew()
     return , $window
 }
@@ -2609,11 +2700,12 @@ function Test-TkConfiguration {
 }
 
 function Get-TkWindowsRecord {
-    # A zone's records on one server as 'name|type|data', the name absolute, SOA left out.
-    param([string]$Server, [string]$Zone)
+    # A zone's records on one server as 'name|type|data', the name absolute, SOA left out;
+    # with -Ttl each line ends in a tab and the record's time to live.
+    param([string]$Server, [string]$Zone, [switch]$Ttl)
     return , @(Invoke-TkRemote -Server $Server -Name ReadRecords -Arguments @($Zone) | ForEach-Object {
             $name = $(if ($_.Name -eq '@') { $Zone } else { "$($_.Name).$Zone" })
-            "$name|$($_.Type)|$(([string]$_.Data).ToLowerInvariant())"
+            "$name|$($_.Type)|$(([string]$_.Data).ToLowerInvariant())$(if ($Ttl) { "`t$([string]$_.Ttl)" })"
         } | Sort-Object -Unique)
 }
 
@@ -2640,12 +2732,17 @@ function Test-TkApartName {
     # Records that steer authentication or hand a subtree away: everything at or under the
     # _msdcs, _tcp, _udp and _sites names and the DomainDnsZones and ForestDnsZones
     # partitions, the Kerberos, LDAP and global catalog locator names, every NS and DNAME
-    # below the apex, the apex's own A, AAAA and NS, and the controllers' own addresses.
-    param([string]$Name, [string]$Type, [string]$Zone, [string[]]$Controllers)
+    # below the apex, the apex's own A, AAAA, NS, CNAME and DNAME, every wildcard, the
+    # controllers' own addresses, and the addresses of a name server the zone names or of a
+    # name below a delegation (its glue).
+    param([string]$Name, [string]$Type, [string]$Zone, [string[]]$Controllers, [string[]]$NsTargets = @(), [string[]]$Delegated = @())
     if ($Name -match '(^|\.)(_msdcs|_tcp|_udp|_sites|domaindnszones|forestdnszones|_kerberos|_kpasswd|_ldap|_gc)(\.|$)') { return $true }
-    if ($Name -eq $Zone) { return ('A', 'AAAA', 'NS' -contains $Type) }
+    if ($Name.StartsWith('*.')) { return $true }
+    if ($Name -eq $Zone) { return ('A', 'AAAA', 'NS', 'CNAME', 'DNAME' -contains $Type) }
     if ('NS', 'DNAME' -contains $Type) { return $true }
-    return ($Controllers -contains $Name -and ('A', 'AAAA' -contains $Type))
+    if ('A', 'AAAA' -notcontains $Type) { return $false }
+    if ($Controllers -contains $Name -or $NsTargets -contains $Name) { return $true }
+    return @($Delegated | Where-Object { $Name -eq $_ -or $Name.EndsWith(".$_") }).Count -gt 0
 }
 
 function Get-TkZoneReturn {
@@ -2663,11 +2760,20 @@ function Get-TkZoneReturn {
     $result = [ordered]@{}
     $changes = [ordered]@{}
     foreach ($zone in $Zones) {
-        $now = Get-TkWindowsRecord -Server $r.pdc -Zone $zone.name
-        $result[$zone.name] = @{ Restore = $false; Fix = @(); Expected = $now }
-        $diff = @(Compare-Object -ReferenceObject @(Get-TkField $State.Data.values "records.$($zone.name)") -DifferenceObject $now | ForEach-Object {
+        # The copy as shown, with every time to live and the start of authority's timers, for
+        # the check before the integration.
+        $shown = Get-TkWindowsRecord -Server $r.pdc -Zone $zone.name -Ttl
+        $now = @($shown | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique)
+        $flip = @(Get-TkField $State.Data.values "records.$($zone.name)")
+        $soa = Invoke-TkRemote -Server $r.pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1
+        $result[$zone.name] = @{ Restore = $false; Fix = @(); Expected = $now; Shown = $shown; Timers = [string]$soa.Timers }
+        # Name servers the zone names and the delegations it holds, at the flip or now.
+        $ns = @(@($flip) + $now | Where-Object { $_.Split('|', 3)[1] -eq 'NS' })
+        $targets = @($ns | ForEach-Object { $_.Split('|', 3)[2] } | Select-Object -Unique)
+        $delegated = @($ns | ForEach-Object { $_.Split('|', 3)[0] } | Where-Object { $_ -ne $zone.name } | Select-Object -Unique)
+        $diff = @(Compare-Object -ReferenceObject $flip -DifferenceObject $now | ForEach-Object {
                 $owner, $type, $data = ([string]$_.InputObject).Split('|', 3)
-                @{ Line = [string]$_.InputObject; Owner = $owner; Type = $type; Data = $data; Added = ($_.SideIndicator -eq '=>'); Apart = (Test-TkApartName -Name $owner -Type $type -Zone $zone.name -Controllers $controllers) }
+                @{ Line = [string]$_.InputObject; Owner = $owner; Type = $type; Data = $data; Added = ($_.SideIndicator -eq '=>'); Apart = (Test-TkApartName -Name $owner -Type $type -Zone $zone.name -Controllers $controllers -NsTargets $targets -Delegated $delegated) }
             })
         if ($diff.Count -gt 0) { $changes[$zone.name] = $diff }
     }
@@ -2699,7 +2805,7 @@ function Get-TkZoneReturn {
             }
             $back = @($flip | Where-Object { $part = $_.Split('|', 3); $part[0] -eq $owner -and $types -contains $part[1] })
             $relative = $(if ($owner -eq $name) { '@' } else { $owner.Substring(0, $owner.Length - $name.Length - 1) })
-            $result[$name].Fix += , @{ Name = $relative; Types = $types; Records = @($back | ForEach-Object { $part = $_.Split('|', 3); @{ Type = $part[1]; Data = $part[2] } }) }
+            $result[$name].Fix += , @{ Name = $relative; Owner = $owner; Types = $types; Records = @($back | ForEach-Object { $part = $_.Split('|', 3); @{ Type = $part[1]; Data = $part[2] } }) }
             $result[$name].Expected = @(@($result[$name].Expected | Where-Object { $part = $_.Split('|', 3); -not ($part[0] -eq $owner -and $types -contains $part[1]) }) + $back | Sort-Object -Unique)
         }
     }
@@ -2761,6 +2867,15 @@ function Get-TkPhase4 {
                 # on those copies, written, and checked record by record against what was
                 # shown; only then the directory. The others answer from their secondaries
                 # meanwhile, then each loads the directory copy by its own polling.
+                # Each zone goes back into the partition the discovery read; one this script cannot
+                # put back there is refused before anything changes.
+                foreach ($zone in $ordered) {
+                    $partition = [string](Get-TkField $zone 'partition')
+                    if (-not $zone.ds -or 'Domain', 'Forest', 'Legacy', 'Custom' -notcontains [string]$zone.scope -or ($zone.scope -eq 'Custom' -and -not $partition)) {
+                        Exit-TkTakeover 1 "$($zone.name) was read as $(if ($zone.ds) { "replicated to '$(ConvertTo-TkSafeText $zone.scope)'" } else { 'not directory-integrated' }) at the discovery, which this script cannot put back; nothing was changed"
+                    }
+                    foreach ($value in @($zone.scope, $partition) | Where-Object { $_ }) { Assert-TkRestoreValue -Readings $r -Value $value -Class discovered }
+                }
                 $open = @()
                 foreach ($zone in $ordered) {
                     $frozen = Invoke-TkRemote -Server $pdc -Name FreezeZone -Arguments @($zone.name, "$($zone.name).dns") | Select-Object -Last 1
@@ -2769,7 +2884,6 @@ function Get-TkPhase4 {
                 }
                 $return = Get-TkZoneReturn -State $State -Zones @($open | Where-Object { -not (Get-TkField $State.Data.values "restore.$($_.name)") })
                 foreach ($zone in $open) {
-                    $scope = $(if ($zone.name.StartsWith('_msdcs.')) { 'Forest' } else { 'Domain' })
                     Assert-TkRestoreValue -Readings $r -Value $zone.update -Class discovered
                     if ((Get-TkField $State.Data.values "restore.$($zone.name)") -or $return[$zone.name].Restore) {
                         $State.Data.values["restore.$($zone.name)"] = $true
@@ -2780,12 +2894,22 @@ function Get-TkPhase4 {
                         $soa = Get-TkField $State.Data.values "soa.$($zone.name)"
                         $mname = [string](Get-TkField $soa 'mname'); $rname = [string](Get-TkField $soa 'rname')
                         foreach ($value in $mname, $rname) { if ($value -and $value -notmatch '^([a-z0-9_-]{1,63}\.)+[a-z0-9_-]{1,63}\.?$') { Exit-TkTakeover 4 "the start of authority recorded for $($zone.name) names $(ConvertTo-TkSafeText $value), which is not a host name" } }
-                        [void](Invoke-TkRemote -Server $pdc -Name ApplyZoneFix -Arguments @($zone.name, [object[]]$return[$zone.name].Fix, $mname, $rname))
-                        $written = Get-TkWindowsRecord -Server $pdc -Zone $zone.name
-                        $diff = @(Compare-Object -ReferenceObject @($return[$zone.name].Expected) -DifferenceObject $written)
-                        if ($diff.Count -gt 0) { Exit-TkTakeover 4 "the copy of $($zone.name) on $pdc differs from what was shown in $($diff.Count) records (first: $(ConvertTo-TkSafeText $diff[0].InputObject)); nothing of it reached the directory" }
+                        $plan = $return[$zone.name]
+                        [void](Invoke-TkRemote -Server $pdc -Name ApplyZoneFix -Arguments @($zone.name, [object[]]$plan.Fix, $mname, $rname))
+                        # Record by record, and every time to live and timer kept as shown.
+                        $after = Get-TkWindowsRecord -Server $pdc -Zone $zone.name -Ttl
+                        $diff = @(Compare-Object -ReferenceObject @($plan.Expected) -DifferenceObject @($after | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique))
+                        if ($diff.Count -eq 0) {
+                            $setBack = @($plan.Fix | ForEach-Object { $fix = $_; $fix.Types | ForEach-Object { "$($fix.Owner)|$_" } })
+                            $shownKept = @($plan.Shown | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
+                            $afterKept = @($after | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
+                            $diff = @(Compare-Object -ReferenceObject $shownKept -DifferenceObject $afterKept)
+                            $timers = [string](Invoke-TkRemote -Server $pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1).Timers
+                            if ($timers -ne $plan.Timers) { $diff += [pscustomobject]@{ InputObject = "start of authority timers $timers, shown $($plan.Timers)" } }
+                        }
+                        if ($diff.Count -gt 0) { Exit-TkTakeover 4 "the copy of $($zone.name) on $pdc differs from what was shown in $($diff.Count) records (first: $(ConvertTo-TkSafeText (([string]$diff[0].InputObject) -replace "`t", ' ttl '))); nothing of it reached the directory" }
                     }
-                    $now = Invoke-TkRemote -Server $pdc -Name IntegrateZone -Arguments @($zone.name, $scope, $zone.update) | Select-Object -Last 1
+                    $now = Invoke-TkRemote -Server $pdc -Name IntegrateZone -Arguments @($zone.name, [string]$zone.scope, [string](Get-TkField $zone 'partition'), $zone.update) | Select-Object -Last 1
                     if (-not $now.Ds -or $now.Update -ne $zone.update) { Exit-TkTakeover 2 "$($zone.name) on $pdc is $($now.Type), update $($now.Update) after the way back, not directory-integrated with $($zone.update): a zone left open to unsigned updates fails the reverse" }
                     $State.Data.values.Remove("restore.$($zone.name)")
                     Save-TkState $State
@@ -2830,33 +2954,101 @@ function Show-TkRestoreLine {
     }
 }
 
-function Test-TkAuthorization {
-    # Whether each controller's own replica lists exactly the given servers as authorized
+function Get-TkLaggingController {
+    # The controllers whose own replica does not list exactly the given servers as authorized
     # (or none of them): the name field of each dhcpServers value, compared whole.
     param([System.Collections.IDictionary]$Readings, [string[]]$Servers, [bool]$Authorized)
     foreach ($controller in $Readings.controllers) {
         $names = @(Invoke-TkRemote -Server $controller.name -Name ReadAuthorization -Arguments @($Readings.configuration) |
                 ForEach-Object { ([string]$_).Split('$') } | Where-Object { $_.Length -gt 1 -and $_[0] -eq 's' } | ForEach-Object { $_.Substring(1).ToLowerInvariant() })
-        foreach ($server in $Servers) { if (($names -contains $server) -ne $Authorized) { return $false } }
+        if (@($Servers | Where-Object { ($names -contains $_) -ne $Authorized }).Count -gt 0) { $controller.name }
     }
-    return $true
+}
+
+function Test-TkAuthorization {
+    param([System.Collections.IDictionary]$Readings, [string[]]$Servers, [bool]$Authorized)
+    return @(Get-TkLaggingController -Readings $Readings -Servers $Servers -Authorized $Authorized).Count -eq 0
 }
 
 function Write-TkAuthorization {
     # The authorization of the given servers added or removed, replicated, and read back on
     # every controller's own replica until all show it, for at most five minutes; the last
-    # read decides.
-    param([System.Collections.IDictionary]$Readings, [string[]]$Servers, [bool]$Authorized)
+    # read decides. With -Lenient the controllers still behind are returned, not thrown.
+    param([System.Collections.IDictionary]$Readings, [string[]]$Servers, [bool]$Authorized, [switch]$Lenient)
     foreach ($server in $Readings.dhcp | Where-Object { $Servers -contains $_.name }) { [void](Invoke-TkRemote -Server $Readings.pdc -Name SetAuthorization -Arguments @($server.name, $server.address, $Authorized)) }
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
     while ($true) {
         [void](Invoke-TkRemote -Server $Readings.pdc -Name Replicate)
-        if (Test-TkAuthorization -Readings $Readings -Servers $Servers -Authorized $Authorized) { return }
+        $lagging = @(Get-TkLaggingController -Readings $Readings -Servers $Servers -Authorized $Authorized)
+        if ($lagging.Count -eq 0) { return }
         if ($watch.Elapsed.TotalSeconds -ge $script:TkReplicaWaitSec) {
-            throw "a controller's replica does not show the DHCP servers as $(if ($Authorized) { 'authorized' } else { 'not authorized' }) within $($script:TkReplicaWaitSec / 60) minutes of the change; run the script again once it has replicated"
+            if ($Lenient) { return $lagging }
+            throw "a controller's replica ($($lagging -join ', ')) does not show the DHCP servers as $(if ($Authorized) { 'authorized' } else { 'not authorized' }) within $($script:TkReplicaWaitSec / 60) minutes of the change; run the script again once it has replicated"
         }
         Start-Sleep -Seconds $script:TkPollSec
     }
+}
+
+function Sync-TkBarrier {
+    # The DHCP window's second barrier: both authorizations removed and read back on every
+    # controller's own replica. A controller that has not caught up within five minutes
+    # leaves the barrier pending, with a warning; the check step and every later sitting read
+    # it again until it holds. With -Remove the removal is made first.
+    param([hashtable]$State, [switch]$Remove)
+    $r = $State.Data.readings
+    $names = @($r.dhcp | ForEach-Object { $_.name })
+    if ($Remove) { $lagging = @(Write-TkAuthorization -Readings $r -Servers $names -Authorized $false -Lenient) }
+    else {
+        if (@(@(Get-TkField $State.Data.values 'barrier_pending') | Where-Object { $_ }).Count -eq 0) { return }
+        [void](Invoke-TkRemote -Server $r.pdc -Name Replicate)
+        $lagging = @(Get-TkLaggingController -Readings $r -Servers $names -Authorized $false)
+    }
+    $State.Data.values.barrier_pending = $lagging
+    Save-TkState $State
+    if ($lagging.Count -gt 0) {
+        Write-Warning "the removal of the DHCP servers' authorization has not reached $($lagging -join ', ') yet. Tenko serves and the DHCP Server services are stopped and disabled, so no Windows server answers unless someone starts that service; the check step and every later sitting read it again."
+    } elseif (-not $Remove) { Write-TkNote 'The removal of the DHCP servers'' authorization has now reached every controller.' }
+}
+
+function Read-TkChoice {
+    # The host's choice prompt: a dialog where the host has one, a two-way question in a
+    # console. A host that cannot ask answers the default.
+    param([string]$Caption, [string]$Message, [string[]]$Choices, [int]$Default)
+    $options = [System.Collections.ObjectModel.Collection[System.Management.Automation.Host.ChoiceDescription]]::new()
+    foreach ($choice in $Choices) { $options.Add([System.Management.Automation.Host.ChoiceDescription]::new($choice)) }
+    try { return $Choices[$Host.UI.PromptForChoice($Caption, $Message, $options, $Default)] } catch { return $Choices[$Default] }
+}
+
+function Confirm-TkSilence {
+    # The DHCP window's one confirmation, right before anything is stopped; Abort, the
+    # default, changes nothing.
+    param([System.Collections.IDictionary]$Readings)
+    $servers = @($Readings.dhcp | ForEach-Object { $_.name })
+    $scopes = @($Readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)
+    $message = @(
+        "Continue makes these changes now:"
+        "  1. The DHCP Server service is stopped and disabled on $($servers -join ' and ')."
+        "  2. Tenko starts answering $($scopes -join ', ') at once."
+        "  3. The servers' authorization in the directory is removed right after; it may take some minutes to reach every controller."
+        'To go back later, run Tenko-Takeover.ps1 -Reverse: Tenko keeps answering until Windows answers again.'
+        'Abort changes nothing.'
+    ) -join "`n"
+    return ((Read-TkChoice -Caption 'The DHCP window' -Message $message -Choices @('&Abort', '&Continue') -Default 0) -replace '&', '') -eq 'Continue'
+}
+
+function Resume-TkWindowsDhcp {
+    # The Windows DHCP servers this run stopped, started again as the discovery read them,
+    # still authorized: they serve, and Tenko stays off.
+    param([hashtable]$State)
+    $r = $State.Data.readings
+    foreach ($server in $r.dhcp | Where-Object { @(Get-TkField $State.Data.values 'stopped') -contains $_.name }) {
+        Assert-TkRestoreValue -Readings $r -Value $server.service_start -Class discovered
+        $now = $null
+        try { $now = Invoke-TkRemote -Server $server.name -Name StartDhcp -Arguments @($server.service_start, $false) | Select-Object -Last 1 } catch { Write-Warning "the start of $($server.name) failed: $($_.Exception.Message)" }
+        if ($null -eq $now -or $now.Status -ne 'Running') { Write-Warning "$($server.name)'s DHCP Server service is not running again; start it there (Set-Service DHCPServer -StartupType $($server.service_start); Start-Service DHCPServer)" }
+    }
+    $State.Data.values.stopped = @()
+    Save-TkState $State
 }
 
 function Get-TkPhase5 {
@@ -2867,9 +3059,6 @@ function Get-TkPhase5 {
         @{ Name = 'refusals'
             Do = {
                 if (@($r.window_refusals).Count -gt 0) { Exit-TkTakeover 1 "the DHCP window is refused: $(@($r.window_refusals) -join '; ')" }
-                if ($null -ne $script:TkWindowWatch -and $script:TkWindowWatch.Elapsed.TotalSeconds -gt $script:TkReconfirmSec) {
-                    if (-not (Confirm-TkTyped 'More than fifteen minutes have passed since the window''s confirmation. Type the domain''s name to make Windows silent' $r.domain)) { Exit-TkTakeover 3 'the silence was not confirmed at the console' }
-                }
             }
         }
         @{ Name = 'takeover'
@@ -2890,8 +3079,12 @@ function Get-TkPhase5 {
         }
         @{ Name = 'silence'
             Do = {
+                # The confirmation; the silence read back; Tenko's scopes on at once; then the
+                # authorizations removed, whose read-back may stay pending. Each part recorded,
+                # so a resume goes on where the last sitting stopped and asks nothing twice.
                 $waits = @{}
                 foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
+                    if ((Get-TkField $State.Data.values "completed.$key") -eq $true) { continue }
                     $waits[$key] = Wait-TkJob -Id $State.Data.jobs[$key] -ManualKind 'migrate.takeover.silence'
                     if ($waits[$key].Step -lt 0) { throw "the takeover job of $($key.Substring(9)) ended $($waits[$key].State) before Windows was made silent" }
                 }
@@ -2908,23 +3101,38 @@ function Get-TkPhase5 {
                     $State.Data.values.leases = $pairs
                     Save-TkState $State
                 }
-                Show-TkRestoreLine $r
-                foreach ($server in $r.dhcp) {
-                    # Recorded before the stop: a later sitting does not read a server that may be stopped.
-                    if (@(Get-TkField $State.Data.values 'stopped') -notcontains $server.name) { $State.Data.values.stopped = @(@(Get-TkField $State.Data.values 'stopped') | Where-Object { $_ }) + $server.name; Save-TkState $State }
-                    $now = Invoke-TkRemote -Server $server.name -Name StopDhcp | Select-Object -Last 1
-                    if ($now.Status -ne 'Stopped' -or $now.Start -ne 'Disabled' -or $now.Listening -ne 0) { throw "$($server.name) is not silent: the service is $($now.Status), start $($now.Start), $($now.Listening) listeners on UDP 67" }
+                # Tenko never goes on while a Windows server of the pair may still answer: both
+                # silences read back first, or both servers started again and Tenko left off.
+                if ((Get-TkField $State.Data.values 'silenced') -ne $true) {
+                    if (-not (Confirm-TkSilence -Readings $r)) { Exit-TkTakeover 3 'the DHCP window was aborted at the console; nothing of it was changed, Windows answers as before' }
+                    Show-TkRestoreLine $r
+                    try {
+                        foreach ($server in $r.dhcp) {
+                            # Recorded before the stop: a later sitting does not read a server that may be stopped.
+                            if (@(Get-TkField $State.Data.values 'stopped') -notcontains $server.name) { $State.Data.values.stopped = @(@(Get-TkField $State.Data.values 'stopped') | Where-Object { $_ }) + $server.name; Save-TkState $State }
+                            $now = Invoke-TkRemote -Server $server.name -Name StopDhcp | Select-Object -Last 1
+                            if ($now.Status -ne 'Stopped' -or $now.Start -ne 'Disabled' -or $now.Listening -ne 0) { throw "$($server.name) is not silent: the service is $($now.Status), start $($now.Start), $($now.Listening) listeners on UDP 67" }
+                        }
+                    } catch {
+                        $why = $_.Exception.Message
+                        Resume-TkWindowsDhcp -State $State
+                        throw "the silence of the Windows DHCP servers was not read back ($why): they are started again as they were and answer, and Tenko's scopes stay off"
+                    }
+                    $State.Data.values.silenced = $true
+                    Save-TkState $State
                 }
-                $State.Data.values.deauthorized = $names
-                Save-TkState $State
-                Write-TkAuthorization -Readings $r -Servers $names -Authorized $false
                 foreach ($key in $waits.Keys) {
-                    [void](Invoke-Tenko -Method POST -Path "/jobs/$($State.Data.jobs[$key])/steps/$($waits[$key].Step)/complete" -Body ([ordered]@{ note = "Windows silent: DHCPServer stopped and disabled on $($names -join ', '), authorizations removed and read back" }))
+                    [void](Invoke-Tenko -Method POST -Path "/jobs/$($State.Data.jobs[$key])/steps/$($waits[$key].Step)/complete" -Body ([ordered]@{ note = "Windows silent: DHCPServer stopped and disabled on $($names -join ', '), read back; the authorizations are removed next" }))
+                    $State.Data.values["completed.$key"] = $true
+                    Save-TkState $State
                 }
-                foreach ($key in $waits.Keys) {
+                foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
                     $done = Wait-TkJob -Id $State.Data.jobs[$key]
                     if ($done.State -ne 'succeeded') { throw "the takeover of $($key.Substring(9)) ended $($done.State) after the silence; run -Reverse to make Windows answer again" }
                 }
+                $State.Data.values.deauthorized = $names
+                Save-TkState $State
+                Sync-TkBarrier -State $State -Remove
             }
             Undo = {
                 # Tenko serves until Windows is ready: each stopped service started while its
@@ -2965,11 +3173,13 @@ function Get-TkPhase5 {
                 }
                 $State.Data.values.stopped = @()
                 $State.Data.values.deauthorized = @()
+                foreach ($key in @($State.Data.values.Keys | Where-Object { $_ -like 'completed.*' -or $_ -eq 'silenced' -or $_ -eq 'barrier_pending' })) { $State.Data.values.Remove($key) }
                 Complete-TkRevert -State $State
             }
         }
         @{ Name = 'check'
             Do = {
+                Sync-TkBarrier -State $State
                 # Tenko's ACK counters: a client answered within five minutes of its scopes on.
                 $watch = [System.Diagnostics.Stopwatch]::StartNew()
                 foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
@@ -3039,10 +3249,18 @@ function Resume-TkTakeoverJob {
                 break
             } catch {
                 $why = $_.Exception.Message
-                if ($why -match '^Tenko refused \S+ \S+ with 4\d\d') {
+                # Only a refusal that names the takeover is Tenko's decision about it; a session
+                # that ended or a route this session may not call is not.
+                if ($why -match '^Tenko refused \S+ \S+ with 401') {
+                    throw "the session with Tenko ended before it turned $cidr on again ($why): no server answers $cidr now, the Windows servers are stopped; run Tenko-Takeover.ps1 -Reverse again, which asks for a new approval and then turns Tenko's scopes on first"
+                }
+                if ($why -match '^Tenko refused \S+ \S+ with 4\d\d migrate\.takeover\.') {
                     $State.Data.values["refused.$key"] = $true
                     Save-TkState $State
                     throw "Tenko refused to turn $cidr on again ($why): no server answers $cidr now; make the Windows DHCP servers start again, then run Tenko-Takeover.ps1 -Reverse, which brings Windows back without asking Tenko again"
+                }
+                if ($why -match '^Tenko refused \S+ \S+ with 4\d\d') {
+                    throw "Tenko did not take the call that turns $cidr on again ($why): no server answers $cidr now, the Windows servers are stopped; run Tenko-Takeover.ps1 -Reverse again once the node takes it, it turns Tenko's scopes on first"
                 }
                 if ($try -ge $script:TkResumeTries) { throw "Tenko did not answer the call that turns $cidr on again ($why): no server answers $cidr now, the Windows servers are stopped; run Tenko-Takeover.ps1 -Reverse again once Tenko answers, it turns Tenko's scopes on first" }
                 Start-Sleep -Seconds $script:TkPollSec
@@ -3286,6 +3504,8 @@ function Invoke-Takeover {
         $latest = Get-TkLatestPhase $data.phases
         if (-not $Reverse -and $latest) {
             Write-TkNote "A run of $domain against Tenko at $($data.tenko.host):$($data.tenko.port) exists; the next phase is $phase, the latest done or failed ${latest}."
+            $pending = @(@(Get-TkField $data.values 'barrier_pending') | Where-Object { $_ })
+            if ($pending.Count -gt 0) { Write-TkNote "Pending: the removal of the DHCP servers' authorization has not reached $($pending -join ', '); this sitting reads it again." }
             $choice = (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant()
             if ($choice -eq 'r') { $Reverse = $true }
         }
@@ -3305,6 +3525,7 @@ function Invoke-Takeover {
         } else {
             Select-TkMirrorHost -Readings $readings -Chosen $data.readings.mirror_host.name
             $script:TkKnownHosts = @($script:TkKnownHosts + @($data.readings.controllers | ForEach-Object { $_.name }) + @($data.readings.dhcp | ForEach-Object { $_.name }) + $data.readings.mirror_host.name | Select-Object -Unique)
+            if (-not $Reverse) { Sync-TkBarrier -State $state }
         }
         $payloads = @{
             exporter  = Get-TkPayload -Name 'Tenko-DhcpMirror.ps1' -Directory $Directory -OutDir (Join-Path $state.Dir 'payload')
@@ -3365,8 +3586,9 @@ function Invoke-Takeover {
                 if (-not (Confirm-TkTyped 'The parallel period is over and the finish (phase 6) removes the DHCP role from both servers. Type the domain''s name to go on' $domain)) { Exit-TkTakeover 3 'waiting for the parallel period' }
                 $data.values.finish_confirmed = $true
             }
-            # The window is confirmed at the console in every sitting that starts phase 4 or 5.
-            if (('4', '5' -contains $phase) -and $null -eq $script:TkWindowWatch) { [void](Confirm-TkWindow -State $state) }
+            # The DNS window is confirmed at the console in every sitting that starts it; the
+            # DHCP window by its own one confirmation, right before the silence.
+            if ($phase -eq '4' -and $null -eq $script:TkWindowWatch) { [void](Confirm-TkWindow -State $state) }
             Write-TkNote "Phase $phase"
             Invoke-TkPhase -State $state -Phase $phase -Payloads $payloads
             [void](Invoke-Tenko -Method PUT -Path "/migrate/runs/$run/phases/$phase" -Body ([ordered]@{ state = 'done' }) -Expect @(200, 204, 404))

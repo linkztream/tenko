@@ -31,6 +31,11 @@ Describe 'The code' {
         ConvertTo-TkHex (Get-TkSha256 $body) | Should -Be $code.request_sha256
         ConvertTo-TkHex (ConvertFrom-TkBase64Url $code.key_base64url) | Should -Be $code.key_uncompressed
         ConvertTo-TkHex (ConvertTo-TkUuidByte $code.approval_id) | Should -Be $code.approval_id_octets
+        $preimage = Get-TkApprovalPreimage -Domain $code.domain -RootSha256 (ConvertFrom-TkHex $code.root_sha256) -RequestSha256 (Get-TkSha256 $body) -Key (ConvertFrom-TkHex $code.key_uncompressed) -Id $code.approval_id
+        ConvertTo-TkHex $preimage | Should -Be $code.preimage
+        $digest = ConvertTo-TkHex (Get-TkSha256 $preimage)
+        $digest | Should -Be $code.sha256
+        $digest.Substring(0, 20) | Should -Be $code.first_80_bits
         $result = Get-TkApprovalCode -Domain $code.domain -RootSha256 (ConvertFrom-TkHex $code.root_sha256) -RequestSha256 (Get-TkSha256 $body) `
             -Key (ConvertFrom-TkHex $code.key_uncompressed) -Id $code.approval_id
         $result | Should -BeExactly $code.code
@@ -94,5 +99,33 @@ Describe 'The request' {
         $bytes = ConvertTo-TkApprovalBody -Plan $plan -Key (ConvertFrom-TkHex $code.key_uncompressed) -Machine 'ADM1' -User 'CORP\admin'
         $text = [System.Text.Encoding]::ASCII.GetString($bytes)
         $text | Should -BeExactly ('{"purpose":"windows-takeover","plan":{"domain":"corp.example.test","operations":["mirrors"]},"key":"' + $code.key_base64url + '","client":{"machine":"ADM1","user":"CORP\\admin","version":"0.1.0"}}')
+    }
+
+    It 'is written byte for byte as the vector''s body from the vector''s plan, its Kerberos account included' {
+        $parsed = ConvertFrom-TkJson -Chars $code.request_body.ToCharArray()
+        $script:TkVersion = [string]$parsed.client.version
+        $bytes = ConvertTo-TkApprovalBody -Plan $parsed.plan -Key (ConvertFrom-TkHex $code.key_uncompressed) -Machine $parsed.client.machine -User $parsed.client.user
+        [System.Text.Encoding]::UTF8.GetString($bytes) | Should -BeExactly $code.request_body
+        ConvertTo-TkHex (Get-TkSha256 $bytes) | Should -Be $code.request_sha256
+    }
+
+    It 'carries Tenko''s computer account exactly when the plan adopts one, in the server''s form' {
+        $readings = [ordered]@{
+            domain = 'corp.example.test'; forest_root = 'corp.example.test'
+            controllers = @([ordered]@{ name = 'dc1.corp.example.test'; addresses = @('192.0.2.11'); pdc = $true })
+            zones = @([ordered]@{ name = 'corp.example.test'; update = 'Secure' }); forwarders = @()
+            dhcp = @([ordered]@{ name = 'dc1.corp.example.test'; address = '192.0.2.11'; scopes = @([ordered]@{ cidr = '192.0.2.0/24' }); failover = @() })
+            mirror_host = [ordered]@{ name = 'srv1.corp.example.test'; address = '192.0.2.30' }
+        }
+        $plan = Get-TkPlan -Readings $readings -NodeName 'tenko'
+        $plan.operations | Should -Contain 'kerberos_adopt'
+        $plan.kerberos.realm | Should -BeExactly 'CORP.EXAMPLE.TEST'
+        $plan.kerberos.account | Should -BeExactly 'TENKO$'
+        @($plan.kerberos.spns) | Should -Be @('DNS/tenko.corp.example.test')
+        @($plan.Keys)[-1] | Should -Be 'kerberos'
+        $readings.zones[0].update = 'NonsecureAndSecure'
+        $plan = Get-TkPlan -Readings $readings -NodeName 'tenko'
+        $plan.operations | Should -Not -Contain 'kerberos_adopt'
+        $plan.Contains('kerberos') | Should -BeFalse
     }
 }

@@ -70,6 +70,15 @@ Describe 'The remote blocks' {
         }
     }
 
+    It 'no block assigns to a variable of its own parameter''s name, whose type would convert the value (names ignore case)' {
+        foreach ($name in $script:TkRemote.Keys) {
+            $ast = $script:TkRemote[$name].Ast
+            $params = @($(if ($ast.ParamBlock) { $ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath } }))
+            $assigned = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and $n.Left -is [System.Management.Automation.Language.VariableExpressionAst] }, $true) | ForEach-Object { $_.Left.VariablePath.UserPath })
+            @($assigned | Where-Object { $params -contains $_ }) | Should -BeNullOrEmpty -Because $name
+        }
+    }
+
     It 'the remote blocks call no command that compiles or runs text' {
         foreach ($name in $script:TkRemote.Keys) {
             $text = $script:TkRemote[$name].ToString()

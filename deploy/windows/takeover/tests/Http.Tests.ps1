@@ -202,6 +202,27 @@ Describe 'The approval''s pin' {
     }
 }
 
+Describe 'A refused collect' {
+    It 'says plainly that the approval was denied or withdrawn, retries nothing, and offers a new approval' {
+        Use-TestConnection
+        $script:TkVersion = '0.0.0-test'
+        $nonce = ConvertTo-TkBase64Url ([byte[]](1..32))
+        $server.queue.Clear()
+        $server.queue.Enqueue((Get-TestAnswer -Status 201 -Body "{`"id`":`"0190d1c2-0000-7000-8000-00000000a001`",`"nonce`":`"$nonce`"}"))
+        $server.queue.Enqueue((Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.approval.denied","status":403,"detail":"the approver signed out"}'))
+        $script:offers = 0
+        Mock Read-TkAnswer { $script:offers++; 'n' }
+        $before = $server.requests
+        $failure = $null
+        try { [void](Request-TkApproval -Plan ([ordered]@{ domain = 'corp.example.test' }) -Domain 'corp.example.test' 6>$null) } catch { $failure = $_.Exception }
+        $failure.Message | Should -Match 'denied or withdrawn in Tenko''s UI, or the administrator who gave it signed out everywhere, was disabled or lost the administrator role; nothing was collected: run the script again for a new approval'
+        $failure.Data['tk.exit'] | Should -Be 1
+        ($server.requests - $before) | Should -Be 2 -Because 'one request and one collect, no retry'
+        $script:offers | Should -Be 1
+        $server.queue.Clear()
+    }
+}
+
 Describe 'An older node' {
     # A server that presents its leaf alone, as Tenko's API listener did before it presented
     # its root: refused on both editions, by the real check, with a sentence that says why.
@@ -220,6 +241,21 @@ Describe 'An older node' {
         Use-TestConnection
         $script:TkConn.Port = $old.port
         { Invoke-TkHttp -Method GET -Path '/api/v1/health' -NoSession } | Should -Throw '*presented its leaf certificate alone, without the root*older node*'
+    }
+}
+
+Describe 'The presented certificates' {
+    It 'are never completed from the platform''s chain on Windows PowerShell: an empty extra store is refused' -Skip:$core {
+        # Runner: Windows PowerShell 5.1 (PowerShell 7 hands the chain over that way by design).
+        $chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new()
+        try {
+            $chain.ChainPolicy.ExtraStore.Add($ca) | Out-Null
+            [void]$chain.Build($leaf)
+            $chain.ChainPolicy.ExtraStore.Clear()
+            $chain.ChainElements.Count | Should -BeGreaterThan 1 -Because 'the platform completed the chain'
+            (Get-TkTlsCallback).Invoke($null, $leaf, $chain, [System.Net.Security.SslPolicyErrors]::RemoteCertificateChainErrors) | Should -BeFalse
+            $script:TkConn.LastTls.Failure | Should -Match 'an empty extra store'
+        } finally { $chain.Dispose() }
     }
 }
 

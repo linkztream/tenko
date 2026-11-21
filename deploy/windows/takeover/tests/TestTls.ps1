@@ -22,7 +22,8 @@ function Get-TestCertificate {
         $request.CertificateExtensions.Add([System.Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($eku, $false))
     }
     $from = [datetimeoffset]::UtcNow.AddMinutes(-5)
-    $to = [datetimeoffset]::UtcNow.AddDays(1)
+    # A certificate never ends after its issuer: .NET refuses to sign one that does.
+    $to = $(if ($null -eq $Issuer) { [datetimeoffset]::UtcNow.AddDays(1) } else { [datetimeoffset]::new($Issuer.NotAfter.ToUniversalTime()) })
     if ($null -eq $Issuer) { $made = $request.CreateSelfSigned($from, $to) }
     else {
         $serial = [byte[]]::new(8)

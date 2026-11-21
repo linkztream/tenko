@@ -64,7 +64,7 @@ function Get-FakeWorld {
     foreach ($name in $script:FakeDomain, "_msdcs.$($script:FakeDomain)", '2.0.192.in-addr.arpa') {
         $zones[$name] = [ordered]@{}
         foreach ($dc in 'dc1', 'dc2') {
-            $zones[$name][$dc] = @{ Type = 'Primary'; Ds = $true; Update = 'NonsecureAndSecure'; Scope = $(if ($name.StartsWith('_msdcs')) { 'Forest' } else { 'Domain' }); Transfer = 'NoTransfer'; Notify = 'NoNotify'; Secondaries = @(); NotifyServers = @(); Registry = @{ Transfer = 3; Notify = 0 } }
+            $zones[$name][$dc] = @{ Type = 'Primary'; Ds = $true; Update = 'NonsecureAndSecure'; Scope = $(if ($name.StartsWith('_msdcs')) { 'Forest' } else { 'Domain' }); Partition = ''; Transfer = 'NoTransfer'; Notify = 'NoNotify'; Secondaries = @(); NotifyServers = @(); Registry = @{ Transfer = 3; Notify = 0 } }
         }
     }
     return @{
@@ -89,6 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
+        forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
         batchRight = $false
         rsat = $true
@@ -127,12 +128,12 @@ function Assert-FakeServiceRunning {
 }
 
 function Add-FakeAccount {
-    # The run's own account by its recorded SID or its mark; a sitting may end right after
-    # the creation (crashAfterCreate).
+    # The run's own account by the SID the script resolved; the mark goes into the new
+    # object's description. A sitting may end right after the creation (crashAfterCreate).
     param([string]$Name, [string]$KnownSid, [string]$Mark)
     $w = $script:world
     if ($w.accounts.Contains($Name)) {
-        if ($w.accounts[$Name] -ne $KnownSid -and -not ($Mark -and $w.marks[$Name] -ceq $Mark)) { throw "the account $Name exists and carries neither the SID nor the mark of this run: it is not used and never removed" }
+        if ($w.accounts[$Name] -ne $KnownSid) { throw "the account $Name exists and is not the run's own: it is not used and never removed" }
         return $w.accounts[$Name]
     }
     $w.nextRid++
@@ -169,7 +170,7 @@ function Invoke-FakeRemote {
             foreach ($zone in $w.zones.Keys) {
                 $z = $w.zones[$zone][$s]
                 if ($null -eq $z) { continue }
-                @{ Name = $zone; Type = $z.Type; Ds = $z.Ds; Scope = $z.Scope; Update = $z.Update; Reverse = $zone.EndsWith('.arpa'); Transfer = $z.Transfer; Notify = $z.Notify; Secondaries = @($z.Secondaries); NotifyServers = @($z.NotifyServers); Masters = @(); Serial = '7'; Aging = $false }
+                @{ Name = $zone; Type = $z.Type; Ds = $z.Ds; Scope = $z.Scope; Partition = $z.Partition; Update = $z.Update; Reverse = $zone.EndsWith('.arpa'); Transfer = $z.Transfer; Notify = $z.Notify; Secondaries = @($z.Secondaries); NotifyServers = @($z.NotifyServers); Masters = @(); Serial = '7'; Aging = $false }
             }
             @{ Name = '.'; Type = 'ServerForwarder'; Masters = @('198.51.100.53') }
             @{ Name = ''; Type = 'Scavenging'; Masters = @(); Aging = $false }
@@ -193,6 +194,8 @@ function Invoke-FakeRemote {
         'ReadComputers' {
             @{ Name = "srv1.$domain"; Server = $true; IPv4 = '192.0.2.30'; Sid = "$($script:FakeSid)-1300"; Delegation = [bool]$w.srvDelegation }
             @{ Name = "pc1.$domain"; Server = $false; IPv4 = '192.0.2.120'; Sid = "$($script:FakeSid)-1301"; Delegation = $false }
+            # A computer a domain user created under the quota, named like a stale DHCP server.
+            if ($w.quotaComputer) { @{ Name = "dhcp3.$domain"; Server = $true; IPv4 = '192.0.2.33'; Sid = "$($script:FakeSid)-1302"; Delegation = $false; Creator = "$($script:FakeSid)-1105" } }
         }
         'ReadNameUse' { $w.nameUse }
         'ReadHardening' { @{ Kind = 'server'; LdapSigning = 2; ChannelBinding = 2; Spooler = 'Stopped'; TimeStatus = 'Last Successful Sync Time: 2026-11-21'; TimeSource = $(if ($s -eq 'dc1') { $w.timeSource } else { "dc1.$domain" }) } }
@@ -238,10 +241,25 @@ function Invoke-FakeRemote {
             $acl = $(if ($w.tenkoAcl) { $w.tenkoAcl } else { "O:DAG:DUD:(A;;RPWPCRCCDCLCLORCWOWDSDDTSW;;;DA)(A;;CR;;;$($script:FakeSid)-1234)(A;;RPWP;;;PS)(A;;RC;;;AU)(OA;;WP;bf967a7f-0de6-11d0-a285-00aa003049e2;;CA)(OA;;RPWP;6db69a1c-9422-11d1-aebd-0000f80367c1;;S-1-5-32-561)(OA;;RP;46a9b11d-60ae-405a-b7e8-ff8a58d456d2;;S-1-5-32-560)" })
             @{ Dn = "CN=$($a[0]),$($a[1])"; Sid = $sid; Groups = @(); Uac = 4096; Encryption = 24; Spns = @($a[2]); DelegateTo = @(); PwdLastSet = $w.pwdLastSet; Sddl = $acl; AccountOps = 0 }
         }
+        'ReadRunObject' {
+            # Someone may plant an object of the run's name with a mark copied from another
+            # object of the run (forge = @{ Name; From }).
+            if ($a[0] -eq 'gpo') {
+                if ($w.gpo) { @{ Id = $w.gpo; Mark = $w.gpoMark; Creator = ''; Sddl = 'O:DAG:DAD:(A;;GA;;;DA)(A;;GA;;;SY)(OA;;CR;edacfd8f-ffb3-11d1-b41d-00a0c968f939;;AU)'; AccountOps = 0 } }
+                return
+            }
+            if ($w.forge -and $w.forge.Name -eq $a[1] -and -not $w.accounts.Contains($a[1])) {
+                $w.nextRid++; $w.accounts[$a[1]] = "$($script:FakeSid)-$($w.nextRid)"; $w.marks[$a[1]] = $w.marks[$w.forge.From]
+            }
+            if ($w.accounts.Contains($a[1])) {
+                $sddl = $(if ($w.objectAcl.ContainsKey($a[1])) { $w.objectAcl[$a[1]] } else { 'O:DAG:DAD:(A;;GA;;;DA)(A;;GA;;;SY)(OA;;CR;ab721a53-1e2f-11d0-9819-00aa0040529b;;WD)(OA;;WP;bf967a7f-0de6-11d0-a285-00aa003049e2;;CA)' })
+                @{ Id = $w.accounts[$a[1]]; Mark = [string]$w.marks[$a[1]]; Creator = [string]$w.creators[$a[1]]; Sddl = $sddl; AccountOps = 0 }
+            }
+        }
         'ReadPwdLastSet' { $w.pwdLastSet }
         'DisableAccount' { $w.disabled = $a[0]; $false }
         'NewGpo' {
-            if ($w.gpo -and $w.gpo -ne $a[3] -and -not ($a[4] -and $w.gpoMark -ceq $a[4])) { throw "a group policy object named '$($a[0])' exists and carries neither the id nor the mark of this run" }
+            if ($w.gpo -and $w.gpo -ne $a[3]) { throw "a group policy object named '$($a[0])' exists and is not the run's own" }
             if (-not $w.gpo) { $w.gpoMark = $a[4] }
             $w.gpo = '6ac1786c-016f-11d2-945f-00c04fb984f9'; $w.gpoMembers = @($a[2]); $w.gpo
         }
@@ -259,16 +277,16 @@ function Invoke-FakeRemote {
             # A secondary holds what Tenko serves now, a file-backed copy what it froze, a
             # directory-integrated zone the directory's records. Tenko may add records once a
             # copy of the PDC emulator was read outside the directory (lateAdds).
+            # Every record answers its time to live, 3600 unless it names its own.
             $z = $w.zones[$a[0]][$s]
-            if ($z.Type -eq 'Secondary') { Get-FakeLive $a[0] }
-            elseif (-not $z.Ds) { @($w.copies[$a[0]]) }
-            else { @($w.records[$a[0]]) }
+            $held = $(if ($z.Type -eq 'Secondary') { Get-FakeLive $a[0] } elseif (-not $z.Ds) { @($w.copies[$a[0]]) } else { @($w.records[$a[0]]) })
+            @($held | Where-Object { $null -ne $_ }) | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; Data = $_.Data; Ttl = $(if ($_.PSObject.Properties['Ttl']) { $_.Ttl } else { '3600' }) } }
             if ($s -eq 'dc1' -and -not $z.Ds -and $w.lateAdds.ContainsKey($a[0])) {
                 $w.tenkoAdds[$a[0]] = @(@($(if ($w.tenkoAdds.ContainsKey($a[0])) { $w.tenkoAdds[$a[0]] })) + @($w.lateAdds[$a[0]]) | Where-Object { $null -ne $_ })
                 $w.lateAdds.Remove($a[0])
             }
         }
-        'ReadSoa' { @{ Mname = "dc1.$domain."; Rname = "hostmaster.$domain." } }
+        'ReadSoa' { @{ Mname = "dc1.$domain."; Rname = "hostmaster.$domain."; Timers = $(if ($w.timersTamper -and $w.soaSet.ContainsKey($a[0])) { '1 600 86400 3600 3600' } else { '900 600 86400 3600 3600' }) } }
         'ConvertToSecondary' {
             $z = $w.zones[$a[0]][$s]
             if ($a[3]) { $z.Type = 'Secondary'; $z.Ds = $false; $w.directory = @($w.directory | Where-Object { $_ -ne $a[0] }) }
@@ -290,6 +308,8 @@ function Invoke-FakeRemote {
                     $w.copies[$a[0]] = @(@($w.copies[$a[0]] | Where-Object { -not ($_.Name -eq $fix.Name -and @($fix.Types) -contains $_.Type) }) + @($fix.Records | ForEach-Object { [pscustomobject]@{ Name = $fix.Name; Type = $_.Type; Data = $_.Data } }))
                 }
             }
+            # An administrator of the PDC emulator may change a time to live meanwhile (ttlTamper).
+            if ($w.ttlTamper) { $w.copies[$a[0]] = @($w.copies[$a[0]] | ForEach-Object { if ($_.Name -eq 'pc1') { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; Data = $_.Data; Ttl = '1' } } else { $_ } }) }
             $w.soaSet[$a[0]] = "$($a[2]) $($a[3])"
         }
         'RestoreZone' {
@@ -303,14 +323,19 @@ function Invoke-FakeRemote {
         'IntegrateZone' {
             $z = $w.zones[$a[0]][$s]
             if (-not $z.Ds) { $w.records[$a[0]] = @($w.copies[$a[0]]) }
-            $z.Type = 'Primary'; $z.Ds = $true; $z.Update = $a[2]
+            $z.Type = 'Primary'; $z.Ds = $true; $z.Update = $a[3]
+            $w.integratedScope[$a[0]] = "$($a[1])|$($a[2])"
             if ($w.directory -notcontains $a[0]) { $w.directory += $a[0] }
-            @{ Type = 'Primary'; Ds = $true; Update = $(if ($w.leaveOpen) { 'NonsecureAndSecure' } else { $a[2] }) }
+            @{ Type = 'Primary'; Ds = $true; Update = $(if ($w.leaveOpen) { 'NonsecureAndSecure' } else { $a[3] }) }
         }
         'RemoveSecondary' { $z = $w.zones[$a[0]][$s]; $z.Type = 'Primary'; $z.Ds = $true; $z.Update = $w.zones[$a[0]]['dc1'].Update }
         'ReadZone' { $z = $w.zones[$a[0]][$s]; @{ Type = $z.Type; Ds = $z.Ds; Update = $z.Update } }
         'ReadLeases' { Assert-FakeServiceRunning $s; if ($a[0] -eq '192.0.2.0') { @{ Ip = '192.0.2.101'; Client = '00-00-5e-00-53-11' } } }
-        'StopDhcp' { $w.services[$s].Status = 'Stopped'; $w.services[$s].Serving = $false; $w.services[$s].Start = 'Disabled'; @{ Status = 'Stopped'; Start = 'Disabled'; Listening = 0 } }
+        'StopDhcp' {
+            # A service that does not stop (stopFailsOn) is read back as running.
+            if ($w.stopFailsOn -eq $s) { return @{ Status = 'Running'; Start = 'Automatic'; Listening = 1 } }
+            $w.services[$s].Status = 'Stopped'; $w.services[$s].Serving = $false; $w.services[$s].Start = 'Disabled'; @{ Status = 'Stopped'; Start = 'Disabled'; Listening = 0 }
+        }
         'StartDhcp' {
             $service = $w.services[$s]
             $service.Start = $a[0]
@@ -388,7 +413,7 @@ function Invoke-FakeTenko {
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' { return (Get-FakeJob 'prepare') }
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/takeover$' { return (Get-FakeJob 'takeover') }
         '^GET /jobs/(.+)$' { return [ordered]@{ job = $w.jobs[$Matches[1]] } }
-        '^POST /jobs/([^/]+)/steps/(\d+)/complete$' { $job = $w.jobs[$Matches[1]]; $job.steps[[int]$Matches[2]].state = [ordered]@{ state = 'done' }; $job.state = 'succeeded'; $w.scopesOn = $true; return [ordered]@{} }
+        '^POST /jobs/([^/]+)/steps/(\d+)/complete$' { $job = $w.jobs[$Matches[1]]; $job.steps[[int]$Matches[2]].state = [ordered]@{ state = 'done' }; $job.state = 'succeeded'; $w.scopesOn = $true; [void]$w.calls.Add('tenko|task-complete'); return [ordered]@{} }
         '^GET /dns/zones$' {
             $name = ($query -replace '^name=', '')
             return [ordered]@{ items = @($w.tzones.Values | Where-Object { $_.name -eq $name }) }
@@ -414,6 +439,7 @@ function Invoke-FakeTenko {
             $w.resumeCalls++
             if ($w.resumeFails -eq 'refuse') { throw "Tenko refused $Method $Path with 409 migrate.takeover.not_resumable: reverted in the UI" }
             if ($w.resumeFails -eq 'down') { throw 'the connection to Tenko failed: injected' }
+            if ($w.resumeFails -eq 'session') { throw "Tenko refused $Method $Path with 401 auth.session.expired: the session ended" }
             $w.scopesOn = $true; [void]$w.calls.Add('tenko|scopes-on'); return [ordered]@{}
         }
         '^GET /dhcp/leases$' { return [ordered]@{ items = $w.tenkoLeases } }
@@ -467,6 +493,16 @@ function Install-FakeWorld {
         $script:world.answers.RemoveAt(0)
         return [string]$next
     }
+    # The host's choice prompt answers the next queued answer, Abort when it names no choice.
+    Mock Read-TkChoice {
+        if ($script:world.answers.Count -eq 0) { throw "no answer queued for the choice: $Caption" }
+        $next = [string]$script:world.answers[0]
+        $script:world.answers.RemoveAt(0)
+        $script:world.choices++
+        $script:world.lastChoice = $Message
+        $picked = @($Choices | Where-Object { ($_ -replace '&', '') -eq $next })
+        return $(if ($picked.Count -eq 1) { $picked[0] } else { $Choices[$Default] })
+    }
     $script:world.window = [ordered]@{ started_by = 'admin'; started_at = '2026-11-21T10:00:00Z' }
 }
 
@@ -491,4 +527,4 @@ function Invoke-FakeRun {
 
 # The answers of a first sitting: the domain, the DHCP servers' confirmation, the mirror
 # host, Tenko's address, the change list's confirmation, the window's confirmation.
-$script:FirstSitting = @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'corp.example.test')
+$script:FirstSitting = @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'corp.example.test', 'Continue')

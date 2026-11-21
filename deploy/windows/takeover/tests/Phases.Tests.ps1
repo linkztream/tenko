@@ -98,7 +98,9 @@ Describe 'A failure at a step' {
         $state.steps[$step].state | Should -Be 'failed'
         $state.steps[$step].error | Should -Match 'injected'
         # A new process: the mirrors' tokens are gone, and the exporter step makes them anew.
-        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 3 -Because $script:lastError
+        # A sitting that starts the DNS window confirms it; the DHCP window asks its choice.
+        $resume = $(if ($step -like '5.*') { @('c', 'Continue') } else { @('c', 'corp.example.test', 'Continue') })
+        Invoke-FakeRun -Answers $resume | Should -Be 3 -Because $script:lastError
         (Read-State).steps[$step].state | Should -Be 'done'
         @($script:world.tasks).Count | Should -Be 2
     }
@@ -199,6 +201,17 @@ Describe 'The refusals' {
         $readings.refusals | Should -Contain 'The zone corp.example.test takes secure updates only. This release of Tenko cannot yet take over a zone that takes secure updates only without weakening it, because its secure updates (the Kerberos line of the identity plan) are not complete. Nothing was changed. Take over this domain with a release whose notes say the Kerberos line is complete.'
     }
 
+    It 'a zone its reverse could not put back where it is (<case>) is refused in phase 0' -ForEach @(
+        @{ case = 'not directory-integrated'; setup = { foreach ($dc in 'dc1', 'dc2') { $script:world.zones['corp.example.test'][$dc].Ds = $false } }; text = 'not directory-integrated' }
+        @{ case = 'a custom partition not named'; setup = { foreach ($dc in 'dc1', 'dc2') { $script:world.zones['corp.example.test'][$dc].Scope = 'Custom' } }; text = "replicated to 'Custom'" }
+    ) {
+        & $setup
+        $out = @(Invoke-FakeRun -Answers $script:FirstSitting 6>&1)
+        $out[-1] | Should -Be 1
+        ($out -join "`n") | Should -Match ([regex]::Escape("The zone corp.example.test is $text"))
+        (Get-WindowsChange) | Should -BeNullOrEmpty
+    }
+
     It 'the DHCP window is refused while <case>' -ForEach @(
         @{ case = 'a DHCPv6 scope exists'; setup = { $script:world.v6 = @('2001:db8::') } }
         @{ case = 'a group policy sets the start of DHCPServer'; setup = { $script:world.startPolicy = @('\\corp.example.test\SYSVOL\corp.example.test\Policies\{X}\Machine\Microsoft\Windows NT\SecEdit\GptTmpl.inf') } }
@@ -270,6 +283,14 @@ Describe 'The DHCP servers of the domain' {
         $script:world.calls | Should -Not -Contain 'dc1|ReadDhcpServer'
     }
 
+    It 'refuse a listed name whose computer object a domain user made under the machine account quota' {
+        $script:world.quotaComputer = $true
+        $script:world.foreign = @(@{ Name = 'dhcp3.corp.example.test'; Address = '192.0.2.33' })
+        Invoke-FakeRun -Answers @('corp.example.test', 'y', '1') | Should -Be 1
+        $script:lastError | Should -Match 'dhcp3\.corp\.example\.test, whose computer object S-1-5-21-1000-2000-3000-1105 created under the machine account quota'
+        $script:world.calls | Should -Not -Contain 'dhcp3|ReadDhcpServer'
+    }
+
     It 'are read only on an explicit yes: Enter declines' {
         Invoke-FakeRun -Answers @('corp.example.test', '') | Should -Be 1
         $script:world.calls | Should -Not -Contain 'dc1|ReadDhcpServer'
@@ -288,25 +309,54 @@ Describe 'The objects of the run' {
 
     It 'an account of the run''s name that this run did not create is refused and survives the reverse' {
         $script:world.accounts['tenko-mirror'] = 'S-1-5-21-1000-2000-3000-999'
-        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
         $script:lastError | Should -Match 'carries neither the SID nor the mark of this run'
         Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
         $script:world.accounts['tenko-mirror'] | Should -Be 'S-1-5-21-1000-2000-3000-999'
     }
 
-    It 'an account a sitting created but could not record is known again by the run''s mark, recorded before the creation' {
+    It 'an account a sitting created but could not record is known again by its own mark, whose secret the state file holds' {
         $script:world.crashAfterCreate = 'tenko-mirror'
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
-        (Read-State).values.mark | Should -Match '^Tenko takeover [0-9a-f]{32}$'
-        $script:world.marks['tenko-mirror'] | Should -BeExactly (Read-State).values.mark
-        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 3 -Because $script:lastError
+        $values = (Read-State).values
+        $values.mark_secret | Should -Match '^[0-9a-f]{64}$'
+        $mark = Get-TkRunMark -State @{ Data = @{ values = $values } } -Name 'tenko-mirror'
+        $script:world.marks['tenko-mirror'] | Should -BeExactly $mark
+        $mark | Should -Not -BeExactly (Get-TkRunMark -State @{ Data = @{ values = $values } } -Name 'tenko$') -Because 'a mark fits one name only'
+        Invoke-FakeRun -Answers @('c', 'corp.example.test', 'Continue') | Should -Be 3 -Because $script:lastError
         (Read-State).values.mirror_account_sid | Should -Be $script:world.accounts['tenko-mirror']
+    }
+
+    It 'an account that carries the mark but was made under the machine account quota, or that another account may write, is refused' {
+        $script:world.crashAfterCreate = 'tenko-mirror'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:world.creators['tenko-mirror'] = 'S-1-5-21-1000-2000-3000-1105'
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1
+        $script:lastError | Should -Match 'created by S-1-5-21-1000-2000-3000-1105 under the machine account quota'
+        $script:world.creators.Remove('tenko-mirror')
+        $script:world.objectAcl['tenko-mirror'] = 'O:DAG:DAD:(A;;GA;;;DA)(A;;WP;;;S-1-5-21-1000-2000-3000-1105)'
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1
+        $script:lastError | Should -Match 'may be written by S-1-5-21-1000-2000-3000-1105'
+        $script:world.objectAcl['tenko-mirror'] = 'O:S-1-5-21-1000-2000-3000-1105G:DAD:(A;;GA;;;DA)'
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1
+        $script:lastError | Should -Match 'is owned by S-1-5-21-1000-2000-3000-1105'
+    }
+
+    It 'Tenko''s computer account planted with a mark copied from another object of the run is refused, its password untouched' {
+        $script:TkKerberosLineComplete = $true
+        try {
+            $script:world.zones['corp.example.test'].dc1.Update = 'Secure'; $script:world.zones['corp.example.test'].dc2.Update = 'Secure'
+            $script:world.forge = @{ Name = 'tenko$'; From = 'tenko-mirror' }
+            Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
+            $script:lastError | Should -Match 'the account tenko\$ exists and carries neither the SID nor the mark of this run'
+            $script:world.calls | Should -Not -Contain 'dc1|NewTenkoAccount'
+        } finally { $script:TkKerberosLineComplete = $false }
     }
 
     It 'a group policy object of the run''s name that this run did not make is refused' {
         $script:world.gpo = '00000000-0000-0000-0000-00000000abcd'
-        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
-        $script:lastError | Should -Match 'carries neither the id nor the mark of this run'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
+        $script:lastError | Should -Match 'carries neither the SID nor the mark of this run'
     }
 
     It 'a remote folder owned by another account is refused, never adopted' {
@@ -324,16 +374,24 @@ Describe 'The DHCP window' {
         $tenko = @($script:world.tenkoCalls)
     }
 
-    It 'stops DHCPServer on both servers, reads the silence back, removes both authorizations and reads them back on each controller, and only then completes the job''s task' {
+    It 'asks once, stops DHCPServer on both servers and reads the silence back, completes Tenko''s task, and only then removes both authorizations and reads them back on each controller' {
+        $script:world.choices | Should -Be 1
+        $script:world.lastChoice | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
+        $script:world.lastChoice | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
+        $script:world.lastChoice | Should -Match 'may take some minutes to reach every controller'
+        $script:world.lastChoice | Should -Match 'Tenko-Takeover\.ps1 -Reverse'
         $stop1 = [array]::IndexOf($calls, 'dc1|StopDhcp'); $stop2 = [array]::IndexOf($calls, 'dc2|StopDhcp')
+        $task = [array]::IndexOf($calls, 'tenko|task-complete')
         $auth = [array]::IndexOf($calls, 'dc1|SetAuthorization')
         $read1 = [array]::LastIndexOf($calls, 'dc1|ReadAuthorization'); $read2 = [array]::LastIndexOf($calls, 'dc2|ReadAuthorization')
         $stop1 | Should -BeGreaterThan -1
         $stop2 | Should -BeGreaterThan $stop1
-        $auth | Should -BeGreaterThan $stop2
+        $task | Should -BeGreaterThan $stop2 -Because 'Tenko goes on only once both silences are read back'
+        $auth | Should -BeGreaterThan $task -Because 'the authorizations follow Tenko''s task'
         $read1 | Should -BeGreaterThan $auth
         $read2 | Should -BeGreaterThan $auth
         @($tenko | Where-Object { $_ -match '/steps/1/complete$' }).Count | Should -Be 1
+        @((Read-State).values.barrier_pending).Count | Should -Be 0
     }
 
     It 'names the DHCP Server service exactly, never the DHCP client' {
@@ -387,16 +445,82 @@ Describe 'A failure inside the DHCP window' {
         @((Read-State).values.leases['dc1.corp.example.test|192.0.2.0']).Count | Should -Be 1
     }
 
-    It 'leaves a later sitting able to start, and to reverse, after a stop between the two servers' {
+    It 'starts the first server again and leaves Tenko off when the stop of the second fails, and can still reverse' {
         $script:world.failAt = 'StopDhcp'; $script:world.failOn = 'dc2'
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
-        $script:world.services.dc1.Status | Should -Be 'Stopped'
-        $script:world.calls.Clear()
-        Invoke-FakeRun -Reverse -Answers @() | Should -Be 5 -Because $script:lastError
-        $script:world.calls | Should -Not -Contain 'dc1|ReadDhcpServer'
+        $script:lastError | Should -Match 'started again as they were and answer, and Tenko''s scopes stay off'
         $script:world.services.dc1.Status | Should -Be 'Running'
         $script:world.services.dc1.Serving | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        $script:world.calls | Should -Not -Contain 'tenko|task-complete'
+        $script:world.calls.Clear()
+        Invoke-FakeRun -Reverse -Answers @() | Should -Be 5 -Because $script:lastError
+        $script:world.services.dc1.Serving | Should -BeTrue
         $script:world.services.dc2.Serving | Should -BeTrue
+    }
+
+    It 'leaves Windows serving and Tenko off when a silence is not read back' {
+        $script:world.stopFailsOn = 'dc2'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:lastError | Should -Match 'dc2\.corp\.example\.test is not silent'
+        $script:world.services.dc1.Status | Should -Be 'Running'
+        $script:world.services.dc1.Start | Should -Be 'Automatic'
+        $script:world.services.dc2.Serving | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        @($script:world.authorized).Count | Should -Be 2
+        @((Read-State).values.stopped).Count | Should -Be 0
+    }
+
+    It 'changes nothing on Abort, the default' {
+        $answers = @($script:FirstSitting[0..5]) + 'Abort'
+        Invoke-FakeRun -Answers $answers | Should -Be 3
+        $script:lastError | Should -Match 'aborted at the console'
+        $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
+        $script:world.calls | Should -Not -Contain 'tenko|task-complete'
+        $script:world.services.dc1.Serving | Should -BeTrue
+        Invoke-FakeRun -Answers @('c', '') | Should -Be 3 -Because 'a choice that names neither is Abort'
+        $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
+        Invoke-FakeRun -Answers @('c', 'Continue') | Should -Be 3 -Because $script:lastError
+        $script:world.scopesOn | Should -BeTrue
+    }
+
+    It 'resumes after the silence into Tenko''s task without asking or stopping again' {
+        $script:world.failRoute = '/steps/\d+/complete$'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        (Read-State).values.silenced | Should -BeTrue
+        $script:world.scopesOn | Should -BeFalse
+        Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
+        $script:world.choices | Should -Be 1
+        @($script:world.calls | Where-Object { $_ -like '*|StopDhcp' }).Count | Should -Be 2
+        @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
+        @($script:world.tenkoCalls | Where-Object { $_ -match '/takeover$' }).Count | Should -Be 1
+    }
+
+    It 'resumes inside the authorization barrier without completing Tenko''s task twice' {
+        $script:world.failAt = 'SetAuthorization'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:world.scopesOn | Should -BeTrue
+        Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
+        @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
+        $script:world.choices | Should -Be 1
+        @($script:world.authorized).Count | Should -Be 0
+    }
+
+    It 'ends the sitting with the barrier pending and a warning when a replica does not catch up, and a later sitting clears it' {
+        $script:TkReplicaWaitSec = 0
+        try {
+            $script:world.staleReads = 1000
+            $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1)
+            $out[-1] | Should -Be 3 -Because $script:lastError
+            $script:world.scopesOn | Should -BeTrue
+            @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ' ' | Should -Match 'has not reached dc1\.corp\.example\.test, dc2\.corp\.example\.test yet'
+            @((Read-State).values.barrier_pending) | Should -Be @('dc1.corp.example.test', 'dc2.corp.example.test')
+            $script:world.staleReads = 0
+            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
+            ($out -join "`n") | Should -Match 'Pending: the removal of the DHCP servers'' authorization has not reached'
+            ($out -join "`n") | Should -Match 'has now reached every controller'
+            @((Read-State).values.barrier_pending).Count | Should -Be 0
+        } finally { $script:TkReplicaWaitSec = 300 }
     }
 
     It 'turns Tenko''s scopes on again when the restart of Windows fails, so that one side serves' {
@@ -470,19 +594,22 @@ Describe 'A failure inside the DHCP window' {
         $script:world.services.dc1.Serving | Should -BeTrue
     }
 
+    It 'tells an ended session apart from a refusal: no permanent mark, and the next reverse asks Tenko again' {
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:world.restartFails = $true; $script:world.resumeFails = 'session'
+        Invoke-FakeRun -Answers @('r') | Should -Be 2
+        $script:world.resumeCalls | Should -Be 1
+        $script:lastError | Should -Match 'the session with Tenko ended before it turned 192\.0\.2\.0/24 on again .*asks for a new approval'
+        (Read-State).values.Contains('refused.takeover.192.0.2.0/24') | Should -BeFalse
+        $script:world.restartFails = $false; $script:world.resumeFails = ''
+        Invoke-FakeRun -Answers @('r') | Should -Be 5 -Because $script:lastError
+        $script:world.resumeCalls | Should -Be 2 -Because 'the next sitting turns Tenko on first'
+    }
+
     It 'reads the replicas until they show the change, and judges the last read' {
         $script:world.staleReads = 3
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
         @($script:world.calls | Where-Object { $_ -eq 'dc1|Replicate' }).Count | Should -BeGreaterThan 1
-    }
-
-    It 'stops when a replica still shows the old state at the end of the wait' {
-        $script:TkReplicaWaitSec = 0
-        try {
-            $script:world.staleReads = 1000
-            Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
-            $script:lastError | Should -Match 'does not show the DHCP servers as not authorized within'
-        } finally { $script:TkReplicaWaitSec = 300 }
     }
 
     It 'reports a check with no client answered as a failure' {
@@ -551,6 +678,22 @@ Describe 'The DNS reverse' {
         Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no', 'no') | Should -Be 5 -Because $script:lastError
         @($script:world.restoredFromBackup) | Should -Contain 'corp.example.test'
         @($script:world.records['corp.example.test'] | Where-Object { $_.Type -eq 'TXT' -or $_.Name -eq 'new1' }).Count | Should -Be 0
+    }
+
+    It 'integrates nothing whose time to live or start of authority timers changed after it was shown' {
+        $script:world.ttlTamper = $true
+        Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no') | Should -Be 4
+        $script:lastError | Should -Match 'differs from what was shown in 2 records .*pc1\.corp\.example\.test\|a\|192\.0\.2\.120 ttl'
+        $script:world.zones['corp.example.test'].dc1.Ds | Should -BeFalse
+        $script:world.ttlTamper = $false; $script:world.timersTamper = $true
+        Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no') | Should -Be 4
+        $script:lastError | Should -Match 'start of authority timers 1 600 86400 3600 3600, shown 900 600 86400 3600 3600'
+    }
+
+    It 'puts each zone back into the partition the discovery read' {
+        Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no') | Should -Be 5 -Because $script:lastError
+        $script:world.integratedScope['corp.example.test'] | Should -Be 'Domain|'
+        $script:world.integratedScope['_msdcs.corp.example.test'] | Should -Be 'Forest|'
     }
 
     It 'finishes a restore that stopped between the removal of the zone and its load' {

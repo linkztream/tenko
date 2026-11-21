@@ -8,22 +8,22 @@
     "domain_rule": "the plan's domain in canonical form: lower-case ASCII without a trailing dot, preceded by its length in one octet",
     "root_sha256": "d09ba17af468b6520524c5f668a9431e529ca4fa1ca5d243a65db2ca3c23c428",
     "root_rule": "the SHA-256 of the DER of the self-signed root the script built its chain to by signature verification",
-    "request_body": "{\"purpose\":\"windows-takeover\",\"plan\":{\"domain\":\"corp.example.test\",\"forest_root\":\"corp.example.test\",\"controllers\":[{\"name\":\"dc1.corp.example.test\",\"addresses\":[\"192.0.2.11\"],\"pdc\":true},{\"name\":\"dc2.corp.example.test\",\"addresses\":[\"192.0.2.12\"]}],\"zones\":[\"corp.example.test\",\"_msdcs.corp.example.test\",\"2.0.192.in-addr.arpa\"],\"forwarders\":[{\"zone\":\".\",\"servers\":[\"198.51.100.53\"]}],\"dhcp_servers\":[{\"name\":\"dhcp1.corp.example.test\",\"address\":\"192.0.2.21\"},{\"name\":\"dhcp2.corp.example.test\",\"address\":\"192.0.2.22\"}],\"relationship\":\"dhcp1-dhcp2\",\"scopes\":[\"192.0.2.0/24\"],\"mirror_host\":{\"name\":\"mgmt1.corp.example.test\",\"address\":\"192.0.2.30\"},\"node_name\":\"tenko\",\"operations\":[\"mirrors\",\"secondary_zones\",\"forwarding_rules\",\"prepare\",\"flip\",\"takeover\"]},\"key\":\"BLUuxvGhdza9CWEevZEnGnk9kKef7zBuS5gNxUsBjmc0K3XfgnBcduS0njSaeRbwGLdIipJ5JIB3qhRJRCWvoDw\",\"client\":{\"machine\":\"ADM1\",\"user\":\"CORP\\\\admin\",\"version\":\"0.1.0\"}}",
+    "request_body": "{\"purpose\":\"windows-takeover\",\"plan\":{\"domain\":\"corp.example.test\",\"forest_root\":\"corp.example.test\",\"controllers\":[{\"name\":\"dc1.corp.example.test\",\"addresses\":[\"192.0.2.11\"],\"pdc\":true},{\"name\":\"dc2.corp.example.test\",\"addresses\":[\"192.0.2.12\"]}],\"zones\":[\"corp.example.test\",\"_msdcs.corp.example.test\",\"2.0.192.in-addr.arpa\"],\"forwarders\":[{\"zone\":\".\",\"servers\":[\"198.51.100.53\"]}],\"dhcp_servers\":[{\"name\":\"dhcp1.corp.example.test\",\"address\":\"192.0.2.21\"},{\"name\":\"dhcp2.corp.example.test\",\"address\":\"192.0.2.22\"}],\"relationship\":\"dhcp1-dhcp2\",\"scopes\":[\"192.0.2.0/24\"],\"mirror_host\":{\"name\":\"mgmt1.corp.example.test\",\"address\":\"192.0.2.30\"},\"node_name\":\"tenko\",\"operations\":[\"mirrors\",\"secondary_zones\",\"forwarding_rules\",\"kerberos_adopt\",\"prepare\",\"flip\",\"takeover\"],\"kerberos\":{\"realm\":\"CORP.EXAMPLE.TEST\",\"account\":\"TENKO$\",\"spns\":[\"DNS/tenko.corp.example.test\"]}},\"key\":\"BLUuxvGhdza9CWEevZEnGnk9kKef7zBuS5gNxUsBjmc0K3XfgnBcduS0njSaeRbwGLdIipJ5JIB3qhRJRCWvoDw\",\"client\":{\"machine\":\"ADM1\",\"user\":\"CORP\\\\admin\",\"version\":\"0.1.0\"}}",
     "request_rule": "the exact octets of the POST /api/v1/auth/approvals body as sent (UTF-8), which carries the plan",
-    "request_sha256": "da31fea31eada1145eb474d54ee0816ad1c61f6b1a4753493ba5bd1b6d611d9a",
+    "request_sha256": "6d4996c1e0bd77ceaae78e5c40a3284967253f80309d7ede1c28eff0d3f3dfe6",
     "key_uncompressed": "04b52ec6f1a17736bd09611ebd91271a793d90a79fef306e4b980dc54b018e67342b75df82705c76e4b49e349a7916f018b7488a9279248077aa14494425afa03c",
     "key_base64url": "BLUuxvGhdza9CWEevZEnGnk9kKef7zBuS5gNxUsBjmc0K3XfgnBcduS0njSaeRbwGLdIipJ5JIB3qhRJRCWvoDw",
     "approval_id": "0190d1c2-0000-7000-8000-00000000a001",
     "approval_id_octets": "0190d1c200007000800000000000a001",
-    "preimage": "74656e6b6f2d74616b656f7665722d617070726f76616c2d76310011636f72702e6578616d706c652e74657374d09ba17af468b6520524c5f668a9431e529ca4fa1ca5d243a65db2ca3c23c428da31fea31eada1145eb474d54ee0816ad1c61f6b1a4753493ba5bd1b6d611d9a04b52ec6f1a17736bd09611ebd91271a793d90a79fef306e4b980dc54b018e67342b75df82705c76e4b49e349a7916f018b7488a9279248077aa14494425afa03c0190d1c200007000800000000000a001",
-    "sha256": "815c39141cc3d4491166d0717cb1308276eafcf7286277eac16b786b00a8988a",
-    "first_80_bits": "815c39141cc3d4491166",
-    "code": "G5E3-J50W-RFA4-J4B6"
+    "preimage": "74656e6b6f2d74616b656f7665722d617070726f76616c2d76310011636f72702e6578616d706c652e74657374d09ba17af468b6520524c5f668a9431e529ca4fa1ca5d243a65db2ca3c23c4286d4996c1e0bd77ceaae78e5c40a3284967253f80309d7ede1c28eff0d3f3dfe604b52ec6f1a17736bd09611ebd91271a793d90a79fef306e4b980dc54b018e67342b75df82705c76e4b49e349a7916f018b7488a9279248077aa14494425afa03c0190d1c200007000800000000000a001",
+    "sha256": "f873d130ff7b0269484f68870b79a7886fabdbb5e9e5334eee6346c29c034175",
+    "first_80_bits": "f873d130ff7b0269484f",
+    "code": "Z1SX-2C7Z-FC16-JJ2F"
   },
   "typed": {
     "rule": "a typed code is read without spaces and hyphens, in upper case, with O read as 0 and I and L as 1; it must then be 16 characters of the alphabet",
-    "typed": "g5e3 j5ow rfa4 j4b6",
-    "canonical": "G5E3-J50W-RFA4-J4B6"
+    "typed": "zlsx 2c7z fcl6 jj2f",
+    "canonical": "Z1SX-2C7Z-FC16-JJ2F"
   },
   "collect": {
     "rule": "signature = ECDSA P-256 with SHA-256 over context || 0x00 || approval_id_octets || nonce, as r || s of 32 octets each; the collect body is {\"signature\": base64url}",
@@ -31,7 +31,7 @@
     "nonce_base64url": "U7-n4zKQGG1Lch39A-N5BMReom4wzqB0wQ7WnpkrkXA",
     "nonce": "53bfa7e33290186d4b721dfd03e37904c45ea26e30cea074c10ed69e992b9170",
     "message": "74656e6b6f2d74616b656f7665722d636f6c6c6563742d7631000190d1c200007000800000000000a00153bfa7e33290186d4b721dfd03e37904c45ea26e30cea074c10ed69e992b9170",
-    "signature_base64url": "JMdBx70CiQlPoIRnvmq7yIpBELBoQUNOMk5t8mTtd1m50bGc3ddhgxgtDTbhQvcRMmLmlYE2uXcdbtFvGH7dZQ",
+    "signature_base64url": "FIGl7oXWm5nqhHRV-5cX-8PBmEynEAAvfXciBFH5o8MQ5IrtocMAoq8tZgwJcL67V1lz4d5iv4dj0r35DW1K6A",
     "signature_rule": "ECDSA signatures are randomized: this one verifies with the key, another signature of the same message verifies too"
   }
 }

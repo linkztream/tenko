@@ -232,8 +232,52 @@ Describe 'The names listed apart' {
         @{ name = 'dc1.corp.example.test'; type = 'A'; apart = $true }
         @{ name = 'dc1.corp.example.test'; type = 'TXT'; apart = $false }
         @{ name = 'pc1.corp.example.test'; type = 'A'; apart = $false }
+        @{ name = 'corp.example.test'; type = 'DNAME'; apart = $true }
+        @{ name = 'corp.example.test'; type = 'CNAME'; apart = $true }
+        @{ name = '*.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = '*.branch.corp.example.test'; type = 'TXT'; apart = $true }
+        @{ name = 'ns1.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'ns1.corp.example.test'; type = 'AAAA'; apart = $true }
+        @{ name = 'dc9.child.corp.example.test'; type = 'A'; apart = $true }
+        @{ name = 'child.corp.example.test'; type = 'AAAA'; apart = $true }
+        @{ name = 'ns1.corp.example.test'; type = 'MX'; apart = $false }
+        @{ name = 'nochild.corp.example.test'; type = 'A'; apart = $false }
     ) {
-        Test-TkApartName -Name $name -Type $type -Zone 'corp.example.test' -Controllers @('dc1.corp.example.test') | Should -Be $apart
+        Test-TkApartName -Name $name -Type $type -Zone 'corp.example.test' -Controllers @('dc1.corp.example.test') -NsTargets @('ns1.corp.example.test') -Delegated @('child.corp.example.test') | Should -Be $apart
+    }
+}
+
+Describe 'The restore block' {
+    # Run here against a test folder for the DNS server's own: the export is staged under its
+    # own name and checked by its SHA-256 before the zone is touched.
+    BeforeEach {
+        # Windows PowerShell's crypto providers load from %SystemRoot%, which this test points
+        # elsewhere: the digest is taken with the managed SHA-256.
+        function Get-TestDigest { param([string]$LiteralPath) $sha = [System.Security.Cryptography.SHA256Managed]::new(); try { [System.BitConverter]::ToString($sha.ComputeHash([System.IO.File]::ReadAllBytes($LiteralPath))).Replace('-', '') } finally { $sha.Dispose() } }
+        Mock Get-FileHash { [pscustomobject]@{ Hash = (Get-TestDigest -LiteralPath $LiteralPath) } }
+        $savedRoot = $env:SystemRoot
+        $env:SystemRoot = Join-Path $TestDrive ([guid]::NewGuid().ToString())
+        $dns = Join-Path $env:SystemRoot 'System32\dns'
+        [void](New-Item -ItemType Directory -Path $dns -Force)
+        [System.IO.File]::WriteAllText((Join-Path $dns 'tenko-backup-corp.example.test.dns'), "export`r`n")
+        $digest = Get-TestDigest -LiteralPath (Join-Path $dns 'tenko-backup-corp.example.test.dns')
+        $script:zoneCalls = @()
+        function Get-DnsServerZone { [pscustomobject]@{ IsDsIntegrated = $false; ZoneFile = 'corp.example.test.dns' } }
+        function Remove-DnsServerZone { [CmdletBinding(SupportsShouldProcess)] param($Name, [switch]$Force) if ($PSCmdlet.ShouldProcess($Name)) { $script:zoneCalls += "remove $Name $Force" } }
+        function Add-DnsServerPrimaryZone { param($Name, $ZoneFile, [switch]$LoadExisting) $script:zoneCalls += "add $Name $ZoneFile $LoadExisting" }
+    }
+    AfterEach { $env:SystemRoot = $savedRoot }
+
+    It 'loads the staged export when its digest is the run''s' {
+        & $script:TkRemote.RestoreZone 'corp.example.test' 'tenko-backup-corp.example.test.dns' 'tenko-restore-corp.example.test.dns' $digest
+        $script:zoneCalls | Should -Be @('remove corp.example.test True', 'add corp.example.test tenko-restore-corp.example.test.dns True')
+    }
+
+    It 'touches no zone when the export on the server is not the run''s' {
+        [System.IO.File]::WriteAllText((Join-Path $dns 'tenko-backup-corp.example.test.dns'), "planted`r`n")
+        [System.IO.File]::WriteAllText((Join-Path $dns 'tenko-restore-corp.example.test.dns'), "planted`r`n")
+        { & $script:TkRemote.RestoreZone 'corp.example.test' 'tenko-backup-corp.example.test.dns' 'tenko-restore-corp.example.test.dns' $digest } | Should -Throw '*is not the export of phase 2*'
+        $script:zoneCalls | Should -BeNullOrEmpty
     }
 }
 
