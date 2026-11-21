@@ -36,10 +36,13 @@
 //!
 //! # Modules
 //!
-//! None yet. Each module is one line below; parallel changes each append their own line and
-//! never edit or reorder another's.
+//! Each module is one line below; parallel changes each append their own line and never edit
+//! or reorder another's.
 
 #![forbid(unsafe_code)]
+
+/// Reverse names: the network a reverse zone covers.
+pub mod reverse;
 
 #[cfg(test)]
 mod tests {
