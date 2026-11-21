@@ -46,6 +46,7 @@
 //! | [`secret`] | [`SecretRef`](secret::SecretRef) and the vault envelope marker |
 //! | [`role`] | node roles |
 //! | `testing` | test support (feature `testing`): the shared wait, free ports, temporary directories |
+//! | [`clock`] | the clock guard: whether the wall clock may be believed, [`clock::trusted_now`], [`clock::plausible_now`] |
 
 /// Re-exports used by the exported macros (`id_type!`, `namespaced_name!`). Not part of
 /// the contract.
@@ -58,6 +59,7 @@ pub mod __private {
 
 pub mod audit;
 pub mod auth;
+pub mod clock;
 pub mod cluster;
 pub mod codec;
 // WP7.0: the DHCP model (Phase 3).
