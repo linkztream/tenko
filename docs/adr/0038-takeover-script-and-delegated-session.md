@@ -22,7 +22,7 @@ Two rules stand in the way of a script calling the takeover's operations. The fl
 ## Consequences
 
 - No token reaches the flip, the takeover or the window. The interactive rule now reads "a person's session, or a session a person delegated to one run for that run's plan, after that person's second decision for what serves"; under Hardened the takeover line's sentence "no script acts as `admin`" now reads "a script acts as an administrator only through a session that administrator approved with a passkey, narrowed to one plan".
-- The administrator's actions for the reference domain fall to about 17 to 20, the values to two (plan section 2.16.6, E146); a locked-down domain adds its intake once per release.
+- The administrator's actions for the reference domain fall to about 18 to 21, the values to two (plan section 2.16.6, E146); a locked-down domain adds its intake once per release.
 - A compromised node still decides what it serves after the flip and the takeover, as any DNS and DHCP authority does, and as an AD-integrated DNS authority with a domain computer account it reaches further into a typical domain (plan section 2.16.3; the owner's acceptance is WT-Q19). It can lie or stall during the run; it cannot obtain the Windows credential, run code on Windows, start the window's Windows changes without the console, or make the script act on objects Windows did not report.
 - New surface: one route without a credential (bounded per /64, rate-limited, strictly parsed), a signature check, an allow-list that must be extended deliberately for any route the script later needs (R221), a not-served state for zones and an inactive state for forwarding rules.
 

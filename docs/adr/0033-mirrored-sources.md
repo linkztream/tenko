@@ -1,6 +1,6 @@
 # ADR 0033: Mirrored sources: a pushed migration source with a token that writes one mirror and nothing else
 
-- Status: Accepted on 2026-11-20 (the owner decided the design on 2026-11-01 and 2026-11-05, WT-Q1, WT-Q2, WT-Q11 of `docs/plans/windows-takeover-plan.md`; WP14.1 has built the push, and E73 passes in `crates/tenko-api/src/routes/tests.rs::a_mirror_token_is_refused_on_every_operation_but_its_push`, `crates/tenko-migrate/tests/mirror_service.rs` and `ui/e2e/mirror.spec.ts`)
+- Status: Accepted on 2026-11-20 (the owner decided the design on 2026-11-01 and 2026-11-05, WT-Q1, WT-Q2, WT-Q11 of `docs/plans/windows-takeover-plan.md`; WP14.1 has built the push, and E73 passes in `crates/tenko-api/src/routes/tests.rs::a_mirror_token_is_refused_on_every_operation_but_its_push`, `crates/tenko-migrate/tests/mirror_service.rs` and `ui/e2e/mirror.spec.ts`). Decision 6 superseded in part by ADR 0034 decision 5 (2026-11-21): the condition of `migrate.mirror.scope_active` and of staleness after a takeover
 - Date: 2026-11-05
 
 ## Context
