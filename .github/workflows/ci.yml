@@ -949,6 +949,8 @@ jobs:
   # PowerShell 7, PSScriptAnalyzer with the same rule file as the exporter, and the release
   # build, which refuses a released script that is not ASCII with CRLF line ends (a copy
   # pasted into a file must have the release digest). Same pinned tools as mirror-exporter.
+  # Windows only: the script runs only on a domain member under Windows, and its suites test
+  # access lists, Schannel TLS and whole runs that exist only there.
   takeover-script:
     name: Windows takeover script (${{ matrix.os }}, ${{ matrix.shell }})
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -961,8 +963,6 @@ jobs:
           - os: windows-latest
             shell: powershell
           - os: windows-latest
-            shell: pwsh
-          - os: ubuntu-latest
             shell: pwsh
     defaults:
       run:

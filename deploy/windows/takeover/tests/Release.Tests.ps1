@@ -119,6 +119,8 @@ Describe 'The start line' {
         ($script:started[0] -join ' ') | Should -Be "-NoProfile -ExecutionPolicy Bypass -File $target"
         Add-Content -LiteralPath $target -Value '# changed'
         $script:started = @()
+        # A console runs the line with the default preference; a caller's Stop would end the test here.
+        $ErrorActionPreference = 'Continue'
         $errors = @(& ([scriptblock]::Create($line)) 2>&1)
         $script:started.Count | Should -Be 0
         "$errors" | Should -Match "does not match the release digest; nothing was run\. Its SHA-256 is $((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash)"

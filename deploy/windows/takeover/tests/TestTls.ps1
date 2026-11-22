@@ -1,5 +1,5 @@
 # Shared by the suites: certificates made in memory (no trust store is touched; a served chain
-# passes through the user's intermediate store and leaves it on close) and a TLS server on a
+# passes through an intermediate store and leaves it on close) and a TLS server on a
 # loopback port in a runspace of its own, which answers each connection with the bytes the
 # suite sets and records what it was sent.
 
@@ -62,8 +62,8 @@ function Open-TestTlsServer {
                     if ($control.certs.Count -gt 0) { $next = $control.certs.Dequeue(); $serve = $next.Cert; $with = $next.Chain }
                     $with = @($with | Where-Object { $null -ne $_ })
                     if ($with.Count -gt 0) {
-                        # .NET on Windows adds these to the user's intermediate store (CurrentUser\CA) to
-                        # send them; Close-TestTlsServer takes them out again.
+                        # .NET on Windows adds these to an intermediate store (LocalMachine\CA or
+                        # CurrentUser\CA) to send them; Close-TestTlsServer takes them out again.
                         foreach ($c in $with) { [void]$control.served.Add($c.Thumbprint) }
                         $options = [System.Net.Security.SslServerAuthenticationOptions]::new()
                         $options.ServerCertificateContext = [System.Net.Security.SslStreamCertificateContext]::Create($serve, [System.Security.Cryptography.X509Certificates.X509Certificate2Collection]::new([System.Security.Cryptography.X509Certificates.X509Certificate2[]]$with), $true)
@@ -113,9 +113,17 @@ function Close-TestTlsServer {
     try { [void]$Control.worker.EndInvoke($Control.handle) } catch { Write-Verbose 'the server ended' }
     $Control.worker.Dispose()
     $Control.runspace.Dispose()
+    # .NET writes to LocalMachine\CA when the process may (elevated, as on a CI runner), else to
+    # CurrentUser\CA. The user's view lists the machine's too, so the machine's go first.
+    foreach ($location in 'LocalMachine', 'CurrentUser') {
+        $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('CA', $location)
+        try { $store.Open('ReadWrite') } catch { $store.Dispose(); continue }
+        try { foreach ($c in @($store.Certificates | Where-Object { $Control.served -contains $_.Thumbprint })) { $store.Remove($c) } } finally { $store.Dispose() }
+    }
     $store = [System.Security.Cryptography.X509Certificates.X509Store]::new('CA', 'CurrentUser')
-    $store.Open('ReadWrite')
-    try { foreach ($c in @($store.Certificates | Where-Object { $Control.served -contains $_.Thumbprint })) { $store.Remove($c) } } finally { $store.Dispose() }
+    $store.Open('ReadOnly')
+    try { $left = @($store.Certificates | Where-Object { $Control.served -contains $_.Thumbprint }) } finally { $store.Dispose() }
+    if ($left.Count -gt 0) { throw "The test server's chain is still in an intermediate store: $($left.Thumbprint -join ', ')" }
 }
 
 function Get-TestAnswer {
