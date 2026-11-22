@@ -561,3 +561,34 @@ fn two_ias_of_one_client_get_two_addresses_in_one_commit() {
     assert_eq!(world.store.history().len(), 2);
     assert!(bound(&world, offered[0].1, &duid) && bound(&world, offered[1].1, &duid));
 }
+
+/// While the clock guard holds a forward jump of a minute, an address whose binding ended
+/// 30 s ago by the wall clock is offered to no other client; once the hold ends it is.
+#[test]
+fn a_forward_hold_keeps_another_clients_address_for_the_jump6() {
+    let mut world = World6::new();
+    let address = lease(&mut world, &duid_ll(mac(9)), 1);
+    world.now = world
+        .table
+        .get(NIL, address)
+        .expect("row")
+        .ends
+        .checked_add(std::time::Duration::from_secs(30))
+        .expect("later");
+    let hinted = relay1(&message(MessageType::Solicit, 0x00_9abc, |b| {
+        client_options(b, &duid_ll(mac(10)));
+        ia_na(b, 1, Some(address));
+    }));
+    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    let offered = addresses(&world.exchange(&hinted).1.expect("advertise"))[0].1;
+    assert_ne!(offered, address);
+    drop(held);
+    let offered = addresses(&world.exchange(&hinted).1.expect("advertise"))[0].1;
+    assert_eq!(offered, address);
+}

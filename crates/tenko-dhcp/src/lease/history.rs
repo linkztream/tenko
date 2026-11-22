@@ -226,13 +226,21 @@ impl PurgeService {
         count_rows(view.as_ref())
     }
 
-    /// One round at `now` under the leader `epoch`.
+    /// One round at `now` under the leader `epoch`; it purges nothing while the clock guard
+    /// holds the clock.
     ///
     /// # Errors
     ///
     /// A store error; a failed fence ends the round with
     /// [`StoreError::PreconditionFailed`].
     pub async fn round(&self, epoch: u64, now: Timestamp) -> Result<PurgeRound, StoreError> {
+        if let Err(held) = tenko_core::clock::trusted_now() {
+            tracing::debug!(?held, "the clock is held: no lease history is purged");
+            return Ok(PurgeRound {
+                cutoff: Timestamp::UNIX_EPOCH,
+                purged: 0,
+            });
+        }
         let view = self.store.read(ReadConsistency::Local).await?;
         let settings_days = view
             .get_typed(&tables::SETTINGS, &())?

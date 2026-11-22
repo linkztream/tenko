@@ -6,7 +6,8 @@
 //!   their DHCID and their PTR; the lease rows record the names and the DHCID.
 //! - A second client that claims the first one's name is refused by name protection, and
 //!   its lease says why; under `replace` it takes the name over.
-//! - A release and an expiry remove the records whose DHCID still matches.
+//! - A release and an expiry remove the records whose DHCID still matches; while the clock
+//!   guard holds the clock, an active row past its end keeps them.
 //! - An address IPAM names, and a name held by a manual RRset, are left alone.
 //! - Under Standard a zone takes DHCP updates only when its policy allows them.
 //! - A client that asks to write its A record itself, where the scope allows that, gets
@@ -455,6 +456,39 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
         .await;
     wait_until_async("the name for the third client", async || {
         lab.a("laptop.lan.example.test").await == vec![a_of(52)]
+    })
+    .await;
+}
+
+/// While the clock guard holds the clock, an active row past its end still holds its
+/// address, so it keeps (here: gets) its names; a release removes them all the same.
+#[tokio::test]
+async fn a_held_clock_keeps_the_name_of_an_active_lease_past_its_end_and_a_release_removes_it() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let _held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    let mut ended = lab.lease(60, 1, None, Some("sensor"));
+    ended.ends = ended
+        .cltt
+        .checked_sub(Duration::from_secs(10))
+        .expect("a time");
+    ended.cltt = ended
+        .ends
+        .checked_sub(Duration::from_secs(3_600))
+        .expect("a time");
+    lab.commit(ended).await;
+    wait_until_async("the name of the active row", async || {
+        lab.a("sensor.lan.example.test").await == vec![a_of(60)] && lab.ptr(60).await.is_some()
+    })
+    .await;
+    lab.end(60, BindingState::Released).await;
+    wait_until_async("the removal", async || {
+        lab.a("sensor.lan.example.test").await.is_empty() && lab.ptr(60).await.is_none()
     })
     .await;
 }

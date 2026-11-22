@@ -163,11 +163,16 @@ fn is_empty(written: &Written) -> bool {
 }
 
 /// The request a lease row asks for: add for a binding that holds its address now,
-/// remove otherwise. The DDNS settings are those the class and policy matcher decided at
-/// the commit (the row's `ddns_policy`, the settings the reply's option 81 used), else the
-/// scope's.
-pub fn request_of(lease: &Lease, image: &ConfigImage, now: Timestamp) -> DdnsRequest {
-    let active = lease.state == BindingState::Active && lease.ends > now;
+/// remove otherwise; while the clock is not `trusted`, an active row holds it whatever its
+/// end says. The DDNS settings are those the class and policy matcher decided at the commit
+/// (the row's `ddns_policy`, the settings the reply's option 81 used), else the scope's.
+pub fn request_of(
+    lease: &Lease,
+    image: &ConfigImage,
+    now: Timestamp,
+    trusted: bool,
+) -> DdnsRequest {
+    let active = lease.state == BindingState::Active && (!trusted || lease.ends > now);
     // Slice 8 follow-ups: the policy's settings first.
     let policy = lease
         .ddns_policy
@@ -198,8 +203,13 @@ pub fn request_of(lease: &Lease, image: &ConfigImage, now: Timestamp) -> DdnsReq
 // WP9.1: the request of a DHCPv6 lease row.
 /// The request a DHCPv6 lease row asks for, by the rules of [`request_of`]; the scope's
 /// DDNS settings (classes and policies are DHCPv4 only).
-pub fn request_of6(lease: &Lease6, image: &ConfigImage, now: Timestamp) -> DdnsRequest {
-    let active = lease.state == BindingState::Active && lease.ends > now;
+pub fn request_of6(
+    lease: &Lease6,
+    image: &ConfigImage,
+    now: Timestamp,
+    trusted: bool,
+) -> DdnsRequest {
+    let active = lease.state == BindingState::Active && (!trusted || lease.ends > now);
     let policy = image
         .v6()
         .scope(lease.scope)
@@ -547,6 +557,11 @@ impl<'a> Worker<'a> {
             }
         };
         let now = Timestamp::now();
+        let trusted = tenko_core::clock::trusted_now()
+            .inspect_err(|held| {
+                tracing::debug!(?held, "the clock is held: active leases keep their names");
+            })
+            .is_ok();
         let take = self.service.settings.batch.max(1);
         let mut keys = Vec::with_capacity(take);
         while keys.len() < take {
@@ -567,13 +582,13 @@ impl<'a> Worker<'a> {
             let row = match key.1 {
                 IpAddr::V4(addr) => view
                     .get_typed(&tables::LEASES, &(key.0, addr))
-                    .map(|row| row.map(|(lease, _)| request_of(&lease, image, now))),
+                    .map(|row| row.map(|(lease, _)| request_of(&lease, image, now, trusted))),
                 IpAddr::V6(addr) => view
                     .get_typed(&tables::LEASES6, &(key.0, addr))
                     // WP9.2: a delegated prefix has no name.
                     .map(|row| {
                         row.filter(|(lease, _)| lease.kind == Lease6Kind::Na)
-                            .map(|(lease, _)| request_of6(&lease, image, now))
+                            .map(|(lease, _)| request_of6(&lease, image, now, trusted))
                     }),
             };
             let request = match row {

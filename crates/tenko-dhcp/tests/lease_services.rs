@@ -3,7 +3,8 @@
 //! leader's term and never over a row that changed; the offer hold holds an address for one
 //! client for its lifetime and is pruned by expiry; the history retention follows the node,
 //! the settings and the profile, and the purge deletes exactly the rows older than the
-//! retention, audited.
+//! retention, audited. While the clock guard holds the clock, expiry and the purge destroy
+//! nothing.
 
 mod lease_support;
 
@@ -14,13 +15,14 @@ use lease_support::{
 };
 use tenko_core::{
     PrefixId, Principal, SystemComponent, Timestamp, VrfId,
+    clock::{Held, Reason, Release, testing::hold},
     dhcp::{BindingState, DhcpSettings, HistoryRow, LeaseEvent, LeaseEventKind, audit, tables},
 };
 use tenko_dhcp::{
     allocator::OfferHold,
     lease::{
         CommitSettings, ExpiryService, ExpirySettings, HistoryProfile, HistoryRetention,
-        LeaseTable, OfferTable, PurgeService, PurgeSettings, metrics,
+        LeaseTable, OfferTable, PurgeService, PurgeSettings, expiry::ExpiryRound, metrics,
     },
     store::{LeaseStore, Ticket},
 };
@@ -382,4 +384,108 @@ async fn the_purge_deletes_what_is_older_than_the_retention() {
     );
     let count = tenko_dhcp::lease::history::count_rows(view.as_ref()).expect("counted");
     assert_eq!(count, 10);
+}
+
+/// A forward jump of a minute, which holds the clock on this thread while its override lives.
+fn jump() -> Held {
+    Held {
+        reason: Reason::Jump,
+        jump_ms: 60_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: Release::Wait,
+        until: None,
+    }
+}
+
+#[tokio::test]
+async fn a_held_clock_expires_no_lease_and_removes_no_move_row_until_the_release() {
+    let store = mem_store();
+    let (leases_store, leases, stop, task) = start(Arc::clone(&store), CommitSettings::default());
+    let (vrf, scope) = (VrfId::generate(), PrefixId::generate());
+    let pending = change(
+        LeaseEventKind::Granted,
+        vrf,
+        scope,
+        addr(80),
+        1,
+        BindingState::Active,
+        ago(100),
+        ago(1),
+    );
+    leases_store.submit(&pending, Ticket(1)).expect("queued");
+    completions(&leases_store, 1, Duration::from_secs(5)).await;
+    let moving = tenko_core::dhcp::MovingClient {
+        job: tenko_core::JobId::generate(),
+        mac: tenko_core::MacAddr::new([0x00, 0x00, 0x5e, 0x00, 0x53, 0x32]),
+        lease: None,
+        short_secs: 120,
+        target: None,
+        until: ago(1),
+        extended: false,
+    };
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Ipam), Timestamp::now());
+    batch
+        .put_typed(&tables::MOVING, &moving.job, &moving)
+        .expect("a row");
+    store.propose(batch).await.expect("written");
+    let history_before = rows(store.as_ref()).await.history.len();
+    let service = ExpiryService::new(Arc::clone(&store), NODE, ExpirySettings::default())
+        .with_table(leases.clone());
+
+    let held = hold(jump());
+    let round = service.round(0, from_now(86_400)).await.expect("a round");
+    assert_eq!(round, ExpiryRound::default(), "nothing is due");
+    let found = rows(store.as_ref()).await;
+    assert_eq!(found.leases[&(vrf, addr(80))].state, BindingState::Active);
+    assert_eq!(found.history.len(), history_before);
+    let view = store.read(ReadConsistency::Local).await.expect("a view");
+    assert!(
+        view.get_typed(&tables::MOVING, &moving.job)
+            .expect("read")
+            .is_some()
+    );
+
+    drop(held);
+    let round = service.round(0, Timestamp::now()).await.expect("a round");
+    assert_eq!((round.expired, round.moving), (1, 1));
+    stop.cancel();
+    task.await.expect("the committer");
+}
+
+#[tokio::test]
+async fn a_held_clock_purges_no_history() {
+    let store = mem_store();
+    let at = ago(40 * 86_400);
+    let row = change(
+        LeaseEventKind::Renewed,
+        VrfId::generate(),
+        PrefixId::generate(),
+        addr(71),
+        1,
+        BindingState::Active,
+        at,
+        at,
+    )
+    .to_event(NODE);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+    batch
+        .put_typed(
+            &tables::HISTORY,
+            &(row.at, row.vrf, row.addr),
+            &HistoryRow::of(&row),
+        )
+        .expect("encodes");
+    store.propose(batch).await.expect("written");
+    let service = PurgeService::new(
+        Arc::clone(&store),
+        Arc::new(HistoryRetention::new(HistoryProfile::Home, None)),
+        PurgeSettings::default(),
+    );
+    let now = Timestamp::now();
+    let held = hold(jump());
+    assert_eq!(service.round(0, now).await.expect("a round").purged, 0);
+    assert_eq!(rows(store.as_ref()).await.history.len(), 1);
+    drop(held);
+    let round = service.round(0, now).await.expect("a round");
+    assert_eq!(round.purged, 1, "40 days old, 30 kept under Home");
 }

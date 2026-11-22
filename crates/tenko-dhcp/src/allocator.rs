@@ -161,11 +161,10 @@ impl<'a> Request<'a> {
         {
             return false;
         }
-        if self
-            .leases
-            .get(scope.vrf, addr)
-            .is_some_and(|lease| lease.blocks(self.now) && !is_client(&lease, self.identity))
-        {
+        if self.leases.get(scope.vrf, addr).is_some_and(|lease| {
+            lease.blocks(crate::lease::batch::reuse_now(self.now))
+                && !is_client(&lease, self.identity)
+        }) {
             return false;
         }
         !self

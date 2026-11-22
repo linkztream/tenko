@@ -27,6 +27,7 @@ use tenko_core::dhcp::{
 };
 
 use super::Context6;
+use crate::lease::batch::reuse_now;
 use crate::v4::engine::{hash_mix, hash_of_bytes};
 use crate::v6::image::{PdPool6Image, Pool6Image, Scope6Image};
 
@@ -96,7 +97,7 @@ fn available(
         }
     }
     if let Some(lease) = ctx.leases.get(scope.vrf, addr)
-        && lease.blocks(ctx.now)
+        && lease.blocks(reuse_now(ctx.now))
         && (lease.state == BindingState::Abandoned
             || lease.iaid != iaid
             || lease.duid.as_bytes() != client.duid)
@@ -239,7 +240,7 @@ fn prefix_available(
         return false;
     }
     if let Some(lease) = ctx.leases.get(scope.vrf, prefix)
-        && lease.blocks(ctx.now)
+        && lease.blocks(reuse_now(ctx.now))
         && (lease.state == BindingState::Abandoned
             || lease.kind != Lease6Kind::Pd
             || lease.iaid != iaid

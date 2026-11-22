@@ -101,13 +101,23 @@ pub fn put_history(
     Ok(())
 }
 
+/// The time by which another client's binding is judged at `now`: earlier by the forward
+/// jump the clock guard holds (`tenko_core::clock::forward_hold`), so that a jump of the
+/// wall clock ends no binding early. A time out of range reads as the Unix epoch.
+pub(crate) fn reuse_now(now: Timestamp) -> Timestamp {
+    tenko_core::clock::forward_hold().map_or(now, |jump| {
+        now.checked_sub(jump).unwrap_or(Timestamp::UNIX_EPOCH)
+    })
+}
+
 /// Whether `previous` stops `change`: another client's binding (or abandoned address) that
-/// has not ended at `now`. An operator's reclaim may take it.
+/// has not ended at `now`, earlier by a forward jump the clock guard holds. An operator's
+/// reclaim may take it.
 pub fn held_by_other(change: &PendingChange, previous: Option<&Lease>, now: Timestamp) -> bool {
     let Some(previous) = previous else {
         return false;
     };
-    if change.kind == LeaseEventKind::Reclaimed || !previous.blocks(now) {
+    if change.kind == LeaseEventKind::Reclaimed || !previous.blocks(reuse_now(now)) {
         return false;
     }
     // WP8.5: a DECLINE's change belongs to no client (the engine checked that the decliner
@@ -144,10 +154,13 @@ pub fn build(
     }
     let mut lease = change.to_lease(node, previous);
     // A row never moves back in client time, so that the table's rule (the later `cltt`
-    // wins) and the store agree even if the clock stepped back.
+    // wins) and the store agree even if the clock stepped back; its end moves with it, so
+    // the client keeps the time it was granted.
     if let Some(previous) = previous
         && previous.cltt > lease.cltt
     {
+        let step = previous.cltt.saturating_since(lease.cltt);
+        lease.ends = lease.ends.checked_add(step).unwrap_or(lease.ends);
         lease.cltt = previous.cltt;
         lease.granted = lease.granted.map(|granted| granted.min(lease.cltt));
     }
@@ -170,10 +183,95 @@ pub fn build(
         }
     }
     let mut history = change.to_event(node);
-    history.at = lease.cltt;
+    (history.at, history.ends) = (lease.cltt, lease.ends);
     Ok(LeaseBatch {
         batch,
         history,
         lease,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use tenko_core::{
+        PrefixId, VrfId,
+        clock::{Held, Reason, Release, testing::hold},
+        dhcp::BindingState,
+    };
+
+    use super::*;
+
+    fn at(now: Timestamp, secs: i64) -> Timestamp {
+        Timestamp::from_unix_nanos(now.unix_nanos() + i128::from(secs) * 1_000_000_000)
+            .expect("a time")
+    }
+
+    /// Client `client` (an RFC 7042 MAC address) takes 192.0.2.10 from `cltt` to `ends`.
+    fn change(scope: PrefixId, client: u8, cltt: Timestamp, ends: Timestamp) -> PendingChange {
+        PendingChange::new(
+            LeaseEventKind::Granted,
+            VrfId(uuid::Uuid::nil()),
+            scope,
+            Ipv4Addr::new(192, 0, 2, 10),
+            1,
+            &[0x00, 0x00, 0x5e, 0x00, 0x53, client],
+            None,
+            BindingState::Active,
+            cltt,
+            ends,
+        )
+    }
+
+    fn held(reason: Reason, jump_ms: i64) -> Held {
+        Held {
+            reason,
+            jump_ms,
+            since: Timestamp::UNIX_EPOCH,
+            release: Release::Wait,
+            until: None,
+        }
+    }
+
+    #[test]
+    fn a_forward_hold_keeps_another_clients_address_for_the_jump() {
+        let (scope, now) = (PrefixId::generate(), Timestamp::now());
+        // Client 1's binding ended 30 s ago by the wall clock.
+        let first = change(scope, 1, at(now, -3_630), at(now, -30)).to_lease(NodeId(1), None);
+        let other = change(scope, 2, now, at(now, 3_600));
+        let jump = hold(held(Reason::Jump, 60_000));
+        assert!(held_by_other(&other, Some(&first), now));
+        drop(jump);
+        assert!(!held_by_other(&other, Some(&first), now));
+        // Any amount: the time saturates instead of wrapping or panicking.
+        let _far = hold(held(Reason::Jump, i64::MAX));
+        assert_eq!(reuse_now(now), Timestamp::UNIX_EPOCH);
+        assert!(held_by_other(&other, Some(&first), now));
+    }
+
+    #[test]
+    fn a_start_gap_does_not_widen_the_reuse_check() {
+        let (scope, now) = (PrefixId::generate(), Timestamp::now());
+        let first = change(scope, 1, at(now, -3_630), at(now, -30)).to_lease(NodeId(1), None);
+        let _gap = hold(held(Reason::StartGap, 60_000));
+        assert_eq!(reuse_now(now), now);
+        assert!(!held_by_other(
+            &change(scope, 2, now, at(now, 3_600)),
+            Some(&first),
+            now
+        ));
+    }
+
+    #[test]
+    fn a_backward_step_keeps_the_granted_lease_time() {
+        let (scope, now) = (PrefixId::generate(), Timestamp::now());
+        let first = change(scope, 1, at(now, 60), at(now, 3_660)).to_lease(NodeId(1), None);
+        // The clock stepped back a minute: the renewal's client time lies before the row's.
+        let renewal = change(scope, 1, now, at(now, 3_600));
+        let built = build(&renewal, NodeId(1), Some(&first), |_| Vec::new(), now).expect("built");
+        let granted = (at(now, 60), at(now, 3_660));
+        assert_eq!((built.lease.cltt, built.lease.ends), granted);
+        assert_eq!((built.history.at, built.history.ends), granted);
+    }
 }

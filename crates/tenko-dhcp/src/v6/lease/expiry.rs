@@ -111,7 +111,8 @@ impl Expiry6Service {
         Ok(due)
     }
 
-    /// One round at `now` under the leader `epoch`.
+    /// One round at `now` under the leader `epoch`; nothing is due while the clock guard
+    /// holds the clock.
     ///
     /// # Errors
     ///
@@ -120,6 +121,10 @@ impl Expiry6Service {
     pub async fn round(&self, epoch: u64, now: Timestamp) -> Result<ExpiryRound, StoreError> {
         if let Some(offers) = &self.offers {
             offers.prune(now);
+        }
+        if let Err(held) = tenko_core::clock::trusted_now() {
+            tracing::debug!(?held, "the clock is held: no DHCPv6 lease expires");
+            return Ok(ExpiryRound::default());
         }
         let view = self.store.read(ReadConsistency::Local).await?;
         let keys = self.due(view.as_ref(), now)?;

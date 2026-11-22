@@ -85,10 +85,17 @@ pub fn build<'t>(
     for binding in change.bindings() {
         let held = previous(binding);
         let mut lease = change.to_lease(binding, node, held);
-        // A row never moves back in client time (the table's rule and the store agree).
+        // A row never moves back in client time (the table's rule and the store agree); its
+        // lifetimes move with it, so the client keeps the time it was granted.
         if let Some(held) = held
             && held.cltt > lease.cltt
         {
+            let step = held.cltt.saturating_since(lease.cltt);
+            lease.ends = lease.ends.checked_add(step).unwrap_or(lease.ends);
+            lease.preferred_ends = lease
+                .preferred_ends
+                .checked_add(step)
+                .unwrap_or(lease.preferred_ends);
             lease.cltt = held.cltt;
             lease.granted = lease.granted.map(|granted| granted.min(lease.cltt));
         }
@@ -97,7 +104,7 @@ pub fn build<'t>(
             .put_typed(&tables::LEASES6, &key, &lease)
             .map_err(encode)?;
         let mut event = change.to_event(binding, node);
-        event.at = lease.cltt;
+        (event.at, event.ends) = (lease.cltt, lease.ends);
         // WP9.4: the link-layer address the row keeps (a renewal without RFC 6939 keeps
         // the one learned before).
         event.link_layer.clone_from(&lease.link_layer);

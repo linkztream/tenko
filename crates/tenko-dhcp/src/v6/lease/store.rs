@@ -35,8 +35,8 @@ pub trait Lease6Store: Send + Sync {
 }
 
 /// Whether `previous` stops `binding` of `change`: another client's binding, or an
-/// abandoned address, that has not ended at `now`. A RELEASE or DECLINE of the holder and
-/// an operator's reclaim may end it.
+/// abandoned address, that has not ended at `now`, earlier by a forward jump the clock
+/// guard holds. A RELEASE or DECLINE of the holder and an operator's reclaim may end it.
 pub fn held_by_other6(
     change: &PendingChange6,
     binding: &Binding6,
@@ -46,6 +46,7 @@ pub fn held_by_other6(
     let Some(previous) = previous else {
         return false;
     };
+    let now = crate::lease::batch::reuse_now(now);
     if binding.event == LeaseEventKind::Reclaimed || !previous.blocks(now) {
         return false;
     }

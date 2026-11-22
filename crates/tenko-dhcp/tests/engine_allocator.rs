@@ -245,3 +245,64 @@ fn the_hashed_order_spreads_clients_and_keeps_each_client_on_its_start() {
     // order gives most of them their own address.
     assert!(firsts.len() > 48, "{} distinct starts", firsts.len());
 }
+
+/// While the clock guard holds a forward jump of a minute, an address whose binding ended
+/// 30 s ago by the wall clock goes to no other client; once the hold ends it does.
+#[test]
+fn a_forward_hold_keeps_another_clients_address_for_the_jump() {
+    let spec = Spec {
+        pools: vec![(10, 10)],
+        excluded: Vec::new(),
+    };
+    let (image, vrf) = build(&[spec], false, &[]);
+    let scope = &image.scopes()[0];
+    let addr = host(scope.network, 10);
+    let now = t0().checked_add(Duration::from_secs(3_630)).expect("time");
+    let mut table = MemLeaseTable::default();
+    table.apply(
+        PendingChange::new(
+            LeaseEventKind::Granted,
+            vrf,
+            scope.prefix,
+            addr,
+            1,
+            &identity(1)[2..],
+            None,
+            BindingState::Active,
+            t0(),
+            t0().checked_add(Duration::from_secs(3_600)).expect("time"),
+        )
+        .to_lease(NodeId(1), None),
+    );
+    let id = identity(2);
+    let request = Request {
+        image: &image,
+        scope,
+        identity: &id,
+        hardware: &id,
+        admission: &AdmitAll,
+        requested: Some(addr),
+        leases: &table,
+        offers: &NoOffers,
+        ownership: &SingleNode,
+        now,
+    };
+    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    assert!(!request.is_free(scope, addr));
+    assert_eq!(
+        HashedAllocator.pick(&request),
+        None,
+        "the pool's one address"
+    );
+    drop(held);
+    assert_eq!(
+        HashedAllocator.pick(&request),
+        Some(Choice::Requested(addr))
+    );
+}

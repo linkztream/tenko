@@ -1041,3 +1041,26 @@ fn a_message_with_a_malformed_ia_pd_is_dropped() {
     );
     assert_eq!(world.rows(), 0);
 }
+
+/// While the clock guard holds a forward jump of a minute, a prefix whose binding ended 30 s
+/// ago by the wall clock goes to no other client; once the hold ends it does.
+#[test]
+fn a_forward_hold_keeps_another_clients_prefix_for_the_jump() {
+    let mut world = one_prefix_world();
+    let prefix = delegate(&mut world, &duid_ll(mac(52)), 1, &[]);
+    world.now = world.table.get(NIL, prefix).expect("row").ends;
+    advance(&mut world, 30);
+    let solicit = relay1(&pd_message(MessageType::Solicit, &duid_ll(mac(53)), 1, &[]));
+    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    let reply = world.exchange(&solicit).1.expect("advertise");
+    assert_eq!(pd_statuses(&reply), vec![Some(status::NO_PREFIX_AVAIL)]);
+    drop(held);
+    let reply = world.exchange(&solicit).1.expect("advertise");
+    assert_eq!(prefixes(&reply)[0].1, prefix);
+}
