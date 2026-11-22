@@ -159,6 +159,91 @@ async fn another_node_takes_over_the_jobs_of_an_expired_lease() {
 }
 
 #[tokio::test]
+async fn a_held_clock_takes_over_no_expired_lease() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let first = TestEngine::with_config(node(1));
+    let second = first.sibling(node(2));
+    let runner = first.engine.start().expect("runner 1");
+    let id = first
+        .engine
+        .submit(
+            spec(vec![manual("jobs.test.reserve", None, None)]),
+            &first.ctx(),
+        )
+        .await
+        .expect("submit");
+    first.wait_for_state(id, JobState::Waiting).await;
+    runner.abort();
+    first
+        .clock
+        .advance(EngineConfig::default().lease_ttl + Duration::from_secs(1));
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: Release::Wait,
+        until: None,
+    });
+    let job = second.engine.drive_once(id).await.expect("drive");
+    assert_eq!(job.runner, Some(NodeId(1)), "no takeover while held");
+    drop(held);
+    let job = second.engine.drive_once(id).await.expect("drive");
+    assert_eq!(job.runner, Some(NodeId(2)));
+}
+
+/// Node 1 runs a waiting job while its clock is held after a step back of `back`, then
+/// stops; node 2, with a trusted clock, drives the job once the lease's time to live and
+/// `after` have passed. Returns the job's runner then.
+async fn runner_after_an_owner_step_back(back: Duration, after: Duration) -> Option<NodeId> {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let first = TestEngine::with_config(node(1));
+    let second = first.sibling(node(2));
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: -i64::try_from(back.as_millis()).expect("step"),
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: Release::Person,
+        until: None,
+    });
+    let runner = first.engine.start().expect("runner 1");
+    // A job that outlasts the wait, so that only the lease decides.
+    let mut waiting = spec(vec![manual("jobs.test.reserve", None, None)]);
+    waiting.timeout = Duration::from_secs(30 * 24 * 3600);
+    let id = first
+        .engine
+        .submit(waiting, &first.ctx())
+        .await
+        .expect("submit");
+    first.wait_for_state(id, JobState::Waiting).await;
+    runner.abort();
+    drop(held);
+    first
+        .clock
+        .advance(EngineConfig::default().lease_ttl + after);
+    second.engine.drive_once(id).await.expect("drive").runner
+}
+
+#[tokio::test]
+async fn a_runner_whose_clock_stepped_back_keeps_its_jobs_for_the_step() {
+    // Node 1's clock stepped back an hour: the leases it writes look an hour old elsewhere.
+    let hour = Duration::from_secs(3600);
+    assert_eq!(
+        runner_after_an_owner_step_back(hour, Duration::from_secs(1)).await,
+        Some(NodeId(1))
+    );
+}
+
+#[tokio::test]
+async fn a_runner_lease_runs_longer_by_a_day_at_most() {
+    let day = tenko_core::clock::SELF_RELEASE_MAX;
+    let step = day * 3;
+    assert_eq!(
+        runner_after_an_owner_step_back(step, day + Duration::from_secs(1)).await,
+        Some(NodeId(2))
+    );
+}
+
+#[tokio::test]
 async fn a_takeover_loses_against_a_renewed_lease() {
     let first = TestEngine::with_config(node(1));
     let second = first.sibling(node(2));

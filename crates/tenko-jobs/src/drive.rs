@@ -143,12 +143,26 @@ pub(crate) enum DriveEnd {
     Deposed,
 }
 
-/// The lease row this runner writes when it starts or claims a job.
+/// The lease row this runner writes when it starts or claims a job. While this node's clock
+/// is held after a step back, the lease runs longer by the step, at most
+/// [`tenko_core::clock::SELF_RELEASE_MAX`], so that a runner with a trusted clock does not read
+/// it as expired. Still open until the clocks of nodes are compared: once the wait of this
+/// node ends while its clock stays behind, its leases look expired to others again; and when
+/// the step corrected a clock that ran ahead, a lease written during the hold outlasts the
+/// truth by the step.
 pub(crate) fn lease(inner: &Inner, now: Timestamp) -> RunnerLease {
+    let back = tenko_core::clock::trusted_now()
+        .err()
+        .map_or(std::time::Duration::ZERO, |held| {
+            std::time::Duration::from_millis(held.jump_ms.min(0).unsigned_abs())
+                .min(tenko_core::clock::SELF_RELEASE_MAX)
+        });
     RunnerLease {
         node: inner.config.node,
         renewed: now,
-        expires: now.checked_add(inner.config.lease_ttl).unwrap_or(now),
+        expires: now
+            .checked_add(inner.config.lease_ttl + back)
+            .unwrap_or(now),
     }
 }
 
@@ -296,7 +310,12 @@ async fn decide(
         takeover = true;
         if !scope.takes_over_at_once() {
             match view.get_typed(&RUNNERS, &owner) {
-                Ok(Some((lease, _))) if lease.expires > now => return Err(DriveEnd::NotOwned),
+                // A held clock cannot tell an expired lease from a live one.
+                Ok(Some((lease, _)))
+                    if lease.expires > now || tenko_core::clock::trusted_now().is_err() =>
+                {
+                    return Err(DriveEnd::NotOwned);
+                }
                 Ok(Some((_, revision))) => lease_expect = Some((owner, Some(revision))),
                 Ok(None) => lease_expect = Some((owner, None)),
                 Err(error) => {

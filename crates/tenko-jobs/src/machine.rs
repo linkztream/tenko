@@ -16,7 +16,9 @@
 //!   `jobs.step.deadline_passed`: the observation deadline of the step, or for a manual
 //!   task the deadline set on the waiting task (`JobEngine::set_manual_deadline`), else the
 //!   step timeout from the step's first start, whichever of these and the job deadline is
-//!   earlier.
+//!   earlier. While the clock guard holds destruction (`tenko_core::clock`) no deadline
+//!   passes: a waiting step looks again a minute later, and an `execute` call is not
+//!   cut short by the job deadline.
 //! - A cancel request takes effect at the next boundary: the current step is aborted with
 //!   `jobs.canceled` and the job rolls back, ending in `canceled` (`FinishCancel`).
 //! - A step found `running` with no result to apply was interrupted by a crash: an
@@ -30,7 +32,7 @@
 //!   Undo tasks do not block the compensation of earlier steps; the rollback ends when the
 //!   last undo task is completed. A failed compensation ends the job in `failed`.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 
 use tenko_core::{
     Coded, CodedError, MessageKey, NodeId, Principal, RequestId, Timestamp, serde_util::HexBytes,
@@ -40,6 +42,10 @@ use crate::{
     model::{Job, JobAction, JobError, JobState, ManualTask, StepKind, StepOutcome, StepState},
     tables::{Transition, TransitionEvent},
 };
+
+/// How long a waiting step whose deadline a held clock did not let pass parks before it
+/// looks again.
+const HELD_RETRY: Duration = Duration::from_secs(60);
 
 /// Error code of a step or job aborted by a cancel.
 pub const CANCELED: &str = "jobs.canceled";
@@ -197,6 +203,8 @@ pub struct Machine<'a> {
     /// Rows for the transition log, without sequence numbers yet.
     pub rows: Vec<Transition>,
     now: Timestamp,
+    /// Whether a deadline may pass: the clock guard's answer when the cycle started.
+    trusted: bool,
     runner: Option<NodeId>,
     by: Principal,
     request: Option<RequestId>,
@@ -219,6 +227,11 @@ impl<'a> Machine<'a> {
             job,
             rows: Vec::new(),
             now,
+            trusted: tenko_core::clock::trusted_now()
+                .inspect_err(|held| {
+                    tracing::debug!(?held, "no job deadline passes until the clock is trusted");
+                })
+                .is_ok(),
             runner,
             by,
             request,
@@ -536,7 +549,8 @@ impl<'a> Machine<'a> {
         let timeout = self.job.spec.steps[usize::from(step)]
             .timeout
             .unwrap_or(self.job.spec.timeout);
-        earliest(self.now.checked_add(timeout), self.job_deadline())
+        let job = self.job_deadline().filter(|_| self.trusted);
+        earliest(self.now.checked_add(timeout), job)
     }
 
     /// Aborts the current step if it was running or waiting.
@@ -614,9 +628,10 @@ impl<'a> Machine<'a> {
             self.roll_back(canceled(), JobAction::Cancel);
             return None;
         }
-        if self
-            .job_deadline()
-            .is_some_and(|deadline| self.now >= deadline)
+        if self.trusted
+            && self
+                .job_deadline()
+                .is_some_and(|deadline| self.now >= deadline)
         {
             let error = JobError::Timeout.to_coded_error();
             self.abort_current(&error);
@@ -714,6 +729,9 @@ impl<'a> Machine<'a> {
             }
         };
         match deadline {
+            Some(deadline) if self.now >= deadline && !self.trusted => Some(Boundary::Park {
+                deadline: self.now.checked_add(HELD_RETRY),
+            }),
             Some(deadline) if self.now >= deadline => {
                 let error = if self.job_deadline().is_some_and(|job| job <= deadline) {
                     JobError::Timeout.to_coded_error()
@@ -801,5 +819,135 @@ pub fn earliest(a: Option<Timestamp>, b: Option<Timestamp>) -> Option<Timestamp>
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::{
+        JobId, Revision, SystemComponent,
+        clock::{Held, Reason, Release, testing},
+        ipam::Stamp,
+        serde_util::HexBytes,
+    };
+
+    use super::*;
+    use crate::model::{JobKind, JobSpec, StepRecord, StepSpec};
+
+    const START: &str = "2026-10-09T12:00:00Z";
+
+    fn at(secs: u64) -> Timestamp {
+        START
+            .parse::<Timestamp>()
+            .expect("time")
+            .checked_add(Duration::from_secs(secs))
+            .expect("time")
+    }
+
+    /// A job of one step started at [`START`], with a job timeout of an hour.
+    fn job_in(state: JobState, step: StepState) -> Job {
+        Job {
+            id: JobId::generate(),
+            spec: JobSpec {
+                kind: JobKind::from_static("jobs.test"),
+                title: MessageKey::from_static("jobs.test.title"),
+                targets: Vec::new(),
+                steps: vec![StepSpec {
+                    kind: StepKind::from_static("jobs.test.step"),
+                    params: HexBytes(vec![0xA0]),
+                    timeout: None,
+                }],
+                timeout: Duration::from_secs(3600),
+                group: None,
+                group_limit: None,
+                idempotency: None,
+                node: None,
+            },
+            state,
+            steps: vec![StepRecord {
+                index: 0,
+                kind: StepKind::from_static("jobs.test.step"),
+                state: step,
+                attempts: 1,
+                started: Some(at(0)),
+                finished: None,
+                output: None,
+            }],
+            created: Stamp::new(at(0), Principal::system(SystemComponent::Jobs)),
+            started: Some(at(0)),
+            runner: None,
+            revision: Revision::ZERO,
+            cancel_requested: None,
+            error: None,
+            finished: None,
+        }
+    }
+
+    /// Advances `job` at `now`: the boundary, the deadline of an `execute` there, the job.
+    fn advance(job: Job, now: Timestamp) -> (Boundary, Option<Timestamp>, Job) {
+        let handlers = |_: &StepKind| Some(HandlerInfo { idempotent: true });
+        let tasks = BTreeMap::new();
+        let mut machine = Machine::new(
+            job,
+            now,
+            None,
+            Principal::system(SystemComponent::Jobs),
+            None,
+            &handlers,
+            &tasks,
+        );
+        let boundary = machine.advance();
+        (boundary, machine.execute_deadline(0), machine.job)
+    }
+
+    fn code(job: &Job) -> Option<&str> {
+        job.error.as_ref().map(|error| error.code.as_ref())
+    }
+
+    fn hold() -> testing::Override {
+        testing::hold(Held {
+            reason: Reason::Jump,
+            jump_ms: 7_200_000,
+            since: at(7200),
+            release: Release::Wait,
+            until: None,
+        })
+    }
+
+    #[test]
+    fn a_held_clock_passes_no_job_deadline() {
+        let held = hold();
+        let (boundary, deadline, job) =
+            advance(job_in(JobState::Running, StepState::Pending), at(7200));
+        assert_eq!(boundary, Boundary::Execute { step: 0 });
+        assert_eq!(job.state, JobState::Running);
+        assert_eq!(deadline, Some(at(7200 + 3600)), "the step timeout alone");
+        drop(held);
+        let (_, _, job) = advance(job_in(JobState::Running, StepState::Pending), at(7200));
+        assert_eq!(code(&job), Some("jobs.timeout"));
+    }
+
+    #[test]
+    fn a_held_clock_passes_no_step_deadline() {
+        let waiting = StepState::WaitingForManual {
+            task: ManualTask {
+                instruction: MessageKey::from_static("jobs.test.reserve"),
+                args: BTreeMap::new(),
+                undo: None,
+            },
+            deadline: Some(at(60)),
+        };
+        let held = hold();
+        let (boundary, _, job) = advance(job_in(JobState::Waiting, waiting.clone()), at(120));
+        assert_eq!(
+            boundary,
+            Boundary::Park {
+                deadline: Some(at(180))
+            }
+        );
+        assert_eq!(job.state, JobState::Waiting);
+        drop(held);
+        let (_, _, job) = advance(job_in(JobState::Waiting, waiting), at(120));
+        assert_eq!(code(&job), Some(DEADLINE_PASSED));
     }
 }
