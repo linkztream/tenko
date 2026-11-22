@@ -48,7 +48,7 @@ use tower::ServiceExt as _;
 use super::forwarded::{ConnInfo, IntegrationClient};
 use crate::{
     middleware::{
-        Quota, RateLimitConfig, RateLimiter, integration::isolated_too_long, quorum::Staleness,
+        Quota, RateLimitConfig, RateLimiter, integration::ISOLATION_LIMIT, quorum::Staleness,
     },
     routes::integrations::CaIssuer,
 };
@@ -431,7 +431,7 @@ fn stands(shared: &Shared, client: &IntegrationClient, full: bool) -> bool {
 fn cut_off(store: &dyn Store, now: Timestamp) -> bool {
     let status = store.status();
     Staleness::of(&status.quorum, status.revision)
-        .is_some_and(|staleness| isolated_too_long(staleness.since, now))
+        .is_some_and(|staleness| tenko_core::clock::passed(staleness.since, now, ISOLATION_LIMIT))
 }
 
 /// Sleeps `after` (a moment just past it, so the boundary itself has gone), or forever.

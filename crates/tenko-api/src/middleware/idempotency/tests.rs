@@ -1816,14 +1816,7 @@ async fn the_sweep_indexes_or_removes_the_records_of_an_earlier_version() {
 
 /// Held after a forward jump of an hour, for the calling test.
 fn held() -> tenko_core::clock::testing::Override {
-    use tenko_core::clock::{Held, Reason, Release, testing};
-    testing::hold(Held {
-        reason: Reason::Jump,
-        jump_ms: 3_600_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: Release::Wait,
-        until: None,
-    })
+    tenko_core::clock::testing::hold_jump(3_600_000, Timestamp::UNIX_EPOCH)
 }
 
 #[tokio::test]

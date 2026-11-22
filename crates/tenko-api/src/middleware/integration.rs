@@ -9,7 +9,7 @@
 //!   account ends a long-lived connection at its next request.
 //! - A controller cut off from its quorum for more than [`ISOLATION_LIMIT`] answers nothing
 //!   here: it cannot know of a revocation made elsewhere. While the clock guard holds issuing,
-//!   a cut-off controller answers nothing here at once ([`isolated_too_long`]).
+//!   a cut-off controller answers nothing here at once ([`tenko_core::clock::passed`]).
 //! - No public operation is served here.
 //! - The request must be authenticated by a token of the account the certificate names.
 
@@ -26,16 +26,6 @@ use crate::{extract::AuthOutcome, problem::ApiError, server::forwarded::ConnInfo
 
 /// How long a controller without quorum contact keeps answering on the integration listener.
 pub const ISOLATION_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Whether a controller cut off from its quorum since `since` has been so for longer than
-/// [`ISOLATION_LIMIT`] at `now`: also on a clock that stands before `since`, or while the
-/// clock guard holds issuing ([`tenko_core::clock::plausible_now`]), since a clock set back
-/// would make the isolation look shorter.
-pub(crate) fn isolated_too_long(since: Timestamp, now: Timestamp) -> bool {
-    tenko_core::clock::plausible_now().is_err()
-        || tenko_auth::clock::stands_before(now, since)
-        || now.saturating_since(since) > ISOLATION_LIMIT
-}
 
 fn refuse(code: &'static str, status: u16, detail: &str) -> Response {
     ApiError::new(code, status, detail).into_response()
@@ -54,7 +44,7 @@ pub(crate) fn certificate(
 ) -> Option<Response> {
     let client = request.extensions().get::<ConnInfo>()?.client.clone()?;
     let now = Timestamp::now();
-    if isolated_since.is_some_and(|since| isolated_too_long(since, now)) {
+    if isolated_since.is_some_and(|since| tenko_core::clock::passed(since, now, ISOLATION_LIMIT)) {
         return Some(refuse(
             "integration.isolated",
             503,
@@ -424,7 +414,6 @@ mod tests {
 
     #[tokio::test]
     async fn a_clock_set_back_refuses_a_cut_off_controller_at_once() {
-        use tenko_core::clock::{Held, Reason, Release, testing};
         let env = env().await;
         let request = request(&env, "current", Some(token(env.account)));
         let refused = || {
@@ -434,13 +423,7 @@ mod tests {
         assert!(!refused(), "a short loss of contact is tolerated");
         // An isolation that began after the clock it is judged on.
         assert!(check(&request, false, false, Some(ahead(60))).is_some());
-        let _held = testing::hold_issuing(Held {
-            reason: Reason::Jump,
-            jump_ms: -3_600_000,
-            since: ago(5),
-            release: Release::Person,
-            until: None,
-        });
+        let _held = tenko_core::clock::testing::hold_jump(-3_600_000, ago(5));
         assert!(refused());
     }
 
