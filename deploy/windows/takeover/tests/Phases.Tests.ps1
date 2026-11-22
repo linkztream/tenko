@@ -250,8 +250,9 @@ Describe 'The refusals' {
             Install-FakeWorld
             $script:world.takeoverList = $form
             Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1 -Because $form
-            $script:lastError | Should -Match "this node's version of Tenko cannot report answered clients per takeover"
+            $script:lastError | Should -Match "this node's version of Tenko cannot report answered clients per takeover.*no DNS or DHCP setting was changed; this run's marker on the PDC emulator stays, so run the script again from this machine"
             (Get-WindowsChange | Where-Object { $_ -notmatch '\|WriteMarker$' }) | Should -BeNullOrEmpty
+            $script:world.marker.Run | Should -Be (Read-State).id -Because 'the message says the marker stays'
         }
     }
 
@@ -810,6 +811,34 @@ Describe 'A failure inside the DHCP window' {
         } finally { $script:TkAckWaitSec = 300 }
         $state = @{ Data = @{ readings = [ordered]@{ dhcp = @([ordered]@{ scopes = @([ordered]@{ cidr = '198.51.100.0/24' }) }) }; jobs = [ordered]@{} } }
         @(Get-TkUnproven -State $state) | Should -Be @('198.51.100.0/24')
+    }
+
+    It 'tells a node that reports no ACK counter apart from a counter of 0, and refuses two items of one job with exit 4' {
+        $script:TkAckWaitSec = 0
+        try {
+            $script:world.acks = 0
+            Invoke-FakeRun -Answers $script:FirstSitting 3>$null | Should -Be 3 -Because $script:lastError
+            $script:world.acks = $null
+            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
+            $out[-1] | Should -Be 2
+            $script:lastError | Should -Match "Tenko's node does not report answered clients for 192\.0\.2\.0/24 \(its takeover has no ACK counter\).*update the node"
+            ($out -join "`n") | Should -Not -Match 'Tenko reports no answered client yet'
+        } finally { $script:TkAckWaitSec = 300 }
+        $job = '0190d1c2-0000-7000-8000-000000000001'
+        $state = @{ Data = @{ readings = [ordered]@{ dhcp = @([ordered]@{ scopes = @([ordered]@{ cidr = '192.0.2.0/24' }) }) }; jobs = [ordered]@{ 'takeover.192.0.2.0/24' = $job } } }
+        Mock Invoke-Tenko { [ordered]@{ items = @([ordered]@{ job = $job; acks = 0 }, [ordered]@{ job = $job; acks = 5 }) } }
+        $caught = $null
+        try { [void](Get-TkUnproven -State $state) } catch { $caught = $_.Exception }
+        $caught.Data['tk.exit'] | Should -Be 4
+        $caught.Message | Should -Match "lists the job $job of 192\.0\.2\.0/24 2 times"
+    }
+
+    It 'refuses with exit 4 a node that names one job for two scopes, while Windows still serves' {
+        $script:world.twoScopes = $true; $script:world.sameJob = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4
+        $script:lastError | Should -Match 'Tenko named the job \S+ for the takeover of \S+ and of \S+, so the script cannot prove each scope on its own; Windows still serves'
+        $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
+        $script:world.services.dc1.Serving | Should -BeTrue
     }
 
     It 'refuses the DHCP window on a node that cannot report answered clients, before its question and any stop' {

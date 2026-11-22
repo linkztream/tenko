@@ -89,7 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
-        nrpt = @(); takeoverList = ''; foreignFirst = $false; ignoreFilter = $false
+        nrpt = @(); takeoverList = ''; foreignFirst = $false; ignoreFilter = $false; sameJob = $false
         jobScopes = @{}; acksByScope = @{}; prompts = [System.Collections.ArrayList]@()
         forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
@@ -418,6 +418,8 @@ function Invoke-FakeTenko {
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' { return (Get-FakeJob 'prepare') }
         '^POST /migrate/mirrors/[^/]+/scopes/([^/]+)/takeover$' {
             $scope = [uri]::UnescapeDataString($Matches[1])
+            # A node that names one job for two scopes (sameJob).
+            if ($w.sameJob -and $w.jobScopes.Count -gt 0) { return [ordered]@{ id = @($w.jobScopes.Keys)[0] } }
             $job = Get-FakeJob 'takeover'
             $w.jobScopes[$job.id] = $scope
             return $job

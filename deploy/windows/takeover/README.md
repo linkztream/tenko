@@ -217,7 +217,10 @@ are not yet proven, and the sitting ends as usual. To prove a scope at once, run
 `ipconfig /renew` on any of its clients and look at the lease it gets; if a client that asks
 gets no answer, check the relay or the listener, or run `-Reverse`. Every later sitting says
 in one line which scopes Tenko still reports no answered client for, and the finish's
-confirmation names them (it does not refuse).
+confirmation names them (it does not refuse). A node that lists a scope's takeover without
+its counter is not a quiet network: the check stops (exit 2) and says that the node does not
+report answered clients; update the node and run the script again. A node that names one
+job for two scopes, or lists one job twice, is refused with exit 4.
 
 ## The state, the exit codes and a failed step
 

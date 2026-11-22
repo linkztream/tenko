@@ -292,6 +292,12 @@ Describe 'The name resolution policy' {
         { Assert-TkDirectAnswer -Domain 'xn--bcher-kva.example.test' } | Should -Throw '*fixed servers by policy*'
     }
 
+    It 'stops a run at a rule with name servers whose name is no DNS name, naming that rule' {
+        Mock Get-TkNrptRule { @((Get-TestRule -Namespace '.bad..example.test'), (Get-TestRule -Namespace '.other.example.test' -NameServers '192.0.2.99'), (Get-TestRule -Namespace '.bad..example.test' -NameServers '192.0.2.11')) }
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Throw '*rule for .bad..example.test names 192.0.2.11 and its name cannot be read as a DNS name*run it from a machine without such a rule*'
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' -InWindow } | Should -Throw '*cannot be read as a DNS name*run the script again to resume*'
+    }
+
     It 'stops a run when the policy cannot be read' {
         Mock Get-TkNrptRule { throw 'Access is denied' }
         { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Throw '*could not be read (Access is denied)*run it from a machine whose policy it can read*'

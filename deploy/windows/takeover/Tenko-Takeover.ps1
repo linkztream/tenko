@@ -1057,7 +1057,10 @@ function Assert-TkDirectAnswer {
         $servers = @(@($rule.NameServers) + @($rule.DirectAccessDnsServers) | Where-Object { $_ -and [string]$_ })
         if ($servers.Count -eq 0) { continue }
         foreach ($space in @($rule.Namespace | Where-Object { $_ })) {
-            if (@($names | Where-Object { Test-TkNamespaceMatch -Namespace ([string]$space) -Name $_ }).Count -gt 0) {
+            $covers = $false
+            try { $covers = @($names | Where-Object { Test-TkNamespaceMatch -Namespace ([string]$space) -Name $_ }).Count -gt 0 }
+            catch { Exit-TkTakeover $code "the Name Resolution Policy Table rule for $(ConvertTo-TkSafeText $space) names $(ConvertTo-TkSafeText ($servers -join ', ')) and its name cannot be read as a DNS name ($(ConvertTo-TkSafeText $_.Exception.Message)), so the script cannot check which server answers the names of ${Domain}: $next" }
+            if ($covers) {
                 Exit-TkTakeover $code "this machine sends the names of $Domain to fixed servers by policy (the Name Resolution Policy Table rule for $(ConvertTo-TkSafeText $space) names $(ConvertTo-TkSafeText ($servers -join ', '))), so the script cannot check which server answers them: $next"
             }
         }
@@ -3208,7 +3211,10 @@ function Get-TkPhase5 {
                         $key = "takeover.$($scope.cidr)"
                         if (Get-TkField $State.Data.jobs $key) { continue }
                         $job = Invoke-Tenko -Method POST -Path "/migrate/mirrors/$($State.Data.mirrors[$server.name])/scopes/$($scope.cidr -replace '/', '%2F')/takeover"
-                        $State.Data.jobs[$key] = [string](Get-TkField $job 'id')
+                        $id = [string](Get-TkField $job 'id')
+                        $same = @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' -and [string]$State.Data.jobs[$_] -ceq $id })
+                        if ($same.Count -gt 0) { Exit-TkTakeover 4 "Tenko named the job $id for the takeover of $($scope.cidr) and of $($same[0].Substring(9)), so the script cannot prove each scope on its own; Windows still serves" }
+                        $State.Data.jobs[$key] = $id
                         Save-TkState $State
                     }
                 }
@@ -3387,14 +3393,19 @@ $script:TkQuietText = 'Tenko has not answered a client yet. That is normal in a 
 function Get-TkUnproven {
     # The scopes whose takeover Tenko reports no answered client for yet: only the item whose
     # job is that scope's own counts, and anything but an ACK counter greater than zero, a
-    # missing item or a scope without a job counts as not answered.
+    # missing item or a scope without a job counts as not answered. An item without a counter
+    # is a node that does not report answered clients, and two items of one job are refused.
     param([hashtable]$State)
     foreach ($cidr in @($State.Data.readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)) {
         $job = [string](Get-TkField $State.Data.jobs "takeover.$cidr")
         if (-not $job) { $cidr; continue }
-        $item = @(@(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$job") 'items') | Where-Object { [string](Get-TkField $_ 'job') -ceq $job }) | Select-Object -First 1
+        $items = @(@(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$job") 'items') | Where-Object { [string](Get-TkField $_ 'job') -ceq $job })
+        if ($items.Count -gt 1) { Exit-TkTakeover 4 "Tenko lists the job $job of $cidr $($items.Count) times in its takeover list, so the script cannot tell which ACK counter is the scope's" }
+        if ($items.Count -eq 0) { $cidr; continue }
+        $value = Get-TkField $items[0] 'acks'
+        if ($null -eq $value) { throw "Tenko's node does not report answered clients for $cidr (its takeover has no ACK counter), so the script cannot tell a quiet network from a scope that no server answers: update the node, then run the script again to resume, or run it with -Reverse" }
         $acks = [long]0
-        if ($null -eq $item -or -not [long]::TryParse([string](Get-TkField $item 'acks'), [ref]$acks) -or $acks -le 0) { $cidr }
+        if (-not [long]::TryParse([string]$value, [ref]$acks) -or $acks -le 0) { $cidr }
     }
 }
 
@@ -3410,7 +3421,7 @@ function Assert-TkTakeoverList {
         elseif (@($items | Where-Object { -not ($_ -is [System.Collections.IDictionary]) -or -not [string](Get-TkField $_ 'job') -or $null -eq (Get-TkField $_ 'acks') }).Count -gt 0) { $why = 'its takeover list has an item without a job or an ACK counter' }
     } catch { $why = ConvertTo-TkSafeText $_.Exception.Message }
     if ($why) {
-        Exit-TkTakeover $Code "this node's version of Tenko cannot report answered clients per takeover ($why), so the DHCP window is not started and Windows answers as before: $(if ($Code -eq 1) { 'run the script with a node that serves the takeover list; nothing was changed' } else { 'update the node, then run the script again to resume, or run it with -Reverse' })"
+        Exit-TkTakeover $Code "this node's version of Tenko cannot report answered clients per takeover ($why), so the DHCP window is not started and Windows answers as before: $(if ($Code -eq 1) { 'no DNS or DHCP setting was changed; this run''s marker on the PDC emulator stays, so run the script again from this machine once the node serves the takeover list' } else { 'update the node, then run the script again to resume, or run it with -Reverse' })"
     }
 }
 
