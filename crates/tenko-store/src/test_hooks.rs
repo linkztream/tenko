@@ -23,7 +23,8 @@ pub const REFUSE_WRITES_FILE: &str = "TENKO_TEST_REFUSE_WRITES_FILE";
 pub const HOLD_APPLY: &str = "test-hold-apply";
 /// The file in a store's data directory whose presence holds every log group commit.
 pub const STALL_LOG: &str = "test-stall-log";
-/// The file in a store's data directory whose presence fails every log group commit.
+/// The file in a store's data directory whose presence fails every log group commit, with
+/// the OS error of a full disk.
 pub const FAIL_LOG: &str = "test-fail-log";
 /// The file in a store's data directory whose presence fails every apply of a batch, as a
 /// write the disk refuses would.

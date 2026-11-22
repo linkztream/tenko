@@ -395,6 +395,9 @@ pub struct RaftStoreConfig {
     /// The tables a sign-in writes: below the disk guard's margin a sign-in still passes,
     /// small and capped (`docs/cluster.md` section 12.12). Empty: none passes.
     pub signin_tables: Vec<TableName>,
+    /// The tables one of whose rows marks a batch as a sign-in (a session, an account's
+    /// lock); a sign-in writes at least one of them.
+    pub signin_anchors: Vec<TableName>,
 }
 
 impl RaftStoreConfig {
@@ -425,6 +428,7 @@ impl RaftStoreConfig {
             fsync_probe_samples: fsync::DEFAULT_PROBE_SAMPLES,
             verify_full_audit_chain: false,
             signin_tables: Vec::new(),
+            signin_anchors: Vec::new(),
         }
     }
 
@@ -883,7 +887,7 @@ impl RaftStore {
             config.read_wait,
             Duration::from_millis(config.timings.heartbeat_ms),
         ));
-        let disk = disk::Guard::new(config.signin_tables.clone());
+        let disk = disk::Guard::new(config.signin_tables.clone(), config.signin_anchors.clone());
         let inner = Arc::new(Inner {
             config,
             raft,
@@ -1227,11 +1231,18 @@ impl RaftStore {
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)
             .map_err(ForwardError::Store)?;
-        inner.admit(&decoded).map_err(ForwardError::Store)?;
         let fingerprint = match &decoded.idempotency {
             Some(_) => Some(decoded.fingerprint().map_err(ForwardError::Store)?),
             None => None,
         };
+        // A forwarded retry of a committed write is answered as one proposed here.
+        if let Some(replayed) = inner
+            .replay(&decoded, fingerprint.as_ref())
+            .map_err(ForwardError::Store)?
+        {
+            return replayed.map_err(ForwardError::Store);
+        }
+        inner.admit(&decoded).map_err(ForwardError::Store)?;
         match inner
             .queue_local(ProposedBatch { batch, fingerprint }, false, None)
             .await
@@ -2080,9 +2091,9 @@ impl Inner {
     /// process): every call answers [`StoreError::Stopped`] from then on. A state machine
     /// that stopped at an entry it cannot apply (`APPLY_STOPPED`) is not noted: a restart
     /// would stop at the same entry. A stop restarts the process only when a start cures it:
-    /// the disk was full (its cause says so, or the store was short of room). After another
-    /// failure, such as a disk that fails to read, a start would fail too and stop the
-    /// service for good, so the store stays up and says why.
+    /// its cause names a full disk. After another failure, such as a disk that fails to
+    /// read, a start would fail too and stop the service for good, so the store stays up and
+    /// says why.
     fn note_stopped(&self) {
         if self.stopped.get().is_some() || self.sm.stopped().is_some() {
             return;
@@ -2091,8 +2102,7 @@ impl Inner {
             && !matches!(fatal, Fatal::Stopped)
         {
             let cause = fatal.to_string();
-            let restartable = disk::names_a_full_disk(&cause)
-                || *self.disk.subscribe().borrow() != Pressure::Normal;
+            let restartable = disk::names_a_full_disk(&cause);
             tracing::error!(
                 code = StoreError::STOPPED,
                 %cause,
@@ -2400,7 +2410,9 @@ async fn maintain(inner: Weak<Inner>) {
         let policy = inner.config.snapshot;
         let settled = last_trigger.is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
         // After a snapshot file that could not be written: again once one fits, not at once.
+        // Never beside a compaction: both may need the room that is left.
         let settled = settled
+            && !inner.compacting.load(Ordering::Relaxed)
             && (!inner.sm.stats().snapshot_failed.load(Ordering::Relaxed)
                 || (last_trigger.is_none_or(|at| at.elapsed() >= SNAPSHOT_RETRY)
                     && inner.disk.status().0

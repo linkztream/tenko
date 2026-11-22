@@ -1080,6 +1080,11 @@ pub const APPLY_STOPPED: &str = "sys.store.apply_stopped";
 /// would cover until a snapshot can be written ([`StoreSafety::snapshot_failed`]).
 pub const SNAPSHOT_FAILED: &str = "sys.store.snapshot_failed";
 
+/// The free space below which the store takes no write at all, only its own snapshot and
+/// compaction: what a prune batch needs (`raft::disk`). Only a person gets a store out of
+/// it (`docs/cluster.md` section 12.12).
+pub const DISK_FLOOR_BYTES: u64 = 128 * 1024 * 1024;
+
 /// The code of a free space of the data directory that cannot be read: the store takes
 /// only writes that free space until it can ([`StoreSafety::free_unknown`]).
 pub const DISK_UNKNOWN: &str = "sys.store.disk_unknown";

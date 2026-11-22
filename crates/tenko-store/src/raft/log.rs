@@ -522,9 +522,12 @@ impl Shared {
     ) -> Result<Written, redb::Error> {
         #[cfg(feature = "test-hooks")]
         if self.dir.join(crate::test_hooks::FAIL_LOG).exists() {
-            return Err(redb::Error::Io(io::Error::other(
-                "the test hook fails the write",
-            )));
+            // A full disk, as the OS reports it.
+            #[cfg(windows)]
+            let full = io::Error::from_raw_os_error(112);
+            #[cfg(not(windows))]
+            let full = io::Error::from_raw_os_error(28);
+            return Err(redb::Error::Io(full));
         }
         let mut transaction = self.db.begin_write()?;
         transaction.set_durability(Durability::Immediate)?;

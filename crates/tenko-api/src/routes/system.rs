@@ -55,7 +55,7 @@ use tenko_core::{
 };
 use tenko_store::{
     ApplyStopped, Pressure, ReadConsistency, StoreError, StoreRole, StoreSafety, WriteBatch,
-    api::{APPLY_STOPPED, DISK_UNKNOWN, SNAPSHOT_FAILED},
+    api::{APPLY_STOPPED, DISK_FLOOR_BYTES, DISK_UNKNOWN, SNAPSHOT_FAILED},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -703,10 +703,21 @@ fn store_safety_warnings(safety: &StoreSafety, follower: bool) -> Vec<StatusWarn
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} it keeps: only writes that \
-                 free space and sign-ins are taken.{follows}",
+                 free space and sign-ins are taken; failed sign-ins are counted and not \
+                 recorded, and one summary record follows once the disk has room.{follows}",
                 gib(safety.margin_bytes)
             ),
             safety.margin_bytes,
+        )),
+        Pressure::Reserve if safety.free_bytes < DISK_FLOOR_BYTES => warnings.push(warning(
+            StoreError::DISK_RESERVE,
+            format!(
+                "the store's disk has {free} free, below the {} even a prune needs: nothing \
+                 is taken, and only a person can free space on the host (docs/cluster.md \
+                 section 12.12, on a full disk).{follows}",
+                gib(DISK_FLOOR_BYTES)
+            ),
+            DISK_FLOOR_BYTES,
         )),
         Pressure::Reserve => warnings.push(warning(
             StoreError::DISK_RESERVE,
@@ -1729,6 +1740,7 @@ mod tests {
             [(StoreError::DISK_RESERVE.to_owned(), "200".to_owned())]
         );
         safety.pressure = Pressure::Reserve;
+        safety.free_bytes = DISK_FLOOR_BYTES;
         safety.snapshot_failed = true;
         safety.stopped = Some("a storage failure".to_owned());
         safety.restartable = true;
@@ -1739,6 +1751,20 @@ mod tests {
                 (StoreError::DISK_RESERVE.to_owned(), "100".to_owned()),
                 (SNAPSHOT_FAILED.to_owned(), "100".to_owned()),
             ]
+        );
+        // Below the floor the warning names the floor: nothing is taken.
+        safety.free_bytes = DISK_FLOOR_BYTES - 1;
+        assert_eq!(
+            codes(&safety)[1],
+            (
+                StoreError::DISK_RESERVE.to_owned(),
+                DISK_FLOOR_BYTES.to_string()
+            )
+        );
+        assert!(
+            store_safety_warnings(&safety, false)[1]
+                .detail
+                .contains("nothing is taken")
         );
         assert_eq!(
             crate::findings::health_level(StoreError::STOPPED),

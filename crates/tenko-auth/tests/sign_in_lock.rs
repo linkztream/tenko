@@ -26,7 +26,7 @@ use tenko_auth::{
     totp::{self, TotpParams},
 };
 use tenko_core::{Principal, RequestCtx, SystemComponent, Timestamp};
-use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
+use tenko_store::{KeyRange, Pressure, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
 
 /// The second administrator's name; with it, [`ADMIN`] is not the last administrator.
 const SECOND: &str = "boris";
@@ -1426,4 +1426,46 @@ async fn a_code_held_back_by_the_delay_keeps_its_challenge() {
         matches!(answer, Ok(LoginOutcome::Session(_))),
         "the challenge is still open: {answer:?}"
     );
+}
+
+/// While the store's disk is short of room a failed sign-in writes no record of its own:
+/// the account still locks, its lock is stored, and once the disk has room one summary
+/// record names the attempts, the names, the networks and the accounts that exist.
+#[tokio::test]
+async fn below_the_disk_margin_an_account_still_locks_and_one_summary_follows() {
+    let (env, admin) = TestEnv::installed(Profile::Hardened).await;
+    second_admin(&env, &admin).await;
+    let failed_before = audit_count(&env, "auth.login.password").await;
+    env.store.set_pressure(Pressure::Margin);
+    for _ in 0..8 {
+        fail_waiting(&env, ATTACKER, ADMIN).await;
+    }
+    fail_waiting(&env, OTHER, "nobody-here").await;
+    assert!(matches!(
+        login(&env, ATTACKER, ADMIN, ADMIN_PASSWORD).await,
+        Err(AuthError::Throttled { .. })
+    ));
+    assert_eq!(locks_of(&env, ADMIN).await, 1, "the lock is stored");
+    assert_eq!(
+        audit_count(&env, "auth.login.password").await,
+        failed_before,
+        "no record per failed sign-in"
+    );
+
+    env.store.set_pressure(Pressure::Normal);
+    let summary = tenko_core::testing::wait_until_async("the summary record", async || {
+        let view = env.store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(&tables::AUDIT, KeyRange::all(), 10_000, false)
+            .expect("audit")
+            .into_iter()
+            .map(|(_, record, _)| record)
+            .find(|record| record.draft.details.context.contains_key("summary"))
+    })
+    .await;
+    let context = &summary.draft.details.context;
+    assert_eq!(context["attempts"], "9", "{context:?}");
+    assert_eq!(context["names"], "2");
+    assert_eq!(context["networks"], "2");
+    assert_eq!(context["accounts"], ADMIN, "only the account that exists");
+    assert_eq!(summary.draft.action.as_str(), "auth.login.password");
 }

@@ -35,7 +35,7 @@
 use std::{
     net::IpAddr,
     sync::{
-        Arc,
+        Arc, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -45,7 +45,7 @@ use tenko_core::{
     ObjectRef, Principal, RequestCtx, Revision, SystemComponent,
     audit::{AuditAction, AuditDraft},
 };
-use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
+use tenko_store::{KeyRange, Pressure, ReadView, ReadViewExt, WriteBatch};
 use tokio::sync::Semaphore;
 
 use super::{AuthService, actions};
@@ -652,6 +652,11 @@ impl AuthService {
         }
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), ctx.now);
         batch.request = Some(ctx.request);
+        if *self.store.pressure().borrow() != Pressure::Normal {
+            self.failed_short_of_room(ctx, attempt, user, action, outcome.locked_until, batch)
+                .await;
+            return AuthError::InvalidCredentials;
+        }
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])
             .unwrap_or_default();
@@ -702,6 +707,43 @@ impl AuthService {
             tracing::warn!(%error, "could not record a failed login");
         }
         AuthError::InvalidCredentials
+    }
+
+    /// A failed attempt while the store's disk is short of room: the store takes no record
+    /// alone then, so the failure is counted for one summary record (`unrecorded`). The
+    /// waits and locks in memory hold as always, and a lock that starts is stored: a lock row
+    /// passes the store's guard below its margin, as a sign-in's rows do.
+    async fn failed_short_of_room(
+        &self,
+        ctx: &RequestCtx,
+        attempt: &Attempt,
+        user: Option<(&UserRecord, Revision)>,
+        action: AuditAction,
+        locked_until: Option<tenko_core::Timestamp>,
+        mut batch: WriteBatch,
+    ) {
+        self.unrecorded
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .note(
+                action,
+                &attempt.name,
+                user.map(|(user, _)| user.id),
+                network_text(attempt.source),
+            );
+        if attempt.mode != LockoutMode::Off {
+            let _ = self.count_mark_failure(attempt, ctx.now).await;
+        }
+        let Some(until) = locked_until else {
+            return;
+        };
+        if let Err(error) = self.stage_lock(&mut batch, ctx, attempt, until).await {
+            tracing::error!(%error, "could not stage a sign-in lock");
+            return;
+        }
+        if let Err(error) = self.store.propose(batch).await {
+            tracing::warn!(%error, "could not store a sign-in lock");
+        }
     }
 
     /// Adds the stored lock of the attempt to `batch`, and removes the ended locks of the

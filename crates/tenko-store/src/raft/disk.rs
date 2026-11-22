@@ -12,14 +12,16 @@
 //!   a stored row, bumps a counter or replaces a value with one no larger, with at most one
 //!   audit draft of at most [`MAX_DRAFT_BYTES`], and a draft only when the batch removes at
 //!   least as many bytes as the draft holds. Those with a draft pass at most
-//!   [`DRAFTS_PER_MINUTE`] a minute. Below the reserve such a batch passes up to
-//!   [`RESERVE_BATCH_BYTES`], and not below [`FLOOR`]; a larger one is answered with
-//!   [`StoreError::BatchTooLarge`] (`sys.store.batch_too_large`, 413) naming its size and that
-//!   limit, and its caller splits it into batches of at most the limit and retries.
-//! - Below the margin only, a sign-in passes: its rows go to the tables the store was given
-//!   for it (`RaftStoreConfig::signin_tables`), at most [`SIGNIN_ROWS`] of at most
-//!   [`SIGNIN_ROW_BYTES`] each with at most one draft, [`SIGNINS_PER_MINUTE`] a minute. A
-//!   batch of a draft alone (a failed sign-in) counts as one too.
+//!   [`DRAFTS_PER_MINUTE`] a minute. Below the reserve such a batch passes when it removes
+//!   a stored row, up to [`RESERVE_BATCH_BYTES`] and [`RESERVE_BATCH_CHANGES`], and not below
+//!   [`FLOOR`]; a batch larger in bytes is answered with [`StoreError::BatchTooLarge`]
+//!   (`sys.store.batch_too_large`, 413) naming its size and that limit, and its caller splits
+//!   it into batches of at most the limit and retries.
+//! - Below the margin only, a sign-in passes: it writes a row of one of the tables that mark
+//!   one (`RaftStoreConfig::signin_anchors`: a session, or an account's lock), and rows only
+//!   to the tables the store was given for it (`RaftStoreConfig::signin_tables`), at most
+//!   [`SIGNIN_ROWS`] of at most [`SIGNIN_ROW_BYTES`] each with at most one draft,
+//!   [`SIGNINS_PER_MINUTE`] a minute. A batch of a draft alone is refused.
 //! - Nothing else passes: a refused batch gets [`StoreError::DiskReserve`].
 //!
 //! A state is left only 10 percent above its line, so free space that hovers at a line does
@@ -47,13 +49,16 @@ pub(crate) const RESERVE_BASE: u64 = 256 * 1024 * 1024;
 /// The largest batch (its payload, `WriteBatch::payload_size`) that frees space and passes
 /// below the reserve: a prune sends its deletes in batches no larger.
 pub(crate) const RESERVE_BATCH_BYTES: usize = 256 * 1024;
-/// The free space below which nothing passes, from what a delete batch of
-/// [`RESERVE_BATCH_BYTES`] needs: a delete names a table (at least 8 bytes) and a key (at
-/// least 8), so such a batch removes at most 16,384 rows; copy-on-write rewrites at most one
-/// 4 KiB leaf per row, 64 MiB, and the branch pages above them, at most half as much again;
-/// with the batch's log record and its journal row, about 97 MiB; with a fifth more,
-/// 128 MiB (half of [`RESERVE_BASE`]).
-pub(crate) const FLOOR: u64 = RESERVE_BASE / 2;
+/// The most changes of a batch that frees space and passes below the reserve.
+pub(crate) const RESERVE_BATCH_CHANGES: usize = 16_384;
+/// The free space below which nothing passes, from what a delete batch below the reserve
+/// needs: at most [`RESERVE_BATCH_CHANGES`] rows; copy-on-write rewrites at most one 4 KiB
+/// leaf per row, 64 MiB, and the branch pages above them, at most half as much again; with
+/// the batch's log record (at most [`RESERVE_BATCH_BYTES`]) and its journal row, about
+/// 97 MiB; with a fifth more, 128 MiB (half of [`RESERVE_BASE`]). The bound holds per
+/// reading of the free space (every 250 ms), not per batch: pages a commit frees are reused
+/// only after the next durable checkpoint.
+pub(crate) const FLOOR: u64 = crate::api::DISK_FLOOR_BYTES;
 /// The largest encoded audit draft a batch may carry below the margin.
 pub(crate) const MAX_DRAFT_BYTES: usize = 1024;
 /// How many batches that free space and carry an audit draft pass a minute below the margin.
@@ -105,12 +110,19 @@ fn pressure_after(before: Pressure, free: u64, (reserve, margin): (u64, u64)) ->
     }
 }
 
-/// Whether the cause of a stop names a full disk (`ENOSPC`, or Windows' disk-full errors):
-/// one that a start cures once there is room again.
+/// The OS error codes of a full disk: `ENOSPC` and `EDQUOT` on Unix,
+/// `ERROR_HANDLE_DISK_FULL` and `ERROR_DISK_FULL` on Windows.
+#[cfg(unix)]
+const FULL_DISK_CODES: [&str; 2] = ["os error 28)", "os error 122)"];
+#[cfg(windows)]
+const FULL_DISK_CODES: [&str; 2] = ["os error 39)", "os error 112)"];
+#[cfg(not(any(unix, windows)))]
+const FULL_DISK_CODES: [&str; 0] = [];
+
+/// Whether the cause of a stop names a full disk: the one cause a start cures once there
+/// is room again.
 pub(crate) fn names_a_full_disk(cause: &str) -> bool {
-    ["os error 28", "os error 39", "os error 112"]
-        .iter()
-        .any(|code| cause.contains(code))
+    FULL_DISK_CODES.iter().any(|code| cause.contains(code))
 }
 
 /// Free bytes of the file system that holds `dir`. With the test hooks, the byte count in
@@ -193,14 +205,16 @@ pub(crate) struct Guard {
     unknown: AtomicBool,
     drafts: Budget,
     signins: Budget,
-    /// The tables a sign-in writes (`RaftStoreConfig::signin_tables`).
+    /// The tables a sign-in writes, and those one of whose rows marks a sign-in
+    /// (`RaftStoreConfig::signin_tables`, `signin_anchors`).
     signin_tables: Vec<TableName>,
+    signin_anchors: Vec<TableName>,
     /// When a batch that frees space last passed below the margin.
     last_prune: Mutex<Option<Instant>>,
 }
 
 impl Guard {
-    pub(crate) fn new(signin_tables: Vec<TableName>) -> Self {
+    pub(crate) fn new(signin_tables: Vec<TableName>, signin_anchors: Vec<TableName>) -> Self {
         Self {
             pressure: watch::Sender::new(Pressure::Normal),
             free: AtomicU64::new(u64::MAX),
@@ -210,6 +224,7 @@ impl Guard {
             drafts: Budget::new(DRAFTS_PER_MINUTE),
             signins: Budget::new(SIGNINS_PER_MINUTE),
             signin_tables,
+            signin_anchors,
             last_prune: Mutex::new(None),
         }
     }
@@ -305,6 +320,11 @@ impl Guard {
                         limit: RESERVE_BATCH_BYTES,
                     });
                 }
+                // Below the reserve a batch must remove a stored row (a delete of absent keys
+                // grows the log and frees nothing), and its rows are bounded for the floor.
+                if removed == Some(0) || batch.mutations.len() > RESERVE_BATCH_CHANGES {
+                    return refused(line);
+                }
             }
             if draft.is_some() && !self.drafts.take(now) {
                 return refused(line);
@@ -321,20 +341,24 @@ impl Guard {
         refused(line)
     }
 
-    /// Whether `batch` has the shape of a sign-in: rows of the sign-in tables only, few and
-    /// small (deletes anywhere).
+    /// Whether `batch` has the shape of a sign-in: a row of a sign-in anchor (a session, an
+    /// account's lock), rows of the sign-in tables only, few and small (deletes anywhere). A
+    /// batch without rows is none.
     fn signs_in(&self, batch: &WriteBatch) -> bool {
         let mut rows = 0;
-        batch.mutations.iter().all(|mutation| match mutation {
+        let mut anchored = false;
+        let shaped = batch.mutations.iter().all(|mutation| match mutation {
             Mutation::Delete { .. } => true,
             Mutation::Bump { .. } => false,
             Mutation::Put { table, value, .. } => {
                 rows += 1;
+                anchored |= self.signin_anchors.contains(table);
                 rows <= SIGNIN_ROWS
                     && value.len() <= SIGNIN_ROW_BYTES
                     && self.signin_tables.contains(table)
             }
-        })
+        });
+        shaped && anchored
     }
 
     /// Whether the prunes that the pressure rising at `since` started are over at `now`:
@@ -362,6 +386,8 @@ mod tests {
 
     const ROWS: TableName = TableName::from_static("ipam.disk_rows");
     const SESSIONS: TableName = TableName::from_static("auth.disk_sessions");
+    const LOCKS: TableName = TableName::from_static("auth.disk_locks");
+    const INDEX: TableName = TableName::from_static("auth.disk_index");
     const MIB: u64 = 1024 * 1024;
 
     fn batch() -> WriteBatch {
@@ -407,7 +433,7 @@ mod tests {
 
     /// A guard at `free` bytes for 1 GiB of data and a 100 MiB snapshot.
     fn with_free(free: u64) -> Guard {
-        let guard = Guard::new(vec![SESSIONS]);
+        let guard = Guard::new(vec![SESSIONS, LOCKS, INDEX], vec![SESSIONS, LOCKS]);
         guard.update(free, 1024 * MIB, 100 * MIB);
         guard
     }
@@ -438,7 +464,7 @@ mod tests {
 
     #[test]
     fn the_watch_tells_each_change_of_the_pressure_once() {
-        let guard = Guard::new(Vec::new());
+        let guard = Guard::new(Vec::new(), Vec::new());
         let mut pressure = guard.subscribe();
         let (reserve, margin) = lines(0, 0);
         assert_eq!(
@@ -466,7 +492,7 @@ mod tests {
 
     #[test]
     fn a_state_is_left_only_ten_percent_above_its_line() {
-        let guard = Guard::new(Vec::new());
+        let guard = Guard::new(Vec::new(), Vec::new());
         let (reserve, margin) = lines(0, 0);
         guard.update(reserve - 1, 0, 0);
         assert_eq!(
@@ -555,6 +581,22 @@ mod tests {
         guard
             .admit(&deletes(1), stored)
             .expect("a prune below the reserve");
+        assert!(
+            refused(&guard.admit(&deletes(0), nothing)),
+            "a delete of absent rows frees nothing"
+        );
+        let mut many = batch();
+        for n in 0..=u32::try_from(RESERVE_BATCH_CHANGES).expect("fits") {
+            many.delete(
+                TableName::from_static("dns.a"),
+                Bytes::from(n.to_be_bytes().to_vec()),
+            );
+        }
+        assert!(many.payload_size() <= RESERVE_BATCH_BYTES);
+        assert!(
+            refused(&guard.admit(&many, stored)),
+            "more than 16,384 changes"
+        );
         let mut put = batch();
         put.put(ROWS, Bytes::from_static(b"k"), Bytes::from_static(b"value"));
         assert!(matches!(
@@ -607,11 +649,7 @@ mod tests {
                     Bytes::from_static(b"s"),
                     Bytes::from(vec![0_u8; 500]),
                 )
-                .put(
-                    SESSIONS,
-                    Bytes::from_static(b"i"),
-                    Bytes::from(vec![0_u8; 32]),
-                );
+                .put(INDEX, Bytes::from_static(b"i"), Bytes::from(vec![0_u8; 32]));
             batch.audit(draft());
             batch
         };
@@ -620,12 +658,19 @@ mod tests {
             guard.admit(&signin(), nothing).expect("within the cap");
         }
         assert!(refused(&guard.admit(&signin(), nothing)), "past the cap");
+        // An account's lock is a sign-in's row too.
         let guard = at(Pressure::Margin);
-        let mut failed = batch();
-        failed.audit(draft());
+        let mut lock = batch();
+        lock.put(LOCKS, Bytes::from_static(b"l"), Bytes::from(vec![0_u8; 64]));
         guard
-            .admit(&failed, nothing)
-            .expect("a failed sign-in's record");
+            .admit(&lock, nothing)
+            .expect("a lock below the margin");
+        let mut index_only = batch();
+        index_only.put(INDEX, Bytes::from_static(b"i"), Bytes::from(vec![0_u8; 32]));
+        assert!(
+            refused(&guard.admit(&index_only, nothing)),
+            "rows without a session or a lock"
+        );
         let mut elsewhere = signin();
         elsewhere.put(ROWS, Bytes::from_static(b"k"), Bytes::from_static(b"v"));
         assert!(refused(&guard.admit(&elsewhere, nothing)), "another table");
@@ -640,6 +685,28 @@ mod tests {
             refused(&at(Pressure::Reserve).admit(&signin(), nothing)),
             "below the reserve"
         );
+    }
+
+    /// A record alone is no sign-in: a stream of them neither passes nor spends the budget
+    /// of the sign-ins that follow.
+    #[test]
+    fn a_batch_of_an_audit_record_alone_is_refused_and_spends_no_sign_in() {
+        let guard = at(Pressure::Margin);
+        let mut record = batch();
+        record.audit(draft());
+        for _ in 0..SIGNINS_PER_MINUTE {
+            assert!(refused(&guard.admit(&record, nothing)), "a record alone");
+        }
+        let mut signin = batch();
+        signin.put(
+            SESSIONS,
+            Bytes::from_static(b"s"),
+            Bytes::from(vec![0_u8; 500]),
+        );
+        signin.audit(draft());
+        guard
+            .admit(&signin, nothing)
+            .expect("the sign-in after them");
     }
 
     #[test]
@@ -658,13 +725,29 @@ mod tests {
         assert!(guard.prunes_over(since, since + PRUNE_WINDOW));
     }
 
+    #[cfg(unix)]
     #[test]
     fn only_a_full_disk_is_a_cause_a_start_cures() {
         assert!(names_a_full_disk("No space left on device (os error 28)"));
+        assert!(names_a_full_disk("Disk quota exceeded (os error 122)"));
+        assert!(!names_a_full_disk("Input/output error (os error 5)"));
+        // Windows' codes mean other things here (ENOTEMPTY, EHOSTDOWN).
+        assert!(!names_a_full_disk("Directory not empty (os error 39)"));
+        assert!(!names_a_full_disk("Host is down (os error 112)"));
+        assert!(!names_a_full_disk("the test hook fails the write"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_a_full_disk_is_a_cause_a_start_cures() {
         assert!(names_a_full_disk(
             "There is not enough space on the disk. (os error 112)"
         ));
-        assert!(!names_a_full_disk("Input/output error (os error 5)"));
+        assert!(names_a_full_disk("The disk is full. (os error 39)"));
+        assert!(!names_a_full_disk(
+            "The request could not be performed because of an I/O device error. (os error 1117)"
+        ));
+        assert!(!names_a_full_disk("(os error 28)"), "a Unix code");
         assert!(!names_a_full_disk("the test hook fails the write"));
     }
 }

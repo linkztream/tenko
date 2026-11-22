@@ -35,6 +35,7 @@ mod preferences;
 pub mod reveal;
 mod setup;
 pub mod types;
+mod unrecorded;
 // IAM-20 and IAM-21: renewal, reuse detection and source binding of scoped tokens.
 mod renewal;
 // WP14.1: the service account and the token of a mirrored source (ADR 0033).
@@ -255,6 +256,9 @@ pub struct AuthService {
     hash_gate: guard::HashGate,
     dummy_timing: guard::DummyTiming,
     known_networks: Arc<guard::KnownNetworks>,
+    /// Failed sign-ins counted while the store's disk is short of room, for one summary
+    /// record once it has room again (`unrecorded`).
+    unrecorded: Mutex<unrecorded::Unrecorded>,
     devices_in_flight: devices::DevicesInFlight,
     misses: misses::Misses,
     /// The token warnings the last sweep computed (IAM-20).
@@ -416,6 +420,7 @@ impl AuthService {
             hash_gate: guard::HashGate::new(config.password_hash_memory_mib),
             dummy_timing: guard::DummyTiming::default(),
             known_networks: Arc::new(guard::KnownNetworks::default()),
+            unrecorded: Mutex::new(unrecorded::Unrecorded::default()),
             devices_in_flight: devices::DevicesInFlight::default(),
             misses: misses::Misses::default(),
             token_warnings: Mutex::new(Vec::new()),
@@ -432,6 +437,7 @@ impl AuthService {
         let installation = service.view().await?.get_typed(&INSTALLATION, &())?;
         service.configure_relying_party(installation.as_ref().map(|(i, _)| i))?;
         service.spawn_unlock_watch();
+        service.spawn_unrecorded_watch();
         service.spawn_pin_sweep();
         Ok(service)
     }
@@ -1148,6 +1154,48 @@ impl AuthService {
         let throttle = Arc::clone(&self.throttle);
         let known = Arc::clone(&self.known_networks);
         handle.spawn(unlock_watch(store, throttle, known));
+    }
+
+    /// Writes the summary of the failed sign-ins counted while the store's disk was short
+    /// of room, each time its pressure returns to normal (`unrecorded`).
+    fn spawn_unrecorded_watch(self: &Arc<Self>) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let service = Arc::downgrade(self);
+        let mut pressure = self.store.pressure();
+        handle.spawn(async move {
+            while pressure.changed().await.is_ok() {
+                if *pressure.borrow_and_update() != tenko_store::Pressure::Normal {
+                    continue;
+                }
+                let Some(service) = service.upgrade() else {
+                    return;
+                };
+                service.write_unrecorded().await;
+            }
+        });
+    }
+
+    /// Writes the summary of the failed sign-ins counted so far, if any.
+    async fn write_unrecorded(&self) {
+        let counted = std::mem::take(
+            &mut *self
+                .unrecorded
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        let Some(draft) = counted.draft() else {
+            return;
+        };
+        let mut batch = WriteBatch::new(
+            Principal::system(tenko_core::SystemComponent::Auth),
+            tenko_core::Timestamp::now(),
+        );
+        batch.audit(draft);
+        if let Err(error) = self.store.propose(batch).await {
+            tracing::warn!(%error, "could not record the failed sign-ins counted while the disk was short of room");
+        }
     }
 
     /// Loads a session of `user` by id.

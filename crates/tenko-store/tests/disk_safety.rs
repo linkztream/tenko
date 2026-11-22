@@ -101,8 +101,9 @@ async fn a_snapshot_whose_file_cannot_be_written_leaves_the_store_running_and_is
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_core_stopped_on_a_failed_write_with_room_stays_up_and_answers_its_code() {
+async fn a_core_stopped_on_a_full_disk_answers_its_code_and_restarts_once_a_start_fits() {
     let store = single().await;
+    // The hook fails the log writes with the OS error of a full disk.
     fs::write(data_file(&store, FAIL_LOG), b"").expect("fail the log writes");
     let failed = store.propose(put(1)).await;
     assert!(matches!(failed, Err(StoreError::Stopped)), "{failed:?}");
@@ -110,23 +111,7 @@ async fn a_core_stopped_on_a_failed_write_with_room_stays_up_and_answers_its_cod
     assert_eq!(refused.code(), StoreError::STOPPED);
     assert_eq!(refused.http_status(), 503);
     let safety = store.safety().expect("safety");
-    assert!(safety.stopped.is_some());
-    // A failed write on a disk with room (a failing disk): a start would fail to open the
-    // store, so the process stays up.
-    assert!(!safety.restartable, "{safety:?}");
-    assert!(!safety.restart_due());
-    fs::remove_file(data_file(&store, FAIL_LOG)).expect("heal");
-    let _ = store.shutdown().await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_core_stopped_short_of_room_restarts_once_a_start_fits() {
-    let store = single().await;
-    free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
-    fs::write(data_file(&store, FAIL_LOG), b"").expect("fail the log writes");
-    let failed = store.propose(delete(1)).await;
-    assert!(matches!(failed, Err(StoreError::Stopped)), "{failed:?}");
-    assert!(store.safety().expect("safety").restartable, "short of room");
+    assert!(safety.restartable, "a full disk: {safety:?}");
     // The stopped store goes on reading its disk, which decides the restart
     // (`StoreSafety::restart_due`, whose minute its unit test covers).
     free_space(&store, 0, Pressure::Reserve).await;
@@ -140,12 +125,14 @@ async fn a_core_stopped_short_of_room_restarts_once_a_start_fits() {
 }
 
 /// A write the disk refuses inside an apply is not a batch this binary cannot read: the core
-/// stops and the store notes it, also while its disk shows room.
+/// stops and the store notes it. Its cause names no full disk, so a start would not cure it
+/// and the process stays up, below the margin too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_write_inside_an_apply_is_noted_as_a_stop() {
     let store = single().await;
+    free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
     fs::write(data_file(&store, FAIL_STATE), b"").expect("fail the applies");
-    let failed = store.propose(put(1)).await;
+    let failed = store.propose(delete(1)).await;
     assert!(matches!(failed, Err(StoreError::Stopped)), "{failed:?}");
     let safety = store.safety().expect("safety");
     assert!(
@@ -159,6 +146,9 @@ async fn a_failed_write_inside_an_apply_is_noted_as_a_stop() {
         store.status().stopped.is_none(),
         "not an entry this binary cannot apply"
     );
+    assert!(!safety.restartable, "no full disk named: {safety:?}");
+    free_space(&store, u64::MAX, Pressure::Normal).await;
+    assert!(!store.safety().expect("safety").restart_due());
     fs::remove_file(data_file(&store, FAIL_STATE)).expect("heal");
     let _ = store.shutdown().await;
 }
@@ -191,6 +181,11 @@ async fn below_the_reserve_a_delete_passes_down_to_the_floor_and_the_snapshot_ru
     let store = single().await;
     store.propose(put(1)).await.expect("a write");
     store.propose(put(2)).await.expect("a write");
+    let mut rows = batch();
+    for n in 0..5_000_u64 {
+        rows.put(ROWS, encode_key(&(1_000 + n)), Bytes::from_static(b"value"));
+    }
+    store.propose(rows).await.expect("rows to prune");
     free_space(&store, FLOOR + 1024 * 1024, Pressure::Reserve).await;
     let refused = store.propose(put(3)).await.expect_err("a new row");
     assert_eq!(refused.code(), StoreError::DISK_RESERVE);
@@ -226,6 +221,15 @@ async fn below_the_reserve_a_delete_passes_down_to_the_floor_and_the_snapshot_ru
     }
     assert!(half.payload_size() <= 262_144);
     store.propose(half).await.expect("a batch within the limit");
+    // Deletes of rows that are not there free nothing: refused below the reserve.
+    for round in 0..200_u64 {
+        let mut absent = batch();
+        for n in 0..10_u64 {
+            absent.delete(ROWS, encode_key(&(100_000 + round * 10 + n)));
+        }
+        let refused = store.propose(absent).await.expect_err("frees nothing");
+        assert_eq!(refused.code(), StoreError::DISK_RESERVE);
+    }
 
     free_space(&store, FLOOR - 1, Pressure::Reserve).await;
     let refused = store.propose(delete(2)).await.expect_err("below the floor");
@@ -276,5 +280,33 @@ async fn the_state_file_is_compacted_once_after_the_prunes_go_quiet() {
     tokio::time::sleep(Duration::from_secs(11)).await;
     assert_eq!(store.engine_stats().reseeds_in_place, 1, "once an episode");
     assert!(!store.safety().expect("safety").compacting);
+    store.shutdown().await.expect("shutdown");
+}
+
+/// A retry of a committed write that reaches the leader forwarded is answered from its
+/// record there too, and appends nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
+    let store = single().await;
+    let mut keyed = put(9);
+    keyed.idempotency = Some(IdempotencyKey::new("disk-safety-forwarded").expect("a key"));
+    let encoded = tenko_core::codec::to_cbor(&keyed).expect("encoded");
+    let first = store
+        .accept_forwarded(encoded.clone())
+        .await
+        .expect("the forwarded write");
+    free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
+    let last = store.raft().metrics().borrow().last_log_index;
+    let replayed = store
+        .accept_forwarded(encoded)
+        .await
+        .expect("its forwarded retry");
+    assert!(replayed.replayed, "answered from the idempotency record");
+    assert_eq!(replayed.revision, first.revision);
+    assert_eq!(
+        store.raft().metrics().borrow().last_log_index,
+        last,
+        "nothing was appended"
+    );
     store.shutdown().await.expect("shutdown");
 }

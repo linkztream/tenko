@@ -102,8 +102,15 @@ impl MemStore {
                 notify,
                 leadership,
                 shutdown: AtomicBool::new(false),
+                pressure: watch::Sender::new(crate::api::Pressure::Normal),
             }),
         }
+    }
+
+    /// Sets the pressure the store reports (`Store::pressure`), for the tests of code that
+    /// waits on it; the memory store refuses nothing for it.
+    pub fn set_pressure(&self, pressure: crate::api::Pressure) {
+        self.inner.pressure.send_replace(pressure);
     }
 
     /// Stops the store: proposals and reads fail with `StoreError::ShuttingDown` and watch
@@ -139,6 +146,8 @@ struct Inner {
     /// Always the same leader, this store, until it shuts down.
     leadership: watch::Sender<Option<Leadership>>,
     shutdown: AtomicBool,
+    /// What `Store::pressure` reports (`MemStore::set_pressure`).
+    pressure: watch::Sender<crate::api::Pressure>,
 }
 
 impl Inner {
@@ -985,6 +994,10 @@ impl Store for MemStore {
 
     fn leadership(&self) -> watch::Receiver<Option<Leadership>> {
         self.inner.leadership.subscribe()
+    }
+
+    fn pressure(&self) -> watch::Receiver<crate::api::Pressure> {
+        self.inner.pressure.subscribe()
     }
 }
 
