@@ -89,7 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
-        nrpt = @()
+        nrpt = @(); takeoverList = ''; foreignFirst = $false; ignoreFilter = $false
         jobScopes = @{}; acksByScope = @{}; prompts = [System.Collections.ArrayList]@()
         forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
@@ -460,10 +460,20 @@ function Invoke-FakeTenko {
         '^GET /migrate/runs/' { return [ordered]@{ window = $w.window } }
         '^PUT /migrate/runs/' { return [ordered]@{} }
         '^GET /migrate/takeovers$' {
-            # The ACK counter of the job's scope (acksByScope), the world's otherwise.
-            $scope = [string]$w.jobScopes[($query -replace '^job=', '')]
-            $acks = $(if ($w.acksByScope.ContainsKey($scope)) { $w.acksByScope[$scope] } else { $w.acks })
-            return [ordered]@{ items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-00000000f001'; acks = $acks }) }
+            # One item per takeover job with its scope's ACK counter (acksByScope, the world's
+            # otherwise). A node of an older release answers 501 (takeoverList 'missing') or items
+            # without their fields ('malformed'); a server may ignore the job filter (ignoreFilter)
+            # and list another job's takeover first (foreignFirst).
+            if ($w.takeoverList -eq 'missing') { throw "Tenko refused $Method $Path with 501 api.not_implemented: not implemented" }
+            $items = @(foreach ($id in $w.jobScopes.Keys) {
+                    $scope = [string]$w.jobScopes[$id]
+                    [ordered]@{ id = $id; job = $id; acks = $(if ($w.acksByScope.ContainsKey($scope)) { $w.acksByScope[$scope] } else { $w.acks }) }
+                })
+            if ($w.takeoverList -eq 'malformed') { $items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-00000000f001'; acks = 1 }) }
+            if ($w.foreignFirst) { $items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-0000000000ff'; job = '0190d1c2-0000-7000-8000-0000000000ff'; acks = 9 }) + $items }
+            $job = ($query -replace '^job=', '')
+            if ($query -and -not $w.ignoreFilter) { $items = @($items | Where-Object { $_.job -eq $job }) }
+            return [ordered]@{ items = $items }
         }
         '^POST /migrate/takeovers/[^/]+/resume$' {
             # Tenko may refuse the call (a person reverted it in the UI, or it is not this

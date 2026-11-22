@@ -1024,12 +1024,16 @@ function Get-TkNrptRule {
 function Test-TkNamespaceMatch {
     # A rule's namespace: '.suffix' covers the suffix and every name below it, '.' every name,
     # anything else that one name.
+    # Both compared in their ASCII form, without a trailing dot.
     param([string]$Namespace, [string]$Name)
-    $space = $Namespace.Trim().ToLowerInvariant()
-    $target = $Name.ToLowerInvariant().TrimEnd('.')
+    $space = $Namespace.Trim()
     if ($space -eq '.' -or $space -eq '*') { return $true }
-    if ($space.StartsWith('.')) { return ($target -eq $space.Substring(1) -or $target.EndsWith($space)) }
-    return ($target -eq $space.TrimEnd('.'))
+    $suffix = $space.StartsWith('.')
+    $idn = [System.Globalization.IdnMapping]::new()
+    $space = $idn.GetAscii($space.Trim('.')).ToLowerInvariant()
+    $target = $idn.GetAscii($Name.TrimEnd('.')).ToLowerInvariant()
+    if ($suffix) { return ($target -eq $space -or $target.EndsWith(".$space")) }
+    return ($target -eq $space)
 }
 
 function Assert-TkDirectAnswer {
@@ -1040,16 +1044,21 @@ function Assert-TkDirectAnswer {
     # of a covering one, so any covering entry with servers redirects. Local rules and Group
     # Policy rules alike; an entry with DNSSEC settings only and no covering entry with servers
     # changes no server; a policy that cannot be read stops the run as well.
-    param([string]$Domain)
+    # Before any change the run is refused (exit 1); inside the DNS window (-InWindow), after the
+    # flip, the step stops (exit 2) and the run resumes once the rule is gone.
+    param([string]$Domain, [switch]$InWindow)
+    $next = $(if ($InWindow) { 'remove the rule on this machine and run the script again to resume, or run it with -Reverse' } else { 'run it from a machine without such a rule' })
+    $code = $(if ($InWindow) { 2 } else { 1 })
     $rules = @()
-    try { $rules = @(Get-TkNrptRule) } catch { Exit-TkTakeover 1 "this machine's Name Resolution Policy Table could not be read ($(ConvertTo-TkSafeText $_.Exception.Message)), so the script cannot check which server answers the names of ${Domain}: run it from a machine whose policy it can read" }
-    $names = @($Domain, "_ldap._tcp.dc._msdcs.$Domain")
+    try { $rules = @(Get-TkNrptRule) } catch { Exit-TkTakeover $code "this machine's Name Resolution Policy Table could not be read ($(ConvertTo-TkSafeText $_.Exception.Message)), so the script cannot check which server answers the names of ${Domain}: $(if ($InWindow) { 'make it readable on this machine and run the script again to resume, or run it with -Reverse' } else { 'run it from a machine whose policy it can read' })" }
+    # The one name the script asks a named server for.
+    $names = @("_ldap._tcp.dc._msdcs.$Domain")
     foreach ($rule in $rules) {
         $servers = @(@($rule.NameServers) + @($rule.DirectAccessDnsServers) | Where-Object { $_ -and [string]$_ })
         if ($servers.Count -eq 0) { continue }
         foreach ($space in @($rule.Namespace | Where-Object { $_ })) {
             if (@($names | Where-Object { Test-TkNamespaceMatch -Namespace ([string]$space) -Name $_ }).Count -gt 0) {
-                Exit-TkTakeover 1 "this machine sends the names of $Domain to fixed servers by policy (the Name Resolution Policy Table rule for $(ConvertTo-TkSafeText $space) names $(ConvertTo-TkSafeText ($servers -join ', '))), so the script cannot check which server answers them: run it from a machine without such a rule"
+                Exit-TkTakeover $code "this machine sends the names of $Domain to fixed servers by policy (the Name Resolution Policy Table rule for $(ConvertTo-TkSafeText $space) names $(ConvertTo-TkSafeText ($servers -join ', '))), so the script cannot check which server answers them: $next"
             }
         }
     }
@@ -2683,10 +2692,10 @@ function Confirm-TkWindow {
     }
     $by = ConvertTo-TkSafeText (Get-TkField $window 'started_by')
     $at = ConvertTo-TkSafeText (Get-TkField $window 'started_at')
-    Write-TkNote "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4), then the DHCP window (phase 5)."
-    # The DHCP window's warning is part of the prompt itself, as in its own choice, so that no
-    # redirection of the script's output hides what the typed name approves.
-    $prompt = (Get-TkSilenceText -Readings $State.Data.readings) + "`nThis confirmation stands for the DHCP window too when its stop begins within 15 minutes; later, or in another sitting, it asks Abort or Continue.`nType the domain's name to start the DNS window and then the DHCP window"
+    # Who started the window and the DHCP window's warning are part of the prompt itself, as
+    # in the DHCP window's own choice, so that no redirection of the script's output hides
+    # what the typed name approves.
+    $prompt = "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4), then the DHCP window (phase 5).`n" + (Get-TkSilenceText -Readings $State.Data.readings) + "`nThis confirmation stands for the DHCP window too when its stop begins within 15 minutes; later, or in another sitting, it asks Abort or Continue.`nType the domain's name to start the DNS window and then the DHCP window"
     if (-not (Confirm-TkTyped $prompt $State.Data.domain)) { Exit-TkTakeover 3 'the window was not confirmed at the console; nothing was changed' }
     $script:TkWindowWatch = [System.Diagnostics.Stopwatch]::StartNew()
     return , $window
@@ -3000,7 +3009,7 @@ function Get-TkPhase4 {
         @{ Name = 'check'
             Do = {
                 # The one place the script decides from which server answered a DNS query.
-                Assert-TkDirectAnswer -Domain $r.domain
+                Assert-TkDirectAnswer -Domain $r.domain -InWindow
                 $answer = @(Resolve-DnsName -Name "_ldap._tcp.dc._msdcs.$($r.domain)" -Type SRV -Server $tenkoIp -DnsOnly -ErrorAction SilentlyContinue | Where-Object { $_.Type -eq 'SRV' })
                 $names = @($r.controllers | ForEach-Object { $_.name })
                 if (@($answer | Where-Object { $names -contains ([string]$_.NameTarget).ToLowerInvariant().TrimEnd('.') }).Count -eq 0) { throw "Tenko does not answer the locator records of $($r.domain)" }
@@ -3259,6 +3268,8 @@ function Get-TkPhase5 {
                     }
                 }
                 if ((Get-TkField $State.Data.values 'silenced') -ne $true) {
+                    # The proof of the window's last step, asked before any question or stop.
+                    Assert-TkTakeoverList -Code 2
                     if (-not (Confirm-TkSilence -Readings $r)) { Exit-TkTakeover 3 'the DHCP window was aborted at the console; nothing of it was changed, Windows answers as before' }
                     Show-TkRestoreLine $r
                     try {
@@ -3374,13 +3385,32 @@ function Get-TkPhase5 {
 $script:TkQuietText = 'Tenko has not answered a client yet. That is normal in a quiet network: a client that holds a lease asks its old server directly until 87.5 percent of the lease time has passed, and only new, restarted or reconnecting clients ask openly. To prove it now, run ipconfig /renew on any client of the scope and look at the lease it gets. If a client that asks gets no answer, check the relay or the listener, or run -Reverse.'
 
 function Get-TkUnproven {
-    # The scopes whose takeover Tenko reports no answered client for yet (its ACK counter);
-    # anything but a number greater than zero counts as not answered.
+    # The scopes whose takeover Tenko reports no answered client for yet: only the item whose
+    # job is that scope's own counts, and anything but an ACK counter greater than zero, a
+    # missing item or a scope without a job counts as not answered.
     param([hashtable]$State)
-    foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
-        $item = @(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$($State.Data.jobs[$key])") 'items') | Select-Object -First 1
+    foreach ($cidr in @($State.Data.readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)) {
+        $job = [string](Get-TkField $State.Data.jobs "takeover.$cidr")
+        if (-not $job) { $cidr; continue }
+        $item = @(@(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$job") 'items') | Where-Object { [string](Get-TkField $_ 'job') -ceq $job }) | Select-Object -First 1
         $acks = [long]0
-        if ($null -eq $item -or -not [long]::TryParse([string](Get-TkField $item 'acks'), [ref]$acks) -or $acks -le 0) { $key.Substring(9) }
+        if ($null -eq $item -or -not [long]::TryParse([string](Get-TkField $item 'acks'), [ref]$acks) -or $acks -le 0) { $cidr }
+    }
+}
+
+function Assert-TkTakeoverList {
+    # Windows is made silent only on a node that can report answered clients: its takeover
+    # list answers, and every item carries a job and an ACK counter. Anything else refuses.
+    param([int]$Code)
+    $why = ''
+    try {
+        $answer = Invoke-TkCall -Method GET -Path '/migrate/takeovers' -Expect @(200)
+        $items = @(Get-TkField $answer 'items')
+        if (-not ($answer -is [System.Collections.IDictionary]) -or -not $answer.Contains('items')) { $why = 'its takeover list is not a list of items' }
+        elseif (@($items | Where-Object { -not ($_ -is [System.Collections.IDictionary]) -or -not [string](Get-TkField $_ 'job') -or $null -eq (Get-TkField $_ 'acks') }).Count -gt 0) { $why = 'its takeover list has an item without a job or an ACK counter' }
+    } catch { $why = ConvertTo-TkSafeText $_.Exception.Message }
+    if ($why) {
+        Exit-TkTakeover $Code "this node's version of Tenko cannot report answered clients per takeover ($why), so the DHCP window is not started and Windows answers as before: $(if ($Code -eq 1) { 'run the script with a node that serves the takeover list; nothing was changed' } else { 'update the node, then run the script again to resume, or run it with -Reverse' })"
     }
 }
 
@@ -3678,13 +3708,15 @@ function Invoke-Takeover {
     if ($domain -notmatch '^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z0-9-]{1,63}$') { Exit-TkTakeover 1 "$domain is not a domain name" }
 
     if ($DryRun) {
-        Assert-TkDirectAnswer -Domain $domain
+        # The dry run shows everything it can, the policy's stop among the refusals.
+        $policy = ''
+        try { Assert-TkDirectAnswer -Domain $domain } catch { if (-not $_.Exception.Data.Contains('tk.exit')) { throw }; $policy = $_.Exception.Message }
         $readings = Get-TkDiscovery -Domain $domain
         Select-TkMirrorHost -Readings $readings
         Show-TkChangeList -Readings $readings -NodeName '<the node>'
-        foreach ($refusal in @($readings.refusals) + @($readings.window_refusals)) { Write-Warning $refusal }
+        foreach ($refusal in @($readings.refusals) + @($readings.window_refusals) + @($policy | Where-Object { $_ })) { Write-Warning $refusal }
         Write-TkNote 'Dry run: nothing was changed and Tenko was not contacted.'
-        return $(if (@($readings.refusals).Count -gt 0) { 1 } else { 0 })
+        return $(if (@($readings.refusals).Count -gt 0 -or $policy) { 1 } else { 0 })
     }
 
     $state = Open-TkState -Domain $domain
@@ -3768,6 +3800,8 @@ function Invoke-Takeover {
         $data.tenko.fingerprint = $script:TkConn.Pinned
         Save-TkState $state
         Test-TkServedRoot
+        # A precondition of the first sitting: the node can report answered clients.
+        if (-not $Reverse -and $null -eq (Get-TkField $data.phases '2')) { Assert-TkTakeoverList -Code 1 }
         if (-not $Reverse -and @(@(Get-TkField $data.values 'unproven') | Where-Object { $_ }).Count -gt 0) {
             $unproven = @(Get-TkUnproven -State $state)
             if ($unproven.Count -eq 0) { $data.values.Remove('unproven'); Write-TkNote 'Tenko reports that it has answered a client of every scope since the DHCP window.' }

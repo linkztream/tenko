@@ -89,7 +89,7 @@ Describe 'A failure at a step' {
         @{ step = '5.takeover'; route = 'takeover$' }
         @{ step = '5.silence'; block = 'StopDhcp' }
         @{ step = '5.silence'; block = 'ReadAuthorization' }
-        @{ step = '5.check'; route = '^GET /migrate/takeovers' }
+        @{ step = '5.check'; route = '^GET /migrate/takeovers\?job=' }
     ) {
         Install-FakeWorld
         if ($_.ContainsKey('block')) { $script:world.failAt = $_.block } else { $script:world.failRoute = $_.route }
@@ -235,6 +235,32 @@ Describe 'The refusals' {
     It 'reads the name resolution policy again right before the DNS window''s check' {
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
         Should -Invoke Get-TkNrptRule -Times 2 -Exactly
+    }
+
+    It 'a policy rule that appears before the DNS window''s check stops that step to resume, with exit 2' {
+        $script:nrptReads = 0
+        Mock Get-TkNrptRule { $script:nrptReads++; if ($script:nrptReads -gt 1) { @([pscustomobject]@{ Namespace = @('.corp.example.test'); NameServers = @('192.0.2.11'); DirectAccessDnsServers = @() }) } }
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:lastError | Should -Match 'remove the rule on this machine and run the script again to resume, or run it with -Reverse'
+        (Read-State).steps['4.check'].state | Should -Be 'failed'
+    }
+
+    It 'a node that cannot report answered clients is refused in the first sitting before any change' {
+        foreach ($form in 'missing', 'malformed') {
+            Install-FakeWorld
+            $script:world.takeoverList = $form
+            Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1 -Because $form
+            $script:lastError | Should -Match "this node's version of Tenko cannot report answered clients per takeover"
+            (Get-WindowsChange | Where-Object { $_ -notmatch '\|WriteMarker$' }) | Should -BeNullOrEmpty
+        }
+    }
+
+    It 'the dry run shows the change list and every refusal before it ends with the policy''s exit 1' {
+        $script:world.nrpt = @([pscustomobject]@{ Namespace = @('.corp.example.test'); NameServers = @('192.0.2.11'); DirectAccessDnsServers = @() })
+        $out = @(Invoke-FakeRun -DryRun -Answers @('corp.example.test', 'y', '1') 3>&1 6>&1)
+        $out[-1] | Should -Be 1
+        ($out -join "`n") | Should -Match 'Changes on Windows'
+        (@($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Message -join ' ') | Should -Match 'fixed servers by policy'
     }
 
     It 'a second run recorded on the PDC emulator stops with exit 1' {
@@ -394,6 +420,7 @@ Describe 'The DHCP window' {
         # In the prompt's text, which no redirection of the script's output can hide.
         $prompt = @($script:world.prompts | Where-Object { $_ -match 'start the DNS window' })
         $prompt.Count | Should -Be 1
+        $prompt[0] | Should -Match 'The window was started by admin at 2026-11-21T10:00:00Z, according to Tenko'
         $prompt[0] | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
         $prompt[0] | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
         $prompt[0] | Should -Match 'may take some minutes to reach every controller'
@@ -772,6 +799,29 @@ Describe 'A failure inside the DHCP window' {
             [void](Invoke-FakeRun -Answers @('', ''))
             (Read-State).values.Contains('unproven') | Should -BeFalse
         } finally { $script:TkAckWaitSec = 300 }
+    }
+
+    It 'reads only the item of the scope''s own job, whatever the server lists first, and counts a scope without a job as unproven' {
+        $script:TkAckWaitSec = 0
+        try {
+            $script:world.acks = 0; $script:world.ignoreFilter = $true; $script:world.foreignFirst = $true
+            Invoke-FakeRun -Answers $script:FirstSitting 3>$null | Should -Be 3 -Because $script:lastError
+            @((Read-State).values.unproven) | Should -Be @('192.0.2.0/24') -Because 'another job''s counter is never this scope''s'
+        } finally { $script:TkAckWaitSec = 300 }
+        $state = @{ Data = @{ readings = [ordered]@{ dhcp = @([ordered]@{ scopes = @([ordered]@{ cidr = '198.51.100.0/24' }) }) }; jobs = [ordered]@{} } }
+        @(Get-TkUnproven -State $state) | Should -Be @('198.51.100.0/24')
+    }
+
+    It 'refuses the DHCP window on a node that cannot report answered clients, before its question and any stop' {
+        $script:world.failRoute = 'takeover$'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:world.takeoverList = 'missing'
+        $script:world.calls.Clear()
+        Invoke-FakeRun -Answers @('c', 'Continue') | Should -Be 2
+        $script:lastError | Should -Match "this node's version of Tenko cannot report answered clients per takeover .*so the DHCP window is not started and Windows answers as before: update the node"
+        $script:world.choices | Should -Be 0
+        $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
+        $script:world.services.dc1.Serving | Should -BeTrue
     }
 
     It 'gives no warning when a client is answered within the wait' {

@@ -259,7 +259,8 @@ Describe 'The name resolution policy' {
 
     It 'stops a run whose domain <case>' -ForEach @(
         @{ case = 'a rule with name servers covers by suffix'; rules = { @(Get-TestRule -Namespace '.corp.example.test' -NameServers '192.0.2.11') } }
-        @{ case = 'a rule names exactly, with name servers'; rules = { @(Get-TestRule -Namespace 'corp.example.test' -NameServers '192.0.2.11') } }
+        @{ case = 'has its locator name under an exact rule with name servers'; rules = { @(Get-TestRule -Namespace '_ldap._tcp.dc._msdcs.corp.example.test' -NameServers '192.0.2.11') } }
+        @{ case = 'falls under a suffix rule written with a trailing dot'; rules = { @(Get-TestRule -Namespace '.corp.example.test.' -NameServers '192.0.2.11') } }
         @{ case = 'has its locator names under a rule with name servers'; rules = { @(Get-TestRule -Namespace '._msdcs.corp.example.test' -NameServers '192.0.2.11') } }
         @{ case = 'falls under a DirectAccess rule with its servers'; rules = { @(Get-TestRule -Namespace '.example.test' -DirectAccess '2001:db8::53') } }
         @{ case = 'falls under a rule for every name'; rules = { @(Get-TestRule -Namespace '.' -NameServers '192.0.2.11') } }
@@ -276,14 +277,31 @@ Describe 'The name resolution policy' {
         @{ case = 'with no rule'; rules = { @() } }
         @{ case = 'with a covering rule that sets DNSSEC only'; rules = { @(Get-TestRule -Namespace '.corp.example.test') } }
         @{ case = 'with a rule for another namespace'; rules = { @((Get-TestRule -Namespace '.other.example.test' -NameServers '192.0.2.99'), (Get-TestRule -Namespace 'notcorp.example.test' -NameServers '192.0.2.99')) } }
+        # Only the name the script asks a named server for counts: the bare domain is never asked so.
+        @{ case = 'with an exact rule for the bare domain'; rules = { @(Get-TestRule -Namespace 'corp.example.test' -NameServers '192.0.2.11') } }
     ) {
         Mock Get-TkNrptRule $rules
         { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Not -Throw
     }
 
+    It 'compares on label boundaries and in the names'' ASCII form' {
+        Mock Get-TkNrptRule { @(Get-TestRule -Namespace '.corp.example.test' -NameServers '192.0.2.11') }
+        { Assert-TkDirectAnswer -Domain 'notcorp.example.test' } | Should -Not -Throw -Because 'a suffix rule covers whole labels only'
+        # A rule written as a Unicode name covers the domain written in its ASCII form.
+        Mock Get-TkNrptRule { @(Get-TestRule -Namespace ('.b' + [char]0xFC + 'cher.example.test') -NameServers '192.0.2.11') }
+        { Assert-TkDirectAnswer -Domain 'xn--bcher-kva.example.test' } | Should -Throw '*fixed servers by policy*'
+    }
+
     It 'stops a run when the policy cannot be read' {
         Mock Get-TkNrptRule { throw 'Access is denied' }
         { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Throw '*could not be read (Access is denied)*run it from a machine whose policy it can read*'
+    }
+
+    It 'stops inside the DNS window as a failed step to resume, never as a refusal before any change' {
+        Mock Get-TkNrptRule { @(Get-TestRule -Namespace '.corp.example.test' -NameServers '192.0.2.11') }
+        Get-ExitCode { Assert-TkDirectAnswer -Domain 'corp.example.test' -InWindow } | Should -Be 2
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' -InWindow } | Should -Throw '*remove the rule on this machine and run the script again to resume, or run it with -Reverse*'
+        Get-ExitCode { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Be 1
     }
 }
 

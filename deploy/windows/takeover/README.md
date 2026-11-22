@@ -119,7 +119,10 @@ publishes the releases. For the stronger check, on any machine:
   the platform built, which may take an authority from this machine's certificate stores;
   there no issuer is fetched from a URL the leaf names, while on 5.1 only a Group Policy
   setting stops that fetch. Windows PowerShell 5.1 is the supported and lab-tested runtime.
-- Tenko of the same version as the script (`GET /api/v1/health`).
+- Tenko of the same version as the script (`GET /api/v1/health`), which serves the takeover
+  list (`GET /api/v1/migrate/takeovers`) with a `job` and an `acks` value per item: the
+  DHCP window's last step proves each scope by its own job's counter, so a node that cannot
+  answer it is refused in the first sitting, and again before the DHCP window stops Windows.
 - A machine with no Name Resolution Policy Table rule (local or from Group Policy) that sends
   the domain's names to name servers: the DNS window's check asks Tenko by address, and no
   form of the query goes around such a rule, so the script stops before any change (and
