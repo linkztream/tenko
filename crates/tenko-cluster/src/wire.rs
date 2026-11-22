@@ -487,6 +487,8 @@ mod tests {
                 oldest: Revision(9),
             },
             StoreError::Storage("disk".to_owned()),
+            StoreError::Stopped,
+            StoreError::DiskReserve { free: 1, needed: 2 },
         ];
         for error in errors {
             let status = store_status(&error);

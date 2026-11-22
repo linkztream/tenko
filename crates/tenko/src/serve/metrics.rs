@@ -88,6 +88,14 @@ static STORE_STATE_RATIO: Gauge = Gauge::new(
     )
     .unit("ratio"),
 );
+static STORE_DISK_PRESSURE: Gauge = Gauge::new(Desc::gauge(
+    "tenko_store_disk_pressure",
+    "The store's disk: 0 normal, 1 below the margin, 2 below the reserve (docs/cluster.md 12.12).",
+));
+static STORE_STOPPED: Gauge = Gauge::new(Desc::gauge(
+    "tenko_store_stopped",
+    "1 while the store's Raft core stopped on a storage failure (sys.store.stopped), else 0.",
+));
 static STORE_COALESCER: Gauge = Gauge::new(Desc::gauge(
     "tenko_store_coalescer_queue_batches",
     "Write batches waiting in the coalescer for a Raft entry.",
@@ -228,6 +236,8 @@ pub(crate) fn register(registry: &Registry) {
     for family in [
         &STORE_FILE_BYTES as &'static dyn Collect,
         &STORE_STATE_RATIO,
+        &STORE_DISK_PRESSURE,
+        &STORE_STOPPED,
         &STORE_COALESCER,
         &RAFT_ROLE,
         &RAFT_TERM,
@@ -477,6 +487,14 @@ fn store_files(store: &tenko_store::raft::RaftStore) {
         None => STORE_STATE_RATIO.unset(),
     }
     STORE_COALESCER.set(usize_value(store.coalescer_queue_depth()));
+    if let Some(safety) = tenko_store::Store::safety(store) {
+        STORE_DISK_PRESSURE.set(match safety.pressure {
+            tenko_store::Pressure::Normal => 0.0,
+            tenko_store::Pressure::Margin => 1.0,
+            tenko_store::Pressure::Reserve => 2.0,
+        });
+        STORE_STOPPED.set(if safety.stopped.is_some() { 1.0 } else { 0.0 });
+    }
 }
 
 async fn jobs(engine: &JobEngine) {
