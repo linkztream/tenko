@@ -1261,6 +1261,76 @@ async fn dns_28_the_leader_rotates_when_due_and_checks_daily() {
     assert_eq!(lab.account().await.current().map(|v| v.kvno), Some(4));
 }
 
+/// A forward jump of a minute held on this thread while the value lives.
+fn held_clock() -> tenko_core::clock::testing::Override {
+    tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    })
+}
+
+/// While the clock guard holds the clock, the leader starts no rotation that looks due, and
+/// a rotation keeps the previous versions whatever their age; after the hold both go on.
+#[tokio::test]
+async fn a_held_clock_starts_no_rotation_and_keeps_previous_keys() {
+    let lab = Lab::new();
+    lab.adopt().await;
+    let mut jobs = DirectJobs::new(Arc::clone(&lab.store) as Arc<dyn Store>);
+    jobs.register(lab.service.rotate_step());
+    let jobs: Arc<dyn ZoneJobs> = Arc::new(jobs);
+    let leader = LeaderLoop::new(Arc::clone(&lab.service), jobs);
+    let mut waits = Waits::default();
+    lab.clock.advance(31 * 86_400);
+    let held = held_clock();
+    let due = leader.tick(None, &mut waits).await.expect("tick");
+    assert_ne!(due, Due::Rotated);
+    assert_eq!(lab.account().await.current().map(|v| v.kvno), Some(2));
+    drop(held);
+    assert_eq!(
+        leader.tick(None, &mut waits).await.expect("tick"),
+        Due::Rotated
+    );
+    assert_eq!(lab.keys().await.kvnos(), [2, 3]);
+    // Past the ticket lifetime the previous version would go; while held it stays.
+    lab.clock.advance(13 * 3600);
+    let held = held_clock();
+    lab.service.rotate(&cx(), None).await.expect("rotate");
+    assert_eq!(lab.keys().await.kvnos(), [2, 3, 4]);
+    drop(held);
+    lab.clock.advance(13 * 3600);
+    lab.service.rotate(&cx(), None).await.expect("rotate");
+    assert_eq!(lab.keys().await.kvnos(), [4, 5]);
+}
+
+/// While the clock guard holds the clock, the grace of a pending change has not passed,
+/// whatever the clock says: the KDC's refusal of the pending keys drops nothing.
+#[tokio::test]
+async fn a_held_clock_drops_no_pending_change() {
+    let mut lab = Lab::new();
+    lab.adopt().await;
+    lab.kdc.with(|s| s.change = ChangeMode::Unreachable);
+    lab.service.rotate(&cx(), None).await.expect_err("unsent");
+    lab.restart();
+    lab.kdc.with(|s| {
+        s.unreachable = false;
+        s.change = ChangeMode::Normal;
+    });
+    lab.clock.advance(16 * 60);
+    let held = held_clock();
+    assert_eq!(
+        lab.service.recover(&cx(), None).await.expect("recover"),
+        Rotated::Unknown
+    );
+    drop(held);
+    assert_eq!(
+        lab.service.recover(&cx(), None).await.expect("recover"),
+        Rotated::Undone
+    );
+}
+
 /// A pending change the KDC takes with neither key set (an adopt left incomplete, or the
 /// password changed elsewhere) is not asked about every tick: the attempts back off, so a
 /// day costs a few failed pre-authentications, not hundreds that a lockout policy counts,

@@ -422,6 +422,46 @@ fn retention_removes_the_oldest_segments_beyond_the_size_and_their_keys() {
 }
 
 #[test]
+fn a_held_clock_deletes_no_old_segment() {
+    let dir = TempDir::new("querylog");
+    let old = dir.path().join(format!("{SEGMENT_PREFIX}{NOW:020}.jsonl"));
+    fs::write(&old, b"x\n").expect("segment");
+    let month_ago = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(30 * 86_400))
+        .expect("a time");
+    fs::File::options()
+        .write(true)
+        .open(&old)
+        .and_then(|file| file.set_modified(month_ago))
+        .expect("the segment's time");
+    let mut keys = keys::Keys::load(dir.path());
+    keys.key_for(day_of(NOW), &mut |error| panic!("{error}"));
+    drop(keys);
+    let mut writer = Writer::new(settings(dir.path()));
+    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    writer.retention();
+    assert_eq!(
+        segments(dir.path()).expect("segments").len(),
+        1,
+        "kept while held"
+    );
+    let kept: Vec<u64> = keys::Keys::load(dir.path()).days().collect();
+    assert_eq!(kept, [day_of(NOW)]);
+    drop(held);
+    writer.retention();
+    assert!(
+        segments(dir.path()).expect("segments").is_empty(),
+        "older than 7 days"
+    );
+}
+
+#[test]
 fn an_unfinished_tail_is_cut_off_at_start() {
     let dir = TempDir::new("querylog");
     write_lines(settings(dir.path()), &["a.example.test"], CLIENT);

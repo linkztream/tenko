@@ -1089,9 +1089,15 @@ impl Inner {
     }
 
     /// The copies past their expiry: their records go. A copy whose refresh runs is left to
-    /// the refresh's outcome.
+    /// the refresh's outcome, and every copy stays while the clock guard holds the clock.
     async fn expire_due(&self, epoch: u64) {
-        let now = Timestamp::now();
+        let now = match tenko_core::clock::trusted_now() {
+            Ok(now) => now,
+            Err(held) => {
+                tracing::debug!(?held, "the clock is held: no secondary zone expires");
+                return;
+            }
+        };
         let expired: Vec<ZoneId> = self
             .lock()
             .iter()

@@ -367,6 +367,36 @@ async fn a_copy_past_its_expiry_is_not_served_after_a_restart() {
     assert_eq!(lab.stamp().await, None);
 }
 
+/// While the clock guard holds the clock, a copy past its expiry is still served; its
+/// records go at the first look after the hold ends.
+#[tokio::test]
+async fn a_held_clock_empties_no_secondary_zone() {
+    let primary = Primary::start(Answer::Zone(7)).await;
+    let lab = Lab::new(&primary).await;
+    term(&lab.node()).await;
+    lab.set_stamp(Some(TransferStamp {
+        zone: lab.zone.id,
+        serial: 7,
+        refreshed: hours_ago(2),
+    }))
+    .await;
+    primary.answer(Answer::Closed);
+    let node = lab.node();
+    start(&node).await;
+    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 60_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    look(&node).await;
+    assert_eq!(lab.served().await, Some(7), "kept while held");
+    drop(held);
+    look(&node).await;
+    assert_eq!(lab.served().await, None);
+}
+
 /// A leader that lost its term while its refresh ran cannot record it: the fence refuses
 /// the write, so the new leader's view stays the store's.
 #[tokio::test]

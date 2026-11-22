@@ -612,7 +612,8 @@ fn change_unknown(realm: &Realm, error: &ClientError) -> ZoneError {
 /// The keys after a committed change: the pending version renumbered to `kvno` and made
 /// current, the current one previous. A previous version is dropped only when the version
 /// after it became current long enough ago that no ticket under it can still be valid
-/// ([`KEEP_PREVIOUS`], E45), and at most [`MAX_PREVIOUS`] are kept.
+/// ([`KEEP_PREVIOUS`], E45), and never while the clock guard holds the clock; at most
+/// [`MAX_PREVIOUS`] are kept.
 fn moved_keys(
     account: &KrbAccount,
     keys: &KeySet,
@@ -620,9 +621,10 @@ fn moved_keys(
     kvno: u32,
     now: Timestamp,
 ) -> ZoneResult<KeySet> {
-    let keep_previous = account
-        .current()
-        .is_some_and(|v| now.saturating_since(v.created) < KEEP_PREVIOUS);
+    let keep_previous = tenko_core::clock::trusted_now().is_err()
+        || account
+            .current()
+            .is_some_and(|v| now.saturating_since(v.created) < KEEP_PREVIOUS);
     let mut moved = if keep_previous {
         keys.clone()
     } else {
@@ -1433,9 +1435,10 @@ impl KerberosService {
     /// answer; holds the lock of the caller. The pending keys are committed when the KDC
     /// issues a ticket for them, and dropped only on proof that the change did not happen:
     /// the change was not confirmed, the pending version is older than [`PENDING_GRACE`]
-    /// (no request of any controller can still be in flight, and the controllers have
-    /// replicated), the KDC refuses the pending keys and takes the current ones. In every
-    /// other case nothing moves, and the next recovery asks again.
+    /// by a clock the clock guard does not hold (no request of any controller can still be
+    /// in flight, and the controllers have replicated), the KDC refuses the pending keys and
+    /// takes the current ones. In every other case nothing moves, and the next recovery asks
+    /// again.
     async fn finish_pending(
         &self,
         cx: &RequestCtx,
@@ -1452,11 +1455,12 @@ impl KerberosService {
             .principal()
             .map_err(|_| invalid("name", "not a principal name"))?;
         let target = KdcTarget::of(&account);
-        let young = account
-            .versions
-            .iter()
-            .find(|v| v.state == KeyVersionState::Pending)
-            .is_none_or(|v| timestamp(self.now()).saturating_since(v.created) < PENDING_GRACE);
+        let young = tenko_core::clock::trusted_now().is_err()
+            || account
+                .versions
+                .iter()
+                .find(|v| v.state == KeyVersionState::Pending)
+                .is_none_or(|v| timestamp(self.now()).saturating_since(v.created) < PENDING_GRACE);
         let tgt = match self
             .kdc
             .as_exchange(
@@ -2548,7 +2552,12 @@ impl LeaderLoop {
             };
             return Ok(Due::Recovered);
         }
-        let rotation = account.owned && account.rotation_days > 0;
+        // A rotation changes the account's password for good: not by a clock that is held.
+        let rotation = account.owned
+            && account.rotation_days > 0
+            && tenko_core::clock::trusted_now()
+                .inspect_err(|held| tracing::debug!(?held, "the clock is held: no rotation"))
+                .is_ok();
         let since = account
             .last_rotation
             .or_else(|| account.current().map(|v| v.created));
