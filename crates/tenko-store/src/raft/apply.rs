@@ -234,16 +234,7 @@ impl<'a, 'txn> Applier<'a, 'txn> {
         if let Some((key, fingerprint)) = &idempotency
             && let Some(existing) = self.tables.get(&tables::IDEMPOTENCY, key)?
         {
-            let record: IdempotencyRecord = from_cbor(&existing.value)
-                .map_err(|error| unreadable("idempotency record", &error))?;
-            return Ok(if record.fingerprint == *fingerprint {
-                BatchOutcome::Committed(Committed {
-                    replayed: true,
-                    ..record.committed
-                })
-            } else {
-                BatchOutcome::IdempotencyMismatch
-            });
+            return replayed(&existing.value, fingerprint);
         }
 
         // 2. Preconditions, all reported together.
@@ -530,4 +521,19 @@ fn stage_audit(
 /// The key of `batch`'s idempotency record: keys are scoped per principal.
 pub(crate) fn idempotency_key(batch: &WriteBatch, key: &tenko_core::IdempotencyKey) -> Bytes {
     encode_key(&(batch.principal.subject(), key.as_str().to_owned()))
+}
+
+/// The outcome of a batch whose idempotency record is `record`: the first commit, replayed,
+/// for the same batch (`fingerprint`), a mismatch for another.
+pub(crate) fn replayed(record: &[u8], fingerprint: &Digest) -> Result<BatchOutcome, StoreError> {
+    let record: IdempotencyRecord =
+        from_cbor(record).map_err(|error| unreadable("idempotency record", &error))?;
+    Ok(if record.fingerprint == *fingerprint {
+        BatchOutcome::Committed(Committed {
+            replayed: true,
+            ..record.committed
+        })
+    } else {
+        BatchOutcome::IdempotencyMismatch
+    })
 }

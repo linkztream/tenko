@@ -79,6 +79,7 @@ const ERRORS: &[&str] = &[
     // The store refuses writes on a full disk, or stopped on a storage failure.
     tenko_store::StoreError::DISK_RESERVE,
     tenko_store::StoreError::STOPPED,
+    tenko_store::api::DISK_UNKNOWN,
     super::DNS_ROLE_NOT_SERVING,
     super::DHCP_ROLE_NOT_SERVING,
     super::DHCP_ROLE_STORE_REFUSED,

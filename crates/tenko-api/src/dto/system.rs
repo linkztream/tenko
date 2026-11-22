@@ -322,13 +322,21 @@ pub struct StoreSummary {
 
 /// The disk guard of the store.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts of one status report, not a state"
+)]
 pub struct StoreDiskView {
-    /// Free bytes of the data directory's file system.
+    /// Free bytes of the data directory's file system, as last read.
     pub free_bytes: u64,
-    /// Below this, no write is taken: room for a compaction, two snapshots and the log
-    /// (the live data, twice the latest snapshot and 256 MiB).
+    /// The free space could not be read at the last reading (`sys.store.disk_unknown`); the
+    /// store then takes only writes that free space.
+    pub free_unknown: bool,
+    /// Below this, only writes that free space are taken: room for a compaction, two
+    /// snapshots and the log (the live data, twice the latest snapshot and 256 MiB).
     pub reserve_bytes: u64,
-    /// Below this (twice the reserve), only writes that free space are taken.
+    /// Below this (twice the reserve), only writes that free space, and sign-ins, are
+    /// taken.
     pub margin_bytes: u64,
     /// `normal`, `margin` or `reserve`.
     pub pressure: String,

@@ -1080,6 +1080,10 @@ pub const APPLY_STOPPED: &str = "sys.store.apply_stopped";
 /// would cover until a snapshot can be written ([`StoreSafety::snapshot_failed`]).
 pub const SNAPSHOT_FAILED: &str = "sys.store.snapshot_failed";
 
+/// The code of a free space of the data directory that cannot be read: the store takes
+/// only writes that free space until it can ([`StoreSafety::free_unknown`]).
+pub const DISK_UNKNOWN: &str = "sys.store.disk_unknown";
+
 /// The free space of a store's data directory against the two lines the store keeps there
 /// (`docs/cluster.md` section 12.12): `reserve` (the live data, twice the latest snapshot
 /// and 256 MiB) and `margin` (twice the reserve).
@@ -1089,15 +1093,21 @@ pub enum Pressure {
     /// Above the margin: every write passes.
     #[default]
     Normal,
-    /// Below the margin: only writes that free space pass ([`StoreError::DiskReserve`]).
+    /// Below the margin: only writes that free space, and sign-ins, pass
+    /// ([`StoreError::DiskReserve`]).
     Margin,
-    /// Below the reserve: no write passes; only the store's own snapshot and compaction run.
+    /// Below the reserve: only writes that free space pass, small ones down to a floor, and
+    /// the store's own snapshot and compaction run.
     Reserve,
 }
 
 /// What keeps a store running on its disk, for the status: the free space against its two
 /// lines, the work that frees space, and a stopped Raft core ([`StoreError::Stopped`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "independent facts of one status report, not a state"
+)]
 pub struct StoreSafety {
     /// Free bytes of the data directory's file system, as last read.
     pub free_bytes: u64,
@@ -1114,9 +1124,15 @@ pub struct StoreSafety {
     /// The last snapshot file could not be written; the log keeps its entries and the
     /// snapshot is retried once a snapshot fits.
     pub snapshot_failed: bool,
-    /// Why the Raft core stopped, once it did: the process ends with a failure status as
-    /// soon as the free space covers a start, and the service manager starts it again.
+    /// Why the Raft core stopped, once it did.
     pub stopped: Option<String>,
+    /// Whether a start cures the stop: the disk was full when it stopped. The process then
+    /// ends with a failure status once the free space covers a start, and the service
+    /// manager starts it again; after any other stop the process stays up.
+    pub restartable: bool,
+    /// The free space of the data directory could not be read at the last reading; the
+    /// guard then holds at least the margin.
+    pub free_unknown: bool,
     /// Seconds since the store opened.
     pub running_secs: u64,
 }
@@ -1127,11 +1143,14 @@ pub const RESTART_AFTER_SECS: u64 = 61;
 
 impl StoreSafety {
     /// Whether the process should end now so that its service manager starts it again: the
-    /// Raft core stopped, the free space covers a start (it is above the reserve), and the
-    /// store ran [`RESTART_AFTER_SECS`]. A process that ended into a full disk, or that
-    /// stops again at once, would fail its starts until the service manager gives up.
+    /// Raft core stopped on a full disk, the free space covers a start (it is above the
+    /// reserve), and the store ran [`RESTART_AFTER_SECS`]. A process that ended into a full
+    /// disk, or that stops again at once, would fail its starts until the service manager
+    /// gives up; one that stopped on another failure would fail to open its store at the
+    /// next start, which the service manager does not restart.
     pub fn restart_due(&self) -> bool {
         self.stopped.is_some()
+            && self.restartable
             && self.pressure != Pressure::Reserve
             && self.running_secs >= RESTART_AFTER_SECS
     }
@@ -1167,8 +1186,8 @@ pub enum StoreError {
     /// on the disk.
     #[error("the store stopped on a storage failure and restarts once its disk has room")]
     Stopped,
-    /// The data directory's free space is below the line the store keeps for its snapshot
-    /// and compaction; only writes that free space pass.
+    /// The data directory's free space is below a line the store keeps for its snapshot and
+    /// compaction, and the batch does not free space (`docs/cluster.md` section 12.12).
     #[error("{free} bytes free on the store's disk, below the {needed} it keeps free")]
     DiskReserve {
         /// The free bytes.
@@ -1539,9 +1558,16 @@ mod tests {
             compacting: false,
             snapshotting: false,
             snapshot_failed: false,
-            stopped: stopped.then(|| "a storage failure".to_owned()),
+            stopped: stopped.then(|| "No space left on device (os error 28)".to_owned()),
+            restartable: true,
+            free_unknown: false,
             running_secs,
         };
+        let not_cured = StoreSafety {
+            restartable: false,
+            ..safety(Pressure::Normal, RESTART_AFTER_SECS, true)
+        };
+        assert!(!not_cured.restart_due(), "a start would not open the store");
         assert!(safety(Pressure::Margin, RESTART_AFTER_SECS, true).restart_due());
         assert!(
             !safety(Pressure::Margin, RESTART_AFTER_SECS, false).restart_due(),

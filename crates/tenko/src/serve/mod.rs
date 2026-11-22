@@ -2358,6 +2358,7 @@ pub(crate) fn store_config(resolved: &Resolved) -> RaftStoreConfig {
     config.fsync_probe_samples = section.fsync_probe_samples;
     config.verify_full_audit_chain = section.verify_full_audit_chain;
     config.journal_max_bytes = section.journal_max_mib.saturating_mul(1024 * 1024);
+    config.signin_tables = tenko_auth::model::signin_tables();
     config
 }
 

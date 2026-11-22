@@ -85906,6 +85906,7 @@
         "description": "The disk guard of the store.",
         "required": [
           "free_bytes",
+          "free_unknown",
           "reserve_bytes",
           "margin_bytes",
           "pressure",
@@ -85921,13 +85922,17 @@
           "free_bytes": {
             "type": "integer",
             "format": "int64",
-            "description": "Free bytes of the data directory's file system.",
+            "description": "Free bytes of the data directory's file system, as last read.",
             "minimum": 0
+          },
+          "free_unknown": {
+            "type": "boolean",
+            "description": "The free space could not be read at the last reading (`sys.store.disk_unknown`); the\nstore then takes only writes that free space."
           },
           "margin_bytes": {
             "type": "integer",
             "format": "int64",
-            "description": "Below this (twice the reserve), only writes that free space are taken.",
+            "description": "Below this (twice the reserve), only writes that free space, and sign-ins, are\ntaken.",
             "minimum": 0
           },
           "pressure": {
@@ -85937,7 +85942,7 @@
           "reserve_bytes": {
             "type": "integer",
             "format": "int64",
-            "description": "Below this, no write is taken: room for a compaction, two snapshots and the log\n(the live data, twice the latest snapshot and 256 MiB).",
+            "description": "Below this, only writes that free space are taken: room for a compaction, two\nsnapshots and the log (the live data, twice the latest snapshot and 256 MiB).",
             "minimum": 0
           },
           "snapshot_failed": {

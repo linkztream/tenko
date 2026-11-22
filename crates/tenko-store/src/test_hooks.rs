@@ -8,10 +8,11 @@
 //! reads go on. A test creates the file to cut the quorum on one node and removes it to
 //! heal, without a second process.
 //!
-//! [`HOLD_APPLY`], [`STALL_LOG`] and [`FAIL_LOG`] act on one Raft store: while a file of
-//! that name exists in the store's data directory, its state machine holds every apply (a
-//! commit that has not applied yet), its log writer holds every group commit (a stalled
-//! disk), or every group commit of its log writer fails. Those files are only looked for,
+//! [`HOLD_APPLY`], [`STALL_LOG`], [`FAIL_LOG`] and [`FAIL_STATE`] act on one Raft store:
+//! while a file of that name exists in the store's data directory, its state machine holds
+//! every apply (a commit that has not applied yet), its log writer holds every group commit
+//! (a stalled disk), every group commit of its log writer fails, or every apply of a batch
+//! fails. Those files are only looked for,
 //! never read. [`FREE_BYTES`] holds a byte count that stands in for the free space of the
 //! store's file system.
 
@@ -24,6 +25,9 @@ pub const HOLD_APPLY: &str = "test-hold-apply";
 pub const STALL_LOG: &str = "test-stall-log";
 /// The file in a store's data directory whose presence fails every log group commit.
 pub const FAIL_LOG: &str = "test-fail-log";
+/// The file in a store's data directory whose presence fails every apply of a batch, as a
+/// write the disk refuses would.
+pub const FAIL_STATE: &str = "test-fail-state";
 /// The file in a store's data directory whose content, a byte count, stands in for the free
 /// space of its file system (the disk guard, `raft::disk`).
 pub const FREE_BYTES: &str = "test-free-bytes";

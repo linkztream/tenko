@@ -23950,20 +23950,26 @@ export interface components {
             compacting: boolean;
             /**
              * Format: int64
-             * @description Free bytes of the data directory's file system.
+             * @description Free bytes of the data directory's file system, as last read.
              */
             free_bytes: number;
             /**
+             * @description The free space could not be read at the last reading (`sys.store.disk_unknown`); the
+             *     store then takes only writes that free space.
+             */
+            free_unknown: boolean;
+            /**
              * Format: int64
-             * @description Below this (twice the reserve), only writes that free space are taken.
+             * @description Below this (twice the reserve), only writes that free space, and sign-ins, are
+             *     taken.
              */
             margin_bytes: number;
             /** @description `normal`, `margin` or `reserve`. */
             pressure: string;
             /**
              * Format: int64
-             * @description Below this, no write is taken: room for a compaction, two snapshots and the log
-             *     (the live data, twice the latest snapshot and 256 MiB).
+             * @description Below this, only writes that free space are taken: room for a compaction, two
+             *     snapshots and the log (the live data, twice the latest snapshot and 256 MiB).
              */
             reserve_bytes: number;
             /** @description The last snapshot file could not be written (`sys.store.snapshot_failed`). */

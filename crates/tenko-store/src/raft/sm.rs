@@ -522,17 +522,23 @@ impl StateMachine {
                     EntryPayload::Normal(proposal) => {
                         let mut outcomes = Vec::with_capacity(proposal.batches.len());
                         for batch in &proposal.batches {
-                            outcomes.push(
-                                applier
-                                    .apply(
-                                        batch,
-                                        proposal.journal_retention,
-                                        proposal.journal_max_bytes,
-                                    )
-                                    .map_err(|error| {
-                                        self.stopped_at(Some(&entry.log_id), error.to_string())
-                                    })?,
+                            let outcome = applier.apply(
+                                batch,
+                                proposal.journal_retention,
+                                proposal.journal_max_bytes,
                             );
+                            #[cfg(feature = "test-hooks")]
+                            let outcome = if shared.dir.join(crate::test_hooks::FAIL_STATE).exists()
+                            {
+                                Err(StoreError::Storage(
+                                    "the test hook fails the state write".to_owned(),
+                                ))
+                            } else {
+                                outcome
+                            };
+                            outcomes.push(outcome.map_err(|error| {
+                                self.stop_if_deterministic(Some(&entry.log_id), error)
+                            })?);
                         }
                         responses.push(ApplyResponse { outcomes });
                     }
@@ -897,15 +903,16 @@ impl StateMachine {
         let view = self.view()?;
         let state = view.meta().clone();
         let written = (|| {
-            let mut database = open_database(target, self.shared.options.cache_bytes)?;
+            let database = open_database(target, self.shared.options.cache_bytes)?;
             let txn = database.begin_write().map_err(storage)?;
             copy_tables(view.txn(), &txn)?;
             write_meta(&txn, &state)?;
             txn.commit().map_err(storage)?;
-            compact(&mut database)?;
-            Ok(())
+            Ok(database)
         })();
+        // The copy is complete: the compaction needs no view of the live state.
         drop(view);
+        let written = written.and_then(|mut database| compact(&mut database));
         if written.is_err() {
             let _ = fs::remove_file(target);
         }
@@ -930,6 +937,18 @@ impl StateMachine {
     /// into openraft's fatal error, which stops the node (its role becomes `Shutdown`, so
     /// readiness fails). Nothing of the entry's transaction commits and a refused snapshot
     /// leaves the old state, so after a restart the entry applies again.
+    /// [`StateMachine::stopped_at`] for an error that would come back at every attempt (a
+    /// batch or a snapshot this binary cannot read, an audit chain that does not verify);
+    /// any other error, such as a write the disk refused, is returned as it is: the Raft core
+    /// stops on it, and a start retries the entry.
+    fn stop_if_deterministic(&self, log_id: Option<&LogId>, error: StoreError) -> StoreError {
+        if deterministic(&error) {
+            self.stopped_at(log_id, error.to_string())
+        } else {
+            error
+        }
+    }
+
     fn stopped_at(&self, log_id: Option<&LogId>, reason: String) -> StoreError {
         let stop = ApplyStopped {
             index: log_id.map_or(0, |log_id| log_id.index),
@@ -975,14 +994,25 @@ fn write_meta(txn: &WriteTransaction, meta: &SmMeta) -> Result<(), StoreError> {
     Ok(())
 }
 
+/// The start of the error of an audit chain that does not verify.
+const AUDIT_UNVERIFIED: &str = "the audit chain does not verify";
+
+/// Whether `error` comes back at every attempt: data this binary cannot read or encode, or
+/// an audit chain that does not verify. A storage error from the disk does not.
+fn deterministic(error: &StoreError) -> bool {
+    match error {
+        StoreError::Codec(_) => true,
+        StoreError::Storage(detail) => detail.starts_with(AUDIT_UNVERIFIED),
+        _ => false,
+    }
+}
+
 /// Verifies the audit chain against the committed head: the head record recomputes to the
 /// stored hash and links to its predecessor, and nothing follows it. With `full`, every
 /// record from 1 is verified. `when` names the check in the error.
 fn verify_audit(view: &RedbView, full: bool, when: &str) -> Result<(), StoreError> {
     let head = view.meta().audit_head;
-    let fail = |detail: String| {
-        StoreError::Storage(format!("the audit chain does not verify {when}: {detail}"))
-    };
+    let fail = |detail: String| StoreError::Storage(format!("{AUDIT_UNVERIFIED} {when}: {detail}"));
     if full {
         let mut verifier = ChainVerifier::new();
         let mut range = KeyRange::all();
@@ -1186,11 +1216,15 @@ impl RaftStateMachine<TypeConfig> for StateMachine {
         let meta = meta.clone();
         tokio::task::spawn_blocking(move || {
             sm.install(&meta, &snapshot.path).map_err(|error| {
-                let reason = format!(
+                let failed = StoreError::Storage(format!(
                     "the snapshot {} cannot be installed: {error}",
                     meta.snapshot_id
-                );
-                sm.stopped_at(meta.last_log_id.as_ref(), reason)
+                ));
+                if deterministic(&error) {
+                    sm.stopped_at(meta.last_log_id.as_ref(), failed.to_string())
+                } else {
+                    failed
+                }
             })
         })
         .await

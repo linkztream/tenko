@@ -84,6 +84,16 @@ pub const SESSIONS: TableDef<Vec<u8>, SessionRecord> = TableDef::new("auth.sessi
 /// Session hashes by user, for listing and revocation.
 pub const USER_SESSIONS: TableDef<(UserId, SessionId), Vec<u8>> =
     TableDef::new("auth.user_sessions");
+
+/// The tables a sign-in writes (the session, its index row and the account's record): the
+/// store takes them below its disk margin, small and capped (`docs/cluster.md` section
+/// 12.12), so that an administrator can still sign in to see why.
+pub fn signin_tables() -> Vec<tenko_core::TableName> {
+    [SESSIONS.name(), USER_SESSIONS.name(), USERS.name()]
+        .into_iter()
+        .cloned()
+        .collect()
+}
 /// Personal tokens by the hash of the token.
 pub const TOKENS: TableDef<Vec<u8>, TokenRecord> = TableDef::new("auth.tokens");
 /// Token hashes by owner.

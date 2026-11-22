@@ -722,30 +722,47 @@ A copy of a controller's data directory, or a backup restored on a lab host, car
 
 ### 12.12 Disk space
 
-Every controller keeps the free space of its data directory's file system above two lines, computed from its own store. They are constants of the formula, not settings:
+Every controller compares the free space of its own data directory's file system with two lines, computed from its own store. They are constants of the formula, not settings:
 
 - **reserve** = the live data + 2 × the latest snapshot + 256 MiB: room for one compaction of the state file (a fresh copy of the live data), the next snapshot beside the current one, and the log;
 - **margin** = 2 × the reserve.
 
-The state file can grow to about twice the live data under load (redb doubles its file in steps and reuses freed pages only once no read view holds them), so plan for free space of at least the margin plus that growth.
+The state file can grow to about twice the live data under load (redb doubles its file in steps and reuses freed pages only once no read view holds them), so plan for free space of at least the margin plus that growth. A controller that starts with less free space than the margin refuses new data from its first start.
 
 | Free space | What the store takes | Status |
 |---|---|---|
 | Above the margin | Every write | `store.disk.pressure` is `normal` |
-| Below the margin | Only writes that free space: every change deletes a row, replaces a value with one no larger or bumps a counter, with at most one audit record of at most 1 KiB; those with an audit record at most 600 a minute. Other writes are refused with `507 sys.store.disk_reserve` | `margin`, and the warning `sys.store.disk_reserve` |
-| Below the reserve | No write: only the store's own snapshot and compaction run. Every write is refused with `507 sys.store.disk_reserve` | `reserve`, and the same warning |
+| Below the margin | Writes that free space, and sign-ins. A write frees space when every change deletes a stored row, replaces a value with one no larger or bumps a counter, with at most one audit record of at most 1 KiB, and that record only when the write removes at least as many bytes as it holds; those with an audit record at most 600 a minute. A sign-in writes at most 3 rows of at most 4 KiB each (the session, its index row, the account's record) and one audit record, at most 60 a minute; a failed sign-in's audit record counts as one. Other writes are refused with `507 sys.store.disk_reserve` | `margin`, and the warning `sys.store.disk_reserve` |
+| Below the reserve | Writes that free space of at most 256 KiB each (the payload: table names, keys and values, and the audit record), and the store's own snapshot and compaction. No sign-in. A write that frees space but is larger is answered with `413 sys.store.batch_too_large`, whose `size` names its payload and `limit` 262144: the caller splits it into writes of at most 256 KiB and retries | `reserve`, and the same warning |
+| Below 128 MiB | Nothing but the store's own snapshot and compaction: what a delete of 256 KiB needs for its copy-on-write pages and its log record | `reserve` |
 
-The DHCP role counts a refused write as `store_refused`, as it does when the quorum is lost: renewals are answered for the time they have left and new clients wait. When the free space falls below the margin, writes that free space (prunes) go first. Once none has passed for 10 seconds, or 5 minutes after the pressure rose, the store compacts its state file once into a fresh copy and gives the freed pages back to the file system, as long as a copy of the live data fits. `store.disk` in `GET /api/v1/system/status` shows the free space, both lines, the pressure, and whether a compaction or a snapshot is running.
+A state is left only once the free space is 10 percent above its line, so free space that hovers at a line does not flip the state. Writes the store took before the pressure rose still commit, up to the queue of its coalescer.
+
+The DHCP role counts a refused write as `store_refused`. A new client whose lease is refused waits; renewals rewrite rows of the same size and are taken, and the refusal of one lease does not close the role's refusal gate for the others. When the free space falls below the margin, the store waits for writes that free space: once none has passed for 10 seconds, or 5 minutes after the pressure rose, it compacts its state file once into a fresh copy and gives the freed pages back to the file system. It does so only when the file holds at least half the live data again in free pages, no snapshot is being built and a copy of the live data fits, and it does so on a task of its own, so the store goes on reading its disk meanwhile. Nothing in this version prunes on the pressure itself; the prunes of the tables that grow are built on `Store::pressure`. `store.disk` in `GET /api/v1/system/status` shows the free space, both lines, the pressure, whether the free space could be read (`free_unknown`), and whether a compaction or a snapshot is running; the gauges `tenko_store_disk_pressure` and `tenko_store_stopped` show the same to Prometheus ([observability.md](observability.md) section 4). A free space that cannot be read holds the store at the margin and raises `sys.store.disk_unknown`.
+
+**Each controller guards its own disk.** The guard runs where a write is proposed and on the leader for a forwarded one, against that controller's own free space. A follower appends and applies whatever its leader takes, whatever its own free space: it raises `sys.store.disk_reserve` on its own status with a sentence saying so, and a follower whose disk fills stops. Give every controller of a cluster a data directory at least as large as the leader's.
 
 **A snapshot file that cannot be written** (a full disk, a broken directory) no longer stops the store. The log keeps the entries the snapshot would have covered, the status carries the warning `sys.store.snapshot_failed`, and the store builds the snapshot again 30 seconds later at the earliest, once one fits. A failed write of the log or of the state file still stops the store: nothing it covered may count as written.
 
-**A store that stopped** on a storage failure answers every call with `503 sys.store.stopped` and the status carries the warning of the same code with the cause. DNS keeps answering and DHCP renewals keep being answered. As soon as the free space is above the reserve again, and the store ran at least 61 seconds, the server ends with a failure status and systemd (`Restart=on-failure`) starts it again; the start replays the log, so nothing written is lost. The server never ends into a full disk, and never more than once a minute: the unit gives up after five failed starts in 300 seconds. The warning says how much room a start takes.
+**A store that stopped** on a storage failure answers every call with `503 sys.store.stopped`, and the status carries the warning of the same code with the cause. DNS keeps answering and DHCP renewals keep being answered. When the disk was full at the stop (the cause names a full disk, or the store was below its margin), the server ends with a failure status once the free space is above the reserve again and the store ran at least 61 seconds, and systemd (`Restart=on-failure`) starts it again; the start replays the log, so nothing written is lost. After any other storage failure, such as a disk that fails to read, a start would fail to open the store too, and systemd does not restart a failed start: so the server stays up, keeps serving DNS, and the warning says to check the disk and restart the service. A state machine that stopped at an entry this binary cannot apply stays as it is (`sys.store.apply_stopped`, [upgrades.md](upgrades.md)). The unit gives up after five starts of any kind within 300 seconds; the one-minute wait keeps a store's own restarts below that, but a manual restart or another crash in the same window counts too.
+
+**On a full disk, from the shell.** Below the margin an administrator can still sign in and read the warnings; below the reserve nobody can sign in. On the node:
+
+```sh
+df -h /var/lib/tenko                          # the free space of the data directory
+du -xsh /var/lib/tenko/* | sort -h            # what holds it
+journalctl --vacuum-size=200M                 # the system journal, if it shares the disk
+ls -l /var/lib/tenko/upgrade-backups/         # copies kept for a switch back to an older version
+```
+
+Free space outside the store first: the system journal, backups written onto the same disk (move them to another one), copies under `upgrade-backups/` of versions you will not switch back to, and other files of the host. Never delete or move anything under `store/` (the Raft log, the state file and the snapshots): the store needs all three to start. Once the free space is above the margin again (10 percent above, after a refusal), the store takes every write again within a second; a store that stopped on a full disk restarts by itself once the free space is above its reserve.
 
 | Code | Status | Meaning |
 |---|---|---|
-| `sys.store.disk_reserve` | 507 | The free space is below the margin (only writes that free space are taken) or below the reserve (no write is taken); `free` and `needed` in bytes |
-| `sys.store.stopped` | 503 | The store stopped on a storage failure and starts again with the process once its disk has room |
+| `sys.store.disk_reserve` | 507 | The free space is below the margin (only writes that free space and sign-ins are taken) or below the reserve (only writes that free space); `free` and `needed` in bytes |
+| `sys.store.stopped` | 503 | The store stopped on a storage failure; after a full disk it starts again with the process once its disk has room |
 | `sys.store.snapshot_failed` | (warning) | The last snapshot file could not be written |
+| `sys.store.disk_unknown` | (warning) | The free space of the data directory cannot be read; the store takes only writes that free space |
 
 ## 13. Changing a node's roles
 

@@ -6,19 +6,32 @@
 //!   compacted copy of the live data), the next snapshot beside the current one, and the log.
 //! - `margin` = 2 × `reserve`.
 //!
-//! Above the margin every batch passes. Below it only batches that free space pass: every
-//! mutation deletes, bumps a counter or replaces a value with one no larger, with at most
-//! one audit draft of at most [`MAX_DRAFT_BYTES`]; those with a draft at most
-//! [`DRAFTS_PER_MINUTE`] a minute. Below the reserve no batch passes: only the store's own
-//! snapshot and compaction run. A refused batch gets [`StoreError::DiskReserve`]. The
-//! [`Pressure`] is published on a watch (`Store::pressure`) for work that frees space.
+//! Above the margin every batch passes. Below it:
+//!
+//! - A batch that frees space always passes, below the reserve too: every mutation deletes
+//!   a stored row, bumps a counter or replaces a value with one no larger, with at most one
+//!   audit draft of at most [`MAX_DRAFT_BYTES`], and a draft only when the batch removes at
+//!   least as many bytes as the draft holds. Those with a draft pass at most
+//!   [`DRAFTS_PER_MINUTE`] a minute. Below the reserve such a batch passes up to
+//!   [`RESERVE_BATCH_BYTES`], and not below [`FLOOR`]; a larger one is answered with
+//!   [`StoreError::BatchTooLarge`] (`sys.store.batch_too_large`, 413) naming its size and that
+//!   limit, and its caller splits it into batches of at most the limit and retries.
+//! - Below the margin only, a sign-in passes: its rows go to the tables the store was given
+//!   for it (`RaftStoreConfig::signin_tables`), at most [`SIGNIN_ROWS`] of at most
+//!   [`SIGNIN_ROW_BYTES`] each with at most one draft, [`SIGNINS_PER_MINUTE`] a minute. A
+//!   batch of a draft alone (a failed sign-in) counts as one too.
+//! - Nothing else passes: a refused batch gets [`StoreError::DiskReserve`].
+//!
+//! A state is left only 10 percent above its line, so free space that hovers at a line does
+//! not flip the state. The [`Pressure`] is published on a watch (`Store::pressure`) for work
+//! that frees space. Batches admitted before the pressure rose still commit.
 
 use std::{
     io,
     path::Path,
     sync::{
         Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -31,10 +44,28 @@ use crate::api::{Mutation, Pressure, StoreError, WriteBatch};
 
 /// The part of the reserve beyond the data and the snapshots: the log and the files beside.
 pub(crate) const RESERVE_BASE: u64 = 256 * 1024 * 1024;
-/// The largest encoded audit draft a batch that frees space may carry below the margin.
+/// The largest batch (its payload, `WriteBatch::payload_size`) that frees space and passes
+/// below the reserve: a prune sends its deletes in batches no larger.
+pub(crate) const RESERVE_BATCH_BYTES: usize = 256 * 1024;
+/// The free space below which nothing passes, from what a delete batch of
+/// [`RESERVE_BATCH_BYTES`] needs: a delete names a table (at least 8 bytes) and a key (at
+/// least 8), so such a batch removes at most 16,384 rows; copy-on-write rewrites at most one
+/// 4 KiB leaf per row, 64 MiB, and the branch pages above them, at most half as much again;
+/// with the batch's log record and its journal row, about 97 MiB; with a fifth more,
+/// 128 MiB (half of [`RESERVE_BASE`]).
+pub(crate) const FLOOR: u64 = RESERVE_BASE / 2;
+/// The largest encoded audit draft a batch may carry below the margin.
 pub(crate) const MAX_DRAFT_BYTES: usize = 1024;
 /// How many batches that free space and carry an audit draft pass a minute below the margin.
 pub(crate) const DRAFTS_PER_MINUTE: u32 = 600;
+/// The largest row a sign-in may write below the margin (a session is about 500 bytes).
+pub(crate) const SIGNIN_ROW_BYTES: usize = 4096;
+/// The most rows a sign-in may write below the margin (the session, its index row and the
+/// account's record).
+pub(crate) const SIGNIN_ROWS: usize = 3;
+/// How many sign-ins pass a minute below the margin: at most 60 × (3 × 4 KiB + 1 KiB), about
+/// 780 KiB a minute.
+pub(crate) const SIGNINS_PER_MINUTE: u32 = 60;
 /// The longest the store waits for prunes after the pressure rose before it compacts.
 pub(crate) const PRUNE_WINDOW: Duration = Duration::from_secs(300);
 /// The prunes are over once no batch that frees space passed for this long.
@@ -59,6 +90,29 @@ pub(crate) fn pressure_of(free: u64, (reserve, margin): (u64, u64)) -> Pressure 
     }
 }
 
+/// The pressure after `before` at `free` bytes: a better state is entered only 10 percent
+/// above the line it crosses.
+fn pressure_after(before: Pressure, free: u64, (reserve, margin): (u64, u64)) -> Pressure {
+    let above = |line: u64| free >= line.saturating_add(line / 10);
+    match (before, pressure_of(free, (reserve, margin))) {
+        (Pressure::Reserve, Pressure::Margin | Pressure::Normal) if !above(reserve) => {
+            Pressure::Reserve
+        }
+        (Pressure::Reserve | Pressure::Margin, Pressure::Normal) if !above(margin) => {
+            Pressure::Margin
+        }
+        (_, now) => now,
+    }
+}
+
+/// Whether the cause of a stop names a full disk (`ENOSPC`, or Windows' disk-full errors):
+/// one that a start cures once there is room again.
+pub(crate) fn names_a_full_disk(cause: &str) -> bool {
+    ["os error 28", "os error 39", "os error 112"]
+        .iter()
+        .any(|code| cause.contains(code))
+}
+
 /// Free bytes of the file system that holds `dir`. With the test hooks, the byte count in
 /// the file [`crate::test_hooks::FREE_BYTES`] of `dir` stands in for it.
 ///
@@ -76,30 +130,57 @@ pub(crate) fn free_space(dir: &Path) -> io::Result<u64> {
     fs4::available_space(dir)
 }
 
-/// Whether `batch` only frees space: `existing` answers the stored size of a key.
-fn frees_space(
+/// The bytes `batch` removes when it only removes or keeps (`None` once it writes anything
+/// new); `existing` answers the stored size of a key.
+fn removed_bytes(
     batch: &WriteBatch,
     mut existing: impl FnMut(&TableName, &Bytes) -> Result<Option<usize>, StoreError>,
-) -> Result<bool, StoreError> {
-    if batch.audit.len() > 1 {
-        return Ok(false);
-    }
-    for draft in &batch.audit {
-        if to_cbor(draft)?.len() > MAX_DRAFT_BYTES {
-            return Ok(false);
-        }
-    }
+) -> Result<Option<u64>, StoreError> {
+    let mut removed = 0_usize;
     for mutation in &batch.mutations {
         match mutation {
-            Mutation::Delete { .. } | Mutation::Bump { .. } => {}
-            Mutation::Put { table, key, value } => {
-                if existing(table, key)?.is_none_or(|len| len < value.len()) {
-                    return Ok(false);
-                }
+            Mutation::Delete { table, key } => {
+                removed = removed.saturating_add(existing(table, key)?.unwrap_or(0));
             }
+            Mutation::Bump { .. } => {}
+            Mutation::Put { table, key, value } => match existing(table, key)? {
+                Some(len) if len >= value.len() => {
+                    removed = removed.saturating_add(len - value.len());
+                }
+                _ => return Ok(None),
+            },
         }
     }
-    Ok(true)
+    Ok(Some(u64::try_from(removed).unwrap_or(u64::MAX)))
+}
+
+/// Batches that pass a minute.
+struct Budget {
+    per_minute: u32,
+    /// The start of the current minute and the batches passed in it.
+    window: Mutex<(Instant, u32)>,
+}
+
+impl Budget {
+    fn new(per_minute: u32) -> Self {
+        Self {
+            per_minute,
+            window: Mutex::new((Instant::now(), 0)),
+        }
+    }
+
+    /// Takes one of the minute's batches at `now`; `false` once they are used.
+    fn take(&self, now: Instant) -> bool {
+        let mut window = self.window.lock().unwrap_or_else(PoisonError::into_inner);
+        if now.saturating_duration_since(window.0) >= Duration::from_secs(60) {
+            *window = (now, 0);
+        }
+        if window.1 >= self.per_minute {
+            return false;
+        }
+        window.1 += 1;
+        true
+    }
 }
 
 /// The disk guard of one store.
@@ -108,20 +189,27 @@ pub(crate) struct Guard {
     free: AtomicU64,
     reserve: AtomicU64,
     margin: AtomicU64,
-    /// The start of the current minute and the batches with a draft passed in it.
-    drafts: Mutex<(Instant, u32)>,
+    /// The free space could not be read at the last tick.
+    unknown: AtomicBool,
+    drafts: Budget,
+    signins: Budget,
+    /// The tables a sign-in writes (`RaftStoreConfig::signin_tables`).
+    signin_tables: Vec<TableName>,
     /// When a batch that frees space last passed below the margin.
     last_prune: Mutex<Option<Instant>>,
 }
 
 impl Guard {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(signin_tables: Vec<TableName>) -> Self {
         Self {
             pressure: watch::Sender::new(Pressure::Normal),
             free: AtomicU64::new(u64::MAX),
             reserve: AtomicU64::new(0),
             margin: AtomicU64::new(0),
-            drafts: Mutex::new((Instant::now(), 0)),
+            unknown: AtomicBool::new(false),
+            drafts: Budget::new(DRAFTS_PER_MINUTE),
+            signins: Budget::new(SIGNINS_PER_MINUTE),
+            signin_tables,
             last_prune: Mutex::new(None),
         }
     }
@@ -132,14 +220,27 @@ impl Guard {
         self.free.store(free, Ordering::Relaxed);
         self.reserve.store(lines.0, Ordering::Relaxed);
         self.margin.store(lines.1, Ordering::Relaxed);
-        let now = pressure_of(free, lines);
-        let mut before = now;
+        self.unknown.store(false, Ordering::Relaxed);
+        self.set(|before| pressure_after(before, free, lines))
+    }
+
+    /// The free space could not be read: the guard holds at least the margin until it can.
+    pub(crate) fn unknown(&self) -> (Pressure, Pressure) {
+        self.unknown.store(true, Ordering::Relaxed);
+        self.set(|before| match before {
+            Pressure::Normal => Pressure::Margin,
+            other => other,
+        })
+    }
+
+    fn set(&self, next: impl FnOnce(Pressure) -> Pressure) -> (Pressure, Pressure) {
+        let mut moved = (Pressure::Normal, Pressure::Normal);
         self.pressure.send_if_modified(|current| {
-            before = *current;
-            *current = now;
-            before != now
+            moved = (*current, next(*current));
+            *current = moved.1;
+            moved.0 != moved.1
         });
-        (before, now)
+        moved
     }
 
     pub(crate) fn subscribe(&self) -> watch::Receiver<Pressure> {
@@ -156,6 +257,11 @@ impl Guard {
         )
     }
 
+    /// Whether the free space was unknown at the last reading.
+    pub(crate) fn free_unknown(&self) -> bool {
+        self.unknown.load(Ordering::Relaxed)
+    }
+
     /// Lets `batch` through or refuses it, by the pressure (see the module documentation).
     /// `existing` answers the stored size of a key; it is asked only below the margin.
     pub(crate) fn admit(
@@ -164,40 +270,71 @@ impl Guard {
         existing: impl FnMut(&TableName, &Bytes) -> Result<Option<usize>, StoreError>,
     ) -> Result<(), StoreError> {
         let pressure = *self.pressure.borrow();
-        let refused = |line: &AtomicU64| StoreError::DiskReserve {
-            free: self.free.load(Ordering::Relaxed),
-            needed: line.load(Ordering::Relaxed),
-        };
-        match pressure {
-            Pressure::Normal => return Ok(()),
-            Pressure::Reserve => return Err(refused(&self.reserve)),
-            Pressure::Margin => {}
+        if pressure == Pressure::Normal {
+            return Ok(());
         }
-        if !frees_space(batch, existing)? {
-            return Err(refused(&self.margin));
+        let free = self.free.load(Ordering::Relaxed);
+        let line = match pressure {
+            Pressure::Reserve => self.reserve.load(Ordering::Relaxed),
+            _ => self.margin.load(Ordering::Relaxed),
+        };
+        let refused = |needed| Err(StoreError::DiskReserve { free, needed });
+        let draft = match batch.audit.as_slice() {
+            [] => None,
+            [draft] => Some(to_cbor(draft)?.len()),
+            _ => return refused(line),
+        };
+        if draft.is_some_and(|len| len > MAX_DRAFT_BYTES) {
+            return refused(line);
         }
         let now = Instant::now();
-        if !batch.audit.is_empty() && !self.take_draft(now) {
-            return Err(refused(&self.margin));
+        let removed = removed_bytes(batch, existing)?;
+        let frees = removed.is_some_and(|removed| {
+            draft.is_none_or(|len| removed >= u64::try_from(len).unwrap_or(u64::MAX))
+        });
+        if frees {
+            if pressure == Pressure::Reserve {
+                if free < FLOOR {
+                    return refused(FLOOR);
+                }
+                let size = batch.payload_size();
+                if size > RESERVE_BATCH_BYTES {
+                    // The caller splits it into batches of at most this size and retries.
+                    return Err(StoreError::BatchTooLarge {
+                        size,
+                        limit: RESERVE_BATCH_BYTES,
+                    });
+                }
+            }
+            if draft.is_some() && !self.drafts.take(now) {
+                return refused(line);
+            }
+            *self
+                .last_prune
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(now);
+            return Ok(());
         }
-        *self
-            .last_prune
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(now);
-        Ok(())
+        if pressure == Pressure::Margin && self.signs_in(batch) && self.signins.take(now) {
+            return Ok(());
+        }
+        refused(line)
     }
 
-    /// Takes one of the minute's [`DRAFTS_PER_MINUTE`] at `now`; `false` once they are used.
-    fn take_draft(&self, now: Instant) -> bool {
-        let mut drafts = self.drafts.lock().unwrap_or_else(PoisonError::into_inner);
-        if now.saturating_duration_since(drafts.0) >= Duration::from_secs(60) {
-            *drafts = (now, 0);
-        }
-        if drafts.1 >= DRAFTS_PER_MINUTE {
-            return false;
-        }
-        drafts.1 += 1;
-        true
+    /// Whether `batch` has the shape of a sign-in: rows of the sign-in tables only, few and
+    /// small (deletes anywhere).
+    fn signs_in(&self, batch: &WriteBatch) -> bool {
+        let mut rows = 0;
+        batch.mutations.iter().all(|mutation| match mutation {
+            Mutation::Delete { .. } => true,
+            Mutation::Bump { .. } => false,
+            Mutation::Put { table, value, .. } => {
+                rows += 1;
+                rows <= SIGNIN_ROWS
+                    && value.len() <= SIGNIN_ROW_BYTES
+                    && self.signin_tables.contains(table)
+            }
+        })
     }
 
     /// Whether the prunes that the pressure rising at `since` started are over at `now`:
@@ -224,13 +361,27 @@ mod tests {
     use super::*;
 
     const ROWS: TableName = TableName::from_static("ipam.disk_rows");
+    const SESSIONS: TableName = TableName::from_static("auth.disk_sessions");
     const MIB: u64 = 1024 * 1024;
 
     fn batch() -> WriteBatch {
         WriteBatch::new(Principal::system(SystemComponent::Ipam), Timestamp::now())
     }
 
-    /// Nothing is stored: no put shrinks anything.
+    fn draft() -> AuditDraft {
+        AuditDraft::success(AuditAction::from_static("ipam.disk.prune"), Vec::new())
+    }
+
+    /// Every key holds a row of 4 KiB.
+    #[allow(
+        clippy::unnecessary_wraps,
+        reason = "the signature `Guard::admit` asks for"
+    )]
+    fn stored(_: &TableName, _: &Bytes) -> Result<Option<usize>, StoreError> {
+        Ok(Some(4096))
+    }
+
+    /// Nothing is stored.
     #[allow(
         clippy::unnecessary_wraps,
         reason = "the signature `Guard::admit` asks for"
@@ -245,10 +396,7 @@ mod tests {
             .delete(ROWS, Bytes::from_static(b"k"))
             .bump(CounterKey::new("ipam.disk_counter"));
         for _ in 0..drafts {
-            batch.audit(AuditDraft::success(
-                AuditAction::from_static("ipam.disk.prune"),
-                Vec::new(),
-            ));
+            batch.audit(draft());
         }
         batch
     }
@@ -257,17 +405,21 @@ mod tests {
         matches!(result, Err(StoreError::DiskReserve { .. }))
     }
 
+    /// A guard at `free` bytes for 1 GiB of data and a 100 MiB snapshot.
+    fn with_free(free: u64) -> Guard {
+        let guard = Guard::new(vec![SESSIONS]);
+        guard.update(free, 1024 * MIB, 100 * MIB);
+        guard
+    }
+
     /// A guard at `pressure` for 1 GiB of data and a 100 MiB snapshot.
     fn at(pressure: Pressure) -> Guard {
-        let guard = Guard::new();
         let (reserve, margin) = lines(1024 * MIB, 100 * MIB);
-        let free = match pressure {
+        with_free(match pressure {
             Pressure::Normal => margin,
             Pressure::Margin => margin - 1,
             Pressure::Reserve => reserve - 1,
-        };
-        guard.update(free, 1024 * MIB, 100 * MIB);
-        guard
+        })
     }
 
     #[test]
@@ -281,11 +433,12 @@ mod tests {
         assert_eq!(pressure_of(lines.1, lines), Pressure::Normal);
         assert_eq!(pressure_of(lines.1 - 1, lines), Pressure::Margin);
         assert_eq!(pressure_of(lines.0 - 1, lines), Pressure::Reserve);
+        assert!(FLOOR < lines.0, "the floor lies below every reserve");
     }
 
     #[test]
     fn the_watch_tells_each_change_of_the_pressure_once() {
-        let guard = Guard::new();
+        let guard = Guard::new(Vec::new());
         let mut pressure = guard.subscribe();
         let (reserve, margin) = lines(0, 0);
         assert_eq!(
@@ -304,11 +457,51 @@ mod tests {
             (Pressure::Margin, Pressure::Reserve)
         );
         assert_eq!(*pressure.borrow_and_update(), Pressure::Reserve);
-        guard.update(margin, 0, 0);
+        guard.update(margin + margin / 10, 0, 0);
         assert_eq!(*pressure.borrow_and_update(), Pressure::Normal);
         // The lines grow with the data: the same free space can enter the margin.
-        guard.update(margin, 1, 0);
+        guard.update(margin + margin / 10, 64 * MIB, 0);
         assert_eq!(*pressure.borrow_and_update(), Pressure::Margin);
+    }
+
+    #[test]
+    fn a_state_is_left_only_ten_percent_above_its_line() {
+        let guard = Guard::new(Vec::new());
+        let (reserve, margin) = lines(0, 0);
+        guard.update(reserve - 1, 0, 0);
+        assert_eq!(
+            guard.update(reserve, 0, 0).1,
+            Pressure::Reserve,
+            "at the line"
+        );
+        assert_eq!(
+            guard.update(reserve + reserve / 10, 0, 0).1,
+            Pressure::Margin
+        );
+        assert_eq!(
+            guard.update(margin, 0, 0).1,
+            Pressure::Margin,
+            "at the line"
+        );
+        assert_eq!(guard.update(margin + margin / 10, 0, 0).1, Pressure::Normal);
+        assert_eq!(
+            guard.update(margin - 1, 0, 0).1,
+            Pressure::Margin,
+            "entered at once"
+        );
+    }
+
+    #[test]
+    fn an_unknown_free_space_holds_the_guard_at_the_margin() {
+        let guard = at(Pressure::Normal);
+        assert_eq!(guard.unknown(), (Pressure::Normal, Pressure::Margin));
+        assert!(guard.free_unknown());
+        let reserve = at(Pressure::Reserve);
+        assert_eq!(reserve.unknown().1, Pressure::Reserve, "never eased");
+        let (_, margin) = lines(1024 * MIB, 100 * MIB);
+        guard.update(margin * 2, 1024 * MIB, 100 * MIB);
+        assert!(!guard.free_unknown());
+        assert_eq!(guard.status().3, Pressure::Normal);
     }
 
     #[test]
@@ -320,20 +513,17 @@ mod tests {
             guard.admit(&put, nothing),
             Err(StoreError::DiskReserve { needed, .. }) if needed == lines(1024 * MIB, 100 * MIB).1
         ));
-        // The same put over a larger stored value shrinks it.
-        guard
-            .admit(&put, |_, _| Ok(Some(64)))
-            .expect("a smaller value");
-        guard.admit(&deletes(0), nothing).expect("deletes");
-        guard.admit(&deletes(1), nothing).expect("one small draft");
-        assert!(refused(&guard.admit(&deletes(2), nothing)), "two drafts");
+        guard.admit(&put, stored).expect("a smaller value");
+        guard.admit(&deletes(0), stored).expect("deletes");
+        guard.admit(&deletes(1), stored).expect("one small draft");
+        assert!(refused(&guard.admit(&deletes(2), stored)), "two drafts");
         let mut large = deletes(0);
         large.audit(AuditDraft::success(
             AuditAction::from_static("ipam.disk.prune"),
             vec![tenko_core::ObjectRef::singleton(tenko_core::ObjectKind::Prefix); 64],
         ));
         assert!(
-            refused(&guard.admit(&large, nothing)),
+            refused(&guard.admit(&large, |_, _| Ok(Some(4096)))),
             "a draft above 1 KiB"
         );
         // Above the margin everything passes, without asking for stored sizes.
@@ -343,24 +533,113 @@ mod tests {
     }
 
     #[test]
-    fn below_the_reserve_no_batch_passes() {
+    fn a_draft_passes_only_with_a_batch_that_removes_more_than_it_holds() {
+        let guard = at(Pressure::Margin);
+        guard
+            .admit(&deletes(0), nothing)
+            .expect("a delete of nothing writes nothing");
+        assert!(
+            refused(&guard.admit(&deletes(1), nothing)),
+            "a delete of an absent row with an audit record grows the store"
+        );
+        assert!(
+            refused(&guard.admit(&deletes(1), |_, _| Ok(Some(8)))),
+            "removes less than the draft holds"
+        );
+        guard.admit(&deletes(1), stored).expect("removes more");
+    }
+
+    #[test]
+    fn below_the_reserve_a_batch_that_frees_space_passes_down_to_the_floor() {
         let guard = at(Pressure::Reserve);
+        guard
+            .admit(&deletes(1), stored)
+            .expect("a prune below the reserve");
+        let mut put = batch();
+        put.put(ROWS, Bytes::from_static(b"k"), Bytes::from_static(b"value"));
         assert!(matches!(
-            guard.admit(&deletes(0), nothing),
+            guard.admit(&put, nothing),
             Err(StoreError::DiskReserve { needed, .. }) if needed == lines(1024 * MIB, 100 * MIB).0
         ));
+        let mut large = batch();
+        for n in 0..20_000_u32 {
+            large.delete(ROWS, Bytes::from(n.to_be_bytes().to_vec()));
+        }
+        assert!(large.payload_size() > RESERVE_BATCH_BYTES);
+        assert!(
+            matches!(
+                guard.admit(&large, stored),
+                Err(StoreError::BatchTooLarge { size, limit })
+                    if size == large.payload_size() && limit == RESERVE_BATCH_BYTES
+            ),
+            "a prune batch above 256 KiB is to be split"
+        );
+        let floor = with_free(FLOOR - 1);
+        assert_eq!(floor.status().3, Pressure::Reserve);
+        assert!(matches!(
+            floor.admit(&deletes(0), stored),
+            Err(StoreError::DiskReserve { needed, .. }) if needed == FLOOR
+        ));
+        with_free(FLOOR)
+            .admit(&deletes(0), stored)
+            .expect("at the floor");
     }
 
     #[test]
     fn batches_with_a_draft_are_capped_per_minute_below_the_margin() {
         let guard = at(Pressure::Margin);
         for _ in 0..DRAFTS_PER_MINUTE {
-            guard.admit(&deletes(1), nothing).expect("within the cap");
+            guard.admit(&deletes(1), stored).expect("within the cap");
         }
-        assert!(refused(&guard.admit(&deletes(1), nothing)), "past the cap");
-        guard.admit(&deletes(0), nothing).expect("no draft, no cap");
+        assert!(refused(&guard.admit(&deletes(1), stored)), "past the cap");
+        guard.admit(&deletes(0), stored).expect("no draft, no cap");
         // A new minute opens the cap again.
-        assert!(guard.take_draft(Instant::now() + Duration::from_secs(60)));
+        assert!(guard.drafts.take(Instant::now() + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn a_sign_in_passes_below_the_margin_within_its_cap_and_not_below_the_reserve() {
+        let signin = || {
+            let mut batch = batch();
+            batch
+                .put(
+                    SESSIONS,
+                    Bytes::from_static(b"s"),
+                    Bytes::from(vec![0_u8; 500]),
+                )
+                .put(
+                    SESSIONS,
+                    Bytes::from_static(b"i"),
+                    Bytes::from(vec![0_u8; 32]),
+                );
+            batch.audit(draft());
+            batch
+        };
+        let guard = at(Pressure::Margin);
+        for _ in 0..SIGNINS_PER_MINUTE {
+            guard.admit(&signin(), nothing).expect("within the cap");
+        }
+        assert!(refused(&guard.admit(&signin(), nothing)), "past the cap");
+        let guard = at(Pressure::Margin);
+        let mut failed = batch();
+        failed.audit(draft());
+        guard
+            .admit(&failed, nothing)
+            .expect("a failed sign-in's record");
+        let mut elsewhere = signin();
+        elsewhere.put(ROWS, Bytes::from_static(b"k"), Bytes::from_static(b"v"));
+        assert!(refused(&guard.admit(&elsewhere, nothing)), "another table");
+        let mut large = batch();
+        large.put(
+            SESSIONS,
+            Bytes::from_static(b"s"),
+            Bytes::from(vec![0_u8; SIGNIN_ROW_BYTES + 1]),
+        );
+        assert!(refused(&guard.admit(&large, nothing)), "a row above 4 KiB");
+        assert!(
+            refused(&at(Pressure::Reserve).admit(&signin(), nothing)),
+            "below the reserve"
+        );
     }
 
     #[test]
@@ -372,10 +651,20 @@ mod tests {
             guard.prunes_over(since, since + PRUNE_QUIET),
             "no prune came"
         );
-        guard.admit(&deletes(0), nothing).expect("a prune");
+        guard.admit(&deletes(0), stored).expect("a prune");
         let pruned = guard.last_prune.lock().expect("lock").expect("set");
         assert!(!guard.prunes_over(since, pruned + PRUNE_QUIET / 2));
         assert!(guard.prunes_over(since, pruned + PRUNE_QUIET));
         assert!(guard.prunes_over(since, since + PRUNE_WINDOW));
+    }
+
+    #[test]
+    fn only_a_full_disk_is_a_cause_a_start_cures() {
+        assert!(names_a_full_disk("No space left on device (os error 28)"));
+        assert!(names_a_full_disk(
+            "There is not enough space on the disk. (os error 112)"
+        ));
+        assert!(!names_a_full_disk("Input/output error (os error 5)"));
+        assert!(!names_a_full_disk("the test hook fails the write"));
     }
 }

@@ -55,7 +55,7 @@ use tenko_core::{
 };
 use tenko_store::{
     ApplyStopped, Pressure, ReadConsistency, StoreError, StoreRole, StoreSafety, WriteBatch,
-    api::{APPLY_STOPPED, SNAPSHOT_FAILED},
+    api::{APPLY_STOPPED, DISK_UNKNOWN, SNAPSHOT_FAILED},
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -651,7 +651,7 @@ fn apply_stopped_warning(stopped: &ApplyStopped) -> StatusWarning {
 
 /// The warnings of the store's disk guard and of a stopped Raft core (`docs/cluster.md`
 /// section 12.12).
-fn store_safety_warnings(safety: &StoreSafety) -> Vec<StatusWarning> {
+fn store_safety_warnings(safety: &StoreSafety, follower: bool) -> Vec<StatusWarning> {
     let warning = |code: &str, detail: String, needed: u64| {
         let mut params = std::collections::BTreeMap::new();
         params.insert("free".to_owned(), safety.free_bytes.to_string());
@@ -665,23 +665,45 @@ fn store_safety_warnings(safety: &StoreSafety) -> Vec<StatusWarning> {
     let free = gib(safety.free_bytes);
     let mut warnings = Vec::new();
     if let Some(cause) = &safety.stopped {
+        let next = if safety.restartable {
+            format!(
+                "the server ends and its service manager starts it again once {} are free on \
+                 its disk ({free} now)",
+                gib(safety.reserve_bytes)
+            )
+        } else {
+            "a start would not cure it: check the disk and the log, then restart the service"
+                .to_owned()
+        };
         warnings.push(warning(
             StoreError::STOPPED,
-            format!(
-                "the store stopped on a storage failure ({cause}); the server ends and its \
-                 service manager starts it again once {} are free on its disk ({free} now)",
-                gib(safety.reserve_bytes)
-            ),
+            format!("the store stopped on a storage failure ({cause}); {next}"),
             safety.reserve_bytes,
         ));
     }
+    if safety.free_unknown {
+        warnings.push(warning(
+            DISK_UNKNOWN,
+            "the free space of the store's data directory cannot be read; the store takes only \
+             writes that free space until it can"
+                .to_owned(),
+            safety.margin_bytes,
+        ));
+    }
+    // A follower appends whatever its leader takes, by the leader's own disk.
+    let follows = if follower {
+        " This controller follows: its leader keeps taking writes, so free space here or this \
+         store stops when its disk is full."
+    } else {
+        ""
+    };
     match safety.pressure {
         Pressure::Normal => {}
         Pressure::Margin => warnings.push(warning(
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} it keeps: only writes that \
-                 free space are taken",
+                 free space and sign-ins are taken.{follows}",
                 gib(safety.margin_bytes)
             ),
             safety.margin_bytes,
@@ -690,7 +712,7 @@ fn store_safety_warnings(safety: &StoreSafety) -> Vec<StatusWarning> {
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} a snapshot and a compaction \
-                 need: no write is taken",
+                 need: only writes that free space are taken.{follows}",
                 gib(safety.reserve_bytes)
             ),
             safety.reserve_bytes,
@@ -706,6 +728,25 @@ fn store_safety_warnings(safety: &StoreSafety) -> Vec<StatusWarning> {
         ));
     }
     warnings
+}
+
+/// The store's disk guard as the status shows it.
+fn disk_view(safety: &StoreSafety) -> StoreDiskView {
+    let pressure = match safety.pressure {
+        Pressure::Normal => "normal",
+        Pressure::Margin => "margin",
+        Pressure::Reserve => "reserve",
+    };
+    StoreDiskView {
+        free_bytes: safety.free_bytes,
+        free_unknown: safety.free_unknown,
+        reserve_bytes: safety.reserve_bytes,
+        margin_bytes: safety.margin_bytes,
+        pressure: pressure.to_owned(),
+        compacting: safety.compacting,
+        snapshotting: safety.snapshotting,
+        snapshot_failed: safety.snapshot_failed,
+    }
 }
 
 /// Bytes in GiB with one decimal, for the English text of a finding.
@@ -1196,7 +1237,12 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
     warnings.extend(state.notices_list());
     warnings.extend(store.stopped.as_ref().map(apply_stopped_warning));
     let safety = state.store.safety();
-    warnings.extend(safety.iter().flat_map(store_safety_warnings));
+    let follower = !matches!(store.role, StoreRole::Leader | StoreRole::Memory);
+    warnings.extend(
+        safety
+            .iter()
+            .flat_map(|safety| store_safety_warnings(safety, follower)),
+    );
     let (kek, kek_warnings) = state
         .kek()
         .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
@@ -1237,18 +1283,7 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
             data_bytes: store.data_bytes,
             disk_bytes: store.disk_bytes,
             quorum: store.quorum.into(),
-            disk: safety.map(|safety| StoreDiskView {
-                free_bytes: safety.free_bytes,
-                reserve_bytes: safety.reserve_bytes,
-                margin_bytes: safety.margin_bytes,
-                pressure: serde_json::to_value(safety.pressure)
-                    .ok()
-                    .and_then(|value| value.as_str().map(str::to_owned))
-                    .unwrap_or_default(),
-                compacting: safety.compacting,
-                snapshotting: safety.snapshotting,
-                snapshot_failed: safety.snapshot_failed,
-            }),
+            disk: safety.as_ref().map(disk_view),
         },
         tls,
         ui,
@@ -1677,10 +1712,12 @@ mod tests {
             snapshotting: false,
             snapshot_failed: false,
             stopped: None,
+            restartable: false,
+            free_unknown: false,
             running_secs: 0,
         };
         let codes = |safety: &StoreSafety| -> Vec<(String, String)> {
-            store_safety_warnings(safety)
+            store_safety_warnings(safety, false)
                 .into_iter()
                 .map(|warning| (warning.code, warning.params["needed"].clone()))
                 .collect()
@@ -1694,6 +1731,7 @@ mod tests {
         safety.pressure = Pressure::Reserve;
         safety.snapshot_failed = true;
         safety.stopped = Some("a storage failure".to_owned());
+        safety.restartable = true;
         assert_eq!(
             codes(&safety),
             [
