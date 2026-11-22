@@ -329,7 +329,6 @@ fn is_refusal(error: &StoreError) -> bool {
             | StoreError::Timeout
             | StoreError::ShuttingDown
             | StoreError::Stopped
-            | StoreError::DiskReserve { .. }
             | StoreError::Storage(_)
     )
 }
@@ -523,7 +522,12 @@ impl Committer6 {
                 }
                 Err(error) => {
                     shared.counters.refused.fetch_add(1, Ordering::Relaxed);
-                    if is_refusal(&error) {
+                    if matches!(error, StoreError::DiskReserve { .. }) {
+                        // Refused for room on the disk: this change only (see the v4
+                        // committer).
+                        metrics::STORE_REFUSED.inc();
+                        tracing::debug!(%error, "a DHCPv6 lease change was refused for room on the disk");
+                    } else if is_refusal(&error) {
                         shared.gate.refused(&error.to_string());
                     } else {
                         tracing::warn!(%error, "a DHCPv6 lease change was not committed");

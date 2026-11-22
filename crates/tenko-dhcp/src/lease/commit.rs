@@ -349,7 +349,6 @@ fn is_refusal(error: &StoreError) -> bool {
             | StoreError::Timeout
             | StoreError::ShuttingDown
             | StoreError::Stopped
-            | StoreError::DiskReserve { .. }
             | StoreError::Storage(_)
     )
 }
@@ -586,7 +585,13 @@ impl Running {
                 }
                 Err(error) => {
                     shared.counters.refused.fetch_add(1, Ordering::Relaxed);
-                    if is_refusal(&error) {
+                    if matches!(error, StoreError::DiskReserve { .. }) {
+                        // The store refuses this change for room on its disk, not every
+                        // change: a renewal of the same size still passes, so the gate stays
+                        // open.
+                        metrics::STORE_REFUSED.inc();
+                        tracing::debug!(%error, "a lease change was refused for room on the disk");
+                    } else if is_refusal(&error) {
                         shared.gate.refused(&error.to_string());
                     } else {
                         tracing::warn!(%error, "a lease change was not committed");
