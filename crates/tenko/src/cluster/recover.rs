@@ -438,6 +438,11 @@ struct Facts {
     /// The controllers an earlier forced step superseded: the new history offers its record
     /// to them too.
     marked: BTreeSet<NodeId>,
+    /// The nodes this copy holds as removed ([`registry::revoked_nodes`]): a copy of one is
+    /// never forced, since its first start refuses it.
+    removed: BTreeSet<NodeId>,
+    /// When this controller was removed, as this copy holds it ([`registry::removed_at`]).
+    removed_at: Option<Timestamp>,
     /// The newest record of the history that stopped this controller, if one did.
     stopped_by: Option<generation::Signed>,
     /// `[cluster] peer_address_map`: the address dialed for one a member advertises.
@@ -481,6 +486,11 @@ impl Facts {
             .map(|(node, _, _)| NodeId(node))
             .collect();
         Ok(Self {
+            removed: registry::revoked_nodes(view.as_ref())
+                .map_err(store_failure)?
+                .into_iter()
+                .collect(),
+            removed_at: registry::removed_at(view.as_ref(), node).map_err(store_failure)?,
             enrolled,
             marked,
             stopped_by,
@@ -547,6 +557,14 @@ impl Facts {
                 .map_or_else(String::new, |own| format!(" (record {})", own.hash()))
         );
         let _ = writeln!(text, "node             {}", self.node);
+        if let Some(at) = self.removed_at {
+            let _ = writeln!(
+                text,
+                "removed          at {}: this copy holds the removal of this controller, so it \
+                 is never forced and `tenko serve` does not start it",
+                at.to_rfc3339()
+            );
+        }
         let _ = writeln!(
             text,
             "last log id      {} (committed {}, applied {}; {} entries not known as committed)",
@@ -676,18 +694,28 @@ fn compare(facts: &Facts, given: &[String], out: &mut String) -> Result<Vec<Stri
     let mut fresher = Vec::new();
     let mut behind_us = true;
     for (fingerprint, mine) in &same {
+        // A removed controller's copy never starts, however fresh: it is no choice.
+        let removed = facts.removed.contains(&NodeId(fingerprint.node));
         let _ = writeln!(
             out,
-            "  node {} at {}:{} (revision {}){}",
+            "  node {} at {}:{} (revision {}){}{}",
             fingerprint.node,
             fingerprint.term,
             fingerprint.index,
             fingerprint.revision,
+            if removed {
+                "  removed, never forced"
+            } else {
+                ""
+            },
             if *mine { "  <- this copy" } else { "" }
         );
         if *mine {
             behind_us = false;
-        } else if behind_us && (fingerprint.term, fingerprint.index) > (ours.term, ours.index) {
+        } else if behind_us
+            && !removed
+            && (fingerprint.term, fingerprint.index) > (ours.term, ours.index)
+        {
             fresher.push(format!("node {}", fingerprint.node));
         }
     }
@@ -802,6 +830,9 @@ fn force_checks(
     fresher: &[String],
 ) -> Result<(BTreeSet<NodeId>, Vec<String>), Failure> {
     let node = facts.node;
+    if let Some(at) = facts.removed_at {
+        return Err(removed(node, at));
+    }
     if !facts.copy.voters.contains(&node) {
         return Err(failure(
             codes::NOT_NEEDED,
@@ -888,6 +919,22 @@ fn force_checks(
         ));
     }
     Ok((others, mixed))
+}
+
+/// The refusal of a copy that holds the removal of its controller: `tenko serve` would
+/// refuse every start from it (`cluster.member.removed`).
+fn removed(node: NodeId, at: Timestamp) -> Failure {
+    failure(
+        codes::REMOVED,
+        exit::USAGE,
+        format!(
+            "controller {node} was removed from the cluster at {}, as this copy holds it, so \
+             it would never start from a forced step here; force the copy of another \
+             controller, or, when no other copy is left, restore a backup into an empty \
+             data directory (docs/backup.md section 7)",
+            at.to_rfc3339()
+        ),
+    )
 }
 
 /// The forced step, with `interrupt` asked at every [`Step`] (never in production).
@@ -1003,6 +1050,12 @@ async fn force_with(
         let replayed = replay(&dirs.kept, &dirs.work)
             .await
             .map_err(|error| Failure::other(format!("applying the copy's log: {error}")))?;
+        // The tail this copy never knew as committed may hold the removal.
+        if let Some(at) =
+            registry::removed_at(replayed.copy.view().as_ref(), node).map_err(store_failure)?
+        {
+            return Err(removed(node, at).into());
+        }
         write_tail(&dirs.tail, &replayed)?;
         at(Step::Replayed)?;
         // A controller the tail added is superseded and probed like the others.
@@ -1709,11 +1762,40 @@ pub(crate) mod tests {
             seen: 0,
             fence: None,
             marked: BTreeSet::new(),
+            removed: BTreeSet::new(),
+            removed_at: None,
             address_map: BTreeMap::new(),
             stopped_by: None,
             members: BTreeMap::new(),
             enrolled: BTreeSet::new(),
         }
+    }
+
+    /// A copy that holds its own controller's removal is never forced, and a removed
+    /// controller's copy is never the one `--compare` names as fresher, however fresh.
+    #[test]
+    fn a_removed_controller_is_never_forced_nor_named_fresher() {
+        let mut gone = facts(1, 5, 120);
+        gone.removed = [NodeId(1)].into_iter().collect();
+        gone.removed_at = Some(Timestamp::now());
+        let refused = format!(
+            "{:?}",
+            force_checks(&args(), &gone, &[]).expect_err("removed")
+        );
+        for part in [codes::REMOVED, "another controller", "restore a backup"] {
+            assert!(refused.contains(part), "{part} in {refused}");
+        }
+        assert!(gone.describe().contains("holds the removal"));
+
+        let mut ours = facts(2, 5, 100);
+        ours.removed = [NodeId(1)].into_iter().collect();
+        let mut out = String::new();
+        let fresher = compare(&ours, &[gone.fingerprint()], &mut out).expect("compare");
+        assert!(fresher.is_empty(), "{fresher:?}");
+        assert!(
+            out.contains("node 1 at 5:120 (revision 120)  removed"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1745,12 +1827,13 @@ pub(crate) mod tests {
 
     /// A data directory under `root` whose store is node 1's copy of a cluster of three
     /// voters (closed), with a configuration, an identity under `node/` and a fence of an
-    /// earlier history; returns the configuration.
+    /// earlier history; returns the configuration. A `removed` copy holds node 1's removal
+    /// (a revocation and no node record) while it still lists node 1 as a voter.
     #[allow(
         clippy::too_many_lines,
         reason = "the copy, its identity and its fence, in order"
     )]
-    async fn three_voter_copy(root: &Path) -> Resolved {
+    async fn three_voter_copy(root: &Path, removed: bool) -> Resolved {
         use rcgen::{CertificateParams, KeyPair, PKCS_ECDSA_P256_SHA256};
         use tenko_store::raft::{RaftStore, RaftStoreConfig, network::InProcessNetwork};
 
@@ -1830,28 +1913,43 @@ pub(crate) mod tests {
         // This controller's record holds the certificate the step signs with.
         let info = tenko_cluster::ca::CertInfo::from_der(&leaf).expect("info");
         let certificate = tenko_cluster::peers::certificate_ref(&info);
-        batch
-            .put_typed(
-                &tables::NODES,
-                &1_u64,
-                &tenko_cluster::model::NodeRecord {
-                    id: NodeId(1),
-                    name: "controller-1".to_owned(),
-                    roles: vec![tenko_core::Role::Controller],
-                    address: None,
-                    vrf: None,
-                    certificate: certificate.clone(),
-                    serials: vec![certificate],
-                    enrolled_at: Timestamp::now(),
-                    enrollment: uuid::Uuid::nil(),
-                    enrolled_by: None,
-                    renewed_at: None,
-                    last_seen: None,
-                    version: None,
-                    protocol: tenko_cluster::model::ProtocolState::default(),
-                },
-            )
-            .expect("record");
+        if removed {
+            batch
+                .put_typed(
+                    &tables::REVOCATIONS,
+                    &info.serial,
+                    &tenko_cluster::model::Revocation {
+                        node: NodeId(1),
+                        revoked_at: Timestamp::now(),
+                        not_after: info.not_after,
+                        controller: true,
+                    },
+                )
+                .expect("revocation");
+        } else {
+            batch
+                .put_typed(
+                    &tables::NODES,
+                    &1_u64,
+                    &tenko_cluster::model::NodeRecord {
+                        id: NodeId(1),
+                        name: "controller-1".to_owned(),
+                        roles: vec![tenko_core::Role::Controller],
+                        address: None,
+                        vrf: None,
+                        certificate: certificate.clone(),
+                        serials: vec![certificate],
+                        enrolled_at: Timestamp::now(),
+                        enrollment: uuid::Uuid::nil(),
+                        enrolled_by: None,
+                        renewed_at: None,
+                        last_seen: None,
+                        version: None,
+                        protocol: tenko_cluster::model::ProtocolState::default(),
+                    },
+                )
+                .expect("record");
+        }
         first.propose(batch).await.expect("rows");
         for store in stores {
             store.shutdown().await.expect("shutdown");
@@ -1924,7 +2022,7 @@ pub(crate) mod tests {
         root: &TempDir,
         step: Option<(Step, Interrupt)>,
     ) -> (Resolved, CopyState, Result<Output, Stopped>) {
-        let resolved = three_voter_copy(root.path()).await;
+        let resolved = three_voter_copy(root.path(), false).await;
         let before = state(&resolved.layout().store()).await;
         let copy = inspect(&resolved.layout().store()).await.expect("copy");
         let facts = Facts::read(&resolved, &copy).expect("facts");
@@ -2009,7 +2107,7 @@ pub(crate) mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_forced_step_lifts_a_stop_by_a_minted_record() {
         let root = TempDir::new("recover-minted");
-        let resolved = three_voter_copy(root.path()).await;
+        let resolved = three_voter_copy(root.path(), false).await;
         let minted = competing(4242, 7);
         generation::FenceFile {
             kind: tenko_store::FenceReason::Superseded,
@@ -2062,7 +2160,7 @@ pub(crate) mod tests {
     async fn a_record_at_the_largest_number_stops_the_cluster_for_good() {
         use tenko_store::FenceReason;
         let root = TempDir::new("recover-largest");
-        let resolved = three_voter_copy(root.path()).await;
+        let resolved = three_voter_copy(root.path(), false).await;
         let own = Credentials::load(&NodePaths::new(&resolved.data_dir)).expect("identity");
         let lineage = |copy: &OfflineCopy| Lineage::read(copy.view().as_ref()).expect("lineage");
         let copy = inspect(&resolved.layout().store()).await.expect("copy");
@@ -2208,6 +2306,56 @@ pub(crate) mod tests {
         let error = second.create(data).expect_err("a notice is there");
         assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(fs::read(data.join(NOTICE_FILE)).expect("notice"), first);
+    }
+
+    /// A copy that holds its controller's removal, still listing it as a voter, is refused
+    /// before anything moves; when only the log the step applies holds the removal (the
+    /// tail this copy never knew as committed), the step is refused after the replay and
+    /// everything is put back.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn the_copy_of_a_removed_controller_is_never_forced() {
+        let root = TempDir::new("recover-removed");
+        let resolved = three_voter_copy(root.path(), true).await;
+        let store = resolved.layout().store();
+        let before = state(&store).await;
+        let copy = inspect(&store).await.expect("copy");
+        let mut facts = Facts::read(&resolved, &copy).expect("facts");
+        drop(copy);
+        assert!(facts.copy.voters.contains(&NodeId(1)) && facts.removed_at.is_some());
+        for applied in [true, false] {
+            if !applied {
+                facts.removed_at = None;
+            }
+            // With the removal applied, the refusal comes before the first step.
+            let interrupt = move |step: Step| -> Option<Interrupt> {
+                assert!(!applied, "reached {step:?}");
+                None
+            };
+            let outcome = force_with(
+                &resolved,
+                &args(),
+                &facts,
+                Vec::new(),
+                String::new(),
+                &interrupt,
+            )
+            .await;
+            let Err(Stopped::Failed(failure)) = outcome else {
+                panic!("forced a removed controller's copy ({applied})");
+            };
+            assert!(
+                format!("{failure:?}").contains(codes::REMOVED),
+                "{failure:?}"
+            );
+            let dirs = Dirs::new(&resolved, 1);
+            assert_eq!(state(&store).await, before, "{applied}");
+            assert!(Notice::load(&resolved.data_dir).expect("notice").is_none());
+            assert!(!dirs.kept.exists() && !dirs.work.exists() && !dirs.tail.exists());
+            assert!(
+                dirs.fence.exists() && !dirs.kept_fence.exists(),
+                "{applied}"
+            );
+        }
     }
 
     /// A controller alone needs no forced step, unless another history stopped it: then the

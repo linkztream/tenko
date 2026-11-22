@@ -159,6 +159,8 @@ pub mod codes {
     pub const MIXED: &str = "cluster.recover.mixed";
     /// `--force` on a copy that is already the only voter.
     pub const NOT_NEEDED: &str = "cluster.recover.not_needed";
+    /// `--force` on the copy of a controller that it holds as removed: it never starts.
+    pub const REMOVED: &str = "cluster.recover.removed";
     /// `--force` on a copy whose own generation is the largest number already: no step can
     /// go above it (a record minted with the CA's key took the numbers; a new CA ends that).
     pub const NO_GENERATION_LEFT: &str = "cluster.recover.no_generation_left";
