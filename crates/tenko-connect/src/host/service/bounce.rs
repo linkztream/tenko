@@ -48,7 +48,7 @@ use tenko_core::{
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, StoreError, WriteBatch};
 use tokio::sync::oneshot;
 
-use super::{ConnectorHost, HostError, calls::capability};
+use super::{ConnectorHost, HostError, bounds, calls::capability};
 use crate::{
     Capability, ConnectorError, DeviceRef, DiffLine, Guardrails, L2Change, L2Plan, MAX_DOWN_SECS,
     MIN_DOWN_SECS, WriteMode,
@@ -241,6 +241,14 @@ fn retry_after(base: Duration, attempts: u32) -> Duration {
         3 => 12,
         _ => 60,
     })
+}
+
+/// The farthest ahead a record's `due` is ever written: the longest down time plus the
+/// longest call, or the longest pause between attempts, whichever is longer, and the clock
+/// tolerance. A `due` beyond it was written before the clock stepped back.
+fn due_horizon(retry: Duration) -> Duration {
+    let bounce = Duration::from_secs(u64::from(MAX_DOWN_SECS) + u64::from(bounds::MAX_CALL_SECS));
+    bounce.max(retry_after(retry, u32::MAX)) + tenko_core::clock::TOLERANCE
 }
 
 fn plus(at: Timestamp, after: Duration) -> Timestamp {
@@ -702,8 +710,9 @@ impl ConnectorHost {
     }
 
     /// Brings up the ports of pending records: every one at the start of the host
-    /// (`startup`), else those past due that no task of this host handles. Each runs in
-    /// a task of its own.
+    /// (`startup`), else those past due that no task of this host handles, and those due
+    /// further ahead than any record is written ([`due_horizon`]), which were written before a
+    /// step back of the clock. Each runs in a task of its own.
     pub(super) async fn sweep_bounces(self: &Arc<Self>, startup: bool) {
         let records = match self.pending_bounces().await {
             Ok(records) => records,
@@ -713,13 +722,15 @@ impl ConnectorHost {
             }
         };
         let now = Timestamp::now();
+        let horizon = plus(now, due_horizon(self.config.bounce_retry));
         let reason = if startup {
             Reason::Startup
         } else {
             Reason::Overdue
         };
         for record in records {
-            if !startup && record.due > now {
+            // A step forward brings a port up early, which is accepted.
+            if !startup && record.due > now && record.due <= horizon {
                 continue;
             }
             let key = record.key();
@@ -813,10 +824,9 @@ impl ConnectorHost {
             if plan.change != change {
                 return Err(ConnectorError::protocol("the plugin planned another change").into());
             }
-            if Timestamp::now().saturating_since(plan.read_at) > self.config.plan_max_age {
-                return Err(HostError::from(ConnectorError::VerifyMismatch {
-                    diff: "the plan is too old; plan the kick again".to_owned(),
-                }));
+            if let Some(refusal) = super::calls::stale_plan(plan.read_at, self.config.plan_max_age)
+            {
+                return Err(refusal);
             }
             let receipt = client.apply(&ctx, &plan, WriteMode::Apply, timeout).await?;
             if !receipt.verified {

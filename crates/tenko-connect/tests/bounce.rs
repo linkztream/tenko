@@ -300,6 +300,145 @@ async fn a_record_left_by_a_previous_process_is_re_enabled_at_the_start() {
     assert_eq!(enabled_audit[0].draft.details.context["reason"], "startup");
 }
 
+/// A pending bounce of `port` of the connector `id`, due at `due`.
+fn pending(id: ConnectorId, port: u16, due: Timestamp) -> PendingBounce {
+    PendingBounce {
+        connector: id,
+        device: device(),
+        port,
+        down_secs: 5,
+        job: None,
+        on_behalf_of: None,
+        diff: Vec::new(),
+        restore: vec![L2Change::EnablePort {
+            device: device(),
+            port,
+            restore: r#"{"enabled":true}"#.to_owned(),
+        }],
+        created_at: due,
+        down_at: Some(due),
+        due,
+        attempts: 0,
+        stuck: None,
+    }
+}
+
+async fn put_bounces(fx: &Fixture, pending: &[PendingBounce]) {
+    let mut batch = WriteBatch::for_request(&admin());
+    for record in pending {
+        batch
+            .put_typed(&BOUNCES, &record.key(), record)
+            .expect("put");
+    }
+    fx.store.propose(batch).await.expect("propose");
+}
+
+fn at(from_now_secs: i64) -> Timestamp {
+    let now = Timestamp::now();
+    let by = Duration::from_secs(from_now_secs.unsigned_abs());
+    if from_now_secs < 0 {
+        now.checked_sub(by)
+    } else {
+        now.checked_add(by)
+    }
+    .expect("time")
+}
+
+/// The periodic sweep over `waiting` (a record of port 3) with the clock held as `jump_ms`
+/// says: the start sweep first empties the table, then one write holds `waiting` and a due
+/// record of port 4, so the sweep that brings port 4 up has judged `waiting` too. Returns the
+/// records left once `until` holds for them.
+async fn sweep_held(
+    reason: tenko_core::clock::Reason,
+    jump_ms: i64,
+    waiting: impl FnOnce(ConnectorId) -> PendingBounce,
+    until: impl Fn(&[PendingBounce]) -> bool,
+) -> Vec<PendingBounce> {
+    let fx = fixture(true);
+    let id = switch(&fx, serde_json::json!({ "ports_down": [3, 4] }), true).await;
+    let _held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason,
+        jump_ms,
+        since: Timestamp::now(),
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    });
+    put_bounces(&fx, &[pending(id, 4, at(-60))]).await;
+    let (_stop_tx, stop) = watch::channel(false);
+    let _task = fx.host.start(stop);
+    wait_until_async("the start sweep to empty the table", async || {
+        records(&fx.store).await.is_empty()
+    })
+    .await;
+    put_bounces(&fx, &[waiting(id), pending(id, 4, at(-60))]).await;
+    wait_until_async("the sweep to bring the due ports up", async || {
+        let left = records(&fx.store).await;
+        until(&left).then_some(left)
+    })
+    .await
+}
+
+fn port_4_up(left: &[PendingBounce]) -> bool {
+    left.iter().all(|record| record.port != 4)
+}
+
+fn ports(left: &[PendingBounce]) -> Vec<u16> {
+    left.iter().map(|record| record.port).collect()
+}
+
+#[tokio::test]
+async fn a_record_from_before_a_step_back_comes_up_at_once() {
+    // After a step back of an hour, a record written before it looks due an hour from now,
+    // further ahead than any record is written.
+    sweep_held(
+        tenko_core::clock::Reason::Jump,
+        -3_600_000,
+        |id| pending(id, 3, at(3_590)),
+        <[PendingBounce]>::is_empty,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn a_fresh_record_of_another_controller_is_not_swept_early_after_a_step_back() {
+    // Every controller stepped back together: another one just wrote a record due in 10 s.
+    let left = sweep_held(
+        tenko_core::clock::Reason::Jump,
+        -3_600_000,
+        |id| pending(id, 3, at(10)),
+        port_4_up,
+    )
+    .await;
+    assert_eq!(ports(&left), [3]);
+}
+
+#[tokio::test]
+async fn a_stuck_port_keeps_its_backoff_in_every_hold() {
+    use tenko_core::clock::Reason;
+    for (reason, jump_ms) in [
+        (Reason::Jump, 3_600_000),
+        (Reason::StartGap, 3_600_000),
+        (Reason::Jump, -3_600_000),
+        (Reason::StartGap, -3_600_000),
+    ] {
+        let stuck = |id| PendingBounce {
+            attempts: 3,
+            stuck: Some(tenko_core::CodedError::new(
+                "connect.unreachable",
+                503,
+                "the switch did not answer",
+            )),
+            ..pending(id, 3, at(300))
+        };
+        let left = sweep_held(reason, jump_ms, stuck, port_4_up).await;
+        assert_eq!(
+            ports(&left),
+            [3],
+            "{reason:?} {jump_ms}: retried before its pause ended"
+        );
+    }
+}
+
 async fn refused_bounce(
     fx: &Fixture,
     id: ConnectorId,

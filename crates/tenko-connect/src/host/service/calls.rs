@@ -35,6 +35,35 @@ pub(super) fn fold_into_report(error: ConnectorError) -> Result<HealthReport, Co
     })
 }
 
+/// The refusal of a plan read at `read_at`: older than `max_age`, or of unknown age because
+/// the clock stepped back (`tenko_core::clock`), which can make a stale plan look fresh. A
+/// forward step only makes plans look older, so it is judged as usual.
+pub(super) fn stale_plan(read_at: Timestamp, max_age: std::time::Duration) -> Option<HostError> {
+    let now = match tenko_core::clock::trusted_now() {
+        Ok(now) => now,
+        Err(held) if held.jump_ms < 0 => {
+            return Some(
+                ConnectorError::VerifyMismatch {
+                    diff: "the clock went back, so the plan's age is unknown; plan the change \
+                           again once the clock is trusted"
+                        .to_owned(),
+                }
+                .into(),
+            );
+        }
+        Err(_) => Timestamp::now(),
+    };
+    (now.saturating_since(read_at) > max_age).then(|| {
+        ConnectorError::VerifyMismatch {
+            diff: format!(
+                "the plan is older than {} s; plan the change again",
+                max_age.as_secs()
+            ),
+        }
+        .into()
+    })
+}
+
 pub(super) fn capability(
     host: &ConnectorHost,
     id: ConnectorId,
@@ -127,14 +156,8 @@ impl ConnectorHost {
         if mode == WriteMode::Apply && !runtime.instance().writes_enabled {
             return Err(ConnectorError::WritesDisabled.into());
         }
-        if Timestamp::now().saturating_since(plan.read_at) > self.config.plan_max_age {
-            return Err(ConnectorError::VerifyMismatch {
-                diff: format!(
-                    "the plan is older than {} s; plan the change again",
-                    self.config.plan_max_age.as_secs()
-                ),
-            }
-            .into());
+        if let Some(refusal) = stale_plan(plan.read_at, self.config.plan_max_age) {
+            return Err(refusal);
         }
         let _slot = runtime.calls.acquire().await;
         let timeout = runtime.call_timeout();
@@ -241,5 +264,37 @@ mod tests {
         assert!(
             fold_into_report(ConnectorError::Timeout(std::time::Duration::from_secs(1))).is_err()
         );
+    }
+
+    #[test]
+    fn a_step_back_of_the_clock_applies_no_plan_and_a_forward_hold_judges_as_usual() {
+        use tenko_core::clock::{Held, Reason, Release, testing};
+        let max_age = std::time::Duration::from_secs(600);
+        let read_at = Timestamp::now();
+        let hold_at = |reason, jump_ms| {
+            testing::hold(Held {
+                reason,
+                jump_ms,
+                since: read_at,
+                release: Release::Wait,
+                until: None,
+            })
+        };
+        let held = hold_at(Reason::Jump, -3_600_000);
+        let refusal = stale_plan(read_at, max_age).expect("a fresh plan is refused too");
+        assert!(
+            refusal.to_string().contains("the clock went back"),
+            "{refusal}"
+        );
+        drop(held);
+        for reason in [Reason::Jump, Reason::StartGap] {
+            let _held = hold_at(reason, 3_600_000);
+            assert!(stale_plan(read_at, max_age).is_none(), "{reason:?}");
+        }
+        assert!(stale_plan(read_at, max_age).is_none());
+        let old = read_at
+            .checked_sub(std::time::Duration::from_secs(601))
+            .expect("time");
+        assert!(stale_plan(old, max_age).is_some());
     }
 }
