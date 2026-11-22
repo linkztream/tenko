@@ -916,6 +916,36 @@ describe("check", { skip: gitAvailable ? false : "git is not available" }, () =>
     });
   });
 
+  test('a "Changelog: none" commit does not excuse an unmarked product change in the same range', () => {
+    withRepo((repo, base) => {
+      repo.write("crates/tenko/src/lib.rs", "// v2\n");
+      repo.commit("test(tenko): a test\n\nChangelog: none\n");
+      repo.write("ui/src/App.tsx", "// app\n");
+      repo.commit("feat(ui): a visible change");
+      const r = repo.check(["--base", base]);
+      assert.equal(r.status, 1);
+      assert.match(r.stderr, /CHANGELOG\.md was not updated: 1 product path changed/);
+      assert.match(r.stderr, /ui\/src\/App\.tsx/);
+      assert.doesNotMatch(r.stderr, /crates\/tenko\/src\/lib\.rs/);
+    });
+  });
+
+  test('a range passes when every product commit is marked or an entry is added', () => {
+    withRepo((repo, base) => {
+      repo.write("crates/tenko/src/lib.rs", "// v2\n");
+      repo.commit("a\n\nChangelog: none\n");
+      repo.write("ui/src/App.tsx", "// app\n");
+      repo.commit("b\n\nChangelog: none\n");
+      const r = repo.check(["--base", base]);
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /changelog check skipped: commits [0-9a-f]+, [0-9a-f]+ say "Changelog: none" \(2 product paths changed\)/);
+      repo.write("ui/src/B.tsx", "// b\n");
+      repo.write("CHANGELOG.md", CHANGELOG_V2);
+      repo.commit("c: unmarked with an entry");
+      assert.equal(repo.check(["--base", base]).status, 0);
+    });
+  });
+
   test("the marker counts only on a line of its own", () => {
     withRepo((repo, base) => {
       repo.write("crates/tenko/src/lib.rs", "// v2\n");

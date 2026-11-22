@@ -455,22 +455,25 @@ function runGit(args, cwd) {
 const CHANGELOG_NONE = /^changelog:[ \t]*none[ \t]*$/im;
 
 /**
- * The short ids of the commits in `base..head` whose message has a line "Changelog: none".
+ * The commits in `base..head` (merges left out): the short id, whether the message has a line
+ * "Changelog: none", and the paths the commit changes.
  * @param {string} base
  * @param {string} head
  * @param {string} cwd
- * @returns {string[]}
+ * @returns {{ id: string, none: boolean, files: string[] }[]}
  */
-function commitsMarkedNone(base, head, cwd) {
-  const r = runGit(["log", "--format=%h%x00%B%x1e", `${base}..${head}`], cwd);
+function rangeCommits(base, head, cwd) {
+  const r = runGit(["log", "--no-merges", "--format=%H%x00%h%x00%B%x1e", `${base}..${head}`], cwd);
   if (r.status !== 0) return [];
   return r.stdout
     .split("\x1e")
     .map((record) => record.replace(/^\n/, ""))
     .filter((record) => record !== "")
-    .map((record) => record.split("\0"))
-    .filter(([, body]) => CHANGELOG_NONE.test(body ?? ""))
-    .map(([id]) => id.trim());
+    .map((record) => {
+      const [full, id, body] = record.split("\0");
+      const t = runGit(["diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", full], cwd);
+      return { id: id.trim(), none: CHANGELOG_NONE.test(body ?? ""), files: t.stdout.split("\0").filter((p) => p !== "") };
+    });
 }
 
 /**
@@ -524,7 +527,8 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
     throw new Error(`git diff failed: ${diff.stderr.trim() || `status ${diff.status}`}`);
   }
   const changed = diff.stdout.split("\0").filter((p) => p !== "");
-  const product = productPaths(changed);
+  const allProduct = productPaths(changed);
+  let product = allProduct;
   if (product.length === 0) {
     return {
       ok: true,
@@ -534,16 +538,23 @@ export function runCheck({ base, head = "HEAD", file = "CHANGELOG.md", cwd = pro
   }
   // A commit whose message has a line "Changelog: none" changes nothing a user can see (a
   // test inside a source file, a comment): the push's form of the pull request label
-  // "no-changelog". The commits that carry it are named in the result.
-  const marked = commitsMarkedNone(base, head, cwd);
+  // "no-changelog". The commits that carry it are named in the result. A marker excuses only
+  // the commit that carries it: the product paths an unmarked commit of the range changes
+  // still need an entry.
+  const commits = rangeCommits(base, head, cwd);
+  const marked = commits.filter((c) => c.none).map((c) => c.id);
   if (marked.length > 0) {
-    const noun = marked.length === 1 ? "commit" : "commits";
-    const verb = marked.length === 1 ? "says" : "say";
-    return {
-      ok: true,
-      message: `changelog check skipped: ${noun} ${marked.join(", ")} ${verb} "Changelog: none" (${paths(product.length)} changed)`,
-      productPaths: product,
-    };
+    const unmarked = new Set(commits.filter((c) => !c.none).flatMap((c) => productPaths(c.files)));
+    product = product.filter((p) => unmarked.has(p));
+    if (product.length === 0) {
+      const noun = marked.length === 1 ? "commit" : "commits";
+      const verb = marked.length === 1 ? "says" : "say";
+      return {
+        ok: true,
+        message: `changelog check skipped: ${noun} ${marked.join(", ")} ${verb} "Changelog: none" (${paths(allProduct.length)} changed)`,
+        productPaths: allProduct,
+      };
+    }
   }
 
   const baseText = showAt(base, file, cwd);
