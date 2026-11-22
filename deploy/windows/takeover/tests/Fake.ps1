@@ -89,6 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
+        jobScopes = @{}; acksByScope = @{}; prompts = [System.Collections.ArrayList]@()
         forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
         batchRight = $false
@@ -414,7 +415,12 @@ function Invoke-FakeTenko {
             return (Get-FakeJob 'revert')
         }
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' { return (Get-FakeJob 'prepare') }
-        '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/takeover$' { return (Get-FakeJob 'takeover') }
+        '^POST /migrate/mirrors/[^/]+/scopes/([^/]+)/takeover$' {
+            $scope = [uri]::UnescapeDataString($Matches[1])
+            $job = Get-FakeJob 'takeover'
+            $w.jobScopes[$job.id] = $scope
+            return $job
+        }
         '^GET /jobs/(.+)$' { return [ordered]@{ job = $w.jobs[$Matches[1]] } }
         '^POST /jobs/([^/]+)/steps/(\d+)/complete$' {
             # Tenko may not answer the completion (completeFails, or after completeOk calls), may
@@ -452,7 +458,12 @@ function Invoke-FakeTenko {
         '^GET /migrate/runs/[^/]+/heartbeat$' { return [ordered]@{} }
         '^GET /migrate/runs/' { return [ordered]@{ window = $w.window } }
         '^PUT /migrate/runs/' { return [ordered]@{} }
-        '^GET /migrate/takeovers$' { return [ordered]@{ items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-00000000f001'; acks = $w.acks }) } }
+        '^GET /migrate/takeovers$' {
+            # The ACK counter of the job's scope (acksByScope), the world's otherwise.
+            $scope = [string]$w.jobScopes[($query -replace '^job=', '')]
+            $acks = $(if ($w.acksByScope.ContainsKey($scope)) { $w.acksByScope[$scope] } else { $w.acks })
+            return [ordered]@{ items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-00000000f001'; acks = $acks }) }
+        }
         '^POST /migrate/takeovers/[^/]+/resume$' {
             # Tenko may refuse the call (a person reverted it in the UI, or it is not this
             # session's revert), or not answer it.
@@ -511,6 +522,7 @@ function Install-FakeWorld {
         if ($script:world.answers.Count -eq 0) { throw "no answer queued for the prompt: $Prompt" }
         $next = $script:world.answers[0]
         $script:world.answers.RemoveAt(0)
+        [void]$script:world.prompts.Add($Prompt)
         return [string]$next
     }
     # The host's choice prompt answers the next queued answer, Abort when it names no choice.

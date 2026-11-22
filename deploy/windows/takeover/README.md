@@ -137,7 +137,8 @@ that resolves to the node only. A resumed run reads the domain and the address f
 state file. You confirm by typing the domain's name: the change list before the first
 change, the DNS window before phase 4 (the script shows who started the window and when,
 according to Tenko), the finish, and, in the reverse of phase 4, the records Tenko added
-(below). The DNS window's confirmation also shows the DHCP window's warning: what happens
+(below). The DNS window's confirmation carries the DHCP window's warning in its own prompt,
+where no redirection of the script's output can hide it: what happens
 (the DHCP Server service stopped and disabled on the named servers, Tenko answering their
 scopes at once, the authorizations removed right after and reaching every controller within
 some minutes) and how to go back (`-Reverse`). In the same run of the script it stands as
@@ -197,15 +198,17 @@ Set-Service DHCPServer -StartupType Automatic; Start-Service DHCPServer
 After the takeover every client's renewal ends in a broadcast that whichever server answers
 first can take: DHCP snooping or a DHCP guard on the switches keeps a rogue server out.
 
-The quiet network. The DHCP window's last step waits five minutes for Tenko's first answer to
-a client. In a quiet network there may be none yet, and that is normal: a client that holds a
-lease asks its old server directly until 87.5 percent of the lease time has passed, and only
-new, restarted or reconnecting clients ask openly. The step then finishes with a warning
-that says so, the state file records the takeover as done and unproven, and the sitting ends
-as usual. To prove it at once, run `ipconfig /renew` on any client of the scope and look at
-the lease it gets; if a client that asks gets no answer, check the relay or the listener, or
-run `-Reverse`. Every later sitting says in one line whether Tenko has answered a client
-since.
+The quiet network. The DHCP window's last step waits five minutes until Tenko reports an
+answered client in every scope. In a quiet network some scopes may have none yet, and that
+is normal: a client that holds a lease asks its old server directly until 87.5 percent of
+the lease time has passed, and only new, restarted or reconnecting clients ask openly. The
+step then finishes with a warning that says so and names the scopes not answered yet; the
+state file records them as unproven, the last line says that Tenko's scopes are on and which
+are not yet proven, and the sitting ends as usual. To prove a scope at once, run
+`ipconfig /renew` on any of its clients and look at the lease it gets; if a client that asks
+gets no answer, check the relay or the listener, or run `-Reverse`. Every later sitting says
+in one line which scopes Tenko still reports no answered client for, and the finish's
+confirmation names them (it does not refuse).
 
 ## The state, the exit codes and a failed step
 

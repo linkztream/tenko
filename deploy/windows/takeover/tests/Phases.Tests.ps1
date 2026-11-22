@@ -376,14 +376,17 @@ Describe 'The DHCP window' {
         $tenko = @($script:world.tenkoCalls)
     }
 
-    It 'shows the DHCP window''s warning at the DNS window''s confirmation, which stands for it within 15 minutes: no second question in one sitting' {
+    It 'puts the DHCP window''s warning into the DNS window''s own prompt, which stands for it within 15 minutes: no second question in one sitting' {
         $script:world.choices | Should -Be 0
-        $shown | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
-        $shown | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
-        $shown | Should -Match 'may take some minutes to reach every controller'
-        $shown | Should -Match 'Tenko-Takeover\.ps1 -Reverse'
+        # In the prompt's text, which no redirection of the script's output can hide.
+        $prompt = @($script:world.prompts | Where-Object { $_ -match 'start the DNS window' })
+        $prompt.Count | Should -Be 1
+        $prompt[0] | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
+        $prompt[0] | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
+        $prompt[0] | Should -Match 'may take some minutes to reach every controller'
+        $prompt[0] | Should -Match 'Tenko-Takeover\.ps1 -Reverse'
+        $prompt[0] | Should -Match ([regex]::Escape((Get-TkSilenceText -Readings (Read-State).readings)))
         $shown | Should -Match "The DNS window's confirmation 0 minutes ago stands for the DHCP window"
-        $shown.IndexOf('The DHCP window makes these changes') | Should -BeLessThan $shown.IndexOf('Phase 4')
     }
 
     It 'stops DHCPServer on both servers and reads the silence back, completes Tenko''s task, and only then removes both authorizations and reads them back on each controller' {
@@ -718,19 +721,42 @@ Describe 'A failure inside the DHCP window' {
         $script:TkAckWaitSec = 0
         try {
             $script:world.acks = 0
-            $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1)
+            $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1 6>&1)
             $out[-1] | Should -Be 3 -Because $script:lastError
             $text = @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ' '
             $text | Should -Match ([regex]::Escape($script:TkQuietText))
             $text | Should -Match '87\.5 percent of the lease time.*ipconfig /renew.*or run -Reverse'
+            $text | Should -Match 'Not answered yet: 192\.0\.2\.0/24\.'
+            ($out -join "`n") | Should -Match "Tenko's scopes are on; not yet proven by an answered client: 192\.0\.2\.0/24"
+            ($out -join "`n") | Should -Not -Match 'Tenko serves the scopes'
             (Read-State).steps['5.check'].state | Should -Be 'done'
-            (Read-State).values.unproven | Should -BeTrue
+            @((Read-State).values.unproven) | Should -Be @('192.0.2.0/24')
             $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
-            ($out -join "`n") | Should -Match 'Tenko has not answered a client since the DHCP window yet'
-            (Read-State).values.unproven | Should -BeTrue
+            ($out -join "`n") | Should -Match 'Tenko reports no answered client yet for 192\.0\.2\.0/24'
+            @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1] | Should -Match 'Tenko reports no answered client yet for 192\.0\.2\.0/24' -Because 'the finish names what is unproven, and does not refuse'
             $script:world.acks = 2
             $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
-            ($out -join "`n") | Should -Match 'Tenko has answered a client since the DHCP window: the takeover is proven'
+            ($out -join "`n") | Should -Match 'Tenko reports that it has answered a client of every scope since the DHCP window'
+            (Read-State).values.Contains('unproven') | Should -BeFalse
+        } finally { $script:TkAckWaitSec = 300 }
+    }
+
+    It 'proves each scope on its own: the one with no answered client is named, and the record clears only when both are answered' {
+        $script:TkAckWaitSec = 0
+        try {
+            $script:world.twoScopes = $true
+            $script:world.acksByScope = @{ '192.0.2.0/24' = 3; '198.51.100.0/24' = 0 }
+            $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1)
+            $out[-1] | Should -Be 3 -Because $script:lastError
+            (@($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ' ') | Should -Match 'Not answered yet: 198\.51\.100\.0/24\.$'
+            @((Read-State).values.unproven) | Should -Be @('198.51.100.0/24')
+            # A counter that is not a number counts as not answered, and ends nothing.
+            $script:world.acksByScope['198.51.100.0/24'] = 'many'
+            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
+            $out[-1] | Should -Be 3 -Because $script:lastError
+            @((Read-State).values.unproven) | Should -Be @('198.51.100.0/24')
+            $script:world.acksByScope['198.51.100.0/24'] = 1
+            [void](Invoke-FakeRun -Answers @('', ''))
             (Read-State).values.Contains('unproven') | Should -BeFalse
         } finally { $script:TkAckWaitSec = 300 }
     }
@@ -740,6 +766,14 @@ Describe 'A failure inside the DHCP window' {
         $out[-1] | Should -Be 3 -Because $script:lastError
         @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] -and $_.Message -match 'has not answered a client yet' }) | Should -BeNullOrEmpty
         (Read-State).values.Contains('unproven') | Should -BeFalse
+    }
+
+    It 'lets no confirmation of an earlier run in the same process stand for the next' {
+        $script:TkWindowWatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Mock Assert-TkHost { if ($null -ne $script:TkWindowWatch) { throw 'an earlier run''s confirmation was still held' } }
+        $caught = ''
+        try { [void](Invoke-Takeover -Directory '') } catch { $caught = $_.Exception.Message }
+        $caught | Should -Not -Match 'still held'
     }
 }
 
