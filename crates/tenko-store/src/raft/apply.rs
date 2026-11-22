@@ -227,10 +227,7 @@ impl<'a, 'txn> Applier<'a, 'txn> {
                         .fingerprint()
                         .map_err(|error| unencodable("idempotency fingerprint", &error))?,
                 };
-                Some((
-                    encode_key(&(batch.principal.subject(), key.as_str().to_owned())),
-                    fingerprint,
-                ))
+                Some((idempotency_key(&batch, key), fingerprint))
             }
             None => None,
         };
@@ -528,4 +525,9 @@ fn stage_audit(
         sequence.push(seq);
     }
     Ok((head, sequence))
+}
+
+/// The key of `batch`'s idempotency record: keys are scoped per principal.
+pub(crate) fn idempotency_key(batch: &WriteBatch, key: &tenko_core::IdempotencyKey) -> Bytes {
+    encode_key(&(batch.principal.subject(), key.as_str().to_owned()))
 }

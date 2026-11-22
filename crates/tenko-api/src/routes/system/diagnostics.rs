@@ -76,6 +76,9 @@ const INFORMATIONAL: &[&str] = &[
 
 /// The findings of a role or a service that does not do its work.
 const ERRORS: &[&str] = &[
+    // The store refuses writes on a full disk, or stopped on a storage failure.
+    tenko_store::StoreError::DISK_RESERVE,
+    tenko_store::StoreError::STOPPED,
     super::DNS_ROLE_NOT_SERVING,
     super::DHCP_ROLE_NOT_SERVING,
     super::DHCP_ROLE_STORE_REFUSED,

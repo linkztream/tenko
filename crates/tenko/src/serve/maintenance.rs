@@ -9,7 +9,10 @@
 
 use std::time::Duration;
 
-use tenko_store::raft::{DiskUsage, RaftStore};
+use tenko_store::{
+    Store as _,
+    raft::{DiskUsage, RaftStore},
+};
 use tokio::sync::watch;
 
 use crate::config::StoreSection;
@@ -36,6 +39,30 @@ impl Policy {
             ratio_running: ratio * 2.0,
             min_bytes: section.reseed_min_mib.saturating_mul(1024 * 1024),
             interval: Duration::from_secs(section.maintenance_interval_hours.saturating_mul(3_600)),
+        }
+    }
+}
+
+/// Waits until `store` stopped on a storage failure and its disk has room for a start
+/// (`StoreSafety::restart_due`), and answers why it stopped; without a store, never. The
+/// server then ends with a failure status, so that its service manager starts it again: a
+/// stopped Raft core cannot start again in the process.
+pub(super) async fn until_restart_due(store: Option<RaftStore>) -> String {
+    let Some(store) = store else {
+        return std::future::pending().await;
+    };
+    let mut tick = tokio::time::interval(Duration::from_secs(1));
+    loop {
+        tick.tick().await;
+        if let Some(safety) = store.safety().filter(tenko_store::StoreSafety::restart_due) {
+            let cause = safety.stopped.unwrap_or_default();
+            tracing::error!(
+                code = tenko_store::StoreError::STOPPED,
+                %cause,
+                "the store stopped and its disk has room for a start: the server ends with a \
+                 failure status, and its service manager starts it again"
+            );
+            return cause;
         }
     }
 }

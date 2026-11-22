@@ -159,11 +159,8 @@ async fn a_failed_log_write_fires_nothing() {
     fs::write(&fail.0, b"").expect("fail the log writes");
     let (task, signal) = propose(&store, put(1));
     let outcome = result(task).await;
-    // The failed write stops Raft: the coalescer answers that the store shuts down.
-    assert!(
-        matches!(outcome, Err(StoreError::ShuttingDown)),
-        "{outcome:?}"
-    );
+    // The failed write stops the Raft core: the store answers that it stopped.
+    assert!(matches!(outcome, Err(StoreError::Stopped)), "{outcome:?}");
     assert!(!fired(signal).await, "dropped unfired");
     drop(fail);
     let _ = store.shutdown().await;

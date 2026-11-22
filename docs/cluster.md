@@ -720,6 +720,33 @@ What the step leaves on the host: the copy from before it in `<data_dir>/recover
 
 A copy of a controller's data directory, or a backup restored on a lab host, carries the installation's CA and the controllers' node records: keep such a copy from reaching the cluster port of the original installation. A forced step on it signs with that controller's own certificate, which the real cluster's records hold, so it would count as a newer generation; the step's confirmation lists the addresses it will call for that reason.
 
+### 12.12 Disk space
+
+Every controller keeps the free space of its data directory's file system above two lines, computed from its own store. They are constants of the formula, not settings:
+
+- **reserve** = the live data + 2 × the latest snapshot + 256 MiB: room for one compaction of the state file (a fresh copy of the live data), the next snapshot beside the current one, and the log;
+- **margin** = 2 × the reserve.
+
+The state file can grow to about twice the live data under load (redb doubles its file in steps and reuses freed pages only once no read view holds them), so plan for free space of at least the margin plus that growth.
+
+| Free space | What the store takes | Status |
+|---|---|---|
+| Above the margin | Every write | `store.disk.pressure` is `normal` |
+| Below the margin | Only writes that free space: every change deletes a row, replaces a value with one no larger or bumps a counter, with at most one audit record of at most 1 KiB; those with an audit record at most 600 a minute. Other writes are refused with `507 sys.store.disk_reserve` | `margin`, and the warning `sys.store.disk_reserve` |
+| Below the reserve | No write: only the store's own snapshot and compaction run. Every write is refused with `507 sys.store.disk_reserve` | `reserve`, and the same warning |
+
+The DHCP role counts a refused write as `store_refused`, as it does when the quorum is lost: renewals are answered for the time they have left and new clients wait. When the free space falls below the margin, writes that free space (prunes) go first. Once none has passed for 10 seconds, or 5 minutes after the pressure rose, the store compacts its state file once into a fresh copy and gives the freed pages back to the file system, as long as a copy of the live data fits. `store.disk` in `GET /api/v1/system/status` shows the free space, both lines, the pressure, and whether a compaction or a snapshot is running.
+
+**A snapshot file that cannot be written** (a full disk, a broken directory) no longer stops the store. The log keeps the entries the snapshot would have covered, the status carries the warning `sys.store.snapshot_failed`, and the store builds the snapshot again 30 seconds later at the earliest, once one fits. A failed write of the log or of the state file still stops the store: nothing it covered may count as written.
+
+**A store that stopped** on a storage failure answers every call with `503 sys.store.stopped` and the status carries the warning of the same code with the cause. DNS keeps answering and DHCP renewals keep being answered. As soon as the free space is above the reserve again, and the store ran at least 61 seconds, the server ends with a failure status and systemd (`Restart=on-failure`) starts it again; the start replays the log, so nothing written is lost. The server never ends into a full disk, and never more than once a minute: the unit gives up after five failed starts in 300 seconds. The warning says how much room a start takes.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `sys.store.disk_reserve` | 507 | The free space is below the margin (only writes that free space are taken) or below the reserve (no write is taken); `free` and `needed` in bytes |
+| `sys.store.stopped` | 503 | The store stopped on a storage failure and starts again with the process once its disk has room |
+| `sys.store.snapshot_failed` | (warning) | The last snapshot file could not be written |
+
 ## 13. Changing a node's roles
 
 A node's roles (`controller`, `dns`, `dhcp`, `probe`) start from `roles` in `tenko.toml`, which the installer writes, and are changed afterwards from the web UI, the API and the command line, the way the installation's modules are ([upgrades.md](upgrades.md), the module switch). The change applies at the node's next start, which the node runs itself under a service manager. Outside the Hardened profile the installer does not ask for the roles: it writes every role, and the operator trims the set here; under Hardened it asks (section 13.4 has why).

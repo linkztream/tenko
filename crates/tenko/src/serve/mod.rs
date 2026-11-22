@@ -819,6 +819,10 @@ impl Running {
 }
 
 /// The controller role: start, serve, stop.
+#[allow(
+    clippy::too_many_lines,
+    reason = "the stop order reads best as one sequence"
+)]
 async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(), ServeError> {
     let Hooks { ready, stopping } = hooks;
     tracing::info!(
@@ -880,12 +884,16 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
     let requested = Arc::new(std::sync::OnceLock::<Instant>::new());
     let mark = Arc::clone(&requested);
     let restart_requested = restart.clone();
+    let store_stopped = Arc::new(std::sync::OnceLock::<String>::new());
+    let stopped = Arc::clone(&store_stopped);
+    let store = running.store.clone();
     let notify_stopping = async move {
         tokio::select! {
             () = shutdown => tracing::info!("shutdown requested"),
             reason = restart_requested.requested() => {
                 tracing::info!(%reason, "stopping for a restart");
             }
+            cause = maintenance::until_restart_due(store) => drop(stopped.set(cause)),
         }
         let _ = mark.set(Instant::now());
         if let Some(stopping) = stopping {
@@ -902,6 +910,9 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
     );
     drop((auth, ipam, engine, vault, updates));
     running.stop().await;
+    if let Some(cause) = store_stopped.get() {
+        return Err(ServeError::Runtime(format!("the store stopped: {cause}")));
+    }
     match (result, restart.reason()) {
         (Ok(()), Some(reason)) => {
             tracing::info!(

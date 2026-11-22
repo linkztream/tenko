@@ -53,14 +53,17 @@ use tenko_core::{
     audit::{AuditAction, AuditDraft},
     clock,
 };
-use tenko_store::{ApplyStopped, ReadConsistency, StoreRole, WriteBatch, api::APPLY_STOPPED};
+use tenko_store::{
+    ApplyStopped, Pressure, ReadConsistency, StoreError, StoreRole, StoreSafety, WriteBatch,
+    api::{APPLY_STOPPED, SNAPSHOT_FAILED},
+};
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
 
 use crate::{
     dto::system::{
         DataFormatStatus, Health, HostStatus, LeaderServiceState, LeaderStatus, MetricsStatus,
-        NodeStatus, Readiness, StatusWarning, StoreSummary, SystemStatus, UiStatus,
+        NodeStatus, Readiness, StatusWarning, StoreDiskView, StoreSummary, SystemStatus, UiStatus,
     },
     extract::Ctx,
     host::{HostSample, low_disk_limit},
@@ -646,6 +649,65 @@ fn apply_stopped_warning(stopped: &ApplyStopped) -> StatusWarning {
     }
 }
 
+/// The warnings of the store's disk guard and of a stopped Raft core (`docs/cluster.md`
+/// section 12.12).
+fn store_safety_warnings(safety: &StoreSafety) -> Vec<StatusWarning> {
+    let warning = |code: &str, detail: String, needed: u64| {
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("free".to_owned(), safety.free_bytes.to_string());
+        params.insert("needed".to_owned(), needed.to_string());
+        StatusWarning {
+            code: code.to_owned(),
+            detail,
+            params,
+        }
+    };
+    let free = gib(safety.free_bytes);
+    let mut warnings = Vec::new();
+    if let Some(cause) = &safety.stopped {
+        warnings.push(warning(
+            StoreError::STOPPED,
+            format!(
+                "the store stopped on a storage failure ({cause}); the server ends and its \
+                 service manager starts it again once {} are free on its disk ({free} now)",
+                gib(safety.reserve_bytes)
+            ),
+            safety.reserve_bytes,
+        ));
+    }
+    match safety.pressure {
+        Pressure::Normal => {}
+        Pressure::Margin => warnings.push(warning(
+            StoreError::DISK_RESERVE,
+            format!(
+                "the store's disk has {free} free, below the {} it keeps: only writes that \
+                 free space are taken",
+                gib(safety.margin_bytes)
+            ),
+            safety.margin_bytes,
+        )),
+        Pressure::Reserve => warnings.push(warning(
+            StoreError::DISK_RESERVE,
+            format!(
+                "the store's disk has {free} free, below the {} a snapshot and a compaction \
+                 need: no write is taken",
+                gib(safety.reserve_bytes)
+            ),
+            safety.reserve_bytes,
+        )),
+    }
+    if safety.snapshot_failed {
+        warnings.push(warning(
+            SNAPSHOT_FAILED,
+            "the store could not write its last snapshot file; the log keeps the entries until \
+             a snapshot can be written"
+                .to_owned(),
+            safety.reserve_bytes,
+        ));
+    }
+    warnings
+}
+
 /// Bytes in GiB with one decimal, for the English text of a finding.
 #[allow(clippy::cast_precision_loss)]
 fn gib(bytes: u64) -> String {
@@ -1133,6 +1195,8 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
     );
     warnings.extend(state.notices_list());
     warnings.extend(store.stopped.as_ref().map(apply_stopped_warning));
+    let safety = state.store.safety();
+    warnings.extend(safety.iter().flat_map(store_safety_warnings));
     let (kek, kek_warnings) = state
         .kek()
         .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
@@ -1173,6 +1237,18 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
             data_bytes: store.data_bytes,
             disk_bytes: store.disk_bytes,
             quorum: store.quorum.into(),
+            disk: safety.map(|safety| StoreDiskView {
+                free_bytes: safety.free_bytes,
+                reserve_bytes: safety.reserve_bytes,
+                margin_bytes: safety.margin_bytes,
+                pressure: serde_json::to_value(safety.pressure)
+                    .ok()
+                    .and_then(|value| value.as_str().map(str::to_owned))
+                    .unwrap_or_default(),
+                compacting: safety.compacting,
+                snapshotting: safety.snapshotting,
+                snapshot_failed: safety.snapshot_failed,
+            }),
         },
         tls,
         ui,
@@ -1587,6 +1663,48 @@ mod tests {
         assert_eq!(
             disk_low_warning(&HostSample::blank(Timestamp::now()), None),
             None
+        );
+    }
+
+    #[test]
+    fn the_store_safety_warnings_follow_the_pressure_and_a_stopped_core() {
+        let mut safety = StoreSafety {
+            free_bytes: 10,
+            reserve_bytes: 100,
+            margin_bytes: 200,
+            pressure: Pressure::Normal,
+            compacting: false,
+            snapshotting: false,
+            snapshot_failed: false,
+            stopped: None,
+            running_secs: 0,
+        };
+        let codes = |safety: &StoreSafety| -> Vec<(String, String)> {
+            store_safety_warnings(safety)
+                .into_iter()
+                .map(|warning| (warning.code, warning.params["needed"].clone()))
+                .collect()
+        };
+        assert_eq!(codes(&safety), Vec::new());
+        safety.pressure = Pressure::Margin;
+        assert_eq!(
+            codes(&safety),
+            [(StoreError::DISK_RESERVE.to_owned(), "200".to_owned())]
+        );
+        safety.pressure = Pressure::Reserve;
+        safety.snapshot_failed = true;
+        safety.stopped = Some("a storage failure".to_owned());
+        assert_eq!(
+            codes(&safety),
+            [
+                (StoreError::STOPPED.to_owned(), "100".to_owned()),
+                (StoreError::DISK_RESERVE.to_owned(), "100".to_owned()),
+                (SNAPSHOT_FAILED.to_owned(), "100".to_owned()),
+            ]
+        );
+        assert_eq!(
+            crate::findings::health_level(StoreError::STOPPED),
+            tenko_ipam::findings::FindingLevel::Act
         );
     }
 

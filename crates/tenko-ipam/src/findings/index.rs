@@ -344,7 +344,14 @@ impl FindingsIndex {
     /// # Errors
     ///
     /// Store and decoding errors; the index is left as it was.
-    pub fn load(&self, view: &dyn ReadView, now: Timestamp, with_view: bool) -> IpamResult<()> {
+    /// The view is dropped before the findings of the reconciliation view are computed.
+    pub fn load(
+        &self,
+        owned: std::sync::Arc<dyn ReadView>,
+        now: Timestamp,
+        with_view: bool,
+    ) -> IpamResult<()> {
+        let view = owned.as_ref();
         let mut proposals = Vec::new();
         for (_, id, _) in view.scan_typed(&OPEN_KEYS, KeyRange::all(), usize::MAX, false)? {
             let id: ProposalId = id;
@@ -373,11 +380,10 @@ impl FindingsIndex {
                 }
             }
         }
-        let derived = if with_view {
-            Some(self.view_findings(&self.read_view(view, now)?))
-        } else {
-            None
-        };
+        let read = with_view.then(|| self.read_view(view, now)).transpose()?;
+        let revision = view.revision();
+        drop(owned);
+        let derived = read.as_ref().map(|read| self.view_findings(read));
         let mut state = self.write();
         for prefix in ["proposal:", "alarm:", "job:"] {
             state.remove_prefixed(prefix);
@@ -401,7 +407,7 @@ impl FindingsIndex {
         if let Some(derived) = derived {
             Self::replace_view(&mut state, derived);
         }
-        state.revision = state.revision.max(view.revision());
+        state.revision = state.revision.max(revision);
         state.counts = None;
         Ok(())
     }

@@ -107,6 +107,7 @@ mod apply;
 mod coalescer;
 mod compress;
 mod confirm;
+mod disk;
 mod index;
 mod leadership;
 mod sm;
@@ -120,7 +121,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, PoisonError, Weak,
+        Arc, Mutex, OnceLock, PoisonError, Weak,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -154,8 +155,9 @@ use self::{
     types::{ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
-    ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, QuorumState,
-    ReadConsistency, ReadView, Store, StoreError, StoreRole, StoreStatus, WatchFilter, WriteBatch,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, Pressure,
+    QuorumState, ReadConsistency, ReadView, Store, StoreError, StoreRole, StoreSafety, StoreStatus,
+    WatchFilter, WriteBatch,
 };
 
 /// openraft 0.9 as the store uses it: a peer transport (`tenko-cluster`) takes the wire
@@ -567,6 +569,14 @@ struct Inner {
     tasks: Mutex<Vec<JoinHandle<()>>>,
     /// A temporary data directory removed when the store is dropped.
     temp_dir: Option<PathBuf>,
+    /// The free space of the data directory against the store's two lines (`disk`).
+    disk: disk::Guard,
+    /// Why the Raft core stopped, once it did on a failure ([`StoreError::Stopped`]).
+    stopped: OnceLock<String>,
+    /// The state file is being compacted.
+    compacting: AtomicBool,
+    /// When the store opened.
+    opened: Instant,
 }
 
 impl std::fmt::Debug for RaftStore {
@@ -891,8 +901,13 @@ impl RaftStore {
             leadership: Arc::new(LeadershipState::new(isolation_after)),
             tasks: Mutex::new(vec![coalescer]),
             temp_dir,
+            disk: disk::Guard::new(),
+            stopped: OnceLock::new(),
+            compacting: AtomicBool::new(false),
+            opened: Instant::now(),
         });
         inner.refresh_sizes();
+        inner.update_disk();
         let maintenance = tokio::spawn(maintain(Arc::downgrade(&inner)));
         let applied = {
             let sm = inner.sm.clone();
@@ -1212,6 +1227,7 @@ impl RaftStore {
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)
             .map_err(ForwardError::Store)?;
+        inner.admit(&decoded).map_err(ForwardError::Store)?;
         let fingerprint = match &decoded.idempotency {
             Some(_) => Some(decoded.fingerprint().map_err(ForwardError::Store)?),
             None => None,
@@ -1548,7 +1564,8 @@ fn map_membership_error(error: &MembershipError) -> StoreError {
         openraft::error::RaftError::APIError(
             openraft::error::ClientWriteError::ForwardToLeader(_),
         ) => StoreError::NoQuorum,
-        openraft::error::RaftError::Fatal(_) => StoreError::ShuttingDown,
+        openraft::error::RaftError::Fatal(Fatal::Stopped) => StoreError::ShuttingDown,
+        openraft::error::RaftError::Fatal(_) => StoreError::Stopped,
         openraft::error::RaftError::APIError(_) => StoreError::Storage(error.to_string()),
     }
 }
@@ -2000,7 +2017,7 @@ impl Inner {
                     Confirmation::NotLeader { .. } => {}
                     Confirmation::NoQuorum => return Err(StoreError::NoQuorum),
                     Confirmation::Timeout => return Err(StoreError::Timeout),
-                    Confirmation::ShuttingDown => return Err(StoreError::ShuttingDown),
+                    Confirmation::ShuttingDown => return Err(self.closed()),
                 },
                 Some(id) => match self.transport.forward_read_index(self.me(), id).await {
                     Ok(index) => return self.wait_applied_index(index.log_index, deadline).await,
@@ -2044,9 +2061,152 @@ impl Inner {
     fn check_running(&self) -> Result<(), StoreError> {
         if self.shutdown.load(Ordering::SeqCst) || self.closed.load(Ordering::SeqCst) {
             Err(StoreError::ShuttingDown)
+        } else if self.stopped.get().is_some() {
+            Err(StoreError::Stopped)
         } else {
             Ok(())
         }
+    }
+
+    /// The error of a store that no longer answers: stopped on a failure, or shutting down.
+    fn closed(&self) -> StoreError {
+        self.note_stopped();
+        self.check_running()
+            .err()
+            .unwrap_or(StoreError::ShuttingDown)
+    }
+
+    /// Notes a Raft core that ended on a failure (openraft 0.9 cannot restart one in the
+    /// process): every call answers [`StoreError::Stopped`] from then on. A state machine
+    /// that stopped at an entry it cannot apply (`APPLY_STOPPED`) on a disk with room is not
+    /// noted: a restart would stop at the same entry. Short of room, the stop may be the
+    /// disk's, and a restart once a start fits is the way out.
+    fn note_stopped(&self) {
+        if self.stopped.get().is_some()
+            || (self.sm.stopped().is_some() && *self.disk.subscribe().borrow() == Pressure::Normal)
+        {
+            return;
+        }
+        if let Err(fatal) = &self.raft.metrics().borrow().running_state
+            && !matches!(fatal, Fatal::Stopped)
+        {
+            let cause = fatal.to_string();
+            tracing::error!(
+                code = StoreError::STOPPED,
+                %cause,
+                "the store stopped: the process ends with a failure status, and the service \
+                 manager starts it again, once its disk has room for a start"
+            );
+            let _ = self.stopped.set(cause);
+        }
+    }
+
+    /// Reads the free space of the data directory and sets the disk guard's lines from the
+    /// live data and the latest snapshot; answers the pressure before and after.
+    fn update_disk(&self) -> (Pressure, Pressure) {
+        let free = match disk::free_space(&self.config.data_dir) {
+            Ok(free) => free,
+            Err(error) => {
+                tracing::debug!(%error, "the free space of the data directory is unknown");
+                self.disk.status().0
+            }
+        };
+        let (before, now) =
+            self.disk
+                .update(free, self.sm.meta().data_bytes, self.snapshot_bytes_now());
+        if before != now {
+            let (free, reserve, margin, _) = self.disk.status();
+            if now == Pressure::Normal {
+                tracing::info!(free, margin, "the store's disk has room again");
+            } else {
+                tracing::warn!(
+                    code = StoreError::DISK_RESERVE,
+                    ?now,
+                    free,
+                    reserve,
+                    margin,
+                    "the store's disk is short of room: writes that do not free space are refused"
+                );
+            }
+        }
+        (before, now)
+    }
+
+    /// Short of room (`episode`: since when, and whether it compacted already): writes that
+    /// free space (prunes) go first, then one compaction returns the freed pages to the file
+    /// system, once a fresh copy of the live data fits.
+    async fn relieve(&self, pressure: Pressure, episode: &mut Option<(Instant, bool)>) {
+        if pressure == Pressure::Normal {
+            *episode = None;
+            return;
+        }
+        let (since, compacted) = episode.get_or_insert_with(|| (Instant::now(), false));
+        let fits =
+            self.disk.status().0 >= self.sm.meta().data_bytes.saturating_add(disk::RESERVE_BASE);
+        if !*compacted && fits && self.disk.prunes_over(*since, Instant::now()) {
+            *compacted = true;
+            self.compact().await;
+        }
+    }
+
+    /// The size of the current snapshot file (0 without one).
+    fn snapshot_bytes_now(&self) -> u64 {
+        self.sm
+            .current_snapshot()
+            .and_then(|(_, path)| fs::metadata(path).ok())
+            .map_or(0, |metadata| metadata.len())
+    }
+
+    /// Compacts the state file into a fresh copy (the online re-seed), once.
+    async fn compact(&self) {
+        self.compacting.store(true, Ordering::Relaxed);
+        let sm = self.sm.clone();
+        let rewritten = tokio::task::spawn_blocking(move || sm.rewrite_in_place()).await;
+        self.compacting.store(false, Ordering::Relaxed);
+        match rewritten {
+            Ok(Ok(rewritten)) => tracing::info!(
+                bytes_before = rewritten.bytes_before,
+                bytes_after = rewritten.bytes_after,
+                "the store's state file was compacted under disk pressure"
+            ),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "the store's state file could not be compacted");
+            }
+            Err(error) => tracing::warn!(%error, "the compaction of the state file stopped"),
+        }
+        self.refresh_sizes();
+        self.update_disk();
+    }
+
+    /// The disk guard's answer for `batch` ([`disk`]); below the margin a put is judged by
+    /// the size of the value it replaces. A retry of a write that committed already passes:
+    /// the apply answers it from its idempotency record and writes nothing.
+    fn admit(&self, batch: &WriteBatch) -> Result<(), StoreError> {
+        let mut view = None;
+        let refused = match self.disk.admit(batch, |table, key| {
+            let view = match &mut view {
+                Some(view) => view,
+                None => view.insert(self.sm.view()?),
+            };
+            Ok(view.get(table, key)?.map(|stored| stored.value.len()))
+        }) {
+            Ok(()) => return Ok(()),
+            Err(refused) => refused,
+        };
+        if let (StoreError::DiskReserve { .. }, Some(key)) = (&refused, &batch.idempotency) {
+            let view = match view {
+                Some(view) => view,
+                None => self.sm.view()?,
+            };
+            let record = apply::idempotency_key(batch, key);
+            if view
+                .get(&crate::api::tables::IDEMPOTENCY, &record)?
+                .is_some()
+            {
+                return Ok(());
+            }
+        }
+        Err(refused)
     }
 
     fn refresh_sizes(&self) {
@@ -2120,6 +2280,7 @@ impl RaftStore {
             return Err(StoreError::NoQuorum);
         }
         batch.validate(inner.config.coalescer.max_batch_bytes)?;
+        inner.admit(&batch)?;
         let fingerprint = match &batch.idempotency {
             Some(_) => Some(batch.fingerprint()?),
             None => None,
@@ -2127,7 +2288,11 @@ impl RaftStore {
         let encoded = to_cbor(&batch)?;
         let committed = inner
             .propose_encoded(encoded, fingerprint, background, logged)
-            .await?;
+            .await
+            .map_err(|error| match error {
+                StoreError::ShuttingDown => inner.closed(),
+                error => error,
+            })?;
         COMMIT_DURATION.observe(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
         Ok(committed)
     }
@@ -2142,14 +2307,22 @@ async fn maintain(inner: Weak<Inner>) {
     let mut last_trigger: Option<Instant> = None;
     let mut log_bytes_at_snapshot: Option<u64> = None;
     let mut deferred_since: Option<Instant> = None;
+    let mut short_of_room = None;
     loop {
         tick.tick().await;
         let Some(inner) = inner.upgrade() else {
             return;
         };
-        if inner.check_running().is_err() {
+        if inner.shutdown.load(Ordering::SeqCst) || inner.closed.load(Ordering::SeqCst) {
             return;
         }
+        inner.note_stopped();
+        let (_, pressure) = inner.update_disk();
+        // A stopped store only keeps reading its disk, for the restart (`StoreSafety`).
+        if inner.stopped.get().is_some() {
+            continue;
+        }
+        inner.relieve(pressure, &mut short_of_room).await;
         if last_sizes.elapsed() >= inner.config.status_refresh {
             last_sizes = Instant::now();
             inner.refresh_sizes();
@@ -2178,6 +2351,14 @@ async fn maintain(inner: Weak<Inner>) {
         let since_bytes = log_bytes.saturating_sub(*log_bytes_at_snapshot.get_or_insert(log_bytes));
         let policy = inner.config.snapshot;
         let settled = last_trigger.is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
+        // After a snapshot file that could not be written: again once one fits, not at once.
+        let settled = settled
+            && (!inner.sm.stats().snapshot_failed.load(Ordering::Relaxed)
+                || (last_trigger.is_none_or(|at| at.elapsed() >= SNAPSHOT_RETRY)
+                    && inner.disk.status().0
+                        >= inner
+                            .snapshot_bytes_now()
+                            .saturating_add(disk::RESERVE_BASE)));
         let queued = inner.queue_depth();
         let decision = snapshot_decision(
             &policy,
@@ -2209,6 +2390,9 @@ async fn maintain(inner: Weak<Inner>) {
         }
     }
 }
+
+/// The shortest time between two snapshot builds after one could not write its file.
+pub const SNAPSHOT_RETRY: Duration = Duration::from_secs(30);
 
 // WP9.6 (ADR 0030): the snapshot policy.
 /// The longest time a due snapshot waits for the commit queue to drain.
@@ -2283,6 +2467,27 @@ impl Store for RaftStore {
 
     fn sole_voter(&self) -> bool {
         sole_voter(&self.inner.raft, self.inner.me())
+    }
+
+    fn pressure(&self) -> tokio::sync::watch::Receiver<Pressure> {
+        self.inner.disk.subscribe()
+    }
+
+    fn safety(&self) -> Option<StoreSafety> {
+        let inner = &self.inner;
+        let (free_bytes, reserve_bytes, margin_bytes, pressure) = inner.disk.status();
+        let stats = inner.sm.stats();
+        Some(StoreSafety {
+            free_bytes,
+            reserve_bytes,
+            margin_bytes,
+            pressure,
+            compacting: inner.compacting.load(Ordering::Relaxed),
+            snapshotting: stats.snapshotting.load(Ordering::Relaxed),
+            snapshot_failed: stats.snapshot_failed.load(Ordering::Relaxed),
+            stopped: inner.stopped.get().cloned(),
+            running_secs: inner.opened.elapsed().as_secs(),
+        })
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {

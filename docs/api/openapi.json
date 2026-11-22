@@ -85901,6 +85901,55 @@
         },
         "additionalProperties": false
       },
+      "StoreDiskView": {
+        "type": "object",
+        "description": "The disk guard of the store.",
+        "required": [
+          "free_bytes",
+          "reserve_bytes",
+          "margin_bytes",
+          "pressure",
+          "compacting",
+          "snapshotting",
+          "snapshot_failed"
+        ],
+        "properties": {
+          "compacting": {
+            "type": "boolean",
+            "description": "The state file is being compacted."
+          },
+          "free_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Free bytes of the data directory's file system.",
+            "minimum": 0
+          },
+          "margin_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Below this (twice the reserve), only writes that free space are taken.",
+            "minimum": 0
+          },
+          "pressure": {
+            "type": "string",
+            "description": "`normal`, `margin` or `reserve`."
+          },
+          "reserve_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Below this, no write is taken: room for a compaction, two snapshots and the log\n(the live data, twice the latest snapshot and 256 MiB).",
+            "minimum": 0
+          },
+          "snapshot_failed": {
+            "type": "boolean",
+            "description": "The last snapshot file could not be written (`sys.store.snapshot_failed`)."
+          },
+          "snapshotting": {
+            "type": "boolean",
+            "description": "A snapshot is being built."
+          }
+        }
+      },
       "StoreSummary": {
         "type": "object",
         "description": "Summary of the store status.",
@@ -85921,6 +85970,17 @@
             "format": "int64",
             "description": "Bytes of live data.",
             "minimum": 0
+          },
+          "disk": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/StoreDiskView",
+                "description": "The free space of the store's data directory against the two lines the store keeps\n(`docs/cluster.md` section 12.12); absent for a store without a disk guard."
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "disk_bytes": {
             "type": [

@@ -314,6 +314,30 @@ pub struct StoreSummary {
     /// that predate the controller cluster: a single controller.
     #[serde(default)]
     pub quorum: QuorumView,
+    /// The free space of the store's data directory against the two lines the store keeps
+    /// (`docs/cluster.md` section 12.12); absent for a store without a disk guard.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk: Option<StoreDiskView>,
+}
+
+/// The disk guard of the store.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct StoreDiskView {
+    /// Free bytes of the data directory's file system.
+    pub free_bytes: u64,
+    /// Below this, no write is taken: room for a compaction, two snapshots and the log
+    /// (the live data, twice the latest snapshot and 256 MiB).
+    pub reserve_bytes: u64,
+    /// Below this (twice the reserve), only writes that free space are taken.
+    pub margin_bytes: u64,
+    /// `normal`, `margin` or `reserve`.
+    pub pressure: String,
+    /// The state file is being compacted.
+    pub compacting: bool,
+    /// A snapshot is being built.
+    pub snapshotting: bool,
+    /// The last snapshot file could not be written (`sys.store.snapshot_failed`).
+    pub snapshot_failed: bool,
 }
 
 /// The kind of quorum state of a controller.

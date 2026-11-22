@@ -461,7 +461,7 @@ impl EventHub {
                     self.reset_all(current, ResetReason::Journal);
                     continue;
                 }
-                Err(StoreError::ShuttingDown) => return,
+                Err(StoreError::ShuttingDown | StoreError::Stopped) => return,
                 Err(error) => {
                     tracing::warn!(%error, "event feeder cannot watch the store; retrying");
                     tokio::select! {

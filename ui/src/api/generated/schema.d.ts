@@ -23944,6 +23944,33 @@ export interface components {
              */
             reason?: string | null;
         };
+        /** @description The disk guard of the store. */
+        StoreDiskView: {
+            /** @description The state file is being compacted. */
+            compacting: boolean;
+            /**
+             * Format: int64
+             * @description Free bytes of the data directory's file system.
+             */
+            free_bytes: number;
+            /**
+             * Format: int64
+             * @description Below this (twice the reserve), only writes that free space are taken.
+             */
+            margin_bytes: number;
+            /** @description `normal`, `margin` or `reserve`. */
+            pressure: string;
+            /**
+             * Format: int64
+             * @description Below this, no write is taken: room for a compaction, two snapshots and the log
+             *     (the live data, twice the latest snapshot and 256 MiB).
+             */
+            reserve_bytes: number;
+            /** @description The last snapshot file could not be written (`sys.store.snapshot_failed`). */
+            snapshot_failed: boolean;
+            /** @description A snapshot is being built. */
+            snapshotting: boolean;
+        };
         /** @description Summary of the store status. */
         StoreSummary: {
             /** @description Sequence number of the newest audit record. */
@@ -23953,6 +23980,7 @@ export interface components {
              * @description Bytes of live data.
              */
             data_bytes: number;
+            disk?: components["schemas"]["StoreDiskView"] | null;
             /**
              * Format: int64
              * @description Bytes on disk, when the store is persistent.

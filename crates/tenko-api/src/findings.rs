@@ -236,7 +236,7 @@ impl FindingsService {
         let loaded = tokio::task::spawn_blocking(move || {
             service
                 .index
-                .load(view.as_ref(), Timestamp::now(), service.with_view)
+                .load(view, Timestamp::now(), service.with_view)
         })
         .await;
         match loaded {
@@ -291,7 +291,7 @@ impl FindingsService {
             }
             let from = match self.load().await {
                 Ok(revision) => revision,
-                Err(StoreError::ShuttingDown) => return,
+                Err(StoreError::ShuttingDown | StoreError::Stopped) => return,
                 Err(error) => {
                     tracing::warn!(%error, "the findings index cannot read the store; retrying");
                     tokio::select! {
@@ -302,7 +302,7 @@ impl FindingsService {
             };
             let mut changes = match self.store.watch(Some(from), WatchFilter::all()) {
                 Ok(changes) => changes,
-                Err(StoreError::ShuttingDown) => return,
+                Err(StoreError::ShuttingDown | StoreError::Stopped) => return,
                 Err(error) => {
                     tracing::warn!(%error, "the findings index cannot follow the store; retrying");
                     tokio::select! {

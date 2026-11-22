@@ -53,7 +53,7 @@ async fn index_of(world: &World, now: tenko_core::Timestamp) -> FindingsIndex {
         .read(ReadConsistency::Linearizable)
         .await
         .expect("view");
-    index.load(view.as_ref(), now, true).expect("load");
+    index.load(view, now, true).expect("load");
     index
 }
 
