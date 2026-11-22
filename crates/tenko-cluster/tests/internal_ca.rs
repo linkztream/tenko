@@ -1168,6 +1168,61 @@ async fn the_record_of_an_earlier_version_moves_to_the_controller_it_names() {
     assert_eq!(issues.count(), 2);
 }
 
+/// A record of an earlier version that no controller takes over stays while its certificate
+/// could still be reused, and goes with its key at the first check once it is due for
+/// renewal: the daily check of a controller with its own record, which stays as it was.
+#[tokio::test]
+async fn a_spent_record_of_an_earlier_version_goes_at_the_daily_check() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    let old = ServerIdentity::new("renamed.example.net");
+    env.material(&ca, &ctx, &old).await.expect("old names");
+    let record = env.as_an_earlier_version_left_it(&ctx).await;
+    env.material(&ca, &ctx_at(after(t0(), 300)), &identity())
+        .await
+        .expect("new names");
+    let own = env.server_record().await.expect("its own");
+    assert!(env.legacy_record().await.is_some(), "still reusable");
+
+    // 29 days before the old certificate ends: the reuse path takes it out.
+    let before = env.revision().await;
+    env.material(&ca, &ctx_at(after(t0(), 370)), &identity())
+        .await
+        .expect("the daily check");
+    assert_eq!(env.revision().await.0, before.0 + 1, "the removal only");
+    assert!(env.legacy_record().await.is_none());
+    assert!(env.vault.meta(record.key).await.expect("meta").is_none());
+    assert_eq!(env.server_record().await, Some(own.clone()), "no new issue");
+    assert!(env.vault.meta(own.key).await.expect("meta").is_some());
+}
+
+/// A single controller whose names changed issues its own and, once the record of an
+/// earlier version is due for renewal, removes it with its key in a write after the issue.
+#[tokio::test]
+async fn a_single_controller_removes_a_spent_record_of_an_earlier_version() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    env.material(&ca, &ctx, &ServerIdentity::new("renamed.example.net"))
+        .await
+        .expect("old names");
+    let record = env.as_an_earlier_version_left_it(&ctx).await;
+    let before = env.revision().await;
+    env.material(&ca, &ctx_at(after(t0(), 370)), &identity())
+        .await
+        .expect("new names");
+    assert_eq!(
+        env.revision().await.0,
+        before.0 + 2,
+        "the issue, then the removal"
+    );
+    assert!(env.legacy_record().await.is_none());
+    assert!(env.vault.meta(record.key).await.expect("meta").is_none());
+    let own = env.server_record().await.expect("its own");
+    assert!(env.vault.meta(own.key).await.expect("meta").is_some());
+}
+
 #[tokio::test]
 async fn the_record_of_an_earlier_version_is_renewed_into_the_controllers_own() {
     let env = Env::new();

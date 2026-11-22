@@ -7,7 +7,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rustls::pki_types::{CertificateDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    NodeId, ObjectRef, RequestCtx, RoleSet, Timestamp,
+    NodeId, ObjectRef, RequestCtx, Revision, RoleSet, Timestamp,
     audit::{AuditAction, AuditDraft},
     secret::{SecretClass, SecretRef},
     table::TableDef,
@@ -589,9 +589,11 @@ impl InternalCa {
     /// stored (certificate in `cluster.server_certs` under `node`, key in the vault, the
     /// old key deleted) with a `cluster.tls.issue` audit record. A controller without a
     /// record takes over `cluster.server_cert` of earlier versions when it carries its
-    /// names. The material presents the leaf followed by this root. Call at start and
-    /// periodically (daily), and after the host name changes; install the result in the TLS
-    /// service.
+    /// names. Any other controller's check removes that record with its key, in a write of
+    /// its own that may fail without harm, once its certificate is due for renewal or does
+    /// not read: no version reuses it then. The material presents the leaf followed by this
+    /// root. Call at start and periodically (daily), and after the host name changes;
+    /// install the result in the TLS service.
     ///
     /// # Errors
     ///
@@ -609,23 +611,24 @@ impl InternalCa {
         // The record of earlier versions belongs to the controller whose names it carries;
         // it leaves with its key in one write, so an older controller never deletes a key
         // that a record of this table holds.
-        let legacy = match own {
-            None => view
-                .get_typed(&tables::SERVER_CERT, &())?
-                .filter(|(record, _)| record.identity == *identity),
-            Some(_) => None,
-        };
+        let earlier = view.get_typed(&tables::SERVER_CERT, &())?;
+        let legacy = earlier
+            .as_ref()
+            .filter(|(record, _)| own.is_none() && record.identity == *identity);
+        let spent = earlier
+            .as_ref()
+            .filter(|(record, _)| legacy.is_none() && self.spent(record, ctx.now));
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(
             &tables::SERVER_CERTS,
             &node.0,
             own.as_ref().map(|(_, revision)| *revision),
         );
-        if let Some((_, revision)) = &legacy {
+        if let Some((_, revision)) = legacy {
             batch.expect_typed(&tables::SERVER_CERT, &(), Some(*revision));
             batch.delete_typed(&tables::SERVER_CERT, &());
         }
-        let current = own.as_ref().or(legacy.as_ref()).map(|(record, _)| record);
+        let current = own.as_ref().or(legacy).map(|(record, _)| record);
         if let Some(record) = current
             && let Some(material) = self.reusable(vault, ctx, record, identity).await?
         {
@@ -635,6 +638,7 @@ impl InternalCa {
                     tracing::warn!(%error, "the server certificate of an earlier version is served; it moves to this controller's record at the next check");
                 }
             }
+            drop_spent(store, vault, ctx, spent).await;
             return Ok(material);
         }
         let issued = self.issue_server_cert(identity, ctx.now)?;
@@ -668,7 +672,18 @@ impl InternalCa {
             not_after = %issued.info.not_after,
             "issued a server certificate from the internal CA"
         );
+        drop_spent(store, vault, ctx, spent).await;
         Ok(self.presented(issued.chain, &issued.key)?)
+    }
+
+    /// Whether no version reuses `record` at `now`: its leaf does not read, or is due for
+    /// renewal.
+    fn spent(&self, record: &ServerCertRecord, now: Timestamp) -> bool {
+        CertificateDer::pem_slice_iter(record.chain_pem.as_bytes())
+            .next()
+            .and_then(Result::ok)
+            .and_then(|leaf| CertInfo::from_der(&leaf).ok())
+            .is_none_or(|info| self.needs_renewal(&info, now))
     }
 
     /// What a listener presents: the chain, then this root, so that a client that takes the
@@ -718,7 +733,30 @@ impl InternalCa {
     }
 }
 
-/// PEM-encodes one DER block, for example `pem("CERTIFICATE", der)`.
+/// Removes the server certificate record of earlier versions that no version reuses, with
+/// its key, in a write of its own: a removal elsewhere meanwhile fails it, and the next
+/// check reads again.
+async fn drop_spent(
+    store: &dyn Store,
+    vault: &dyn Vault,
+    ctx: &RequestCtx,
+    spent: Option<&(ServerCertRecord, Revision)>,
+) {
+    let Some((record, revision)) = spent else {
+        return;
+    };
+    let mut batch = WriteBatch::for_request(ctx);
+    batch.expect_typed(&tables::SERVER_CERT, &(), Some(*revision));
+    batch.delete_typed(&tables::SERVER_CERT, &());
+    vault.stage_delete(&mut batch, ctx, record.key);
+    if let Err(error) = store.propose(batch).await {
+        tracing::warn!(%error, "the spent server certificate record of an earlier version was not removed; the next check tries again");
+    }
+}
+
+/// PEM-encodes one DER block, for example `pem("CERTIFICATE", der)`. A private key leaves
+/// no copy behind: the base64 is wiped, and the text is sized once, so the caller wipes the
+/// only copy (`Zeroizing::new(text.into_bytes())`).
 pub fn pem(label: &str, der: &[u8]) -> String {
     let b64 = STANDARD.encode(der);
     let mut out = format!("-----BEGIN {label}-----\n");
