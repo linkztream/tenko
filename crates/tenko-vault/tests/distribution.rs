@@ -587,14 +587,7 @@ async fn a_rewrap_that_fails_half_done_keeps_every_secret_and_counts_its_progres
 
 /// Held after a forward jump, for the calling test.
 fn held() -> tenko_core::clock::testing::Override {
-    use tenko_core::clock::{Held, Reason, Release, testing};
-    testing::hold(Held {
-        reason: Reason::Jump,
-        jump_ms: 3_600_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: Release::Wait,
-        until: None,
-    })
+    tenko_core::clock::testing::hold_jump(3_600_000, Timestamp::UNIX_EPOCH)
 }
 
 #[tokio::test]
