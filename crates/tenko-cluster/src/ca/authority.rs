@@ -758,8 +758,12 @@ async fn drop_spent(
 /// no copy behind: the base64 is wiped, and the text is sized once, so the caller wipes the
 /// only copy (`Zeroizing::new(text.into_bytes())`).
 pub fn pem(label: &str, der: &[u8]) -> String {
-    let b64 = STANDARD.encode(der);
-    let mut out = format!("-----BEGIN {label}-----\n");
+    let b64 = zeroize::Zeroizing::new(STANDARD.encode(der));
+    // "-----BEGIN " and "-----END ", each label with "-----\n", and a newline per line.
+    let mut out = String::with_capacity(32 + 2 * label.len() + b64.len() + b64.len().div_ceil(64));
+    out.push_str("-----BEGIN ");
+    out.push_str(label);
+    out.push_str("-----\n");
     for line in b64.as_bytes().chunks(64) {
         out.push_str(std::str::from_utf8(line).unwrap_or_default());
         out.push('\n');
@@ -781,6 +785,8 @@ mod tests {
                 .map(|i| u8::try_from(i % 251).expect("byte"))
                 .collect();
             let text = pem("CERTIFICATE", &der);
+            // Sized once: no growth left a copy of the text behind.
+            assert_eq!(text.capacity(), text.len(), "length {len}");
             let back = CertificateDer::from_pem_slice(text.as_bytes());
             if len == 0 {
                 continue;

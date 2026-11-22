@@ -162,9 +162,12 @@ pub fn new_renewal_secret() -> Result<BearerSecret, AuthError> {
 
 fn prefixed_secret(prefix: &str) -> Result<BearerSecret, AuthError> {
     let bytes = Zeroizing::new(random::array::<32>()?);
-    let mut text = Zeroizing::new(String::with_capacity(48));
+    // Every copy of the text is wiped, and the text is sized once so that no growth leaves
+    // a copy behind.
+    let encoded = Zeroizing::new(URL_SAFE_NO_PAD.encode(&bytes[..]));
+    let mut text = Zeroizing::new(String::with_capacity(prefix.len() + encoded.len()));
     text.push_str(prefix);
-    text.push_str(&URL_SAFE_NO_PAD.encode(&bytes[..]));
+    text.push_str(&encoded);
     Ok(BearerSecret(text))
 }
 
@@ -259,6 +262,12 @@ mod tests {
         assert!(token.expose().starts_with(TOKEN_PREFIX));
         assert_eq!(token.expose().len(), 47);
         assert_eq!(token.hash(), hash_secret(token.expose()));
+        // Sized once for the longest prefix too: no growth left a copy of the text behind.
+        let bound = new_token_of(TokenForm::Bound).expect("token");
+        assert_eq!(bound.0.capacity(), bound.expose().len());
+        assert!(looks_like_session_secret(
+            &bound.expose()[BOUND_PREFIX.len()..]
+        ));
     }
 
     #[test]
