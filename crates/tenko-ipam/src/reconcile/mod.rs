@@ -8,12 +8,14 @@
 //! 2. The last sightings of addresses and interfaces of intent are brought up to date from
 //!    the current facts (`ipam.obs.last_seen`, at most once per refresh interval).
 //! 3. The rules ([`rules`]) say which proposals should be open; [`crate::proposals`]
-//!    opens, refreshes, supersedes and expires accordingly. Steps 2 and 3 are written as
-//!    `system:reconciler` in batches under the store's limit (one when it all fits), in
-//!    subject-key order, each fenced with the leader epoch; the last batch carries the
-//!    run's audit record (`ipam.reconcile.run`). A batch that fails is tried once more as
-//!    two halves, and what still fails is counted on the report as unwritten for the next
-//!    run to write. A concurrent writer makes the run read again and write what is left.
+//!    opens, refreshes, supersedes, expires and deletes accordingly. Steps 2 and 3 are
+//!    written as `system:reconciler` in batches under the store's limit (one when it all
+//!    fits) in subject-key order, the items that only delete last and in batches of their
+//!    own, each fenced with the leader epoch and carrying one audit record
+//!    (`ipam.reconcile.run`) that counts what it wrote; the last one adds the run's batches
+//!    and unwritten items. A batch that fails is tried once more as two halves, and what
+//!    still fails is counted on the report as unwritten for the next run to write. A
+//!    concurrent writer makes the run read again and write what is left.
 //! 4. Open proposals that an adoption policy covers are applied, each in its own inline
 //!    job as `system:reconciler`.
 //! 5. Move jobs waiting at their observation step are confirmed when a current fact shows
@@ -87,11 +89,12 @@ use crate::{
     observe::{
         self, IngestBatch, IngestReport, ObserveConfig,
         model::{IntentSighting, observed_ips, observed_macs},
+        retention::PURGE_BATCH_BYTES,
         tables::LAST_SEEN,
     },
     plan::PlanOptions,
     proposals::{
-        adoption,
+        self, adoption,
         decide::{self, Applier},
         model::ADOPTION,
         sync::{self, Item, SyncConfig, SyncCounts},
@@ -102,9 +105,10 @@ use crate::{
 /// The name of the leader service that runs the reconciler.
 pub const LEADER_SERVICE: &str = "ipam.reconcile";
 
-/// The audit action of a run that wrote something: its context says how many batches it
-/// took, how many proposal rows and sightings it wrote, and how many items it could not
-/// write.
+/// The audit action of each batch of a run: its context counts the proposal rows the batch
+/// wrote (opened, refreshed, superseded, expired, deleted, removed at the bound) and the
+/// sightings; the last batch's adds how many batches the run took and how many items it
+/// could not write.
 pub const RUN_ACTION: &str = "ipam.reconcile.run";
 
 /// `tenko_ipam_ingest_batches_total`: observation batches [`Reconciler::ingest`] wrote on
@@ -262,13 +266,28 @@ fn batch_budget(max_batch_bytes: usize) -> usize {
     max_batch_bytes / 4 * 3
 }
 
-/// The run's audit record.
-fn run_record(batches: u32, counts: SyncCounts, unwritten: u32) -> AuditDraft {
-    AuditDraft::success(AuditAction::from_static(RUN_ACTION), Vec::new())
-        .with_context("batches", batches.to_string())
-        .with_context("proposals", counts.proposals().to_string())
-        .with_context("sightings", counts.sightings.to_string())
-        .with_context("unwritten", unwritten.to_string())
+/// The audit record of one batch of a run, with what the batch wrote; the record of the
+/// run's last batch adds the batches the run took and the items it could not write.
+fn run_record(counts: SyncCounts, run: Option<(u32, u32)>) -> AuditDraft {
+    let mut draft = AuditDraft::success(AuditAction::from_static(RUN_ACTION), Vec::new());
+    for (key, count) in [
+        ("proposals", counts.proposals()),
+        ("opened", counts.opened),
+        ("refreshed", counts.refreshed),
+        ("superseded", counts.superseded),
+        ("expired", counts.expired),
+        ("deleted", counts.deleted),
+        ("bounded", counts.bounded),
+        ("sightings", counts.sightings),
+    ] {
+        draft = draft.with_context(key, count.to_string());
+    }
+    if let Some((batches, unwritten)) = run {
+        draft = draft
+            .with_context("batches", batches.to_string())
+            .with_context("unwritten", unwritten.to_string());
+    }
+    draft
 }
 
 /// The reconciler of one controller. Shared as `Arc<Reconciler>`; the API reaches it as a
@@ -514,7 +533,8 @@ impl Reconciler {
         }
     }
 
-    /// Deletes facts older than the retention (see [`observe::retention::purge`]).
+    /// Deletes facts older than the retention (see [`observe::retention::purge`]) and the
+    /// closed proposals last changed before it; returns how many rows of both it deleted.
     ///
     /// # Errors
     ///
@@ -527,7 +547,10 @@ impl Reconciler {
         let config = self.effective().await;
         // ADR 0031: the lease view cuts at the retention the purge of the stored facts uses.
         self.ipam.leases().set_retention(config.observe.retention);
-        observe::retention::purge_fenced(self.ipam.store(), &config.observe, now, epoch).await
+        let store = self.ipam.store();
+        let facts = observe::retention::purge_fenced(store, &config.observe, now, epoch).await?;
+        let retention = config.observe.retention;
+        Ok(facts + proposals::purge::closed(store, retention, now, epoch).await?)
     }
 
     /// One run at `now` (see the module documentation).
@@ -652,7 +675,8 @@ impl Reconciler {
                 &written.keys,
             )?;
             left = (plan.unchanged, plan.suppressed);
-            // The sightings first (a key of `None`), then the proposals in key order.
+            // The sightings first (a key of `None`), then the proposals in key order; the
+            // writer moves the items that only delete behind the rest.
             items.append(&mut plan.items);
             if items.is_empty() {
                 break;
@@ -679,6 +703,14 @@ impl Reconciler {
                     );
                 }
             }
+        }
+        if written.counts.bounded > 0 {
+            tracing::warn!(
+                removed = written.counts.bounded,
+                "the clock guard holds expiry, and the oldest open discovered hosts with no \
+                 current sighting were removed past their network's addresses or the MAC \
+                 addresses the facts name"
+            );
         }
         report.opened = written.counts.opened;
         report.refreshed = written.counts.refreshed;
@@ -775,10 +807,14 @@ impl Reconciler {
     }
 
     /// Writes `items` in batches under the store's budget, in order, each fenced with
-    /// `epoch`; the last batch carries the run's audit record. A batch that fails is tried
-    /// once more as two halves, and what still fails is counted as unwritten while the run
-    /// goes on. A failed precondition stops the writing: what was committed stays, and the
-    /// run reads again.
+    /// `epoch` and carrying one audit record of what it wrote. The items that only delete
+    /// come last, in batches of their own of at most [`PURGE_BATCH_BYTES`], so that a store
+    /// refusing growth (a disk near its reserve) still takes them, and so that a run that
+    /// removes anything ends with a removal that carries its totals. A batch that fails is
+    /// tried once more as two halves, and what still fails is counted as unwritten while the
+    /// run goes on; a run that removes nothing and whose last batch the store refuses writes
+    /// its totals alone, and a refusal of that is logged. A failed precondition stops the
+    /// writing: what was committed stays, and the run reads again.
     async fn write_items(
         &self,
         items: Vec<Item>,
@@ -787,19 +823,23 @@ impl Reconciler {
         written: &mut Written,
     ) -> IpamResult<Outcome> {
         let budget = batch_budget(self.ipam.store().max_batch_bytes());
+        let (deletes, writes): (Vec<Item>, Vec<Item>) =
+            items.into_iter().partition(Item::deletes_only);
         let mut groups: Vec<Vec<Item>> = Vec::new();
-        let mut current: Vec<Item> = Vec::new();
-        let mut size = 0;
-        for item in items {
-            if !current.is_empty() && size + item.size > budget {
-                groups.push(std::mem::take(&mut current));
-                size = 0;
+        for (items, budget) in [(writes, budget), (deletes, budget.min(PURGE_BATCH_BYTES))] {
+            let mut current: Vec<Item> = Vec::new();
+            let mut size = 0;
+            for item in items {
+                if !current.is_empty() && size + item.size > budget {
+                    groups.push(std::mem::take(&mut current));
+                    size = 0;
+                }
+                size += item.size;
+                current.push(item);
             }
-            size += item.size;
-            current.push(item);
-        }
-        if !current.is_empty() {
-            groups.push(current);
+            if !current.is_empty() {
+                groups.push(current);
+            }
         }
         let total = groups.len();
         for (index, group) in groups.into_iter().enumerate() {
@@ -862,8 +902,8 @@ impl Reconciler {
         Ok(Outcome::Done)
     }
 
-    /// Commits `items` as one fenced batch, with the run's record when it is the last, and
-    /// counts them as written.
+    /// Commits `items` as one fenced batch with its record (the run's too when it is the
+    /// last), and counts them as written.
     async fn commit(
         &self,
         items: &[Item],
@@ -881,11 +921,8 @@ impl Reconciler {
             item.add_to(&mut batch);
             counts.add(item.counts);
         }
-        if last {
-            let mut total = written.counts;
-            total.add(counts);
-            batch.audit(run_record(written.batches + 1, total, written.unwritten));
-        }
+        let run = last.then_some((written.batches + 1, written.unwritten));
+        batch.audit(run_record(counts, run));
         let done = self.ipam.store().propose(batch).await?;
         written.batches += 1;
         written.counts.add(counts);
@@ -903,11 +940,8 @@ impl Reconciler {
         if let Some(epoch) = epoch {
             batch.preconditions.push(fence(epoch));
         }
-        batch.audit(run_record(
-            written.batches,
-            written.counts,
-            written.unwritten,
-        ));
+        let run = Some((written.batches, written.unwritten));
+        batch.audit(run_record(SyncCounts::default(), run));
         if let Err(error) = self.ipam.store().propose(batch).await {
             tracing::warn!(error = %tenko_core::Coded::code(&error), "the reconcile run's audit record was not written");
         }
@@ -1151,8 +1185,8 @@ impl Reconciler {
                     last_purge = Instant::now();
                     match self.purge_fenced(Timestamp::now(), Some(epoch)).await {
                         Ok(0) => {}
-                        Ok(count) => tracing::info!(count, "observation facts purged"),
-                        Err(error) => tracing::warn!(error = %error.code_str(), "observation purge failed"),
+                        Ok(count) => tracing::info!(count, "old facts and closed proposals purged"),
+                        Err(error) => tracing::warn!(error = %error.code_str(), "the reconciler's purge failed"),
                     }
                     continue;
                 }

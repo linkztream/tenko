@@ -204,7 +204,7 @@ describe("decisions", () => {
     expect(reconcileState().proposals.get(P.mediaPc)?.state).toBe("open");
   });
 
-  it("runs the reconciler now: what intent caught up with expires, the rest stays open", async () => {
+  it("runs the reconciler now: a discovered host intent caught up with goes, the rest stays open", async () => {
     // A person records the hall switch client by hand.
     const made = await post(`${V}/hosts`, { name: "hall-display", interfaces: [{ name: "eth0", mac: "00:00:5e:00:53:d2" }] });
     expect(made.status).toBe(201);
@@ -212,10 +212,25 @@ describe("decisions", () => {
     expect(report.status).toBe(200);
     expect(report.body).toMatchObject({ expired: 1, unchanged: OPEN.length - 1, opened: 0 });
     expect(report.body.revision).toEqual(expect.any(Number));
-    const expired = (await get<S["IntentProposal"]>(`${V}/proposals/${P.hallSwitchClient}`)).body;
-    expect(expired).toMatchObject({ state: "expired", reason: "the observation behind it no longer holds" });
+    // A discovered host the reconciler closes is deleted, and the run's one record counts it.
+    expect((await get<Problem>(`${V}/proposals/${P.hallSwitchClient}`)).body.code).toBe("ipam.proposal.not_found");
+    expect(audit.records.filter((r) => r.draft.action === "ipam.proposal.expire")).toEqual([]);
+    expect(audit.records.at(-1)?.draft).toMatchObject({ action: "ipam.reconcile.run", details: { context: { expired: "1", deleted: "1" } } });
     const quiet = await post<S["ReconcileReport"]>(`${V}/proposals/reconcile`);
     expect(quiet.body).toMatchObject({ expired: 0, revision: null });
+  });
+
+  it("deletes what the reconciler closes of every kind, in one batch whose record counts it", async () => {
+    expect((await post(`${V}/hosts`, { name: "hall-display", interfaces: [{ name: "eth0", mac: "00:00:5e:00:53:d2" }] })).status).toBe(201);
+    expect((await post(`${V}/prefixes`, { cidr: "203.0.113.224/27", role: "network" })).status).toBe(201);
+    const before = audit.records.length;
+    const report = await post<S["ReconcileReport"]>(`${V}/proposals/reconcile`);
+    expect(report.body).toMatchObject({ expired: 2 });
+    for (const id of [P.hallSwitchClient, P.outside]) {
+      expect((await get<Problem>(`${V}/proposals/${id}`)).body.code).toBe("ipam.proposal.not_found");
+    }
+    const runs = audit.records.slice(before).map((r) => [r.draft.action, r.draft.details?.context]);
+    expect(runs).toEqual([["ipam.reconcile.run", expect.objectContaining({ proposals: "2", expired: "2", deleted: "2", batches: "1", unwritten: "0" })]]);
   });
 });
 

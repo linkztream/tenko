@@ -1,22 +1,27 @@
 //! The reconciler's rules against synthetic observations: discovered hosts, address
 //! mismatches, conflicts, addresses outside known networks and orphaned intent; locked
-//! and unmanaged hosts; the life of a proposal (open, refreshed, superseded, expired).
+//! and unmanaged hosts; the life of a proposal (open, refreshed, replaced, expired), where
+//! what the reconciler closes itself is deleted and what a person decided stays until the
+//! purge.
 
 mod common;
 mod reconcile_support;
 
+use std::time::Duration;
+
 use common::*;
 use reconcile_support::*;
 use tenko_core::{
-    ObjectKind,
+    ObjectKind, Timestamp,
     ipam::{Address, AssignmentMode, Host, Status},
 };
 use tenko_ipam::{
     IpamCommand,
-    proposals::{IntentProposalKind, IntentProposalState, ProposalSeverity},
+    proposals::{IntentProposal, IntentProposalKind, IntentProposalState, ProposalSeverity},
     query,
-    reconcile::{rule, scopes},
+    reconcile::{RUN_ACTION, rule, scopes},
 };
+use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, tables::AUDIT};
 
 /// A world with the network 192.0.2.0/24 in the default VRF.
 async fn lab() -> World {
@@ -387,7 +392,7 @@ async fn addresses_outside_known_networks_suggest_a_prefix_and_then_a_host() {
 }
 
 #[tokio::test]
-async fn proposals_are_superseded_when_evidence_changes_and_expire_when_it_goes() {
+async fn a_discovered_host_is_replaced_when_its_evidence_changes_and_deleted_when_it_goes() {
     let world = lab().await;
     world
         .poll(
@@ -419,32 +424,24 @@ async fn proposals_are_superseded_when_evidence_changes_and_expire_when_it_goes(
         .await;
     let report = world.reconcile(at("13:06")).await;
     assert_eq!((report.superseded, report.opened), (1, 1), "{report:?}");
+    // The replaced proposal is gone, not kept closed: the facts keep the device visible.
     let all = world.proposals(None).await;
-    let old = all
-        .iter()
-        .find(|proposal| proposal.id == first.id)
-        .expect("old");
-    assert_eq!(old.state, IntentProposalState::Superseded);
-    let second = world
-        .open(IntentProposalKind::DiscoveredHost)
-        .await
-        .remove(0);
-    assert_eq!(old.superseded_by, Some(second.id));
+    assert_eq!(all.len(), 1, "{all:#?}");
+    assert_ne!(all[0].id, first.id);
+    assert_eq!(all[0].state, IntentProposalState::Open);
     assert_eq!(
-        second.subject.ip.map(|ip| ip.to_string()).as_deref(),
+        all[0].subject.ip.map(|ip| ip.to_string()).as_deref(),
         Some("192.0.2.62")
     );
 
-    // The complete poll without the device expires its fact, and the proposal with it.
+    // The complete poll without the device expires its fact, and the proposal goes with it.
     world.poll(Vec::new(), at("13:10")).await;
     let report = world.reconcile(at("13:11")).await;
     assert_eq!(report.expired, 1, "{report:?}");
-    let expired = world
-        .proposals(Some(IntentProposalState::Expired))
-        .await
-        .remove(0);
-    assert_eq!(expired.id, second.id);
-    assert!(expired.reason.is_some());
+    assert_eq!(
+        world.proposals(None).await,
+        Vec::<tenko_ipam::proposals::IntentProposal>::new()
+    );
 }
 
 #[tokio::test]
@@ -665,4 +662,187 @@ async fn with_probe_scopes_only_a_scanned_address_is_orphaned() {
             .any(|orphan| orphan.subject.objects.contains(&unscanned.id.into())),
         "an address outside every probe scope is not scanned, not gone"
     );
+}
+
+/// The proposals that are not open.
+async fn closed(world: &World) -> Vec<IntentProposal> {
+    let all = world.proposals(None).await;
+    all.into_iter()
+        .filter(|proposal| !proposal.is_open())
+        .collect()
+}
+
+/// `key` summed over the run records in the audit chain.
+async fn counted(world: &World, key: &str) -> u32 {
+    let view = world
+        .store
+        .read(ReadConsistency::Linearizable)
+        .await
+        .expect("view");
+    let records = view
+        .scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit");
+    records
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str() == RUN_ACTION)
+        .filter_map(|(_, record, _)| record.draft.details.context.get(key)?.parse::<u32>().ok())
+        .sum()
+}
+
+/// `round` periods of 20 minutes after 08:00; a probe's sighting lives 15.
+fn round_at(round: u32) -> Timestamp {
+    at("08:00")
+        .checked_add(Duration::from_secs(1_200 * u64::from(round)))
+        .expect("time")
+}
+
+#[tokio::test]
+async fn invented_macs_each_seen_in_two_networks_leave_no_closed_rows() {
+    let world = lab().await;
+    run(
+        &world.service,
+        vec![IpamCommand::CreatePrefix(prefix(None, "198.51.100.0/24"))],
+    )
+    .await;
+    let vrf = world.default_vrf().await;
+    for round in 0..5u32 {
+        // 50 new MAC addresses, each at one address of each network.
+        let seen: Vec<(String, String)> = (1..=50u32)
+            .flat_map(|n| {
+                let mac = format!("02:00:00:03:{round:02x}:{n:02x}");
+                [
+                    (format!("192.0.2.{n}"), mac.clone()),
+                    (format!("198.51.100.{n}"), mac),
+                ]
+            })
+            .collect();
+        let pairs: Vec<(&str, Option<&str>)> = seen
+            .iter()
+            .map(|(ip, mac)| (ip.as_str(), Some(mac.as_str())))
+            .collect();
+        world.probe(vrf, &pairs, round_at(round)).await;
+        world.reconcile(round_at(round)).await;
+        assert_eq!(world.open(IntentProposalKind::Conflict).await.len(), 50);
+        assert_eq!(closed(&world).await, Vec::new(), "round {round}");
+    }
+    // Rounds 1 to 4 each closed the 50 conflicts and the 50 discovered hosts before them.
+    assert_eq!(counted(&world, "expired").await, 400);
+    assert_eq!(counted(&world, "deleted").await, 400);
+}
+
+#[tokio::test]
+async fn addresses_outside_every_network_leave_no_closed_rows() {
+    let world = lab().await;
+    let vrf = world.default_vrf().await;
+    for round in 0..5u32 {
+        // Ten new addresses of 203.0.113.0/24, a network no prefix holds.
+        let seen: Vec<(String, String)> = (1..=10u32)
+            .map(|n| {
+                let host = round * 10 + n;
+                (
+                    format!("203.0.113.{host}"),
+                    format!("02:00:00:04:00:{host:02x}"),
+                )
+            })
+            .collect();
+        let pairs: Vec<(&str, Option<&str>)> = seen
+            .iter()
+            .map(|(ip, mac)| (ip.as_str(), Some(mac.as_str())))
+            .collect();
+        world.probe(vrf, &pairs, round_at(round)).await;
+        world.reconcile(round_at(round)).await;
+        assert_eq!(
+            world.open(IntentProposalKind::OutsidePrefixes).await.len(),
+            1
+        );
+        assert_eq!(closed(&world).await, Vec::new(), "round {round}");
+    }
+    // The suggestion of 203.0.113.0/24 was replaced four times with new evidence.
+    assert_eq!(counted(&world, "superseded").await, 4);
+    assert_eq!(counted(&world, "deleted").await, 4);
+}
+
+#[tokio::test]
+async fn two_devices_cycling_on_one_address_leave_no_closed_rows() {
+    let world = lab().await;
+    let vrf = world.default_vrf().await;
+    for round in 0..5u32 {
+        // A probe and a connector each see another device on 192.0.2.40 every round.
+        let (probed, polled) = (
+            format!("02:00:00:05:{round:02x}:01"),
+            format!("02:00:00:05:{round:02x}:02"),
+        );
+        world
+            .probe(
+                vrf,
+                &[("192.0.2.40", Some(probed.as_str()))],
+                round_at(round),
+            )
+            .await;
+        world
+            .poll(
+                vec![vm("x", None, Some(&polled), &["192.0.2.40"])],
+                round_at(round),
+            )
+            .await;
+        world.reconcile(round_at(round)).await;
+        let open = world.open(IntentProposalKind::Conflict).await;
+        assert_eq!(open.len(), 1, "round {round}: {open:#?}");
+        assert_eq!(open[0].rule, rule::CONFLICT_SHARED_ADDRESS);
+        assert_eq!(closed(&world).await, Vec::new(), "round {round}");
+    }
+    assert_eq!(counted(&world, "superseded").await, 4);
+    assert!(counted(&world, "deleted").await >= 4);
+}
+
+#[tokio::test]
+async fn what_a_person_accepted_or_rejected_survives_the_runs_and_leaves_by_the_purge() {
+    let world = lab().await;
+    world
+        .poll(
+            vec![
+                vm("1", None, Some("00:00:5e:00:53:71"), &["192.0.2.71"]),
+                vm("2", None, Some("00:00:5e:00:53:72"), &["192.0.2.72"]),
+            ],
+            at("08:00"),
+        )
+        .await;
+    world.reconcile(at("08:01")).await;
+    let open = world.open(IntentProposalKind::DiscoveredHost).await;
+    assert_eq!(open.len(), 2);
+    world.approve(&open[0]).await;
+    world.reject(&open[1]).await;
+
+    // The devices go; the reconciler runs, and both decisions stay.
+    world.poll(Vec::new(), at("08:30")).await;
+    world.reconcile(at("08:31")).await;
+    let states = |proposals: Vec<IntentProposal>| {
+        let mut states: Vec<_> = proposals.iter().map(|proposal| proposal.state).collect();
+        states.sort();
+        states
+    };
+    let decided = vec![IntentProposalState::Accepted, IntentProposalState::Rejected];
+    assert_eq!(states(world.proposals(None).await), decided);
+
+    // The decisions were made at the time of the wall clock: younger than the retention
+    // they stay, older they go.
+    let now = Timestamp::now();
+    world
+        .reconciler
+        .purge(
+            now.checked_add(Duration::from_secs(29 * 86_400))
+                .expect("time"),
+        )
+        .await
+        .expect("purge");
+    assert_eq!(states(world.proposals(None).await), decided);
+    world
+        .reconciler
+        .purge(
+            now.checked_add(Duration::from_secs(31 * 86_400))
+                .expect("time"),
+        )
+        .await
+        .expect("purge");
+    assert_eq!(world.proposals(None).await, Vec::new());
 }

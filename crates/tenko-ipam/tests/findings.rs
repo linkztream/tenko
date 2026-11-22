@@ -1,6 +1,6 @@
 //! The findings model over a real reconciler (IPAM-21, IPAM-23): the guard rail (a sighting of a network's
 //! edge address is a scan artifact, never a conflict) for IPv4 and IPv6, an open conflict on
-//! such an address closed by the next run with its reason in the audit record, the
+//! such an address deleted by the next run and counted in its record, the
 //! findings of the view (ghost aging), and the index kept current from change sets.
 
 mod common;
@@ -23,10 +23,9 @@ use tenko_ipam::{
     },
     proposals::{
         IntentProposal, IntentProposalKind, IntentProposalState, ProposalSeverity, ProposalSubject,
-        actions,
         model::{OPEN_KEYS, PROPOSALS},
     },
-    reconcile::{rule, view::lease_conflicts},
+    reconcile::{RUN_ACTION, rule, view::lease_conflicts},
 };
 use tenko_store::{
     Change, ChangeSet, KeyRange, ReadConsistency, ReadViewExt, WriteBatch, tables::AUDIT,
@@ -203,7 +202,7 @@ async fn ipv6_has_no_broadcast_but_its_subnet_router_anycast_address_is_an_artif
 }
 
 #[tokio::test]
-async fn an_open_conflict_on_a_network_address_is_closed_by_the_next_run_with_its_reason() {
+async fn an_open_conflict_on_a_network_address_is_deleted_by_the_next_run() {
     let world = lab().await;
     let vrf = world.default_vrf().await;
     // A conflict an earlier version opened on the network address.
@@ -256,17 +255,10 @@ async fn an_open_conflict_on_a_network_address_is_closed_by_the_next_run_with_it
         .await;
 
     world.reconcile(at("08:01")).await;
-    let expired: Vec<IntentProposal> = world
-        .proposals(Some(IntentProposalState::Expired))
-        .await
-        .into_iter()
-        .filter(|expired| expired.id == proposal.id)
-        .collect();
-    assert_eq!(expired.len(), 1, "the conflict is closed");
-    let reason = expired[0].reason.clone().expect("reason");
-    assert!(
-        reason.starts_with("the network address of its network is never the subject of a conflict"),
-        "{reason}"
+    assert_eq!(
+        world.proposals(None).await,
+        Vec::<IntentProposal>::new(),
+        "the conflict is deleted, not kept closed"
     );
     let view = world
         .store
@@ -278,13 +270,14 @@ async fn an_open_conflict_on_a_network_address_is_closed_by_the_next_run_with_it
         .expect("audit")
         .into_iter()
         .map(|(_, record, _)| record)
-        .filter(|record: &AuditRecord| record.draft.action.as_str() == actions::EXPIRE)
+        .filter(|record: &AuditRecord| record.draft.action.as_str() == RUN_ACTION)
         .collect();
     assert_eq!(records.len(), 1);
+    let context = &records[0].draft.details.context;
     assert_eq!(
-        records[0].draft.details.context.get("reason"),
-        Some(&reason),
-        "the audit record carries the reason"
+        (context.get("expired"), context.get("deleted")),
+        (Some(&"1".to_owned()), Some(&"1".to_owned())),
+        "the run's record counts the expiry and the deletion"
     );
     assert!(
         world.open(IntentProposalKind::Conflict).await.is_empty(),

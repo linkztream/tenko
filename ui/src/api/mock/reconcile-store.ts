@@ -488,6 +488,8 @@ function buildSeed(now: number, revision: number): ReconcileState {
       created: ago(21 * DAY_MS),
       updated: ago(20 * DAY_MS),
     }),
+    // An expired proposal as an earlier version kept it; the server now deletes what the
+    // reconciler closes at once, and the purge takes the old rows after the retention.
     proposal({
       id: ids.oldTest,
       kind: "discovered_host",

@@ -28,8 +28,9 @@
 //   page shows the same facts for the host that was created from the proposal.
 // - An adoption policy on the prefix lets the reconciler adopt the open discovered-host
 //   proposals by itself; clearing it makes the prefix inherit the default `manual` again.
-// - Approving the outside-prefixes proposal creates the network, which supersedes the open
-//   discovered-host proposals with ones that include the IPv6 address.
+// - Approving the outside-prefixes proposal creates the network, which replaces the open
+//   discovered-host proposals with ones that include the IPv6 address; the old ones are
+//   deleted, and a link to one shows that it does not exist and leads back to the inbox.
 // - The findings list, the proposals list, an open proposal with its approve and reject dialogs
 //   and the report of a run, the observations and the picture of a subject in Swedish.
 // - The findings in the status bar (U2): the open proposals are findings to review, so
@@ -312,7 +313,7 @@ test("the observations list the facts of two sources and open the picture of a s
   signedIn,
 }) => {
   expect(signedIn.session.user.name).toBe("admin");
-  const { connector, hosts } = await arrange(api);
+  const { connector, hosts, outside } = await arrange(api);
   const first = sampleHost(0);
   const firstSource = `inventory:${connector.id}`;
 
@@ -324,12 +325,14 @@ test("the observations list the facts of two sources and open the picture of a s
   await runConnector(api, second.id);
   const secondSource = `inventory:${second.id}`;
   // The new evidence changes what the proposal for 2001:db8::/64 says, so the reconciler
-  // replaces it; waiting for that keeps the proposals of the device still while it is read.
+  // replaces it with a new one and deletes the old; waiting for that keeps the proposals of
+  // the device still while it is read.
   await expect
-    .poll(async () => (await proposals(api, { state: "superseded" })).map((p) => p.kind), {
+    .poll(async () => (await proposals(api, { state: "open", kind: "outside_prefixes" })).map((p) => p.id !== outside.id), {
       message: "the outside-prefixes proposal to be replaced by one with the evidence of both sources",
     })
-    .toEqual(["outside_prefixes"]);
+    .toEqual([true]);
+  expect(await proposals(api, { state: "superseded" })).toEqual([]);
   const host = (await hostByName(api, first.name)) as Host;
   const facts = await observations(api);
   expect(facts.map((f) => f.source_key).sort()).toEqual([firstSource, firstSource, firstSource, secondSource].sort());
@@ -548,7 +551,7 @@ test("an adoption policy on the prefix lets the reconciler adopt the open discov
   expect(cleared.source ?? null).toBeNull();
 });
 
-test("approving the outside-prefixes proposal creates the network and supersedes the open host proposals with ones that include the IPv6 address", async ({
+test("approving the outside-prefixes proposal creates the network and replaces the open host proposals with ones that include the IPv6 address", async ({
   page,
   api,
   signedIn,
@@ -578,42 +581,45 @@ test("approving the outside-prefixes proposal creates the network and supersedes
   expect(network?.meta.tags ?? []).toContain("discovered");
 
   // The network is known now: the reconciler replaces each open host proposal with one
-  // that adds the IPv6 address.
+  // that adds the IPv6 address, and deletes the old one rather than keeping it closed.
+  const replaced = (open: Proposal[]) => open.filter((p) => !hosts.some((old) => old.id === p.id));
   await expect
-    .poll(async () => (await proposals(api, { state: "superseded" })).length, { message: "the host proposals to be superseded" })
+    .poll(async () => replaced(await proposals(api, { state: "open" })).length, { message: "the host proposals to be replaced" })
     .toBe(3);
   const open = await waitForProposals(api, { state: "open" }, 3);
   expect(open.every((p) => p.kind === "discovered_host")).toBe(true);
   for (const old of hosts) {
-    const replaced = await proposalOf(api, old.id);
-    expect(replaced.state).toBe("superseded");
     const next = open.find((p) => p.key === old.key);
     expect(next, `a new proposal for ${old.key}`).toBeDefined();
-    expect(replaced.superseded_by).toBe(next!.id);
     expect(next!.id).not.toBe(old.id);
     expect((next!.commands ?? []).filter((c) => c.op === "create_address")).toHaveLength(2);
+    const gone = await api.request.get(`${api.origin}/api/v1/proposals/${old.id}`);
+    expect(gone.status(), `the old proposal for ${old.key}`).toBe(404);
+    expect(((await gone.json()) as { code: string }).code).toBe("ipam.proposal.not_found");
   }
+  expect(await proposals(api, { state: "superseded" })).toEqual([]);
 
-  // The old proposal says so and leads to the new one, which now suggests both addresses.
+  // A person who still has the old proposal's link reads that it does not exist and goes
+  // back to the inbox, where the new one waits.
   await page.goto(`/discovery/${hosts[0]!.id}`);
   const oldPanel = withId(page, "proposal-panel", hosts[0]!.id);
-  await expect(oldPanel.locator('[data-state="superseded"]').first()).toBeVisible();
+  await expect(oldPanel.getByTestId("error-notice")).toHaveAttribute("data-code", "ipam.proposal.not_found");
   await expect(oldPanel.getByTestId("discovery-approve")).toHaveCount(0);
-  await oldPanel.getByTestId("proposal-superseded-by").click();
+  await oldPanel.getByRole("button", { name: "Close" }).click();
+  await expect(page).toHaveURL(/\/discovery(\?.*)?$/);
   const next = open.find((p) => p.key === hosts[0]!.key)!;
-  await expect(page).toHaveURL(new RegExp(`/discovery/${next.id}$`));
+  await page.goto(`/discovery/${next.id}`);
   const nextPanel = withId(page, "proposal-panel", next.id);
   await expect(nextPanel.locator('[data-state="open"]').first()).toBeVisible();
   await expect(nextPanel.getByTestId("evidence")).toHaveCount(2);
   const addresses = planChanges(nextPanel.getByTestId("proposal-change"), "address", "create");
   await expect(addresses).toHaveCount(2);
 
-  // The proposals list has the three new ones as open and the old ones as superseded.
+  // The proposals list has the three new ones as open and nothing superseded.
   await page.goto("/discovery/proposals");
   await page.getByTestId("filter-state").selectOption("superseded");
   const grid = page.getByTestId("grid-proposals");
-  await expect(grid.getByTestId("row")).toHaveCount(3);
-  for (const old of hosts) await expect(cell(withId(grid, "row", old.id), "state").locator('[data-state="superseded"]')).toBeVisible();
+  await expect(grid.getByTestId("row")).toHaveCount(0);
   await page.getByTestId("filter-state").selectOption("open");
   await expect(grid.getByTestId("row")).toHaveCount(3);
 

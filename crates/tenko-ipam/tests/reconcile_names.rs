@@ -325,7 +325,8 @@ async fn the_name_authority_decides_between_real_names() {
         proposal.summary
     );
 
-    // The global rule trusts UniFi first: the proposal is superseded with the other name.
+    // The global rule trusts UniFi first: the proposal is superseded with the other name,
+    // and a discovered host the reconciler replaces is not kept.
     names::set_rule(
         lab.world.store.as_ref(),
         &person(),
@@ -334,12 +335,9 @@ async fn the_name_authority_decides_between_real_names() {
     )
     .await
     .expect("rule");
-    lab.reconcile(at("09:02")).await;
-    let superseded = lab
-        .world
-        .proposals(Some(IntentProposalState::Superseded))
-        .await;
-    assert_eq!(superseded.len(), 1);
+    let report = lab.world.reconcile(at("09:02")).await;
+    assert_eq!(report.superseded, 1, "{report:?}");
+    assert_eq!(lab.world.proposals(None).await.len(), 1);
     let proposal = lab.only(IntentProposalKind::DiscoveredHost).await;
     assert_eq!(host_name_of(&proposal), "db");
     assert_eq!(

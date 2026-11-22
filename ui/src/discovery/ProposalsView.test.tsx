@@ -694,7 +694,7 @@ describe("a conflict", () => {
 });
 
 describe("reconcile now", () => {
-  it("runs the reconciler and reports what it did, expiring what no longer holds", async () => {
+  it("runs the reconciler and reports what it did, deleting what no longer holds", async () => {
     await openInbox();
     await resolveThermostatInIpam();
     fireEvent.click(screen.getByTestId("discovery-reconcile"));
@@ -716,8 +716,7 @@ describe("reconcile now", () => {
     });
     expect(within(report).getByText("No longer holding")).toBeTruthy();
     expect(report.textContent).not.toContain("Nothing changed.");
-    expect(stored(P.thermostat).state).toBe("expired");
-    expect(stored(P.thermostat).reason).toBe(REASON_GONE);
+    expect(reconcileState().proposals.has(P.thermostat)).toBe(false);
 
     // The expired proposal leaves the open list behind the report.
     await listed(6);

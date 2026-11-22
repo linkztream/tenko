@@ -19,7 +19,7 @@ import { notFound, objectDeleted } from "./ipam/problems";
 import { checkRemember, chooseName, rememberChoice, type ApproveRequest } from "./name-authority";
 import { Problem, ok } from "./reply";
 import { paginate, route } from "./route";
-import { REASON_GONE, RECONCILER, reconcileState, type AdoptionPolicy, type IntentProposal, type ObservedFact } from "./reconcile-store";
+import { RECONCILER, reconcileState, type AdoptionPolicy, type IntentProposal, type ObservedFact } from "./reconcile-store";
 import { isUuid } from "./util";
 
 type S = components["schemas"];
@@ -688,10 +688,17 @@ const reconcileNow = route("post", "/api/v1/proposals/reconcile", (ctx) => {
   let revision: number | null = null;
   for (const p of open) {
     if (stillHolds(p)) continue;
-    const next = commit({ ...p, state: "expired", reason: REASON_GONE, decided: { at, by: RECONCILER }, updated: at });
-    appendAudit({ action: "ipam.proposal.expire", objects: [{ kind: "proposal", id: p.id }], principal: RECONCILER, source_ip: null });
-    revision = next.revision ?? revision;
+    // As the server: a proposal the reconciler closes itself is deleted, not kept.
+    reconcileState().proposals.delete(p.id);
+    revision = recordEvent("ipam", { deleted: [{ kind: "proposal", id: p.id }], tables: ["ipam.proposals"] }).id ?? db.revision;
     expired += 1;
+  }
+  if (expired > 0) {
+    // As the server: the deletions in a batch of their own with one record that counts them
+    // and, being the run's only batch, its `batches` and `unwritten`.
+    const counts = { proposals: expired, opened: 0, refreshed: 0, superseded: 0, expired, deleted: expired, bounded: 0, sightings: 0, batches: 1, unwritten: 0 };
+    const context = Object.fromEntries(Object.entries(counts).map(([key, value]) => [key, String(value)]));
+    appendAudit({ action: "ipam.reconcile.run", context, principal: RECONCILER, source_ip: null });
   }
   const report: S["ReconcileReport"] = {
     at,

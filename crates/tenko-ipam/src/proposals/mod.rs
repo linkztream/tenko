@@ -14,6 +14,25 @@
 //! ([`decide::reject`]) is remembered with the proposal's fingerprint, so the same evidence
 //! does not open the subject again until it changes.
 //!
+//! # What the tables keep
+//!
+//! - A proposal that the reconciler closes itself (it expired, or a newer one replaces it)
+//!   is deleted, not kept closed, whatever its kind: it carries no person's decision, the
+//!   facts keep what it was about visible, and sources that report what a client invents
+//!   would otherwise fill the disk. The `expired` and `superseded` states remain for the
+//!   rows earlier versions wrote.
+//! - While the clock guard holds expiry, the open discovered hosts of a network never
+//!   outnumber its assignable addresses, and those outside every IPv4 network that no
+//!   current sighting stands for are held to the number of distinct MAC addresses the
+//!   facts name, so those whose facts were overwritten leave; the oldest sightings go
+//!   first, and a device that is present never goes.
+//! - A decided proposal, and a closed row an earlier version wrote, is deleted once its last
+//!   change is older than the fact retention, on the reconciler's purge timer; a remembered
+//!   rejection stays.
+//!
+//! Each of these removals that no new proposal replaces is a batch that only deletes, with
+//! one audit record that counts what it removed.
+//!
 //! # Tables
 //!
 //! | Table | Key | Value |
@@ -27,6 +46,7 @@ pub mod adoption;
 pub mod decide;
 pub mod keep;
 pub mod model;
+pub(crate) mod purge;
 pub mod query;
 pub(crate) mod sync;
 

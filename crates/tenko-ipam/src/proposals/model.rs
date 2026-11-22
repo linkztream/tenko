@@ -461,6 +461,8 @@ pub mod codes {
 
 /// Audit actions of the area.
 pub mod actions {
+    // The reconciler's own steps are counted in its run records (`ipam.reconcile.run`); these
+    // three are written by earlier versions only, and their records stay in the chain.
     /// A proposal was opened.
     pub const OPEN: &str = "ipam.proposal.open";
     /// A proposal was replaced by a newer one.
