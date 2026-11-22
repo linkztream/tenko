@@ -171,7 +171,7 @@ impl CertIndex {
             return Acceptance::Refused("the records are not loaded");
         }
         if (**self.stale_since.load())
-            .is_some_and(|since| now.saturating_since(since) >= STALE_LIMIT)
+            .is_some_and(|since| tenko_core::clock::passed(since, now, STALE_LIMIT))
         {
             return Acceptance::Refused("the records could not be read for too long");
         }

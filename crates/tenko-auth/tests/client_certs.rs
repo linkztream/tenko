@@ -1317,6 +1317,26 @@ async fn expired_codes_lose_their_secret_at_the_sweep() {
 }
 
 #[tokio::test]
+async fn a_stale_index_refuses_at_once_while_issuing_is_held() {
+    let env = Env::new();
+    let index = Arc::clone(env.certs.index());
+    let (account, current) = enrolled(&env).await;
+    index.load(env.store.as_ref()).await.expect("load");
+    let now = at(1, 0);
+    index.mark_stale(now);
+    assert!(matches!(
+        index.accept(&current.serial, account.id, now),
+        Acceptance::Accepted(_)
+    ));
+    // A step back would hold the bound open: while issuing is held it has passed.
+    let _held = tenko_core::clock::testing::hold_jump(-3_600_000, now);
+    assert_eq!(
+        index.accept(&current.serial, account.id, now),
+        Acceptance::Refused("the records could not be read for too long")
+    );
+}
+
+#[tokio::test]
 async fn a_code_on_a_clock_set_back_before_its_creation_is_expired() {
     let env = Env::new();
     let account = env.service_account().await;
@@ -1332,7 +1352,6 @@ async fn a_code_on_a_clock_set_back_before_its_creation_is_expired() {
 
 #[tokio::test]
 async fn a_clock_that_may_not_issue_removes_no_certificate_and_prunes_no_code() {
-    use tenko_core::clock::{Held, Reason, Release, testing};
     let env = Env::new();
     let (account, current) = enrolled(&env).await;
     let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
@@ -1341,14 +1360,7 @@ async fn a_clock_that_may_not_issue_removes_no_certificate_and_prunes_no_code() 
         .await
         .expect("presented");
     let code = env.code_with(account.id, Some(60), None).await;
-    // Set back by a day and not confirmed: the destruction wait ended, issuing did not.
-    let _held = testing::hold_issuing(Held {
-        reason: Reason::Jump,
-        jump_ms: -86_400_000,
-        since: t0(),
-        release: Release::Person,
-        until: None,
-    });
+    let _held = tenko_core::clock::testing::hold_jump(-86_400_000, t0());
     env.certs
         .remove_lapsed_tokens(at(31, 0))
         .await

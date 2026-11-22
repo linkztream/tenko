@@ -67,6 +67,7 @@ use tenko_core::{
     ObjectRef, Principal, RequestCtx, SessionId, SystemComponent, Timestamp, UserId,
     audit::{AuditAction, AuditDraft},
     auth::{AuthFuture, SESSION_COOKIE},
+    clock::stands_before,
 };
 use tenko_store::{
     AnchorResolver, KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
@@ -77,7 +78,6 @@ use tenko_vault::Vault;
 use crate::{
     authz::{AuthIndex, RbacAuthorizer, ScopeSupport},
     challenge::Ceremonies,
-    clock::stands_before,
     error::AuthError,
     hibp::{BreachChecker, HibpFilter, HibpRangeSource},
     lockout::Throttle,
@@ -984,17 +984,18 @@ impl AuthService {
         settings: &SecuritySettings,
         now: Timestamp,
     ) -> Result<(UserRecord, Timestamp), AuthError> {
-        let delegated = session.delegation.as_ref();
-        // ADR 0038: a clock set back ends a delegated session rather than extending it.
-        let now = delegated.map_or(now, |_| crate::clock::judged(now));
         let (expires_at, _) = effective_expiry(session, settings);
-        if now >= expires_at
-            || delegated.is_some_and(|delegated| {
-                stands_before(now, session.last_seen_at)
-                    || stands_before(now, delegated.approved_at)
-            })
-        {
+        if now >= expires_at {
             return Err(AuthError::SessionExpired);
+        }
+        if let Some(delegated) = &session.delegation {
+            // ADR 0038: a clock set back ends a delegated session rather than extending it,
+            // and while the guard holds issuing it is refused and kept.
+            crate::approval::clock_plausible()?;
+            if stands_before(now, session.last_seen_at) || stands_before(now, delegated.approved_at)
+            {
+                return Err(AuthError::SessionExpired);
+            }
         }
         let (user, _) = Self::holder(view, session.user, Issued::Session(session.generation))?;
         if user.is_service()

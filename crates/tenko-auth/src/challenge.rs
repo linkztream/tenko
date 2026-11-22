@@ -33,7 +33,9 @@
 //! the ceremony (the session, the credential, the enrollment). The ceremony is consumed
 //! exactly when that batch commits; a replay on another controller is refused by the row, or
 //! by the version precondition of the batch when both race. [`purge_used`] removes the rows
-//! of expired ceremonies; the leader runs it hourly as a leader-only service.
+//! a day after their ceremonies expired; the leader runs it hourly as a leader-only service.
+//! On a trusted clock a row stays at most a day and one ceremony lifetime, so the rows number
+//! at most the ceremonies finished in that time, one small row each.
 //!
 //! Every finishing handler of the service does this: the TOTP and recovery code logins,
 //! the passkey login, the TOTP enrollment and the passkey registration. The passkey step of
@@ -517,8 +519,10 @@ mod secret_bytes {
 /// The value of a row of [`USED_CHALLENGES`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsedChallenge {
-    /// When the row may be purged: when the ceremony expires, so the id cannot be used again
-    /// whether or not the row is there.
+    /// When the row may be purged: [`SELF_RELEASE_MAX`](tenko_core::clock::SELF_RELEASE_MAX)
+    /// after the ceremony expires, so the id cannot be used again whether or not the row is
+    /// there, also after a step back of the clock of up to that long (a longer one waits for
+    /// a person before anything is purged).
     pub expires_at: Timestamp,
 }
 
@@ -536,7 +540,7 @@ impl StagedUse {
         &self.ceremony
     }
 
-    /// When the ceremony ends and the row may be purged.
+    /// When the ceremony ends.
     pub fn expires_at(&self) -> Timestamp {
         self.expires_at
     }
@@ -555,7 +559,10 @@ impl StagedUse {
             &USED_CHALLENGES,
             &self.ceremony,
             &UsedChallenge {
-                expires_at: self.expires_at,
+                expires_at: self
+                    .expires_at
+                    .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
+                    .unwrap_or(self.expires_at),
             },
         )?;
         Ok(())
@@ -820,13 +827,13 @@ impl Ceremonies {
     }
 }
 
-/// Deletes the rows of [`USED_CHALLENGES`] whose ceremonies have expired (`expires_at <=
-/// now`), at most [`PURGE_PAGE`] rows per batch so a backlog stays far below the batch size
+/// Deletes the rows of [`USED_CHALLENGES`] that are due (`expires_at <= now`, a day after their
+/// ceremony ended), at most [`PURGE_PAGE`] rows per batch so a backlog stays far below the batch size
 /// limit; returns how many. The leader runs it hourly as a leader-only service,
 /// with the leader epoch of its term as `fence` (`tenko_store::fence`), so a deposed
 /// leader's purge fails instead of racing the new leader's. Nothing is proposed when no row
-/// is due, or while the clock guard holds the clock: a row removed early would let a ceremony
-/// be replayed on another controller.
+/// is due, or while the clock guard holds the clock: a row removed while its ceremony can still
+/// open would let it be replayed on another controller.
 ///
 /// # Errors
 ///
@@ -1407,7 +1414,12 @@ mod tests {
         let row = used_row(&store, staged.ceremony())
             .await
             .expect("the row is there");
-        assert_eq!(row.expires_at, staged.expires_at());
+        assert_eq!(
+            Some(row.expires_at),
+            staged
+                .expires_at()
+                .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
+        );
 
         // Controller B, with a fresh view, is refused: the row is there.
         let view = store.read(ReadConsistency::Local).await.expect("view");
@@ -1591,17 +1603,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_held_clock_purges_no_used_challenge() {
-        use tenko_core::clock::{Held, Reason, Release, testing};
         let now = MockClock::fixed().now();
         let store = MemStore::default();
         put_used(&store, "expired", Timestamp::UNIX_EPOCH).await;
-        let _held = testing::hold(Held {
-            reason: Reason::Jump,
-            jump_ms: 3_600_000,
-            since: now,
-            release: Release::Wait,
-            until: None,
-        });
+        let _held = tenko_core::clock::testing::hold_jump(3_600_000, now);
         assert_eq!(purge_used(&store, now, Some(0)).await.expect("purge"), 0);
         assert_eq!(used_names(&store).await, ["expired"]);
     }
@@ -1682,8 +1687,14 @@ mod tests {
             purge_used(&store, clock.now(), None).await.expect("purge"),
             0
         );
-        // At the expiry the row is due, and the id is dead by itself.
+        // At the expiry the id is dead by itself; the row stays a day, against a clock set
+        // back into the ceremony's life.
         clock.advance(CEREMONY_TTL);
+        assert_eq!(
+            purge_used(&store, clock.now(), None).await.expect("purge"),
+            0
+        );
+        clock.advance(tenko_core::clock::SELF_RELEASE_MAX);
         assert_eq!(
             purge_used(&store, clock.now(), None).await.expect("purge"),
             1

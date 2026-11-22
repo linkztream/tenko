@@ -422,6 +422,23 @@ async fn a_shared_browser_keeps_a_mark_of_each_account() {
     assert!(matches!(other, Ok(LoginOutcome::Session(_))), "{other:?}");
 }
 
+/// While the clock guard holds the clock the sweep keeps a mark past its end: a forward jump
+/// removes no mark that holds once it is undone.
+#[tokio::test]
+async fn a_held_clock_sweeps_no_ended_known_device() {
+    let (env, _) = TestEnv::installed(Profile::Home).await;
+    let other = env.add_admin(OTHER_USER, OTHER_PASSWORD).await;
+    session(login(&env, HOME, OTHER_USER, OTHER_PASSWORD, &no_marks()).await);
+    env.clock.advance(Duration::from_secs(30 * 86_400));
+    let held = tenko_core::clock::testing::hold_jump(3_600_000, env.now());
+    let swept = env.service.prune_known_devices(env.now()).await;
+    assert_eq!(swept.expect("swept"), 0);
+    drop(held);
+    let swept = env.service.prune_known_devices(env.now()).await;
+    assert_eq!(swept.expect("swept"), 1);
+    assert_eq!(device_rows(&env, other).await, 0);
+}
+
 /// The person and an administrator see the known devices and forget them; the hourly
 /// sweep removes ended ones.
 #[tokio::test]

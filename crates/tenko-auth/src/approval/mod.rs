@@ -49,8 +49,8 @@
 //! The times of an approval are stored wall-clock times, because any controller may serve its
 //! steps; a controller whose clock stands more than [`tenko_core::clock::TOLERANCE`] before a
 //! stored time treats the approval as over for its steps, and while the clock guard holds
-//! issuing after a step back the steps judge at the clock moved ahead by the step
-//! ([`crate::clock::judged`]), so a clock set back ends it early rather than extending it.
+//! issuing the lookup, the approval and the collect are refused with
+//! [`Refusal::ClockHeld`]: an administrator confirms the clock first.
 
 mod code;
 mod model;
@@ -145,6 +145,9 @@ pub enum Refusal {
     /// The person denied it.
     #[error("the approval was denied")]
     Denied,
+    /// The clock guard holds issuing on this controller.
+    #[error("this controller's clock is held: an administrator confirms the clock first")]
+    ClockHeld,
 }
 
 impl Refusal {
@@ -161,6 +164,7 @@ impl Refusal {
             Self::Plan(_) => "auth.approval.plan",
             Self::Pending => "auth.approval.pending",
             Self::Denied => "auth.approval.denied",
+            Self::ClockHeld => "auth.approval.clock_held",
         }
     }
 
@@ -173,6 +177,7 @@ impl Refusal {
             Self::Ambiguous | Self::Consumed | Self::Pending => 409,
             Self::Limit(_) => 429,
             Self::Plan(_) => 422,
+            Self::ClockHeld => 503,
         }
     }
 
@@ -243,6 +248,14 @@ pub fn parse_collect(body: &[u8]) -> Result<[u8; 64], Refusal> {
         .ok()
         .and_then(|bytes| <[u8; 64]>::try_from(bytes).ok())
         .ok_or(Refusal::Signature)
+}
+
+/// Refuses while the clock guard holds issuing ([`tenko_core::clock::plausible_now`]): how far
+/// a held clock stands from the times of an approval is not known, so nothing is judged by it.
+pub(crate) fn clock_plausible() -> Result<(), Refusal> {
+    tenko_core::clock::plausible_now()
+        .map(drop)
+        .map_err(|_| Refusal::ClockHeld)
 }
 
 fn plan_refusal(reason: impl Into<String>) -> Refusal {

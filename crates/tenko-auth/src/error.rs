@@ -217,7 +217,10 @@ impl AuthError {
         match self {
             Self::SessionExpired => AuthFailure::Expired,
             Self::Throttled { .. } => AuthFailure::Locked,
-            Self::Unavailable(_) | Self::Store(_) | Self::Internal(_) => AuthFailure::Unavailable,
+            Self::Unavailable(_)
+            | Self::Store(_)
+            | Self::Internal(_)
+            | Self::Approval(crate::approval::Refusal::ClockHeld) => AuthFailure::Unavailable,
             _ => AuthFailure::Invalid,
         }
     }

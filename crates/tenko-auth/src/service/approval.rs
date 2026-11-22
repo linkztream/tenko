@@ -21,7 +21,6 @@ use crate::{
         MAX_PENDING, MAX_PENDING_PER_SOURCE, PENDING_LIFETIME, REQUEST_SPACING, Refusal,
         WRONG_CODE_WINDOW, WRONG_CODES, actions,
     },
-    clock::judged,
     delegation,
     encoding::hex_encode,
     error::AuthError,
@@ -130,15 +129,15 @@ impl AuthService {
     ) -> Result<ApprovalView, AuthError> {
         let (user, session) = self.approver(ctx, true).await?;
         self.unlocked(session)?;
-        let now = judged(ctx.now);
+        approval::clock_plausible()?;
         let view = self.view().await?;
         let mut found = view
             .scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)?
             .into_iter()
-            .filter(|(_, record, _)| record.pending(now) && matches(record, code, root))
+            .filter(|(_, record, _)| record.pending(ctx.now) && matches(record, code, root))
             .map(|(_, record, _)| record);
         match (found.next(), found.next()) {
-            (Some(record), None) => Ok(record.view(plan_of(view.as_ref(), record.id)?, now)),
+            (Some(record), None) => Ok(record.view(plan_of(view.as_ref(), record.id)?, ctx.now)),
             (Some(_), Some(_)) => Err(Refusal::Ambiguous.into()),
             (None, _) => Err(self.wrong_code(ctx, user, session).await),
         }
@@ -161,11 +160,11 @@ impl AuthService {
     ) -> Result<ApprovalView, AuthError> {
         let (user, session) = self.approver(ctx, true).await?;
         self.unlocked(session)?;
-        let now = judged(ctx.now);
+        approval::clock_plausible()?;
         let view = self.view().await?;
         let (mut record, revision) = view.get_typed(&APPROVALS, &id)?.ok_or(Refusal::NotFound)?;
-        if !matches!(record.state, ApprovalState::Pending) || record.expired(now) {
-            return Err(undecided_refusal(&record, now).into());
+        if !matches!(record.state, ApprovalState::Pending) || record.expired(ctx.now) {
+            return Err(undecided_refusal(&record, ctx.now).into());
         }
         if !matches(&record, code, root) {
             return Err(self.wrong_code(ctx, user, session).await);
@@ -173,7 +172,7 @@ impl AuthService {
         let settings = self.settings();
         for (_, other, _) in view.scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)? {
             let open = match &other.state {
-                ApprovalState::Approved(_) => !other.expired(now),
+                ApprovalState::Approved(_) => !other.expired(ctx.now),
                 // Open only while its delegated session holds: a session that lapsed, or whose
                 // approver may no longer act, frees the domain whether or not its row is gone.
                 ApprovalState::Consumed {
@@ -215,7 +214,7 @@ impl AuthService {
                 .with_context("scopes", plan.scopes.len().to_string()),
         );
         self.commit(batch).await?;
-        Ok(record.view(plan, now))
+        Ok(record.view(plan, ctx.now))
     }
 
     /// `POST /auth/approvals/{id}/deny`: an administrator refuses a waiting request, or
@@ -327,7 +326,8 @@ impl AuthService {
             .await;
             return Err(Refusal::Signature.into());
         }
-        let decision = collectable(&record, judged(ctx.now))?;
+        approval::clock_plausible()?;
+        let decision = collectable(&record, ctx.now)?;
         let Some((user, _)) = view.get_typed(&USERS, &decision.by)?.filter(|(user, _)| {
             !user.disabled
                 && !user.is_service()

@@ -575,6 +575,25 @@ impl Tracked {
         now < self.forget_at
     }
 
+    /// Moves an entry whose last failure stands ahead of `now` (the clock was set back) back by
+    /// as much, so a step back neither ends nor lengthens its delay or its lock.
+    fn rebase(&mut self, now: Timestamp) {
+        if !tenko_core::clock::stands_before(now, self.last_failure) {
+            return;
+        }
+        let back = self.last_failure.saturating_since(now);
+        let earlier = |at: Timestamp| {
+            if at == FAR_FUTURE {
+                at
+            } else {
+                at.checked_sub(back).unwrap_or(at)
+            }
+        };
+        self.last_failure = now;
+        self.forget_at = earlier(self.forget_at);
+        self.locked_until = self.locked_until.map(earlier);
+    }
+
     /// The end of the lock, if one holds at `now`.
     fn active_lock(&self, now: Timestamp) -> Option<Timestamp> {
         self.locked_until.filter(|&until| now < until)
@@ -711,6 +730,7 @@ impl Throttle {
         let Some(tracked) = table.get_mut(key) else {
             return Ok(None);
         };
+        tracked.rebase(now);
         if !tracked.is_live(now) {
             table.remove(key);
             return Ok(None);
@@ -762,9 +782,10 @@ impl Throttle {
             return Ok(());
         }
         let mut table = self.table();
-        let Some(tracked) = table.get(key) else {
+        let Some(tracked) = table.get_mut(key) else {
             return Ok(());
         };
+        tracked.rebase(now);
         if tracked.is_live(now) {
             return tracked.verdict(policy, now, guarded);
         }
@@ -815,6 +836,9 @@ impl Throttle {
             };
         }
         let mut table = self.table();
+        if let Some(tracked) = table.get_mut(key) {
+            tracked.rebase(now);
+        }
         if table.get(key).is_some_and(|tracked| !tracked.is_live(now)) {
             table.remove(key);
         }
@@ -904,7 +928,8 @@ impl Throttle {
             key,
             Tracked {
                 failures: 0,
-                last_failure: until,
+                // No failure of this run: a lock ahead of the clock is not a step back.
+                last_failure: Timestamp::UNIX_EPOCH,
                 locked_until: Some(until),
                 forget_at: until,
             },
@@ -1184,6 +1209,38 @@ mod tests {
                 assert_eq!(outcome.locked_until, None, "{mode:?} {n}");
                 assert!(outcome.delay <= secs(60));
             }
+        }
+    }
+
+    #[test]
+    fn a_clock_set_back_neither_lengthens_nor_ends_a_delay() {
+        let lock = LockPolicy::default();
+        let source = Some("192.0.2.10".parse().expect("an address"));
+        for (key, policy) in [
+            (
+                ThrottleKey::account_source("alice", source),
+                lock.per_source(LockoutMode::ProgressiveDelay),
+            ),
+            (
+                ThrottleKey::account("alice"),
+                lock.account_wide(LockoutMode::ProgressiveDelay),
+            ),
+        ] {
+            let throttle = Throttle::new(4);
+            let start = at(10_000);
+            let mut delay = Duration::ZERO;
+            while delay.is_zero() {
+                delay = throttle.record_failure(&key, &policy, start).delay;
+            }
+            // Set back by an hour: the delay holds as long as it was set, from the clock as it is.
+            let back = at(10_000 - 3_600);
+            assert_eq!(
+                throttle.check(&key, &policy, back),
+                Err(Retry { after: Some(delay) }),
+                "{key:?}"
+            );
+            let later = back.checked_add(delay).expect("in range");
+            assert_eq!(throttle.check(&key, &policy, later), Ok(()), "{key:?}");
         }
     }
 

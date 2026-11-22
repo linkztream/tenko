@@ -649,14 +649,17 @@ impl AuthService {
             })
             .flatten();
         let mut removed = 0;
+        // A mark ends by its time only on a clock the guard trusts: a held one judges at the
+        // epoch, before every end, so a forward jump removes no mark that holds once it is undone.
+        let at = tenko_core::clock::trusted_now().map_or(Timestamp::UNIX_EPOCH, |_| now);
         for (digest, record, _) in rows {
-            let ended = record.expires_at <= now
+            let ended = record.expires_at <= at
                 || view
                     .get_typed(&USER_KNOWN_DEVICES, &(record.user, digest.clone()))?
                     .is_none()
                 || view
                     .get_typed(&crate::model::USERS, &record.user)?
-                    .is_none_or(|(user, _)| !holds(&record, &user, u32::MAX, now));
+                    .is_none_or(|(user, _)| !holds(&record, &user, u32::MAX, at));
             if ended {
                 batch.delete_typed(&USER_KNOWN_DEVICES, &(record.user, digest.clone()));
                 batch.delete_typed(&KNOWN_DEVICES, &digest);

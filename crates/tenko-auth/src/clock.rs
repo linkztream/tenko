@@ -25,29 +25,6 @@ impl Clock for SystemClock {
     }
 }
 
-/// Whether `now` stands more than [`TOLERANCE`](tenko_core::clock::TOLERANCE) before `stamp`:
-/// the time was written by a clock set back since, or by another controller's clock ahead of
-/// this one. What carries it counts as over, so a clock set back to before it never makes it
-/// last longer or count as recent.
-pub fn stands_before(now: Timestamp, stamp: Timestamp) -> bool {
-    now.checked_add(tenko_core::clock::TOLERANCE)
-        .is_none_or(|now| now < stamp)
-}
-
-/// `now` as the steps of an approval and a delegated session judge it: moved ahead by a step
-/// back of the clock while the clock guard holds issuing, so that step never lengthens them
-/// (one made after it ends sooner by as much); a forward jump or a start gap moves nothing.
-pub fn judged(now: Timestamp) -> Timestamp {
-    match tenko_core::clock::plausible_now() {
-        Err(held) if held.jump_ms < 0 => now
-            .checked_add(std::time::Duration::from_millis(
-                held.jump_ms.unsigned_abs(),
-            ))
-            .unwrap_or(now),
-        _ => now,
-    }
-}
-
 /// A clock that only moves when told to. Test helper.
 #[cfg(any(test, feature = "testing"))]
 #[derive(Debug)]

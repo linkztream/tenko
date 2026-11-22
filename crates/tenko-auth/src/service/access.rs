@@ -1139,12 +1139,18 @@ fn policy_view(
     }
 }
 
-/// The expiry of a new token under TGL-05.
+/// The expiry of a new token under TGL-05. Refused while the clock guard holds issuing: a
+/// token made on a clock that is ahead would outlive its grant by as much once it is set right.
 pub(super) fn token_expiry(
     settings: &crate::settings::SecuritySettings,
     requested: Option<u32>,
     now: Timestamp,
 ) -> Result<Option<Timestamp>, AuthError> {
+    if tenko_core::clock::plausible_now().is_err() {
+        return Err(AuthError::Unavailable(
+            "this controller's clock is held: an administrator confirms the clock first",
+        ));
+    }
     let days = match (settings.token_max_days, requested) {
         (_, Some(0)) => {
             return Err(AuthError::invalid("expires_in_days", "at least one day"));

@@ -411,7 +411,9 @@ impl ClientCerts {
             CodeState::Used { .. } => return Err(ClientCertError::CodeUsed),
             CodeState::Withdrawn => return Err(ClientCertError::CodeInvalid),
         }
-        if ctx.now.0 >= code.expires_at.0 || crate::clock::stands_before(ctx.now, code.created_at) {
+        if ctx.now.0 >= code.expires_at.0
+            || tenko_core::clock::stands_before(ctx.now, code.created_at)
+        {
             return Err(ClientCertError::CodeExpired);
         }
         let secret_ref = code.secret.ok_or(ClientCertError::CodeInvalid)?;

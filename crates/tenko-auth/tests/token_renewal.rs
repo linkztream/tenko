@@ -283,16 +283,26 @@ async fn reuse_of_a_superseded_token_revokes_the_family() {
     );
 }
 
-/// A clock held after a forward jump, for the calling test.
+/// A clock held after a forward jump of an hour, for the calling test.
 fn held() -> tenko_core::clock::testing::Override {
-    use tenko_core::clock::{Held, Reason, Release, testing};
-    testing::hold(Held {
-        reason: Reason::Jump,
-        jump_ms: 3_600_000,
-        since: tenko_core::Timestamp::UNIX_EPOCH,
-        release: Release::Wait,
-        until: None,
-    })
+    tenko_core::clock::testing::hold_jump(3_600_000, tenko_core::Timestamp::UNIX_EPOCH)
+}
+
+/// While the clock guard holds issuing, no token is created or renewed: one made on a clock
+/// that is ahead would outlive its grant once the clock is set right. A forward start gap
+/// holds no issuing.
+#[tokio::test]
+async fn a_clock_that_may_not_issue_creates_and_renews_no_token() {
+    let fx = fixture().await;
+    let first = fx.token(true, &[]).await;
+    let refused = |result: Result<CreatedToken, AuthError>| matches!(result, Err(AuthError::Unavailable(detail)) if detail.contains("clock"));
+    {
+        let _held = held();
+        assert!(refused(fx.try_token(true, &[]).await));
+        assert!(refused(fx.renew(&first, &secret(&first)).await));
+    }
+    let _gap = tenko_core::clock::testing::hold_gap(3_600_000);
+    fx.renew(&first, &secret(&first)).await.expect("renewed");
 }
 
 /// While the clock guard holds the clock, a superseded token used after its grace is refused
@@ -315,7 +325,8 @@ async fn a_held_clock_refuses_a_late_retired_token_without_revoking_the_family()
     );
 }
 
-/// While the clock guard holds the clock, a renewal removes no superseded member past its end.
+/// While the clock guard holds the clock (here a forward start gap, which holds no issuing), a
+/// renewal removes no superseded member past its end.
 #[tokio::test]
 async fn a_held_clock_keeps_superseded_members_past_their_end() {
     let fx = fixture().await;
@@ -336,7 +347,7 @@ async fn a_held_clock_keeps_superseded_members_past_their_end() {
         .expect("the first use supersedes");
     // The first token ended; the second lives half a day more.
     fx.env.clock.advance(Duration::from_secs(DAY * 3 / 4));
-    let _held = held();
+    let _gap = tenko_core::clock::testing::hold_gap(3_600_000);
     fx.renew(&second, &secret(&second))
         .await
         .expect("renewed again");
