@@ -63,6 +63,19 @@ pub const HELD: &str = "sys.clock.held";
 /// A look whose two monotonic reads lie further apart is dropped.
 const TORN: Duration = Duration::from_millis(100);
 
+/// Whether `now` stands more than [`TOLERANCE`] before `stamp`: the time was written by a clock
+/// set back since, or by another controller's clock ahead of this one.
+pub fn stands_before(now: Timestamp, stamp: Timestamp) -> bool {
+    now.checked_add(TOLERANCE).is_none_or(|now| now < stamp)
+}
+
+/// Whether `limit` has passed since `since` at `now`, for a bound that a clock set back must
+/// not hold open: also on a clock that stands before `since`, and while issuing is held
+/// ([`plausible_now`]), since a step back may then lie behind `now`.
+pub fn passed(since: Timestamp, now: Timestamp, limit: Duration) -> bool {
+    plausible_now().is_err() || stands_before(now, since) || now.saturating_since(since) >= limit
+}
+
 const TOLERANCE_NS: u128 = TOLERANCE.as_nanos();
 
 /// Why the clock is held.
@@ -593,6 +606,19 @@ pub mod testing {
             reason: Reason::Jump,
             jump_ms,
             since: trusted,
+            release: Release::Wait,
+            until: None,
+        })
+    }
+
+    /// Holds destruction on this thread as a start gap of `gap_ms` does (issuing too when it
+    /// is negative), until the value is dropped.
+    #[must_use = "the hold ends when the value is dropped"]
+    pub fn hold_gap(gap_ms: i64) -> Override {
+        hold(Held {
+            reason: Reason::StartGap,
+            jump_ms: gap_ms,
+            since: Timestamp::UNIX_EPOCH,
             release: Release::Wait,
             until: None,
         })

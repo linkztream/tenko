@@ -662,3 +662,22 @@ fn the_test_override_is_per_thread() {
     assert_eq!(plausible_now().unwrap_err().release, Release::Person);
     assert_eq!(forward_hold(), None);
 }
+
+#[test]
+fn a_bound_a_step_back_could_hold_open_has_passed() {
+    let _global = GLOBAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let limit = Duration::from_secs(30);
+    assert!(!passed(at(0), at(29_999), limit));
+    assert!(passed(at(0), at(30_000), limit));
+    // A clock that stands before the start, beyond the tolerance and within it.
+    assert!(passed(at(0), at(-5_001), limit));
+    assert!(!passed(at(0), at(-5_000), limit));
+    let _held = testing::hold_issuing(Held {
+        reason: Reason::Jump,
+        jump_ms: -3_600_000,
+        since: at(0),
+        release: Release::Person,
+        until: None,
+    });
+    assert!(passed(at(0), at(0), limit), "issuing held");
+}
