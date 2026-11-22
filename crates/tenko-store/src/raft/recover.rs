@@ -237,7 +237,7 @@ pub async fn replay(kept: &Path, work: &Path) -> Result<Replayed, StoreError> {
         if !entries.is_empty() {
             sm.apply_entries(entries)?;
         }
-        sm.build_snapshot()
+        sm.build_snapshot()?
     })
     .await
     .map_err(|error| storage("applying the log", error))??;

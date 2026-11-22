@@ -80,7 +80,8 @@ use super::{
     view::RedbView,
 };
 use crate::api::{
-    APPLY_STOPPED, ApplyStopped, DerivedIndex, IndexStatus, KeyRange, ReadView, StoreError, tables,
+    APPLY_STOPPED, ApplyStopped, DerivedIndex, IndexStatus, KeyRange, ReadView, SNAPSHOT_FAILED,
+    StoreError, tables,
 };
 use crate::layout::{self, POINTER_PART, is_state_file, sync_dir};
 
@@ -111,6 +112,10 @@ pub(crate) struct SmStats {
     /// Milliseconds the trigger of the build in progress was deferred while the commit
     /// queue was deep (0: built when due); read and cleared by the build's log line.
     pub(crate) deferred_ms: AtomicU64,
+    /// A snapshot is being built.
+    pub(crate) snapshotting: AtomicBool,
+    /// The last build could not write its snapshot file.
+    pub(crate) snapshot_failed: AtomicBool,
 }
 
 /// The result of rewriting the state into a fresh file.
@@ -626,12 +631,20 @@ impl StateMachine {
         Ok(())
     }
 
-    /// Builds a snapshot of the current state (blocking).
-    pub(crate) fn build_snapshot(&self) -> Result<Snapshot, StoreError> {
+    /// Builds a snapshot of the current state (blocking). The outer error is the state's (a
+    /// failed checkpoint poisons the state file: redb refuses every later transaction); the
+    /// inner one is the snapshot file's, after which the state is as it was.
+    ///
+    /// The build holds its read view across the whole write of the file: a snapshot is one
+    /// consistent view, so the pages written meanwhile stay pinned for as long as the file
+    /// takes to write.
+    pub(crate) fn build_snapshot(&self) -> Result<Result<Snapshot, StoreError>, StoreError> {
         let shared = &*self.shared;
         let started = Instant::now();
         // The log is purged up to the snapshot, so the state it covers must be durable.
-        self.checkpoint().map_err(storage)?;
+        self.checkpoint().map_err(|error| {
+            StoreError::Storage(format!("the checkpoint before a snapshot failed: {error}"))
+        })?;
         let view = self.view().map_err(storage)?;
         let state = view.meta().clone();
         let index = state.last_applied.as_ref().map_or(0, |log_id| log_id.index);
@@ -652,7 +665,7 @@ impl StateMachine {
             Ok(written) => written,
             Err(error) => {
                 let _ = fs::remove_file(&part);
-                return Err(error);
+                return Ok(Err(error));
             }
         };
         drop(view);
@@ -667,7 +680,10 @@ impl StateMachine {
                  installed"
             );
         }
-        fs::rename(&part, &path).map_err(storage)?;
+        if let Err(error) = fs::rename(&part, &path) {
+            let _ = fs::remove_file(&part);
+            return Ok(Err(storage(error)));
+        }
         self.set_current(meta.clone(), path.clone());
         let counters = &shared.stats;
         counters.snapshots_built.fetch_add(1, Ordering::Relaxed);
@@ -688,10 +704,10 @@ impl StateMachine {
             "store snapshot built"
         );
 
-        Ok(Snapshot {
+        Ok(Ok(Snapshot {
             meta,
             snapshot: Box::new(SnapshotFile { path }),
-        })
+        }))
     }
 
     /// Writes a complete state into a new state file in one durable transaction and
@@ -1094,12 +1110,35 @@ pub(crate) struct SnapshotBuilder {
 }
 
 impl RaftSnapshotBuilder<TypeConfig> for SnapshotBuilder {
+    /// A failed snapshot file answers the current snapshot: openraft ignores a snapshot
+    /// that is not newer than the current one, so it purges nothing, the log keeps the
+    /// entries and the next trigger builds again. Any other error ends the Raft core.
     async fn build_snapshot(&mut self) -> Result<Snapshot, StorageError> {
+        let stats = &self.sm.shared.stats;
+        stats.snapshotting.store(true, Ordering::Relaxed);
         let sm = self.sm.clone();
-        tokio::task::spawn_blocking(move || sm.build_snapshot())
-            .await
-            .map_err(snapshot_write)?
-            .map_err(snapshot_write)
+        let built = tokio::task::spawn_blocking(move || sm.build_snapshot()).await;
+        stats.snapshotting.store(false, Ordering::Relaxed);
+        match built.map_err(snapshot_write)?.map_err(snapshot_write)? {
+            Ok(snapshot) => {
+                stats.snapshot_failed.store(false, Ordering::Relaxed);
+                Ok(snapshot)
+            }
+            Err(error) => {
+                tracing::error!(
+                    code = SNAPSHOT_FAILED,
+                    %error,
+                    "the snapshot file could not be written; the log keeps its entries and the \
+                     snapshot is built again once one fits"
+                );
+                stats.snapshot_failed.store(true, Ordering::Relaxed);
+                let (meta, path) = self.sm.current_snapshot().unwrap_or_default();
+                Ok(Snapshot {
+                    meta,
+                    snapshot: Box::new(SnapshotFile { path }),
+                })
+            }
+        }
     }
 }
 
@@ -1311,7 +1350,10 @@ mod tests {
         source
             .apply_entries(vec![audited_entry(1, 1), audited_entry(2, 2)])
             .expect("apply");
-        let snapshot = source.build_snapshot().expect("snapshot");
+        let snapshot = source
+            .build_snapshot()
+            .expect("snapshot")
+            .expect("snapshot file");
 
         let dir = temp_dir("register");
         let sm = StateMachine::open(&dir, OPTIONS).expect("open");
@@ -1618,7 +1660,10 @@ mod tests {
         source
             .apply_entries(vec![audited_entry(1, 1), audited_entry(2, 2)])
             .expect("apply");
-        let honest = source.build_snapshot().expect("snapshot");
+        let honest = source
+            .build_snapshot()
+            .expect("snapshot")
+            .expect("snapshot file");
         let forged = source_dir.join("forged.tnks");
         {
             let view = source.view().expect("view");
