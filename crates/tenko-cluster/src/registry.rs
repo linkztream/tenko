@@ -663,7 +663,9 @@ impl NodeRegistry {
     /// Removes expired revocations, used or expired tokens older than [`TOKEN_RETENTION`],
     /// and the certificate rows and vault keys that a revoked node still has, and cuts a
     /// node record that names more than two certificates back to the newest and the one
-    /// that ends last beside it. Returns how many rows went or were cut back.
+    /// that ends last beside it. Returns how many rows went or were cut back. No revocation
+    /// goes while the clock guard holds issuing ([`tenko_core::clock::plausible_now`]), and
+    /// no token while it holds the clock ([`tenko_core::clock::trusted_now`]).
     ///
     /// # Errors
     ///
@@ -690,10 +692,14 @@ impl NodeRegistry {
             batch.preconditions.push(tenko_store::fence(epoch));
         }
         let mut removed = 0;
+        // A revocation removed on a fast clock would let its certificate in once the clock is
+        // set back, so revocations wait while issuing is held, the rest while the clock is.
+        let plausible = tenko_core::clock::plausible_now().is_ok();
+        let trusted = tenko_core::clock::trusted_now().is_ok();
         for (serial, revocation, revision) in
             view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?
         {
-            if revocation.not_after <= now && !revocation.controller {
+            if plausible && revocation.not_after <= now && !revocation.controller {
                 batch.expect_typed(&tables::REVOCATIONS, &serial, Some(revision));
                 batch.delete_typed(&tables::REVOCATIONS, &serial);
                 removed += 1;
@@ -706,7 +712,8 @@ impl NodeRegistry {
                 .used
                 .as_ref()
                 .map_or(record.expires_at, |used| used.at);
-            if (record.used.is_some() || record.expires_at <= now)
+            if trusted
+                && (record.used.is_some() || record.expires_at <= now)
                 && now.saturating_since(ended) >= TOKEN_RETENTION
             {
                 batch.expect_typed(&tables::ENROLLMENTS, &id, Some(revision));
@@ -1425,7 +1432,12 @@ impl NodeRegistry {
                 "the enrollment token was used already; create a new one",
             )));
         }
-        if cx.now >= record.expires_at {
+        // A token made after the clock that judges it (set back since) counts as expired.
+        let before = cx
+            .now
+            .checked_add(tenko_core::clock::TOLERANCE)
+            .is_none_or(|now| now < record.created_at);
+        if before || cx.now >= record.expires_at {
             return Err(with_token(ClusterError::new(
                 "cluster.enrollment.expired",
                 401,
@@ -2936,13 +2948,16 @@ fn revocation(
     let mut serials = Vec::new();
     batch.delete_typed(&tables::NODES, &node.0);
     batch.delete_typed(&tables::NODE_NAMES, &record.name.to_lowercase());
+    // While the clock guard holds issuing, a certificate that looks ended is revoked too: the
+    // clock may be fast.
+    let held = tenko_core::clock::plausible_now().is_err();
     for cert in &record.serials {
         let until = if cert.serial == record.certificate.serial {
             cert.not_after
         } else {
             cert.not_after.max(newest)
         };
-        if until > cx.now {
+        if held || until > cx.now {
             batch.put_typed(
                 &tables::REVOCATIONS,
                 &cert.serial,
@@ -3542,6 +3557,123 @@ mod tests {
             assert_eq!(rows_left(&store, *node, keys).await, left, "node {node}");
         }
         assert_eq!(registry.prune(cx.now).await.expect("again"), 0);
+    }
+
+    fn held(reason: tenko_core::clock::Reason, jump_ms: i64) -> tenko_core::clock::Held {
+        tenko_core::clock::Held {
+            reason,
+            jump_ms,
+            since: Timestamp::UNIX_EPOCH,
+            release: tenko_core::clock::Release::Wait,
+            until: None,
+        }
+    }
+
+    /// Held after a forward jump: neither destruction nor issuing is trusted.
+    fn forward() -> tenko_core::clock::testing::Override {
+        tenko_core::clock::testing::hold(held(tenko_core::clock::Reason::Jump, 3_600_000))
+    }
+
+    /// Set back and waited out, not confirmed: destruction is trusted, issuing is not.
+    fn set_back() -> tenko_core::clock::testing::Override {
+        tenko_core::clock::testing::hold_issuing(held(tenko_core::clock::Reason::Jump, -3_600_000))
+    }
+
+    #[tokio::test]
+    async fn revocations_wait_while_issuing_is_held_and_tokens_while_the_clock_is() {
+        let (store, registry) = mem_registry().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        registry
+            .create_enrollment(&cx, NewEnrollment::default())
+            .await
+            .expect("a token");
+        let revocation = Revocation {
+            node: NodeId(1002),
+            revoked_at: cx.now,
+            not_after: cx.now,
+            controller: false,
+        };
+        let mut batch = WriteBatch::for_request(&cx);
+        batch
+            .put_typed(&tables::REVOCATIONS, &"ended".to_owned(), &revocation)
+            .expect("revocation");
+        store.propose(batch).await.expect("write");
+        let far = cx
+            .now
+            .checked_add(MAX_TOKEN_TTL + TOKEN_RETENTION + Duration::from_secs(86_400))
+            .expect("a time");
+        let revoked = || async {
+            store
+                .read(ReadConsistency::Local)
+                .await
+                .expect("view")
+                .get_typed(&tables::REVOCATIONS, &"ended".to_owned())
+                .expect("read")
+                .is_some()
+        };
+        {
+            let _held = forward();
+            assert_eq!(registry.prune(far).await.expect("prune"), 0);
+        }
+        {
+            let _back = set_back();
+            assert_eq!(registry.prune(far).await.expect("prune"), 1, "the token");
+            assert!(revoked().await);
+        }
+        assert_eq!(
+            registry.prune(far).await.expect("prune"),
+            1,
+            "the revocation"
+        );
+        assert!(!revoked().await);
+    }
+
+    #[tokio::test]
+    async fn a_certificate_that_looks_ended_is_revoked_while_issuing_is_held() {
+        let (store, registry) = mem_registry().await;
+        let mut cx = RequestCtx::system(SystemComponent::Cluster);
+        cx.now = cx
+            .now
+            .checked_add(Duration::from_secs(2 * 86_400))
+            .expect("a time");
+        for node in [NodeId(1002), NodeId(1003)] {
+            record_node(&store, node, Role::Dns).await;
+        }
+        let held = {
+            let _back = set_back();
+            registry.revoke(&cx, NodeId(1002)).await.expect("revoked")
+        };
+        assert_eq!(held.len(), 1, "a revocation row while held");
+        let trusted = registry.revoke(&cx, NodeId(1003)).await.expect("revoked");
+        assert!(trusted.is_empty(), "none for an ended certificate");
+    }
+
+    #[tokio::test]
+    async fn a_token_made_after_the_clock_that_judges_it_has_expired() {
+        let (_, registry) = mem_registry().await;
+        let cx = RequestCtx::system(SystemComponent::Cluster);
+        let (_, token) = registry
+            .create_enrollment(&cx, NewEnrollment::default())
+            .await
+            .expect("a token");
+        let at = |secs| {
+            let mut cx = cx.clone();
+            cx.now = cx
+                .now
+                .checked_sub(Duration::from_secs(secs))
+                .expect("a time");
+            cx
+        };
+        let refused = registry
+            .enroll(&at(3_600), enroll_with(&token.to_text(), Vec::new()))
+            .await
+            .expect_err("set back an hour");
+        assert_eq!(refused.code(), "cluster.enrollment.expired");
+        let refused = registry
+            .enroll(&at(4), enroll_with(&token.to_text(), Vec::new()))
+            .await
+            .expect_err("no request");
+        assert_ne!(refused.code(), "cluster.enrollment.expired");
     }
 
     /// The failed `cluster.node.enroll` records: their code and context.

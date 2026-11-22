@@ -806,7 +806,7 @@ fn dropped_files_are_adopted_in_name_order() {
         "the temporary name is gone"
     );
 
-    assert_eq!(buffer.adopt_incoming().unwrap(), 3);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 3);
     assert_eq!(
         file_names(&dir.path().join("incoming")),
         Vec::<String>::new()
@@ -820,7 +820,7 @@ fn dropped_files_are_adopted_in_name_order() {
         assert_eq!(&batch.payload, payload);
     }
     // Nothing left to adopt.
-    assert_eq!(buffer.adopt_incoming().unwrap(), 0);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 0);
 }
 
 #[test]
@@ -835,7 +835,7 @@ fn incoming_files_are_taken_by_file_name() {
     fs::write(incoming.join("ignored.txt"), b"left alone").unwrap();
     fs::write(incoming.join("old.rejected"), b"left alone").unwrap();
 
-    assert_eq!(buffer.adopt_incoming().unwrap(), 3);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 3);
     assert_eq!(
         drain(&buffer),
         [
@@ -853,7 +853,7 @@ fn adopted_batches_survive_a_reopen() {
     ObservationBuffer::drop_incoming(dir.path(), b"from another process").unwrap();
     {
         let buffer = open(dir.path());
-        assert_eq!(buffer.adopt_incoming().unwrap(), 1);
+        assert_eq!(buffer.adopt_incoming(true).unwrap(), 1);
     }
     let buffer = open(dir.path());
     assert_eq!(
@@ -871,21 +871,21 @@ fn an_oversized_incoming_file_is_rejected() {
     fs::write(incoming.join("big.batch"), [7_u8; 11]).unwrap();
     fs::write(incoming.join("fits.batch"), [8_u8; 10]).unwrap();
 
-    assert_eq!(buffer.adopt_incoming().unwrap(), 1);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 1);
     assert_eq!(file_names(&incoming), ["big.rejected"]);
     assert_eq!(fs::read(incoming.join("big.rejected")).unwrap(), [7_u8; 11]);
     assert_eq!(buffer.stats().batches, 1);
     assert_eq!(buffer.peek().unwrap(), Some(pending(1, &[8; 10])));
 
     // The rejected file is not looked at again.
-    assert_eq!(buffer.adopt_incoming().unwrap(), 0);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 0);
 }
 
 #[test]
 fn adoption_without_an_incoming_directory_adopts_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let buffer = open(dir.path());
-    assert_eq!(buffer.adopt_incoming().unwrap(), 0);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 0);
     assert!(!dir.path().join("incoming").exists());
 }
 
@@ -896,7 +896,7 @@ fn adoption_applies_the_limits() {
     for n in 0_u8..4 {
         ObservationBuffer::drop_incoming(dir.path(), &[n]).unwrap();
     }
-    assert_eq!(buffer.adopt_incoming().unwrap(), 4);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 4);
 
     let stats = buffer.stats();
     assert_eq!((stats.batches, stats.dropped), (2, 2));
@@ -919,8 +919,27 @@ fn old_temporary_files_are_deleted_and_young_ones_are_left() {
         .unwrap();
     drop(old);
 
-    assert_eq!(buffer.adopt_incoming().unwrap(), 0);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 0);
     assert_eq!(file_names(&incoming), ["young.tmp"]);
+}
+
+#[test]
+fn a_held_clock_keeps_a_stale_incoming_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let buffer = open(dir.path());
+    let incoming = dir.path().join("incoming");
+    fs::create_dir(&incoming).unwrap();
+    fs::write(incoming.join("old.tmp"), b"abandoned").unwrap();
+    let old = fs::OpenOptions::new()
+        .write(true)
+        .open(incoming.join("old.tmp"))
+        .unwrap();
+    old.set_modified(SystemTime::now() - Duration::from_secs(2 * 60 * 60))
+        .unwrap();
+    drop(old);
+
+    assert_eq!(buffer.adopt_incoming(false).unwrap(), 0);
+    assert_eq!(file_names(&incoming), ["old.tmp"]);
 }
 
 #[tokio::test]
@@ -974,7 +993,7 @@ async fn changed_resolves_after_an_adoption() {
     let buffer = open(dir.path());
     ObservationBuffer::drop_incoming(dir.path(), b"one").unwrap();
 
-    assert_eq!(buffer.adopt_incoming().unwrap(), 1);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 1);
     timeout(WAIT, buffer.changed()).await.unwrap();
 }
 
@@ -982,7 +1001,7 @@ async fn changed_resolves_after_an_adoption() {
 async fn an_adoption_of_nothing_does_not_wake_the_consumer() {
     let dir = tempfile::tempdir().unwrap();
     let buffer = open(dir.path());
-    assert_eq!(buffer.adopt_incoming().unwrap(), 0);
+    assert_eq!(buffer.adopt_incoming(true).unwrap(), 0);
     assert!(timeout(SHORT, buffer.changed()).await.is_err());
 }
 

@@ -948,7 +948,9 @@ impl Agent {
                 _ = tick.tick() => {}
             }
             let buffer = self.buffer.clone();
-            match tokio::task::spawn_blocking(move || buffer.adopt_incoming()).await {
+            // Asked here: the guard's test hold does not reach the blocking thread.
+            let trusted = tenko_core::clock::trusted_now().is_ok();
+            match tokio::task::spawn_blocking(move || buffer.adopt_incoming(trusted)).await {
                 Ok(Ok(0)) => {}
                 Ok(Ok(count)) => {
                     tracing::info!(count, "queued batches from the incoming directory");

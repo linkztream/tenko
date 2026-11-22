@@ -476,7 +476,8 @@ impl ObservationBuffer {
     /// The files are taken in the order of their names (a UUIDv7 name sorts by creation
     /// time), pushed like any other batch, so the limits and the eviction rule apply, and then
     /// deleted. A file larger than [`BufferConfig::max_batch_bytes`] is renamed to
-    /// `<name>.rejected` and not counted. A `.tmp` file older than one hour is deleted; a
+    /// `<name>.rejected` and not counted. A `.tmp` file older than one hour is deleted when
+    /// `trusted` (the caller asked the clock guard, [`tenko_core::clock::trusted_now`]); a
     /// younger one may still be written and is left alone. A crash between the push and the
     /// deletion adopts the file a second time. Returns the number of payloads adopted and
     /// wakes [`ObservationBuffer::changed`] when it is not zero.
@@ -485,7 +486,7 @@ impl ObservationBuffer {
     ///
     /// [`BufferError::Io`] when the directory cannot be read or a file cannot be read or
     /// pushed. Payloads adopted before the failure stay adopted.
-    pub fn adopt_incoming(&self) -> Result<usize, BufferError> {
+    pub fn adopt_incoming(&self, trusted: bool) -> Result<usize, BufferError> {
         let incoming = self.inner.config.dir.join(INCOMING_DIR);
         let entries = match fs::read_dir(&incoming) {
             Ok(entries) => entries,
@@ -501,7 +502,7 @@ impl ObservationBuffer {
             }
             match path.extension().and_then(|extension| extension.to_str()) {
                 Some(BATCH_EXT) => files.push(path),
-                Some(TMP_EXT) => remove_stale_tmp(&path),
+                Some(TMP_EXT) if trusted => remove_stale_tmp(&path),
                 _ => {}
             }
         }
