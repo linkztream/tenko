@@ -1073,16 +1073,16 @@ fn new_binding_allowed(
 }
 
 /// The time a bound lease has left when a renewal of it may be answered from the stored
-/// row: within `percent` of its lease time counted from its last commit (`cltt`, or now
-/// when the clock stepped back behind it), and no longer than the server would grant now.
-/// The answer never runs past the committed end.
+/// row: within `percent` of its lease time counted from its last commit (`cltt`), and no
+/// longer than the server would grant now. The answer never runs past the committed end. A
+/// row whose client time is later than now (the clock stepped back) commits, which tells the
+/// whole lease time again.
 fn cached(lease: &LeaseView<'_>, percent: u8, granted: u32, now: Timestamp) -> Option<u32> {
-    if percent == 0 {
+    if percent == 0 || lease.cltt > now {
         return None;
     }
-    let start = lease.cltt.min(now);
-    let total = lease.ends.saturating_since(start).as_secs();
-    let age = now.saturating_since(start).as_secs();
+    let total = lease.ends.saturating_since(lease.cltt).as_secs();
+    let age = now.saturating_since(lease.cltt).as_secs();
     let left = lease.ends.saturating_since(now).as_secs();
     if total == 0 || left == 0 || age.saturating_mul(100) >= u64::from(percent) * total {
         return None;
@@ -1416,7 +1416,7 @@ mod tests {
     use crate::lease::PendingChange;
 
     #[test]
-    fn the_renewal_cache_counts_a_client_time_after_now_from_now() {
+    fn the_renewal_cache_commits_a_row_whose_client_time_is_after_now() {
         let now = Timestamp::now();
         let at = |secs| now.checked_add(Duration::from_secs(secs)).expect("a time");
         let row = |cltt| {
@@ -1435,8 +1435,10 @@ mod tests {
             .to_lease(NodeId(1), None)
         };
         let cached_at = |cltt, when| cached(&LeaseView::of(&row(cltt)), 25, 3_600, when);
-        // Committed just now with its client time raised to its end after a step back.
-        assert_eq!(cached_at(at(3_600), now), Some(3_600));
+        // Committed just now with its client time raised after a step back: every renewal
+        // commits while the clock is behind it, so none is told less than its lease time.
+        assert_eq!(cached_at(at(60), now), None);
+        assert_eq!(cached_at(at(1_200), at(600)), None);
         // An early renewal is answered from the row, a late one commits.
         assert_eq!(cached_at(now, at(600)), Some(3_000));
         assert_eq!(cached_at(now, at(1_800)), None);
