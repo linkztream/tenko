@@ -21,6 +21,7 @@ use crate::{
         MAX_PENDING, MAX_PENDING_PER_SOURCE, PENDING_LIFETIME, REQUEST_SPACING, Refusal,
         WRONG_CODE_WINDOW, WRONG_CODES, actions,
     },
+    clock::judged,
     delegation,
     encoding::hex_encode,
     error::AuthError,
@@ -129,14 +130,15 @@ impl AuthService {
     ) -> Result<ApprovalView, AuthError> {
         let (user, session) = self.approver(ctx, true).await?;
         self.unlocked(session)?;
+        let now = judged(ctx.now);
         let view = self.view().await?;
         let mut found = view
             .scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)?
             .into_iter()
-            .filter(|(_, record, _)| record.pending(ctx.now) && matches(record, code, root))
+            .filter(|(_, record, _)| record.pending(now) && matches(record, code, root))
             .map(|(_, record, _)| record);
         match (found.next(), found.next()) {
-            (Some(record), None) => Ok(record.view(plan_of(view.as_ref(), record.id)?, ctx.now)),
+            (Some(record), None) => Ok(record.view(plan_of(view.as_ref(), record.id)?, now)),
             (Some(_), Some(_)) => Err(Refusal::Ambiguous.into()),
             (None, _) => Err(self.wrong_code(ctx, user, session).await),
         }
@@ -159,10 +161,11 @@ impl AuthService {
     ) -> Result<ApprovalView, AuthError> {
         let (user, session) = self.approver(ctx, true).await?;
         self.unlocked(session)?;
+        let now = judged(ctx.now);
         let view = self.view().await?;
         let (mut record, revision) = view.get_typed(&APPROVALS, &id)?.ok_or(Refusal::NotFound)?;
-        if !matches!(record.state, ApprovalState::Pending) || record.expired(ctx.now) {
-            return Err(undecided_refusal(&record, ctx.now).into());
+        if !matches!(record.state, ApprovalState::Pending) || record.expired(now) {
+            return Err(undecided_refusal(&record, now).into());
         }
         if !matches(&record, code, root) {
             return Err(self.wrong_code(ctx, user, session).await);
@@ -170,7 +173,7 @@ impl AuthService {
         let settings = self.settings();
         for (_, other, _) in view.scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)? {
             let open = match &other.state {
-                ApprovalState::Approved(_) => !other.expired(ctx.now),
+                ApprovalState::Approved(_) => !other.expired(now),
                 // Open only while its delegated session holds: a session that lapsed, or whose
                 // approver may no longer act, frees the domain whether or not its row is gone.
                 ApprovalState::Consumed {
@@ -212,7 +215,7 @@ impl AuthService {
                 .with_context("scopes", plan.scopes.len().to_string()),
         );
         self.commit(batch).await?;
-        Ok(record.view(plan, ctx.now))
+        Ok(record.view(plan, now))
     }
 
     /// `POST /auth/approvals/{id}/deny`: an administrator refuses a waiting request, or
@@ -324,7 +327,7 @@ impl AuthService {
             .await;
             return Err(Refusal::Signature.into());
         }
-        let decision = collectable(&record, ctx.now)?;
+        let decision = collectable(&record, judged(ctx.now))?;
         let Some((user, _)) = view.get_typed(&USERS, &decision.by)?.filter(|(user, _)| {
             !user.disabled
                 && !user.is_service()
@@ -461,9 +464,12 @@ impl AuthService {
 
     /// Removes the approvals that are over: a consumed one [`delegation::LIFETIME`] after its
     /// collect, every other one [`PENDING_LIFETIME`] after its request, on this controller's
-    /// clock standing that far after the row's time (a clock that stands before it removes
-    /// nothing). The sweep runs it every [`PENDING_LIFETIME`].
+    /// clock standing that far after the row's time (a clock that stands before it, or one the
+    /// clock guard holds, removes nothing). The sweep runs it every [`PENDING_LIFETIME`].
     pub(super) async fn prune_approvals(&self, now: Timestamp) -> Result<(), AuthError> {
+        if tenko_core::clock::trusted_now().is_err() {
+            return Ok(());
+        }
         let view = self.view().await?;
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
         for (id, record, _) in view.scan_typed(&APPROVALS, KeyRange::all(), LIST_LIMIT, false)? {

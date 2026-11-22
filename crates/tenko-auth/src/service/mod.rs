@@ -77,6 +77,7 @@ use tenko_vault::Vault;
 use crate::{
     authz::{AuthIndex, RbacAuthorizer, ScopeSupport},
     challenge::Ceremonies,
+    clock::stands_before,
     error::AuthError,
     hibp::{BreachChecker, HibpFilter, HibpRangeSource},
     lockout::Throttle,
@@ -699,7 +700,9 @@ impl AuthService {
         marks: Option<&DeviceMarks>,
     ) -> Result<NewSession, AuthError> {
         batch.put_typed(&LAST_LOGINS, &user.id, &record.created_at)?;
-        // Sessions of the account that have ended are removed with the login.
+        // Sessions of the account that have ended are removed with the login, those ended by
+        // time only on a clock the guard trusts.
+        let trusted = tenko_core::clock::trusted_now().is_ok();
         let settings = self.settings();
         let view = self.view().await?;
         let device = match marks {
@@ -711,7 +714,7 @@ impl AuthService {
         let ended: Vec<_> = Self::user_sessions(view.as_ref(), user.id)?
             .into_iter()
             .filter(|(_, session)| {
-                effective_expiry(session, &settings).0 <= record.created_at
+                (trusted && effective_expiry(session, &settings).0 <= record.created_at)
                     || !user.admits(Issued::Session(session.generation))
             })
             .collect();
@@ -800,11 +803,14 @@ impl AuthService {
         let settings = self.settings();
         let user = match Self::session_holds(view.as_ref(), &session, &settings, now) {
             Err(AuthError::SessionExpired) => {
-                let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
-                batch.delete_typed(&SESSIONS, &hash);
-                batch.delete_typed(&USER_SESSIONS, &(session.user, session.id));
-                if let Err(error) = self.store.propose(batch).await {
-                    tracing::warn!(%error, "could not remove an expired session");
+                // A clock the guard holds refuses the session but keeps it: it may be wrong.
+                if tenko_core::clock::trusted_now().is_ok() {
+                    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+                    batch.delete_typed(&SESSIONS, &hash);
+                    batch.delete_typed(&USER_SESSIONS, &(session.user, session.id));
+                    if let Err(error) = self.store.propose(batch).await {
+                        tracing::warn!(%error, "could not remove an expired session");
+                    }
                 }
                 return Err(AuthError::SessionExpired);
             }
@@ -978,16 +984,16 @@ impl AuthService {
         settings: &SecuritySettings,
         now: Timestamp,
     ) -> Result<(UserRecord, Timestamp), AuthError> {
+        let delegated = session.delegation.as_ref();
+        // ADR 0038: a clock set back ends a delegated session rather than extending it.
+        let now = delegated.map_or(now, |_| crate::clock::judged(now));
         let (expires_at, _) = effective_expiry(session, settings);
-        if now >= expires_at {
-            return Err(AuthError::SessionExpired);
-        }
-        if let Some(delegated) = &session.delegation
-            && now
-                .checked_add(crate::approval::CLOCK_TOLERANCE)
-                .is_none_or(|now| now < session.last_seen_at || now < delegated.approved_at)
+        if now >= expires_at
+            || delegated.is_some_and(|delegated| {
+                stands_before(now, session.last_seen_at)
+                    || stands_before(now, delegated.approved_at)
+            })
         {
-            // ADR 0038: a clock set back ends a delegated session rather than extending it.
             return Err(AuthError::SessionExpired);
         }
         let (user, _) = Self::holder(view, session.user, Issued::Session(session.generation))?;

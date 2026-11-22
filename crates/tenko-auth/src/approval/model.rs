@@ -12,7 +12,7 @@ use tenko_core::{
 };
 use utoipa::ToSchema;
 
-use super::{CLOCK_TOLERANCE, PENDING_LIFETIME};
+use super::PENDING_LIFETIME;
 use crate::service::SecretString;
 
 /// Approvals by id: what is counted and compared, without the plan.
@@ -241,10 +241,9 @@ pub struct ApprovalRecord {
 
 impl ApprovalRecord {
     /// Whether a pending or approved approval's time is over at `now`: ten minutes after the
-    /// request, or a clock that stands more than [`CLOCK_TOLERANCE`] before the request.
+    /// request, or a clock that stands before the request ([`crate::clock::stands_before`]).
     pub fn expired(&self, now: Timestamp) -> bool {
-        now.checked_add(CLOCK_TOLERANCE)
-            .is_none_or(|now| now < self.created_at)
+        crate::clock::stands_before(now, self.created_at)
             || now.saturating_since(self.created_at) >= PENDING_LIFETIME
     }
 

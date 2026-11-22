@@ -72,7 +72,8 @@ pub struct RevealGrant {
     pub policy: RevealPolicy,
 }
 
-/// Decides TGL-24 for a session: its strength and the age of its authentication.
+/// Decides TGL-24 for a session: its strength and the age of its authentication, which is not
+/// recent on a clock that stands before it ([`crate::clock::stands_before`]).
 ///
 /// # Errors
 ///
@@ -83,7 +84,8 @@ pub fn check_step_up(
     authenticated_at: tenko_core::Timestamp,
     now: tenko_core::Timestamp,
 ) -> Result<(), AuthError> {
-    let fresh = now.saturating_since(authenticated_at) <= FRESH_AUTHENTICATION;
+    let fresh = !crate::clock::stands_before(now, authenticated_at)
+        && now.saturating_since(authenticated_at) <= FRESH_AUTHENTICATION;
     match policy.step_up {
         RevealStepUp::Session => Ok(()),
         RevealStepUp::Fresh if fresh => Ok(()),
@@ -233,6 +235,19 @@ mod tests {
                 required: STEP_UP_FRESH
             })
         );
+    }
+
+    #[test]
+    fn a_sign_in_after_the_clock_is_not_recent() {
+        let policy = RevealPolicy::new(RevealStepUp::Fresh, false);
+        // A clock set back by an hour after the sign-in, and one within the tolerance of it.
+        assert_eq!(
+            check_step_up(policy, AuthStrength::Password, at(3_600), at(0)),
+            Err(AuthError::StepUpRequired {
+                required: STEP_UP_FRESH
+            })
+        );
+        assert!(check_step_up(policy, AuthStrength::Password, at(5), at(0)).is_ok());
     }
 
     #[test]

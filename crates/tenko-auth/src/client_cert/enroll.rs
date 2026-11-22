@@ -324,8 +324,12 @@ impl ClientCerts {
 
     /// Deletes the secrets of expired codes and the records of codes past
     /// [`CODE_KEPT_SECS`]; best effort, after a code is created and from the hourly sweep of
-    /// the integration alarms.
+    /// the integration alarms. Nothing while the clock guard holds issuing
+    /// ([`tenko_core::clock::plausible_now`]), as [`ClientCerts::remove_lapsed_tokens`].
     pub async fn prune_codes(&self, ctx: &RequestCtx) {
+        if tenko_core::clock::plausible_now().is_err() {
+            return;
+        }
         let Ok(view) = self.view().await else { return };
         let Ok(codes) = view.scan_typed(&ENROLLMENT_CODES, KeyRange::all(), usize::MAX, false)
         else {
@@ -407,7 +411,7 @@ impl ClientCerts {
             CodeState::Used { .. } => return Err(ClientCertError::CodeUsed),
             CodeState::Withdrawn => return Err(ClientCertError::CodeInvalid),
         }
-        if ctx.now.0 >= code.expires_at.0 {
+        if ctx.now.0 >= code.expires_at.0 || crate::clock::stands_before(ctx.now, code.created_at) {
             return Err(ClientCertError::CodeExpired);
         }
         let secret_ref = code.secret.ok_or(ClientCertError::CodeInvalid)?;

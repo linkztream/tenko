@@ -689,7 +689,10 @@ impl Ceremonies {
             expires_at,
             pending,
         } = sealed;
-        if expires_at <= now {
+        // An end further ahead than a ceremony lives was sealed before the clock was set back.
+        if expires_at <= now
+            || expires_at.saturating_since(now) > CEREMONY_TTL + tenko_core::clock::TOLERANCE
+        {
             return Err(AuthError::ChallengeInvalid);
         }
         let mut local = self.lock();
@@ -822,7 +825,8 @@ impl Ceremonies {
 /// limit; returns how many. The leader runs it hourly as a leader-only service,
 /// with the leader epoch of its term as `fence` (`tenko_store::fence`), so a deposed
 /// leader's purge fails instead of racing the new leader's. Nothing is proposed when no row
-/// is due.
+/// is due, or while the clock guard holds the clock: a row removed early would let a ceremony
+/// be replayed on another controller.
 ///
 /// # Errors
 ///
@@ -832,6 +836,9 @@ pub async fn purge_used(
     now: Timestamp,
     fence: Option<u64>,
 ) -> Result<usize, StoreError> {
+    if tenko_core::clock::trusted_now().is_err() {
+        return Ok(0);
+    }
     let view = store.read(ReadConsistency::Local).await?;
     let mut expired = Vec::new();
     let mut range = KeyRange::all();
@@ -1257,6 +1264,22 @@ mod tests {
     }
 
     #[test]
+    fn a_ceremony_sealed_before_the_clock_was_set_back_is_refused() {
+        let now = MockClock::fixed().now();
+        let ahead = |secs| {
+            now.checked_add(Duration::from_secs(secs))
+                .expect("in range")
+        };
+        let a = controller(7);
+        // Opened an hour ahead of the clock that now takes it: it would last an hour longer.
+        let id = a.open(second_factor(), ahead(3_600)).expect("open");
+        assert!(refused(&controller(7), &id, now));
+        // Within the tolerance of the clock it still opens.
+        let id = a.open(second_factor(), ahead(5)).expect("open");
+        assert!(controller(7).take(&id, now).is_ok());
+    }
+
+    #[test]
     fn a_replay_on_the_same_controller_is_refused() {
         let clock = MockClock::fixed();
         let a = controller(7);
@@ -1564,6 +1587,23 @@ mod tests {
             "a row is due at its expiry"
         );
         assert_eq!(used_names(&store).await, ["next hour"]);
+    }
+
+    #[tokio::test]
+    async fn a_held_clock_purges_no_used_challenge() {
+        use tenko_core::clock::{Held, Reason, Release, testing};
+        let now = MockClock::fixed().now();
+        let store = MemStore::default();
+        put_used(&store, "expired", Timestamp::UNIX_EPOCH).await;
+        let _held = testing::hold(Held {
+            reason: Reason::Jump,
+            jump_ms: 3_600_000,
+            since: now,
+            release: Release::Wait,
+            until: None,
+        });
+        assert_eq!(purge_used(&store, now, Some(0)).await.expect("purge"), 0);
+        assert_eq!(used_names(&store).await, ["expired"]);
     }
 
     #[tokio::test]

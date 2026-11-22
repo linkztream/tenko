@@ -347,13 +347,13 @@ impl AuthService {
             let replaced = Some(member.id) == renewal.successor
                 && member.last_used_at.is_none()
                 && !member.retired();
-            // Superseded members are kept for reuse detection until they would have expired.
+            // Superseded members are kept for reuse detection until expired on a trusted clock.
             let ended = member
                 .renewal
                 .as_ref()
                 .is_some_and(|r| r.superseded() && r.revoked.is_none())
                 && effective_token_expiry(member.created_at, member.expires_at, &settings)
-                    .is_some_and(|end| end <= ctx.now);
+                    .is_some_and(|end| end <= ctx.now && tenko_core::clock::trusted_now().is_ok());
             if !replaced && !ended {
                 continue;
             }
@@ -961,7 +961,8 @@ impl AuthService {
 
     /// A retired token was presented from inside its prefixes: a superseded or replaced one
     /// revokes its family as reuse (IAM-20); a revoked one, one past its own expiry, and a
-    /// superseded one within [`SUPERSEDED_GRACE`] of its supersede are only refused.
+    /// superseded one within [`SUPERSEDED_GRACE`] of its supersede are only refused, and so is
+    /// every one while the clock guard holds the clock (audited with `clock_held`).
     async fn retired_token_used(
         &self,
         view: Arc<dyn ReadView>,
@@ -983,26 +984,30 @@ impl AuthService {
             return;
         }
         tracing::warn!(token = %record.id, source = ?source_ip, "a superseded token was used");
+        // A clock the guard holds may misjudge the grace: the use is refused and audited, and
+        // the family stays.
+        let held = tenko_core::clock::trusted_now().err();
         let ctx = RequestCtx {
             source_ip,
             ..RequestCtx::system(SystemComponent::Auth).at(now)
         };
         let audit_only = || {
             let mut batch = WriteBatch::new(ctx.principal.clone(), now);
-            batch.audit(Self::reuse_audit(
-                record,
-                RevocationReason::ReuseDetected,
-                &ctx,
-            ));
+            let draft = Self::reuse_audit(record, RevocationReason::ReuseDetected, &ctx);
+            batch.audit(match &held {
+                Some(held) => draft.with_context("clock_held", held.reason.as_str()),
+                None => draft,
+            });
             batch
         };
         let decide = |view: &dyn ReadView| -> Result<_, AuthError> {
             let members = Self::family(view, record.owner, renewal.family)?;
             let mut batch = audit_only();
-            // Another controller revoked the family meanwhile: once is enough.
-            if members
-                .iter()
-                .any(|(_, member, _)| member.renewal.as_ref().is_some_and(|r| r.revoked.is_some()))
+            // Held, or another controller revoked the family meanwhile (once is enough).
+            if held.is_some()
+                || members.iter().any(|(_, member, _)| {
+                    member.renewal.as_ref().is_some_and(|r| r.revoked.is_some())
+                })
             {
                 return Ok((batch, ()));
             }

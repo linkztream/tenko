@@ -276,7 +276,8 @@ impl AuthService {
         Self::live_session(self.view().await?.as_ref(), user_id, session_id)
     }
 
-    /// Checks that `session` authenticated within the last five minutes. A delegated session
+    /// Checks that `session` authenticated within the last five minutes, on a clock that does
+    /// not stand before the sign-in ([`crate::clock::stands_before`]). A delegated session
     /// (ADR 0038) is never fresh: it is refused whatever its age, so no account self-service
     /// operation and no other operation behind a recent sign-in is reached through it.
     pub(super) fn require_fresh(
@@ -286,7 +287,9 @@ impl AuthService {
         if session.delegation.is_some() {
             return Err(AuthError::DelegationRefused);
         }
-        if now.saturating_since(session.authenticated_at) > FRESH_AUTHENTICATION {
+        if crate::clock::stands_before(now, session.authenticated_at)
+            || now.saturating_since(session.authenticated_at) > FRESH_AUTHENTICATION
+        {
             return Err(AuthError::StepUpRequired { required: "fresh" });
         }
         crate::journal::note_fresh_session();

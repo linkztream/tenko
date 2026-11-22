@@ -36,8 +36,9 @@
 //! [`PENDING_LIFETIME`]: a consumed approval once its delegated session can no longer live
 //! ([`crate::delegation::LIFETIME`] after the collect), every other one once its pending time
 //! is over. It removes a row only when this controller's clock stands that far after the
-//! row's time, never on a clock that stands before it. A row that is not consumed is
-//! therefore stored for at most two pending lifetimes (20 minutes), and the requests of any
+//! row's time, never on a clock that stands before it, and nothing while the clock guard
+//! holds ([`tenko_core::clock::trusted_now`]). Outside such a hold, a row that is not consumed
+//! is therefore stored for at most two pending lifetimes (20 minutes), and the requests of any
 //! ten minutes number at most [`MAX_PENDING`] (each still waits at their end unless a person
 //! decided it). Stored, that is at most 2 × 64 = 128 plans of at most 64 KiB, 8 MiB, and
 //! 2 × 2 = 4 of one source; each request a person denies or approves lets one more in for
@@ -46,9 +47,10 @@
 //! of one run per domain bound.
 //!
 //! The times of an approval are stored wall-clock times, because any controller may serve its
-//! steps; a controller whose clock stands more than [`CLOCK_TOLERANCE`] before a stored time
-//! treats the approval as over for its steps, so a clock set back ends it early rather than
-//! extending it.
+//! steps; a controller whose clock stands more than [`tenko_core::clock::TOLERANCE`] before a
+//! stored time treats the approval as over for its steps, and while the clock guard holds
+//! issuing after a step back the steps judge at the clock moved ahead by the step
+//! ([`crate::clock::judged`]), so a clock set back ends it early rather than extending it.
 
 mod code;
 mod model;
@@ -89,10 +91,6 @@ pub const WRONG_CODES: u32 = 5;
 pub const WRONG_CODE_WINDOW: Duration = Duration::from_secs(600);
 /// How long a browser session's lookups stay locked after its fifth wrong code.
 pub const LOOKUP_LOCK: Duration = Duration::from_secs(600);
-/// How far a controller's clock may stand before a stored time of another controller before
-/// the approval or the delegated session counts as over: the clock difference at which the
-/// cluster warns (`cluster.clock_skew`).
-pub const CLOCK_TOLERANCE: Duration = Duration::from_secs(5);
 /// The prefix length that makes one IPv6 source: a host may hold many addresses of its /64.
 pub const IPV6_SOURCE_PREFIX: u8 = 64;
 

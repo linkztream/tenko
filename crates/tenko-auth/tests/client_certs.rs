@@ -1315,3 +1315,47 @@ async fn expired_codes_lose_their_secret_at_the_sweep() {
         .await;
     assert_eq!(env.code_state(code.id).await, (CodeState::Pending, false));
 }
+
+#[tokio::test]
+async fn a_code_on_a_clock_set_back_before_its_creation_is_expired() {
+    let env = Env::new();
+    let account = env.service_account().await;
+    let code = env.code(account.id).await;
+    let back = Timestamp(t0().0 - Duration::hours(1));
+    assert_eq!(
+        env.enroll_at(&code, &key(1), back, "h").await.err(),
+        Some(ClientCertError::CodeExpired)
+    );
+    let within = Timestamp(t0().0 - Duration::seconds(4));
+    assert!(env.enroll_at(&code, &key(1), within, "h").await.is_ok());
+}
+
+#[tokio::test]
+async fn a_clock_that_may_not_issue_removes_no_certificate_and_prunes_no_code() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let env = Env::new();
+    let (account, current) = enrolled(&env).await;
+    let successor = renewed(renew_at(&env, at(21, 0), &current, &key(2)).await);
+    env.certs
+        .note_presented(&ctx(at(21, 1)), &successor)
+        .await
+        .expect("presented");
+    let code = env.code_with(account.id, Some(60), None).await;
+    // Set back by a day and not confirmed: the destruction wait ended, issuing did not.
+    let _held = testing::hold_issuing(Held {
+        reason: Reason::Jump,
+        jump_ms: -86_400_000,
+        since: t0(),
+        release: Release::Person,
+        until: None,
+    });
+    env.certs
+        .remove_lapsed_tokens(at(31, 0))
+        .await
+        .expect("sweep");
+    env.certs
+        .prune_codes(&ctx(Timestamp(t0().0 + Duration::minutes(2))))
+        .await;
+    assert_eq!(env.certs.list(None).await.expect("list").len(), 2);
+    assert_eq!(env.code_state(code.id).await, (CodeState::Pending, true));
+}

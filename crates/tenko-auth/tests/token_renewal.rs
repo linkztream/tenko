@@ -283,6 +283,75 @@ async fn reuse_of_a_superseded_token_revokes_the_family() {
     );
 }
 
+/// A clock held after a forward jump, for the calling test.
+fn held() -> tenko_core::clock::testing::Override {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: tenko_core::Timestamp::UNIX_EPOCH,
+        release: Release::Wait,
+        until: None,
+    })
+}
+
+/// While the clock guard holds the clock, a superseded token used after its grace is refused
+/// and audited, and its family stays.
+#[tokio::test]
+async fn a_held_clock_refuses_a_late_retired_token_without_revoking_the_family() {
+    let fx = fixture().await;
+    let first = fx.token(true, &[]).await;
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    fx.use_token(&second)
+        .await
+        .expect("the first use supersedes");
+    fx.env.clock.advance(Duration::from_secs(61));
+    let _held = held();
+    assert!(unauthenticated(&fx.use_token(&first).await));
+    fx.use_token(&second).await.expect("the family stands");
+    assert_eq!(
+        fx.audited("auth.token.reuse_detected").await,
+        [AuditOutcome::Denied]
+    );
+}
+
+/// While the clock guard holds the clock, a renewal removes no superseded member past its end.
+#[tokio::test]
+async fn a_held_clock_keeps_superseded_members_past_their_end() {
+    let fx = fixture().await;
+    let first = fx
+        .create(TokenRequest {
+            name: "dhcp-report".to_owned(),
+            expires_in_days: Some(1),
+            scopes: vec![TokenScope::Metrics],
+            renewable: true,
+            ..TokenRequest::default()
+        })
+        .await
+        .expect("a token");
+    fx.env.clock.advance(Duration::from_secs(DAY / 2));
+    let second = fx.renew(&first, &secret(&first)).await.expect("renewed");
+    fx.use_token(&second)
+        .await
+        .expect("the first use supersedes");
+    // The first token ended; the second lives half a day more.
+    fx.env.clock.advance(Duration::from_secs(DAY * 3 / 4));
+    let _held = held();
+    fx.renew(&second, &secret(&second))
+        .await
+        .expect("renewed again");
+    let view = fx
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let stored = view
+        .scan_typed(&SCOPED_TOKENS, KeyRange::all(), usize::MAX, false)
+        .expect("scan");
+    assert_eq!(stored.len(), 3, "the ended first token is kept");
+}
+
 /// IAM-20: a superseded renewal secret presented with the current token revokes the family.
 #[tokio::test]
 async fn reuse_of_a_superseded_renewal_secret_revokes_the_family() {

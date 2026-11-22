@@ -18,10 +18,11 @@
 //!
 //! It lives at most [`LIFETIME`] from the approval (or the profile's absolute lifetime, if
 //! shorter) and [`IDLE`] since its last recorded request (or the profile's idle lifetime, if
-//! shorter); a controller whose clock stands more than
-//! [`CLOCK_TOLERANCE`](crate::approval::CLOCK_TOLERANCE) before the session's last recorded
-//! request or its approval ends it, so a clock set back never extends it. It ends too at its
-//! own sign-out, at its revocation in the session list, and when the approver is disabled or
+//! shorter); a controller whose clock stands before the session's last recorded request or
+//! its approval ([`crate::clock::stands_before`]) ends it, and while the clock guard holds
+//! issuing after a step back its times are judged at the clock moved ahead by the step
+//! ([`crate::clock::judged`]), so a step back that either rule sees never extends it. It ends
+//! too at its own sign-out, at its revocation in the session list, and when the approver is disabled or
 //! no longer holds the administrator role.
 //!
 //! A route added to the API later is outside the list until it is listed here, with the plan
@@ -32,7 +33,10 @@ use std::time::Duration;
 use ipnet::IpNet;
 use tenko_core::{Timestamp, auth::Delegated, migrate::plan::TakeoverPlan};
 
-use crate::{approval::CLOCK_TOLERANCE, service::FRESH_AUTHENTICATION};
+use crate::{
+    clock::{judged, stands_before},
+    service::FRESH_AUTHENTICATION,
+};
 
 /// The longest life of a delegated session, from the approval.
 pub const LIFETIME: Duration = Duration::from_secs(8 * 3_600);
@@ -106,11 +110,11 @@ pub fn admits(delegated: &Delegated, method: &str, route: &str, now: Timestamp) 
     })
 }
 
-/// Whether `now` lies within [`MIRROR_WINDOW`] of the approval, on a clock that does not stand
-/// more than [`CLOCK_TOLERANCE`] before it.
+/// Whether `now`, as [`judged`], lies within [`MIRROR_WINDOW`] of the approval, on a clock that
+/// does not stand before it ([`stands_before`]).
 pub fn within_approval(delegated: &Delegated, now: Timestamp) -> bool {
-    now.checked_add(CLOCK_TOLERANCE)
-        .is_some_and(|now| now >= delegated.approved_at)
+    let now = judged(now);
+    !stands_before(now, delegated.approved_at)
         && now.saturating_since(delegated.approved_at) <= MIRROR_WINDOW
 }
 
@@ -181,5 +185,26 @@ mod tests {
         // A clock within the tolerance before the approval, and one set back further.
         assert!(admits(&session, "POST", "/migrate/mirrors", at(996)));
         assert!(!admits(&session, "POST", "/migrate/mirrors", at(994)));
+    }
+
+    #[test]
+    fn a_step_back_of_the_clock_never_lengthens_the_mirror_window() {
+        use tenko_core::clock::{Held, Reason, Release, testing};
+        let session = delegated(at(1_000));
+        let held = |reason, jump_ms| Held {
+            reason,
+            jump_ms,
+            since: at(1_000),
+            release: Release::Person,
+            until: None,
+        };
+        // Set back by four minutes: the clock reads one minute after the approval, five passed.
+        let back = testing::hold_issuing(held(Reason::Jump, -240_000));
+        assert!(!admits(&session, "POST", "/migrate/mirrors", at(1_061)));
+        assert!(admits(&session, "POST", "/migrate/mirrors", at(1_059)));
+        drop(back);
+        // A forward start gap judges as usual.
+        let _gap = testing::hold(held(Reason::StartGap, 240_000));
+        assert!(admits(&session, "POST", "/migrate/mirrors", at(1_061)));
     }
 }

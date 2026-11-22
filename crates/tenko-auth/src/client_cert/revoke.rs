@@ -176,11 +176,17 @@ impl ClientCerts {
     /// decision 7). Also deletes the records of ended certificates past their validity; the
     /// key records stay, so that a key still never enrolls twice. Returns how many tokens
     /// were removed; the expiry alarm calls it every hour and after every change of the index.
+    /// Nothing is removed while the clock guard holds issuing
+    /// ([`tenko_core::clock::plausible_now`]): the clock may still be wrong after the wait for
+    /// destruction ended, and a lapsed lineage never comes back.
     ///
     /// # Errors
     ///
     /// A store error; [`ClientCertError::Conflict`] when a record changed meanwhile.
     pub async fn remove_lapsed_tokens(&self, now: Timestamp) -> Result<usize, ClientCertError> {
+        if tenko_core::clock::plausible_now().is_err() {
+            return Ok(0);
+        }
         // Work found in this copy is decided again at the leader: a lagging copy can miss the
         // renewal that keeps a lineage alive, and a lapsed lineage never comes back, so the
         // leader's view makes the removal final.
