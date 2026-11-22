@@ -515,7 +515,7 @@ impl Writer {
 
     /// Removes segments older than `days`, then the oldest beyond `size_mb`; the open
     /// segment stays. Then the keys of the days no segment holds any more. While the clock
-    /// guard holds the clock only the size removes segments, and every key stays.
+    /// guard holds the clock only the size removes segments.
     pub(crate) fn retention(&mut self) {
         self.last_retention = Some(Instant::now());
         let dir = &self.settings.dir;
@@ -523,11 +523,7 @@ impl Writer {
             return;
         };
         names.sort();
-        let trusted = tenko_core::clock::trusted_now()
-            .inspect_err(|held| {
-                tracing::debug!(?held, "the clock is held: the query log keeps old segments");
-            })
-            .is_ok();
+        let trusted = tenko_core::clock::trusted_now().is_ok();
         let open = self.segment.as_ref().map(|segment| segment.name.as_str());
         let max_age = Duration::from_secs(u64::from(self.settings.days) * 86_400);
         let size_of = |name: &str| fs::metadata(dir.join(name)).map_or(0, |meta| meta.len());
@@ -565,7 +561,7 @@ impl Writer {
             .map_or(today, |micros| {
                 day_of(micros.saturating_sub(LATE_ENTRY_MICROS)).min(today)
             });
-        if trusted && let Err(error) = self.keys.retain_from(oldest) {
+        if let Err(error) = self.keys.retain_from(oldest) {
             self.errors
                 .report("cannot store its pseudonymization keys", &error, dir);
         }

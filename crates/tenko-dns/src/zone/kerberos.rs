@@ -2553,11 +2553,8 @@ impl LeaderLoop {
             return Ok(Due::Recovered);
         }
         // A rotation changes the account's password for good: not by a clock that is held.
-        let rotation = account.owned
-            && account.rotation_days > 0
-            && tenko_core::clock::trusted_now()
-                .inspect_err(|held| tracing::debug!(?held, "the clock is held: no rotation"))
-                .is_ok();
+        let rotation =
+            account.owned && account.rotation_days > 0 && tenko_core::clock::trusted_now().is_ok();
         let since = account
             .last_rotation
             .or_else(|| account.current().map(|v| v.created));

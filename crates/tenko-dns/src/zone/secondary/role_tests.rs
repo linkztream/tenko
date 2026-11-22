@@ -383,13 +383,7 @@ async fn a_held_clock_empties_no_secondary_zone() {
     primary.answer(Answer::Closed);
     let node = lab.node();
     start(&node).await;
-    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
-        reason: tenko_core::clock::Reason::Jump,
-        jump_ms: 60_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: tenko_core::clock::Release::Wait,
-        until: None,
-    });
+    let held = tenko_core::clock::testing::hold_jump(60_000);
     look(&node).await;
     assert_eq!(lab.served().await, Some(7), "kept while held");
     drop(held);

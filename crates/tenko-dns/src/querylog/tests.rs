@@ -434,25 +434,14 @@ fn a_held_clock_deletes_no_old_segment() {
         .open(&old)
         .and_then(|file| file.set_modified(month_ago))
         .expect("the segment's time");
-    let mut keys = keys::Keys::load(dir.path());
-    keys.key_for(day_of(NOW), &mut |error| panic!("{error}"));
-    drop(keys);
     let mut writer = Writer::new(settings(dir.path()));
-    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
-        reason: tenko_core::clock::Reason::Jump,
-        jump_ms: 60_000,
-        since: tenko_core::Timestamp::UNIX_EPOCH,
-        release: tenko_core::clock::Release::Wait,
-        until: None,
-    });
+    let held = tenko_core::clock::testing::hold_jump(60_000);
     writer.retention();
     assert_eq!(
         segments(dir.path()).expect("segments").len(),
         1,
         "kept while held"
     );
-    let kept: Vec<u64> = keys::Keys::load(dir.path()).days().collect();
-    assert_eq!(kept, [day_of(NOW)]);
     drop(held);
     writer.retention();
     assert!(
