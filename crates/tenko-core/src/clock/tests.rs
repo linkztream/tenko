@@ -367,6 +367,43 @@ fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
 }
 
 #[test]
+fn a_restored_forward_hold_is_at_most_the_saved_jump_forward() {
+    let saved = |jump_ms, forward_ms| Saved {
+        last_trusted_at: w0(),
+        held: Some(SavedHold {
+            reason: Reason::Jump,
+            jump_ms,
+            since: w0(),
+            destroy: true,
+            issue: true,
+            forward_ms,
+        }),
+    };
+    // Restarted at once, the clock still as far from the last trusted look as saved.
+    let edited = Sim::new(Some(saved(60_000, i64::MAX)), 60_000);
+    assert_eq!(edited.guard.forward_hold(), Some(Duration::from_secs(60)));
+    let back = Sim::new(Some(saved(-60_000, 60_000)), -60_000);
+    assert_eq!(
+        back.guard.forward_hold(),
+        None,
+        "a step back holds no reuse"
+    );
+}
+
+#[test]
+fn a_jump_waited_out_is_not_brought_back_by_a_restart() {
+    let mut first = Sim::new(None, 0);
+    first.look(1_000, 60_000);
+    assert_eq!(first.look(60_000, 0).trusted(), Ok(()));
+    let saved = first.guard.saved();
+    assert_eq!(saved.held.as_ref().map(|held| held.forward_ms), Some(0));
+    // Off for ten minutes: a start gap holds destruction again, the waited jump stays out.
+    let second = Sim::new(Some(saved), 121_000 + 600_000);
+    assert_eq!(second.guard.trusted().unwrap_err().reason, Reason::StartGap);
+    assert_eq!(second.guard.forward_hold(), None);
+}
+
+#[test]
 fn a_restart_after_the_wait_keeps_destruction_released_and_issuing_held() {
     let mut first = Sim::new(None, 0);
     first.look(1_000, 60_000);

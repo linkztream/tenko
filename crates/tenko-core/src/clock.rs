@@ -245,18 +245,13 @@ impl Guard {
         let (reason, since, jump, destroy, issue, forward_ms) = match saved.held {
             Some(held) => {
                 let jump = i128::from(held.jump_ms) * 1_000_000;
+                // Never more than the saved jump forward, whatever the file says.
+                let forward_ms = held.forward_ms.clamp(0, held.jump_ms.max(0));
                 if held.destroy && jump.unsigned_abs() >= gap.unsigned_abs() {
-                    (
-                        held.reason,
-                        held.since,
-                        jump,
-                        true,
-                        held.issue,
-                        held.forward_ms,
-                    )
+                    (held.reason, held.since, jump, true, held.issue, forward_ms)
                 } else if far {
                     let issue = held.issue || gap < 0;
-                    (Reason::StartGap, wall, gap, true, issue, held.forward_ms)
+                    (Reason::StartGap, wall, gap, true, issue, forward_ms)
                 } else {
                     let destroy = held.destroy;
                     (
@@ -265,7 +260,7 @@ impl Guard {
                         jump,
                         destroy,
                         held.issue,
-                        held.forward_ms,
+                        forward_ms,
                     )
                 }
             }
@@ -275,7 +270,7 @@ impl Guard {
         guard.last_trusted = saved.last_trusted_at;
         let mut hold = Hold::new(reason, since, (offset - jump, jump), (mono, wall), issue);
         hold.destroy = destroy;
-        hold.forward = i128::from(forward_ms.max(0)) * 1_000_000;
+        hold.forward = i128::from(forward_ms) * 1_000_000;
         guard.hold = (destroy || issue).then_some(hold);
         guard
     }
@@ -309,6 +304,8 @@ impl Guard {
                     && before.saturating_duration_since(hold.wait.0).as_nanos() >= hold.need()
                 {
                     hold.destroy = false;
+                    // Waited out: a later restart must not bring it back.
+                    hold.forward = 0;
                     if !hold.issue {
                         self.hold = None;
                     }
