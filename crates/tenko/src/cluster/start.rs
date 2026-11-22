@@ -491,14 +491,13 @@ enum Answer {
     Unreadable(String),
 }
 
-/// How one `Cluster.Members` answer of an old voter reads (section 3.5).
+/// How one `Cluster.Members` answer of an old voter reads (section 3.5). An electing voter
+/// counts as alone: it cannot know whether its election finds a majority, and one that
+/// does answers `healthy` at a later tick of the probe, until its deadline.
 fn answer_of(response: &tenko_cluster::proto::v1::MembersResponse) -> Answer {
     let state = response.quorum.as_str();
     match state {
         "healthy" | "single" => Answer::Alive(state.to_owned()),
-        "electing" if response.in_contact * 2 > response.voters => {
-            Answer::Alive("electing with a majority".to_owned())
-        }
         "electing" | "isolated" | "fenced" => Answer::Alone(state.to_owned()),
         // A binary that does not report its state: a known leader means a live cluster.
         "" if response.leader_id != 0 => {
@@ -790,29 +789,29 @@ mod tests {
         }
     }
 
-    fn answer(quorum: &str, leader: u64, in_contact: u32, voters: u32) -> Answer {
+    /// An answer as a binary sends it: the leader it knows (0 for none) and its state.
+    fn answer(quorum: &str, leader: u64) -> Answer {
         answer_of(&MembersResponse {
             leader_id: leader,
             term: 3,
             members: Vec::new(),
             quorum: quorum.to_owned(),
-            in_contact,
-            voters,
-            applied: None,
+            applied: Some(7),
         })
     }
 
+    /// Only a voter with a leader counts as a live old cluster; an electing one, which
+    /// knows no leader, counts as alone until the probe's deadline.
     #[test]
-    fn an_old_voter_with_a_majority_counts_as_alive() {
-        assert!(matches!(answer("healthy", 1, 3, 3), Answer::Alive(_)));
-        assert!(matches!(answer("single", 1, 0, 1), Answer::Alive(_)));
-        assert!(matches!(answer("electing", 0, 2, 3), Answer::Alive(_)));
-        assert!(matches!(answer("electing", 0, 1, 3), Answer::Alone(_)));
-        assert!(matches!(answer("isolated", 0, 0, 3), Answer::Alone(_)));
-        assert!(matches!(answer("fenced", 0, 0, 3), Answer::Alone(_)));
+    fn an_old_voter_with_a_leader_counts_as_alive() {
+        assert!(matches!(answer("healthy", 1), Answer::Alive(_)));
+        assert!(matches!(answer("single", 1), Answer::Alive(_)));
+        assert!(matches!(answer("electing", 0), Answer::Alone(_)));
+        assert!(matches!(answer("isolated", 0), Answer::Alone(_)));
+        assert!(matches!(answer("fenced", 0), Answer::Alone(_)));
         // A binary that reports no state: a known leader is a live cluster.
-        assert!(matches!(answer("", 4, 0, 0), Answer::Alive(_)));
-        assert!(matches!(answer("", 0, 0, 0), Answer::Unreadable(_)));
-        assert!(matches!(answer("later", 0, 0, 3), Answer::Unreadable(_)));
+        assert!(matches!(answer("", 4), Answer::Alive(_)));
+        assert!(matches!(answer("", 0), Answer::Unreadable(_)));
+        assert!(matches!(answer("later", 0), Answer::Unreadable(_)));
     }
 }

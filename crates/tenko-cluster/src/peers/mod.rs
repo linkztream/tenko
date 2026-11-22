@@ -1120,19 +1120,6 @@ impl Peers {
     pub(crate) async fn members_proto(&self) -> Result<v1::MembersResponse, ClusterError> {
         let view = self.view_local(None).await?;
         let status = self.store().status();
-        let voters = self.store().membership().voters;
-        let heard = status
-            .members
-            .iter()
-            .filter(|member| {
-                member.voter
-                    && member.node != self.local()
-                    && member
-                        .last_contact_ms
-                        .is_some_and(|ms| Duration::from_millis(ms) <= CONTACT_WINDOW)
-            })
-            .count();
-        let in_contact = if heard == 0 { 0 } else { heard + 1 };
         Ok(v1::MembersResponse {
             leader_id: view.leader.map_or(0, |leader| leader.0),
             term: view.term,
@@ -1143,8 +1130,6 @@ impl Peers {
                 .map(member_proto)
                 .collect(),
             quorum: status.quorum.name().to_owned(),
-            in_contact: u32::try_from(in_contact).unwrap_or(u32::MAX),
-            voters: u32::try_from(voters.len()).unwrap_or(u32::MAX),
             applied: self.store().applied_index(),
         })
     }
