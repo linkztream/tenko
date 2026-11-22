@@ -15,7 +15,7 @@ use lease_support::{
 };
 use tenko_core::{
     PrefixId, Principal, SystemComponent, Timestamp, VrfId,
-    clock::{Held, Reason, Release, testing::hold},
+    clock::testing::hold_jump,
     dhcp::{BindingState, DhcpSettings, HistoryRow, LeaseEvent, LeaseEventKind, audit, tables},
 };
 use tenko_dhcp::{
@@ -386,17 +386,6 @@ async fn the_purge_deletes_what_is_older_than_the_retention() {
     assert_eq!(count, 10);
 }
 
-/// A forward jump of a minute, which holds the clock on this thread while its override lives.
-fn jump() -> Held {
-    Held {
-        reason: Reason::Jump,
-        jump_ms: 60_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: Release::Wait,
-        until: None,
-    }
-}
-
 #[tokio::test]
 async fn a_held_clock_expires_no_lease_and_removes_no_move_row_until_the_release() {
     let store = mem_store();
@@ -432,7 +421,7 @@ async fn a_held_clock_expires_no_lease_and_removes_no_move_row_until_the_release
     let service = ExpiryService::new(Arc::clone(&store), NODE, ExpirySettings::default())
         .with_table(leases.clone());
 
-    let held = hold(jump());
+    let held = hold_jump(60_000);
     let round = service.round(0, from_now(86_400)).await.expect("a round");
     assert_eq!(round, ExpiryRound::default(), "nothing is due");
     let found = rows(store.as_ref()).await;
@@ -482,7 +471,7 @@ async fn a_held_clock_purges_no_history() {
         PurgeSettings::default(),
     );
     let now = Timestamp::now();
-    let held = hold(jump());
+    let held = hold_jump(60_000);
     assert_eq!(service.round(0, now).await.expect("a round").purged, 0);
     assert_eq!(rows(store.as_ref()).await.history.len(), 1);
     drop(held);

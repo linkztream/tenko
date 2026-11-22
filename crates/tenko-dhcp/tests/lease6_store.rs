@@ -12,8 +12,9 @@
 //! - `Expiry6Service::round` expires an active binding past its end and an abandoned address
 //!   past its hold, with a history row of kind `expired` each, and nothing while the clock
 //!   guard holds the clock.
-//! - While the guard holds a forward jump, another client's binding counts as held for the
-//!   jump past its end; a clock that stepped back keeps the granted lifetimes.
+//! - While the guard holds a forward jump, another client's binding from before the jump
+//!   counts as held for the jump past its end; after a step back the stored lifetimes are
+//!   the ones the client was told.
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -27,7 +28,7 @@ use std::{
 
 use tenko_core::{
     NodeId, PrefixId, Revision, Timestamp, VrfId,
-    clock::{Held, Reason, Release, testing::hold},
+    clock::testing::hold_jump,
     dhcp::{BindingState, Lease6, Lease6Event, Lease6Kind, LeaseEventKind, tables},
 };
 use tenko_dhcp::{
@@ -926,17 +927,6 @@ async fn the_history_rows_keep_the_link_layer_address_the_row_keeps() {
     task.await.expect("the committer");
 }
 
-/// A forward jump of a minute, which holds the clock on this thread while its override lives.
-fn jump() -> Held {
-    Held {
-        reason: Reason::Jump,
-        jump_ms: 60_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: Release::Wait,
-        until: None,
-    }
-}
-
 #[tokio::test]
 async fn a_held_clock_expires_no_lease6() {
     let store = mem_store();
@@ -947,7 +937,7 @@ async fn a_held_clock_expires_no_lease6() {
     completions(&leases_store, 1, Duration::from_secs(10)).await;
     let service = Expiry6Service::new(Arc::clone(&store), NODE, ExpirySettings::default())
         .with_table(leases.clone());
-    let held = hold(jump());
+    let held = hold_jump(60_000);
     let round = service.round(0, from_now(86_400)).await.expect("a round");
     assert_eq!(round, ExpiryRound::default(), "nothing is due");
     assert_eq!(
@@ -961,32 +951,35 @@ async fn a_held_clock_expires_no_lease6() {
     task.await.expect("the committer");
 }
 
+/// While the clock guard holds a forward jump of a minute, a binding written before the jump
+/// that ended 30 s ago by the wall clock is still held; one written and ended since is not.
 #[test]
-fn a_forward_hold_keeps_another_clients_binding6_for_the_jump() {
+fn a_forward_hold_keeps_another_clients_binding6_from_before_the_jump() {
     let (vrf, scope, now) = (VrfId::generate(), PrefixId::generate(), Timestamp::now());
     let before = |secs| now.checked_sub(Duration::from_secs(secs)).expect("a time");
-    // Client 1's binding ended 30 s ago by the wall clock.
-    let first = grant(1, vrf, scope, addr(30), before(3_630), before(30));
-    let (_, _, rows) = build(&first, NODE, |_| None, before(3_630)).expect("built");
+    let row = |cltt, ends| {
+        let (_, _, rows) = build(
+            &grant(1, vrf, scope, addr(30), cltt, ends),
+            NODE,
+            |_| None,
+            cltt,
+        )
+        .expect("built");
+        rows[0].clone()
+    };
+    let (old, new) = (row(before(3_630), before(30)), row(before(20), before(10)));
     let other = grant(2, vrf, scope, addr(30), now, from_now(3_600));
-    let held = hold(jump());
-    assert!(held_by_other6(
-        &other,
-        &other.bindings()[0],
-        rows.first(),
-        now
-    ));
+    let held_for =
+        |previous: &Lease6| held_by_other6(&other, &other.bindings()[0], Some(previous), now);
+    let held = hold_jump(60_000);
+    assert!(held_for(&old));
+    assert!(!held_for(&new), "written during the hold");
     drop(held);
-    assert!(!held_by_other6(
-        &other,
-        &other.bindings()[0],
-        rows.first(),
-        now
-    ));
+    assert!(!held_for(&old));
 }
 
 #[test]
-fn a_backward_step_keeps_the_granted_lease_time6() {
+fn after_a_backward_step_the_stored_end6_is_the_end_the_client_was_told() {
     let (vrf, scope, now) = (VrfId::generate(), PrefixId::generate(), Timestamp::now());
     let at = |secs| now.checked_add(Duration::from_secs(secs)).expect("a time");
     let (_, _, first) = build(
@@ -1000,10 +993,6 @@ fn a_backward_step_keeps_the_granted_lease_time6() {
     let renewal = grant(1, vrf, scope, addr(31), now, at(3_600));
     let (_, _, rows) = build(&renewal, NODE, |_| first.first(), now).expect("built");
     let row = &rows[0];
-    assert_eq!(row.cltt, at(60));
-    assert_eq!(
-        (row.ends, row.preferred_ends),
-        (at(3_660), at(3_660)),
-        "the hour granted"
-    );
+    assert_eq!(row.cltt, at(60), "never back in client time");
+    assert_eq!((row.ends, row.preferred_ends), (at(3_600), at(3_600)));
 }

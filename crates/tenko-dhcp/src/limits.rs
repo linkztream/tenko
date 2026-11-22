@@ -17,8 +17,9 @@
 //!   conflicts in the last day are fewer than an eighth ([`CONFLICT_SHARE`]) of its pool;
 //!   beyond either the address is only skipped for that offer ([`ConflictBudget`]).
 //! - **The renewal cache** (`renew_cache_percent`). A renewal within that share of its
-//!   lease time, counted from its last commit, is answered from the stored lease for the
-//!   time it has left: no commit and no history row, and never past the committed end.
+//!   lease time, counted from its last commit (or from now, when the clock stepped back
+//!   behind it), is answered from the stored lease for the time it has left: no commit and
+//!   no history row, and never past the committed end.
 //!
 //! Unset limits follow the security profile ([`Limits::of_profile`]); zero turns one off.
 //! Every refusal counts `tenko_dhcp_limited_total{limit}` and goes to the [`LimitLog`]

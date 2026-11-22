@@ -1073,14 +1073,16 @@ fn new_binding_allowed(
 }
 
 /// The time a bound lease has left when a renewal of it may be answered from the stored
-/// row: within `percent` of its lease time counted from its last commit (`cltt`), and no
-/// longer than the server would grant now. The answer never runs past the committed end.
+/// row: within `percent` of its lease time counted from its last commit (`cltt`, or now
+/// when the clock stepped back behind it), and no longer than the server would grant now.
+/// The answer never runs past the committed end.
 fn cached(lease: &LeaseView<'_>, percent: u8, granted: u32, now: Timestamp) -> Option<u32> {
     if percent == 0 {
         return None;
     }
-    let total = lease.ends.saturating_since(lease.cltt).as_secs();
-    let age = now.saturating_since(lease.cltt).as_secs();
+    let start = lease.cltt.min(now);
+    let total = lease.ends.saturating_since(start).as_secs();
+    let age = now.saturating_since(start).as_secs();
     let left = lease.ends.saturating_since(now).as_secs();
     if total == 0 || left == 0 || age.saturating_mul(100) >= u64::from(percent) * total {
         return None;
@@ -1398,5 +1400,45 @@ pub fn destination(
             port: settings.client_port,
         },
         _ => Destination::Broadcast(settings.client_port),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{net::Ipv4Addr, time::Duration};
+
+    use tenko_core::{
+        NodeId, PrefixId, VrfId,
+        dhcp::{BindingState, LeaseEventKind},
+    };
+
+    use super::*;
+    use crate::lease::PendingChange;
+
+    #[test]
+    fn the_renewal_cache_counts_a_client_time_after_now_from_now() {
+        let now = Timestamp::now();
+        let at = |secs| now.checked_add(Duration::from_secs(secs)).expect("a time");
+        let row = |cltt| {
+            PendingChange::new(
+                LeaseEventKind::Renewed,
+                VrfId(uuid::Uuid::nil()),
+                PrefixId::generate(),
+                Ipv4Addr::new(192, 0, 2, 10),
+                1,
+                &[0x00, 0x00, 0x5e, 0x00, 0x53, 0x01],
+                None,
+                BindingState::Active,
+                cltt,
+                at(3_600),
+            )
+            .to_lease(NodeId(1), None)
+        };
+        let cached_at = |cltt, when| cached(&LeaseView::of(&row(cltt)), 25, 3_600, when);
+        // Committed just now with its client time raised to its end after a step back.
+        assert_eq!(cached_at(at(3_600), now), Some(3_600));
+        // An early renewal is answered from the row, a late one commits.
+        assert_eq!(cached_at(now, at(600)), Some(3_000));
+        assert_eq!(cached_at(now, at(1_800)), None);
     }
 }

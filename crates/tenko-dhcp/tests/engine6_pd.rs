@@ -1051,16 +1051,46 @@ fn a_forward_hold_keeps_another_clients_prefix_for_the_jump() {
     world.now = world.table.get(NIL, prefix).expect("row").ends;
     advance(&mut world, 30);
     let solicit = relay1(&pd_message(MessageType::Solicit, &duid_ll(mac(53)), 1, &[]));
-    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
-        reason: tenko_core::clock::Reason::Jump,
-        jump_ms: 60_000,
-        since: tenko_core::Timestamp::UNIX_EPOCH,
-        release: tenko_core::clock::Release::Wait,
-        until: None,
-    });
+    let held = tenko_core::clock::testing::hold_jump(60_000);
     let reply = world.exchange(&solicit).1.expect("advertise");
     assert_eq!(pd_statuses(&reply), vec![Some(status::NO_PREFIX_AVAIL)]);
     drop(held);
     let reply = world.exchange(&solicit).1.expect("advertise");
     assert_eq!(prefixes(&reply)[0].1, prefix);
+}
+
+/// While the clock guard holds a forward jump of a minute, a router whose prefix from before
+/// the jump ended 30 s ago by the wall clock gets it back as its binding.
+#[test]
+fn a_forward_hold_gives_a_router_its_own_prefix_from_before_the_jump() {
+    use tenko_dhcp::v6::engine::{Context6, alloc};
+    let mut world = one_prefix_world();
+    let duid = duid_ll(mac(54));
+    let prefix = delegate(&mut world, &duid, 1, &[]);
+    let row = world.table.get(NIL, prefix).expect("row").clone();
+    world.now = row.ends;
+    advance(&mut world, 30);
+    let ctx = Context6 {
+        image: &world.image,
+        leases: &world.table,
+        offers: &world.offers,
+        settings: &world.settings,
+        guard: &world.guard,
+        server_duid: &SERVER_DUID,
+        accepting: true,
+        now: world.now,
+    };
+    let scope = world.image.v6().scope(row.scope).expect("the scope");
+    let client = alloc::Client {
+        duid: &duid,
+        mac: None,
+    };
+    let source = || {
+        let pick = alloc::pick_pd(&ctx, client, scope, 1, &[], &[]).expect("a prefix");
+        (pick.prefix, pick.source)
+    };
+    let held = tenko_core::clock::testing::hold_jump(60_000);
+    assert_eq!(source(), (prefix, alloc::Source::Lease));
+    drop(held);
+    assert_eq!(source().1, alloc::Source::Pool);
 }

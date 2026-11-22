@@ -97,7 +97,7 @@ fn available(
         }
     }
     if let Some(lease) = ctx.leases.get(scope.vrf, addr)
-        && lease.blocks(reuse_now(ctx.now))
+        && lease.blocks(reuse_now(ctx.now, lease.cltt))
         && (lease.state == BindingState::Abandoned
             || lease.iaid != iaid
             || lease.duid.as_bytes() != client.duid)
@@ -159,7 +159,7 @@ pub fn pick<'a>(
         if let Some(lease) = ctx
             .leases
             .by_client(sibling.prefix, Lease6Kind::Na, identity)
-            && lease.is_bound(ctx.now)
+            && lease.is_bound(reuse_now(ctx.now, lease.cltt))
             && is_free(ctx, sibling, lease.addr6(), client, who, taken)
         {
             return Some(Pick {
@@ -240,7 +240,7 @@ fn prefix_available(
         return false;
     }
     if let Some(lease) = ctx.leases.get(scope.vrf, prefix)
-        && lease.blocks(reuse_now(ctx.now))
+        && lease.blocks(reuse_now(ctx.now, lease.cltt))
         && (lease.state == BindingState::Abandoned
             || lease.kind != Lease6Kind::Pd
             || lease.iaid != iaid
@@ -286,7 +286,7 @@ pub fn pick_pd<'a>(
         if let Some(lease) = ctx
             .leases
             .by_client(sibling.prefix, Lease6Kind::Pd, identity)
-            && lease.is_bound(ctx.now)
+            && lease.is_bound(reuse_now(ctx.now, lease.cltt))
             && let Some(pool) = sibling.pd_pool_of(lease.addr6(), lease.prefix_len)
             && is_free_prefix(
                 ctx,

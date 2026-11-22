@@ -17,7 +17,7 @@ use tenko_core::{PrefixId, Timestamp, dhcp::LeaseTimes};
 
 use crate::{
     image::{ConfigImage, PoolImage, ReservationImage, ScopeImage},
-    lease::{LeaseTable, LeaseView},
+    lease::{LeaseTable, LeaseView, batch::reuse_now},
 };
 
 // WP8.4: the class and policy restrictions on which addresses a client may get.
@@ -162,8 +162,7 @@ impl<'a> Request<'a> {
             return false;
         }
         if self.leases.get(scope.vrf, addr).is_some_and(|lease| {
-            lease.blocks(crate::lease::batch::reuse_now(self.now))
-                && !is_client(&lease, self.identity)
+            lease.blocks(reuse_now(self.now, lease.cltt)) && !is_client(&lease, self.identity)
         }) {
             return false;
         }
@@ -242,7 +241,7 @@ impl Allocator for ReferenceAllocator {
         }
         for scope in image.siblings(request.scope) {
             if let Some(lease) = request.leases.by_client(scope.prefix, request.identity)
-                && lease.is_bound(request.now)
+                && lease.is_bound(reuse_now(request.now, lease.cltt))
                 && request.is_free(scope, lease.addr)
             {
                 return Some(Choice::Lease(lease.addr));

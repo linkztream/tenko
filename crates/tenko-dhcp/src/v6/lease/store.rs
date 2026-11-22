@@ -46,7 +46,7 @@ pub fn held_by_other6(
     let Some(previous) = previous else {
         return false;
     };
-    let now = crate::lease::batch::reuse_now(now);
+    let now = crate::lease::batch::reuse_now(now, previous.cltt);
     if binding.event == LeaseEventKind::Reclaimed || !previous.blocks(now) {
         return false;
     }

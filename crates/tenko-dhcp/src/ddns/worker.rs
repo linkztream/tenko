@@ -179,8 +179,9 @@ pub fn request_of(
         .clone()
         .or_else(|| image.scope(lease.scope).map(|scope| scope.ddns.clone()))
         .unwrap_or_default();
-    let lease_secs =
-        u32::try_from(lease.ends.saturating_since(lease.cltt).as_secs()).unwrap_or(u32::MAX);
+    // A client time after `now` (raised after the clock stepped back) counts from now.
+    let lease_secs = u32::try_from(lease.ends.saturating_since(lease.cltt.min(now)).as_secs())
+        .unwrap_or(u32::MAX);
     DdnsRequest {
         action: if active && policy.enabled {
             DdnsAction::Add
@@ -215,8 +216,9 @@ pub fn request_of6(
         .scope(lease.scope)
         .map(|scope| scope.ddns.clone())
         .unwrap_or_default();
-    let lease_secs =
-        u32::try_from(lease.ends.saturating_since(lease.cltt).as_secs()).unwrap_or(u32::MAX);
+    // A client time after `now` (raised after the clock stepped back) counts from now.
+    let lease_secs = u32::try_from(lease.ends.saturating_since(lease.cltt.min(now)).as_secs())
+        .unwrap_or(u32::MAX);
     DdnsRequest {
         action: if active && policy.enabled {
             DdnsAction::Add
@@ -557,11 +559,7 @@ impl<'a> Worker<'a> {
             }
         };
         let now = Timestamp::now();
-        let trusted = tenko_core::clock::trusted_now()
-            .inspect_err(|held| {
-                tracing::debug!(?held, "the clock is held: active leases keep their names");
-            })
-            .is_ok();
+        let trusted = tenko_core::clock::trusted_now().is_ok();
         let take = self.service.settings.batch.max(1);
         let mut keys = Vec::with_capacity(take);
         while keys.len() < take {
@@ -1018,5 +1016,37 @@ impl tenko_core::cluster::LeaderService for DdnsService {
 
     async fn run(&self, epoch: u64, stop: CancellationToken) -> Result<(), String> {
         Worker::new(self, epoch).run(stop).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::Ipv4Addr;
+
+    use tenko_core::{PrefixId, Revision, dhcp::LeaseEventKind};
+
+    use super::*;
+    use crate::{image::ImageBuilder, lease::PendingChange};
+
+    #[test]
+    fn a_client_time_after_now_gives_the_time_left_as_the_lease_time() {
+        let now = Timestamp::now();
+        let at = |secs| now.checked_add(Duration::from_secs(secs)).expect("a time");
+        // The row's client time was raised a minute past now after the clock stepped back.
+        let lease = PendingChange::new(
+            LeaseEventKind::Renewed,
+            VrfId(uuid::Uuid::nil()),
+            PrefixId::generate(),
+            Ipv4Addr::new(192, 0, 2, 10),
+            1,
+            &[0x00, 0x00, 0x5e, 0x00, 0x53, 0x01],
+            None,
+            BindingState::Active,
+            at(60),
+            at(3_600),
+        )
+        .to_lease(tenko_core::NodeId(1), None);
+        let image = ImageBuilder::new(Revision(1)).build();
+        assert_eq!(request_of(&lease, &image, now, true).lease_secs, 3_600);
     }
 }

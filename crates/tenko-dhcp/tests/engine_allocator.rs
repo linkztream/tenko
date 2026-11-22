@@ -246,10 +246,11 @@ fn the_hashed_order_spreads_clients_and_keeps_each_client_on_its_start() {
     assert!(firsts.len() > 48, "{} distinct starts", firsts.len());
 }
 
-/// While the clock guard holds a forward jump of a minute, an address whose binding ended
-/// 30 s ago by the wall clock goes to no other client; once the hold ends it does.
+/// While the clock guard holds a forward jump of a minute, an address whose binding from
+/// before the jump ended 30 s ago by the wall clock goes to no other client, and its own
+/// client gets it back as its lease; once the hold ends it is free.
 #[test]
-fn a_forward_hold_keeps_another_clients_address_for_the_jump() {
+fn a_forward_hold_keeps_a_binding_from_before_the_jump() {
     let spec = Spec {
         pools: vec![(10, 10)],
         excluded: Vec::new(),
@@ -274,12 +275,12 @@ fn a_forward_hold_keeps_another_clients_address_for_the_jump() {
         )
         .to_lease(NodeId(1), None),
     );
-    let id = identity(2);
+    let (own, other) = (identity(1), identity(2));
     let request = Request {
         image: &image,
         scope,
-        identity: &id,
-        hardware: &id,
+        identity: &other,
+        hardware: &other,
         admission: &AdmitAll,
         requested: Some(addr),
         leases: &table,
@@ -287,22 +288,28 @@ fn a_forward_hold_keeps_another_clients_address_for_the_jump() {
         ownership: &SingleNode,
         now,
     };
-    let held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
-        reason: tenko_core::clock::Reason::Jump,
-        jump_ms: 60_000,
-        since: Timestamp::UNIX_EPOCH,
-        release: tenko_core::clock::Release::Wait,
-        until: None,
-    });
+    let held = tenko_core::clock::testing::hold_jump(60_000);
     assert!(!request.is_free(scope, addr));
     assert_eq!(
         HashedAllocator.pick(&request),
         None,
         "the pool's one address"
     );
+    let returning = Request {
+        identity: &own,
+        hardware: &own,
+        requested: None,
+        ..request
+    };
+    assert_eq!(
+        ReferenceAllocator.pick(&returning),
+        Some(Choice::Lease(addr))
+    );
+    assert_eq!(HashedAllocator.pick(&returning), Some(Choice::Lease(addr)));
     drop(held);
     assert_eq!(
         HashedAllocator.pick(&request),
         Some(Choice::Requested(addr))
     );
+    assert_eq!(HashedAllocator.pick(&returning), Some(Choice::Pool(addr)));
 }
