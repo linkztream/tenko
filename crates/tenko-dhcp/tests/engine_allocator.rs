@@ -248,7 +248,8 @@ fn the_hashed_order_spreads_clients_and_keeps_each_client_on_its_start() {
 
 /// While the clock guard holds a forward jump of a minute, an address whose binding from
 /// before the jump ended 30 s ago by the wall clock goes to no other client, and its own
-/// client gets it back as its lease; once the hold ends it is free.
+/// client gets it back as its lease; once the hold ends it is free, and a binding written
+/// during the hold is free at its end however long the hold lasts.
 #[test]
 fn a_forward_hold_keeps_a_binding_from_before_the_jump() {
     let spec = Spec {
@@ -288,7 +289,7 @@ fn a_forward_hold_keeps_a_binding_from_before_the_jump() {
         ownership: &SingleNode,
         now,
     };
-    let held = tenko_core::clock::testing::hold_jump(60_000);
+    let held = tenko_core::clock::testing::hold_jump(60_000, t0());
     assert!(!request.is_free(scope, addr));
     assert_eq!(
         HashedAllocator.pick(&request),
@@ -309,6 +310,17 @@ fn a_forward_hold_keeps_a_binding_from_before_the_jump() {
     drop(held);
     assert_eq!(
         HashedAllocator.pick(&request),
+        Some(Choice::Requested(addr))
+    );
+    assert_eq!(HashedAllocator.pick(&returning), Some(Choice::Pool(addr)));
+    // The same binding written during a hold that has lasted an hour: it ended by the clock
+    // it was written with, so the address is free for both.
+    let _held = tenko_core::clock::testing::hold_jump(
+        60_000,
+        t0().checked_sub(Duration::from_secs(1)).expect("time"),
+    );
+    assert_eq!(
+        ReferenceAllocator.pick(&request),
         Some(Choice::Requested(addr))
     );
     assert_eq!(HashedAllocator.pick(&returning), Some(Choice::Pool(addr)));

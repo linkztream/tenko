@@ -435,7 +435,7 @@ fn a_held_clock_deletes_no_old_segment() {
         .and_then(|file| file.set_modified(month_ago))
         .expect("the segment's time");
     let mut writer = Writer::new(settings(dir.path()));
-    let held = tenko_core::clock::testing::hold_jump(60_000);
+    let held = tenko_core::clock::testing::hold_jump(60_000, tenko_core::Timestamp::now());
     writer.retention();
     assert_eq!(
         segments(dir.path()).expect("segments").len(),

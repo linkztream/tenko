@@ -25,7 +25,8 @@
 //! [`TOLERANCE`] away from the last trusted time is a hold of that gap ([`Reason::StartGap`]).
 //! A start gap never widens [`forward_hold`], since it is mostly real downtime, and a forward
 //! one holds destruction only, unless issuing was held already. A forward jump made while the
-//! node ran keeps feeding [`forward_hold`] across a restart, by its own saved amount.
+//! node ran keeps feeding [`forward_hold`] across a restart, by its own saved amount and from
+//! the saved last trusted time, which stays the reading before the jump while it is held.
 //!
 //! One guard per process, behind one lock: every call looks. Tests drive [`Guard`] with
 //! synthetic instants; [`testing::hold`] and [`testing::hold_issuing`] hold the clock for the
@@ -34,7 +35,7 @@
 use std::{
     sync::{
         LazyLock, Mutex, PoisonError,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicI64, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -375,12 +376,16 @@ impl Guard {
     }
 
     /// The forward jump that the reuse of another client's address waits out, while a runtime
-    /// jump holds destruction.
-    pub fn forward_hold(&self) -> Option<Duration> {
+    /// jump holds destruction, and the last wall reading trusted before it (never after the
+    /// hold began): what was written at or before it is from before the jump.
+    pub fn forward_hold(&self) -> Option<(Duration, Timestamp)> {
         self.hold
             .as_ref()
             .filter(|hold| hold.destroy && hold.forward > 0)
-            .map(|hold| Duration::from_nanos(u64::try_from(hold.forward).unwrap_or(u64::MAX)))
+            .map(|hold| {
+                let jump = Duration::from_nanos(u64::try_from(hold.forward).unwrap_or(u64::MAX));
+                (jump, self.last_trusted.min(hold.since))
+            })
     }
 
     /// The state to keep across a restart.
@@ -413,16 +418,25 @@ impl Guard {
 static GUARD: LazyLock<Mutex<Guard>> =
     LazyLock::new(|| Mutex::new(Guard::start(None, Instant::now(), Timestamp::now())));
 
-/// [`forward_hold`] in milliseconds, 0 for none.
+/// The jump of [`forward_hold`] in milliseconds, 0 for none.
 static FORWARD_MS: AtomicU64 = AtomicU64::new(0);
+
+/// The trusted reading of [`forward_hold`] in Unix nanoseconds, read only while
+/// [`FORWARD_MS`] is not 0; stored before it.
+static FORWARD_FROM_NS: AtomicI64 = AtomicI64::new(0);
 
 fn with<T>(f: impl FnOnce(&mut Guard) -> T) -> T {
     let mut guard = GUARD.lock().unwrap_or_else(PoisonError::into_inner);
     let out = f(&mut guard);
-    let forward = guard.forward_hold().map_or(0, |hold| {
-        u64::try_from(hold.as_millis()).unwrap_or(u64::MAX)
+    let (ms, from) = guard.forward_hold().map_or((0, 0), |(jump, from)| {
+        (
+            u64::try_from(jump.as_millis()).unwrap_or(u64::MAX),
+            // Out of range reads as late: more is judged from before the jump, never less.
+            i64::try_from(from.unix_nanos()).unwrap_or(i64::MAX),
+        )
     });
-    FORWARD_MS.store(forward, Ordering::Relaxed);
+    FORWARD_FROM_NS.store(from, Ordering::Relaxed);
+    FORWARD_MS.store(ms, Ordering::Release);
     out
 }
 
@@ -472,16 +486,27 @@ pub fn plausible_now() -> Result<Timestamp, Held> {
     })
 }
 
-/// The forward jump during a runtime hold of destruction, by which the reuse of another
-/// client's address is judged earlier; one atomic load.
-pub fn forward_hold() -> Option<Duration> {
+/// The forward jump during a runtime hold of destruction and the last wall reading trusted
+/// before it. A binding whose client time is not later than that reading is from before the
+/// jump, so its end is on the clock before it and its reuse is judged earlier by the jump;
+/// one written since, also in the second before the guard's next look, carries the jumped
+/// clock and is judged as it is. One atomic load, and a second only while a jump is held.
+pub fn forward_hold() -> Option<(Duration, Timestamp)> {
     if let Some((held, destroy)) = testing::current() {
-        return (destroy && held.reason == Reason::Jump && held.jump_ms > 0)
-            .then(|| Duration::from_millis(held.jump_ms.unsigned_abs()));
+        return (destroy && held.reason == Reason::Jump && held.jump_ms > 0).then(|| {
+            (
+                Duration::from_millis(held.jump_ms.unsigned_abs()),
+                held.since,
+            )
+        });
     }
-    match FORWARD_MS.load(Ordering::Relaxed) {
+    match FORWARD_MS.load(Ordering::Acquire) {
         0 => None,
-        ms => Some(Duration::from_millis(ms)),
+        ms => {
+            let from = i128::from(FORWARD_FROM_NS.load(Ordering::Relaxed));
+            let from = Timestamp::from_unix_nanos(from).unwrap_or(Timestamp::UNIX_EPOCH);
+            Some((Duration::from_millis(ms), from))
+        }
     }
 }
 
@@ -523,20 +548,22 @@ pub mod testing {
     }
 
     /// Holds destruction on this thread, and issuing as `held` says (all but a forward start
-    /// gap), until the value is dropped.
+    /// gap), until the value is dropped. A forward `Jump` gives `forward_hold` its `jump_ms`
+    /// and its `since` as the last reading trusted before it.
     #[must_use = "the hold ends when the value is dropped"]
     pub fn hold(held: Held) -> Override {
         set(held, true)
     }
 
     /// Holds destruction and issuing on this thread as a forward jump of `jump_ms` made
-    /// while running does, with its `forward_hold`, until the value is dropped.
+    /// while running does, until the value is dropped; `forward_hold` answers the jump and
+    /// `trusted` as the last reading before it.
     #[must_use = "the hold ends when the value is dropped"]
-    pub fn hold_jump(jump_ms: i64) -> Override {
+    pub fn hold_jump(jump_ms: i64, trusted: Timestamp) -> Override {
         hold(Held {
             reason: Reason::Jump,
             jump_ms,
-            since: Timestamp::UNIX_EPOCH,
+            since: trusted,
             release: Release::Wait,
             until: None,
         })

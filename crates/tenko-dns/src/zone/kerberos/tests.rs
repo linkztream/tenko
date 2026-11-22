@@ -1274,7 +1274,7 @@ async fn a_held_clock_starts_no_rotation_and_keeps_previous_keys() {
     let leader = LeaderLoop::new(Arc::clone(&lab.service), jobs);
     let mut waits = Waits::default();
     lab.clock.advance(31 * 86_400);
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     let due = leader.tick(None, &mut waits).await.expect("tick");
     assert_ne!(due, Due::Rotated);
     assert_eq!(lab.account().await.current().map(|v| v.kvno), Some(2));
@@ -1286,7 +1286,7 @@ async fn a_held_clock_starts_no_rotation_and_keeps_previous_keys() {
     assert_eq!(lab.keys().await.kvnos(), [2, 3]);
     // Past the ticket lifetime the previous version would go; while held it stays.
     lab.clock.advance(13 * 3600);
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     lab.service.rotate(&cx(), None).await.expect("rotate");
     assert_eq!(lab.keys().await.kvnos(), [2, 3, 4]);
     drop(held);
@@ -1309,7 +1309,7 @@ async fn a_held_clock_drops_no_pending_change() {
         s.change = ChangeMode::Normal;
     });
     lab.clock.advance(16 * 60);
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     assert_eq!(
         lab.service.recover(&cx(), None).await.expect("recover"),
         Rotated::Unknown

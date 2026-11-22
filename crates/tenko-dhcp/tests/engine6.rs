@@ -562,44 +562,57 @@ fn two_ias_of_one_client_get_two_addresses_in_one_commit() {
     assert!(bound(&world, offered[0].1, &duid) && bound(&world, offered[1].1, &duid));
 }
 
-/// While the clock guard holds a forward jump of a minute, an address whose binding ended
-/// 30 s ago by the wall clock is offered to no other client; once the hold ends it is.
+/// The client time of the binding at `address`, the wall clock set 30 s past its end.
+fn ended_30_s_ago(world: &mut World6, address: std::net::Ipv6Addr) -> tenko_core::Timestamp {
+    let row = world.table.get(NIL, address).expect("row").clone();
+    world.now = row
+        .ends
+        .checked_add(std::time::Duration::from_secs(30))
+        .expect("later");
+    row.cltt
+}
+
+/// A second before `cltt`: a jump trusted last then holds a binding written at `cltt` as one
+/// written during the hold.
+fn just_before(cltt: tenko_core::Timestamp) -> tenko_core::Timestamp {
+    cltt.checked_sub(std::time::Duration::from_secs(1))
+        .expect("earlier")
+}
+
+/// While the clock guard holds a forward jump of a minute, an address whose binding from
+/// before the jump ended 30 s ago by the wall clock is offered to no other client; once the
+/// hold ends it is, and a binding written during the hold is free at its end however long
+/// the hold has lasted.
 #[test]
 fn a_forward_hold_keeps_another_clients_address_for_the_jump6() {
     let mut world = World6::new();
     let address = lease(&mut world, &duid_ll(mac(9)), 1);
-    world.now = world
-        .table
-        .get(NIL, address)
-        .expect("row")
-        .ends
-        .checked_add(std::time::Duration::from_secs(30))
-        .expect("later");
+    let cltt = ended_30_s_ago(&mut world, address);
     let hinted = relay1(&message(MessageType::Solicit, 0x00_9abc, |b| {
         client_options(b, &duid_ll(mac(10)));
         ia_na(b, 1, Some(address));
     }));
-    let held = tenko_core::clock::testing::hold_jump(60_000);
-    let offered = addresses(&world.exchange(&hinted).1.expect("advertise"))[0].1;
-    assert_ne!(offered, address);
+    let offered =
+        |world: &mut World6| addresses(&world.exchange(&hinted).1.expect("advertise"))[0].1;
+    let held = tenko_core::clock::testing::hold_jump(60_000, cltt);
+    assert_ne!(offered(&mut world), address);
     drop(held);
-    let offered = addresses(&world.exchange(&hinted).1.expect("advertise"))[0].1;
-    assert_eq!(offered, address);
+    assert_eq!(offered(&mut world), address);
+    let _held = tenko_core::clock::testing::hold_jump(60_000, just_before(cltt));
+    assert_eq!(offered(&mut world), address, "written during the hold");
 }
 
 /// While the clock guard holds a forward jump of a minute, a client whose binding from
-/// before the jump ended 30 s ago by the wall clock gets it back as its lease.
+/// before the jump ended 30 s ago by the wall clock gets it back as its lease; one written
+/// during the hold has ended.
 #[test]
 fn a_forward_hold_gives_a_client_its_own_binding6_from_before_the_jump() {
     use tenko_dhcp::v6::engine::{Context6, alloc};
     let mut world = World6::new();
     let duid = duid_ll(mac(11));
     let address = lease(&mut world, &duid, 1);
+    let cltt = ended_30_s_ago(&mut world, address);
     let row = world.table.get(NIL, address).expect("row").clone();
-    world.now = row
-        .ends
-        .checked_add(std::time::Duration::from_secs(30))
-        .expect("later");
     let ctx = Context6 {
         image: &world.image,
         leases: &world.table,
@@ -619,8 +632,10 @@ fn a_forward_hold_gives_a_client_its_own_binding6_from_before_the_jump() {
         let pick = alloc::pick(&ctx, client, scope, 1, &[], &[]).expect("an address");
         (pick.addr, pick.source)
     };
-    let held = tenko_core::clock::testing::hold_jump(60_000);
+    let held = tenko_core::clock::testing::hold_jump(60_000, cltt);
     assert_eq!(source(), (address, alloc::Source::Lease));
     drop(held);
     assert_eq!(source().1, alloc::Source::Pool);
+    let _held = tenko_core::clock::testing::hold_jump(60_000, just_before(cltt));
+    assert_eq!(source().1, alloc::Source::Pool, "written during the hold");
 }

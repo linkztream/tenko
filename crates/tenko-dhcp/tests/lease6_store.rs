@@ -937,7 +937,7 @@ async fn a_held_clock_expires_no_lease6() {
     completions(&leases_store, 1, Duration::from_secs(10)).await;
     let service = Expiry6Service::new(Arc::clone(&store), NODE, ExpirySettings::default())
         .with_table(leases.clone());
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     let round = service.round(0, from_now(86_400)).await.expect("a round");
     assert_eq!(round, ExpiryRound::default(), "nothing is due");
     assert_eq!(
@@ -951,8 +951,9 @@ async fn a_held_clock_expires_no_lease6() {
     task.await.expect("the committer");
 }
 
-/// While the clock guard holds a forward jump of a minute, a binding written before the jump
-/// that ended 30 s ago by the wall clock is still held; one written and ended since is not.
+/// While the clock guard holds a forward jump of a minute, trusted last 200 s ago, a binding
+/// written before the jump that ended 30 s ago by the wall clock is still held; one written
+/// 150 s ago, during the hold, and ended since is not.
 #[test]
 fn a_forward_hold_keeps_another_clients_binding6_from_before_the_jump() {
     let (vrf, scope, now) = (VrfId::generate(), PrefixId::generate(), Timestamp::now());
@@ -967,11 +968,11 @@ fn a_forward_hold_keeps_another_clients_binding6_from_before_the_jump() {
         .expect("built");
         rows[0].clone()
     };
-    let (old, new) = (row(before(3_630), before(30)), row(before(20), before(10)));
+    let (old, new) = (row(before(3_630), before(30)), row(before(150), before(10)));
     let other = grant(2, vrf, scope, addr(30), now, from_now(3_600));
     let held_for =
         |previous: &Lease6| held_by_other6(&other, &other.bindings()[0], Some(previous), now);
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, before(200));
     assert!(held_for(&old));
     assert!(!held_for(&new), "written during the hold");
     drop(held);

@@ -1042,34 +1042,53 @@ fn a_message_with_a_malformed_ia_pd_is_dropped() {
     assert_eq!(world.rows(), 0);
 }
 
-/// While the clock guard holds a forward jump of a minute, a prefix whose binding ended 30 s
-/// ago by the wall clock goes to no other client; once the hold ends it does.
+/// The client time of the binding at `prefix`, the wall clock set 30 s past its end.
+fn ended_30_s_ago(world: &mut World6, prefix: Ipv6Addr) -> tenko_core::Timestamp {
+    let row = world.table.get(NIL, prefix).expect("row").clone();
+    world.now = row.ends;
+    advance(world, 30);
+    row.cltt
+}
+
+/// A second before `cltt`: a jump trusted last then holds a binding written at `cltt` as one
+/// written during the hold.
+fn just_before(cltt: tenko_core::Timestamp) -> tenko_core::Timestamp {
+    cltt.checked_sub(std::time::Duration::from_secs(1))
+        .expect("earlier")
+}
+
+/// While the clock guard holds a forward jump of a minute, a prefix whose binding from before
+/// the jump ended 30 s ago by the wall clock goes to no other client; once the hold ends it
+/// does, and a binding written during the hold is free at its end however long the hold has
+/// lasted.
 #[test]
 fn a_forward_hold_keeps_another_clients_prefix_for_the_jump() {
     let mut world = one_prefix_world();
     let prefix = delegate(&mut world, &duid_ll(mac(52)), 1, &[]);
-    world.now = world.table.get(NIL, prefix).expect("row").ends;
-    advance(&mut world, 30);
+    let cltt = ended_30_s_ago(&mut world, prefix);
     let solicit = relay1(&pd_message(MessageType::Solicit, &duid_ll(mac(53)), 1, &[]));
-    let held = tenko_core::clock::testing::hold_jump(60_000);
+    let held = tenko_core::clock::testing::hold_jump(60_000, cltt);
     let reply = world.exchange(&solicit).1.expect("advertise");
     assert_eq!(pd_statuses(&reply), vec![Some(status::NO_PREFIX_AVAIL)]);
     drop(held);
     let reply = world.exchange(&solicit).1.expect("advertise");
     assert_eq!(prefixes(&reply)[0].1, prefix);
+    let _held = tenko_core::clock::testing::hold_jump(60_000, just_before(cltt));
+    let reply = world.exchange(&solicit).1.expect("advertise");
+    assert_eq!(prefixes(&reply)[0].1, prefix, "written during the hold");
 }
 
 /// While the clock guard holds a forward jump of a minute, a router whose prefix from before
-/// the jump ended 30 s ago by the wall clock gets it back as its binding.
+/// the jump ended 30 s ago by the wall clock gets it back as its binding; one written during
+/// the hold has ended.
 #[test]
 fn a_forward_hold_gives_a_router_its_own_prefix_from_before_the_jump() {
     use tenko_dhcp::v6::engine::{Context6, alloc};
     let mut world = one_prefix_world();
     let duid = duid_ll(mac(54));
     let prefix = delegate(&mut world, &duid, 1, &[]);
+    let cltt = ended_30_s_ago(&mut world, prefix);
     let row = world.table.get(NIL, prefix).expect("row").clone();
-    world.now = row.ends;
-    advance(&mut world, 30);
     let ctx = Context6 {
         image: &world.image,
         leases: &world.table,
@@ -1089,8 +1108,10 @@ fn a_forward_hold_gives_a_router_its_own_prefix_from_before_the_jump() {
         let pick = alloc::pick_pd(&ctx, client, scope, 1, &[], &[]).expect("a prefix");
         (pick.prefix, pick.source)
     };
-    let held = tenko_core::clock::testing::hold_jump(60_000);
+    let held = tenko_core::clock::testing::hold_jump(60_000, cltt);
     assert_eq!(source(), (prefix, alloc::Source::Lease));
     drop(held);
     assert_eq!(source().1, alloc::Source::Pool);
+    let _held = tenko_core::clock::testing::hold_jump(60_000, just_before(cltt));
+    assert_eq!(source().1, alloc::Source::Pool, "written during the hold");
 }

@@ -421,7 +421,7 @@ async fn a_held_clock_expires_no_lease_and_removes_no_move_row_until_the_release
     let service = ExpiryService::new(Arc::clone(&store), NODE, ExpirySettings::default())
         .with_table(leases.clone());
 
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     let round = service.round(0, from_now(86_400)).await.expect("a round");
     assert_eq!(round, ExpiryRound::default(), "nothing is due");
     let found = rows(store.as_ref()).await;
@@ -471,7 +471,7 @@ async fn a_held_clock_purges_no_history() {
         PurgeSettings::default(),
     );
     let now = Timestamp::now();
-    let held = hold_jump(60_000);
+    let held = hold_jump(60_000, Timestamp::now());
     assert_eq!(service.round(0, now).await.expect("a round").purged, 0);
     assert_eq!(rows(store.as_ref()).await.history.len(), 1);
     drop(held);

@@ -465,7 +465,7 @@ async fn names_come_on_ack_and_go_on_release_and_expiry() {
 #[tokio::test]
 async fn a_held_clock_keeps_the_name_of_an_active_lease_past_its_end_and_a_release_removes_it() {
     let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
-    let _held = tenko_core::clock::testing::hold_jump(60_000);
+    let _held = tenko_core::clock::testing::hold_jump(60_000, Timestamp::now());
     let mut ended = lab.lease(60, 1, None, Some("sensor"));
     ended.ends = ended
         .cltt

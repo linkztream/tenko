@@ -102,16 +102,18 @@ pub fn put_history(
 }
 
 /// The time by which a binding of client time `cltt` is judged at `now`. A binding written
-/// before the forward jump the clock guard holds (`tenko_core::clock::forward_hold`) ends
-/// by the clock before the jump, so it is judged that much earlier and the jump ends it no
-/// sooner; a binding written since is judged at `now`. A time out of range reads as the
-/// Unix epoch.
+/// before the forward jump the clock guard holds (`tenko_core::clock::forward_hold`: its
+/// client time is not later than the last reading trusted before the jump) ends by the
+/// clock before the jump, so it is judged that much earlier and the jump ends it no sooner.
+/// A binding written since carries the jumped clock and is judged at `now`, however long
+/// the hold lasts. A time out of range reads as the Unix epoch.
 pub(crate) fn reuse_now(now: Timestamp, cltt: Timestamp) -> Timestamp {
-    let Some(jump) = tenko_core::clock::forward_hold() else {
-        return now;
-    };
-    let before = now.checked_sub(jump).unwrap_or(Timestamp::UNIX_EPOCH);
-    if cltt <= before { before } else { now }
+    match tenko_core::clock::forward_hold() {
+        Some((jump, trusted)) if cltt <= trusted => {
+            now.checked_sub(jump).unwrap_or(Timestamp::UNIX_EPOCH)
+        }
+        _ => now,
+    }
 }
 
 /// Whether `previous` stops `change`: another client's binding (or abandoned address) that
@@ -225,13 +227,14 @@ mod tests {
     #[test]
     fn a_forward_hold_keeps_another_clients_address_from_before_the_jump() {
         let (scope, now) = (PrefixId::generate(), Timestamp::now());
-        // Client 1's bindings ended 30 s and 10 s ago by the wall clock: one written before a
-        // jump of a minute, one written since.
+        // A jump of a minute whose last trusted reading was 200 s ago: the hold has lasted
+        // more than twice the jump. Client 1's bindings ended 30 s and 10 s ago by the wall
+        // clock: one written before the jump, one written 150 s ago, during the hold.
         let row =
             |cltt, ends| change(scope, 1, at(now, cltt), at(now, ends)).to_lease(NodeId(1), None);
-        let (old, new) = (row(-3_630, -30), row(-20, -10));
+        let (old, new) = (row(-3_630, -30), row(-150, -10));
         let other = change(scope, 2, now, at(now, 3_600));
-        let jump = hold_jump(60_000);
+        let jump = hold_jump(60_000, at(now, -200));
         assert!(held_by_other(&other, Some(&old), now));
         assert!(
             !held_by_other(&other, Some(&new), now),
@@ -240,7 +243,7 @@ mod tests {
         drop(jump);
         assert!(!held_by_other(&other, Some(&old), now));
         // Any amount: the time saturates instead of wrapping or panicking.
-        let _far = hold_jump(i64::MAX);
+        let _far = hold_jump(i64::MAX, now);
         assert_eq!(reuse_now(now, Timestamp::UNIX_EPOCH), Timestamp::UNIX_EPOCH);
     }
 

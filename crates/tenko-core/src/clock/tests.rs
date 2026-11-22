@@ -58,7 +58,10 @@ fn a_step_over_five_seconds_holds() {
         (held.reason, held.jump_ms, held.release),
         (Reason::Jump, 6_000, Release::Wait)
     );
-    assert_eq!(sim.guard.forward_hold(), Some(Duration::from_secs(6)));
+    assert_eq!(
+        sim.guard.forward_hold(),
+        Some((Duration::from_secs(6), w0()))
+    );
     assert_eq!(sim.guard.plausible().unwrap_err().release, Release::Person);
 
     let mut back = Sim::new(None, 0);
@@ -306,7 +309,10 @@ fn a_saved_hold_survives_a_restart_and_waits_again() {
     let mut second = Sim::new(Some(saved), 60_000);
     let held = second.guard.trusted().unwrap_err();
     assert_eq!((held.reason, held.jump_ms), (Reason::Jump, 60_000));
-    assert_eq!(second.guard.forward_hold(), Some(Duration::from_secs(60)));
+    assert_eq!(
+        second.guard.forward_hold(),
+        Some((Duration::from_secs(60), w0()))
+    );
     assert_eq!(
         second.look(59_000, 0).trusted().unwrap_err().release,
         Release::Wait
@@ -326,7 +332,10 @@ fn a_restart_during_a_forward_hold_keeps_forward_hold_at_the_saved_jump() {
         (held.reason, held.jump_ms, held.release),
         (Reason::StartGap, 91_000, Release::Wait)
     );
-    assert_eq!(second.guard.forward_hold(), Some(Duration::from_secs(60)));
+    assert_eq!(
+        second.guard.forward_hold(),
+        Some((Duration::from_secs(60), w0()))
+    );
     assert_eq!(
         second.guard.plausible().unwrap_err().reason,
         Reason::StartGap
@@ -356,7 +365,7 @@ fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
     );
     assert_eq!(
         second.guard.forward_hold(),
-        Some(Duration::from_secs(60)),
+        Some((Duration::from_secs(60), w0())),
         "the saved jump alone, never the week"
     );
     assert_eq!(
@@ -381,12 +390,44 @@ fn a_restored_forward_hold_is_at_most_the_saved_jump_forward() {
     };
     // Restarted at once, the clock still as far from the last trusted look as saved.
     let edited = Sim::new(Some(saved(60_000, i64::MAX)), 60_000);
-    assert_eq!(edited.guard.forward_hold(), Some(Duration::from_secs(60)));
+    assert_eq!(
+        edited.guard.forward_hold(),
+        Some((Duration::from_secs(60), w0()))
+    );
     let back = Sim::new(Some(saved(-60_000, 60_000)), -60_000);
     assert_eq!(
         back.guard.forward_hold(),
         None,
         "a step back holds no reuse"
+    );
+}
+
+#[test]
+fn the_forward_hold_counts_from_the_last_trusted_look_also_across_a_restart() {
+    let mut first = Sim::new(None, 0);
+    first.look(1_000, 0);
+    // A jump that waits for a person, from the trusted look at second 1.
+    let jump_ms = DAY_MS + 60_000;
+    first.look(1_000, jump_ms);
+    let since = at(2_000 + jump_ms);
+    let reading = Some((Duration::from_millis(jump_ms.unsigned_abs()), at(1_000)));
+    assert_eq!(first.guard.forward_hold(), reading);
+    first.look(3 * DAY_MS, 0);
+    assert_eq!(
+        first.guard.forward_hold(),
+        reading,
+        "a hold longer than its jump"
+    );
+    // Restarted: from the saved last trusted time, with the forward amount.
+    let second = Sim::new(Some(first.guard.saved()), first.wall_ms + 10_000);
+    assert_eq!(second.guard.forward_hold(), reading);
+    // A file whose last trusted time lies after the hold began reads as the hold's start.
+    let mut edited = first.guard.saved();
+    edited.last_trusted_at = at(first.wall_ms + 5_000);
+    let third = Sim::new(Some(edited), first.wall_ms + 10_000);
+    assert_eq!(
+        third.guard.forward_hold().map(|(_, from)| from),
+        Some(since)
     );
 }
 
@@ -507,7 +548,7 @@ fn the_test_override_is_per_thread() {
     };
     let jump = testing::hold(held.clone());
     assert_eq!(trusted_now(), Err(held.clone()));
-    assert_eq!(forward_hold(), Some(Duration::from_secs(3_600)));
+    assert_eq!(forward_hold(), Some((Duration::from_secs(3_600), w0())));
     let other = std::thread::spawn(|| (trusted_now().is_ok(), forward_hold()))
         .join()
         .expect("the other thread");
