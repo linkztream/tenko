@@ -100,7 +100,7 @@ When the controller is in contact with a quorum again, it catches up (it reads t
 4. **Unchanged:** the plan applies as one inline job on the author's behalf. Its audit records name the principal `system:ipam` acting for the author and carry the context `queued_change`, `queued_at`, `queued_on` (the controller) and `original_session`. The item is applied under the idempotency key `queue-<id>`, so a drain interrupted after the commit never applies it twice.
 5. **Anything else:** the item is not applied and becomes a conflict with the reason: `queue.plan_changed` with both plans, the planner's error (for example `ipam.address.duplicate` or `ipam.revision_mismatch`), or the authorization error (`auth.forbidden`, `auth.out_of_scope`). An item that expired before the heal becomes `expired` (`queue.expired`).
 
-A store error that says "not now" (the quorum lost again, a timeout) stops the drain and leaves the rest queued for the next attempt.
+A store error that says "not now" (the quorum lost again, a timeout) stops the drain and leaves the rest queued for the next attempt. So does a held clock (finding `sys.clock.jumped` or `sys.clock.held`): it cannot tell an expired item from a live one, so the drain stops at the next item, applies and expires nothing from there on, and goes on once the clock is trusted.
 
 Nothing applies silently: every settled item, applied ones included, becomes a record in the table `ipam.queued_changes`, which replicates like every IPAM table. Its author lists them on any controller:
 

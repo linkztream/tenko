@@ -448,6 +448,32 @@ async fn proposals_are_superseded_when_evidence_changes_and_expire_when_it_goes(
 }
 
 #[tokio::test]
+async fn a_held_clock_expires_no_proposal() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let world = lab().await;
+    let tv = vm("1", Some("tv"), Some("00:00:5e:00:53:61"), &["192.0.2.61"]);
+    world.poll(vec![tv], at("13:00")).await;
+    world.reconcile(at("13:01")).await;
+    world.poll(Vec::new(), at("13:10")).await;
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: at("13:11"),
+        release: Release::Wait,
+        until: None,
+    });
+    let report = world.reconcile(at("13:11")).await;
+    assert_eq!(report.expired, 0, "{report:?}");
+    assert_eq!(
+        world.open(IntentProposalKind::DiscoveredHost).await.len(),
+        1
+    );
+    drop(held);
+    let report = world.reconcile(at("13:12")).await;
+    assert_eq!(report.expired, 1, "{report:?}");
+}
+
+#[tokio::test]
 async fn an_address_unseen_for_the_orphan_age_is_proposed_for_deprecation() {
     let world = lab().await;
     let nas = intended(

@@ -660,6 +660,47 @@ async fn an_expired_item_becomes_an_expired_record() {
 }
 
 #[tokio::test]
+async fn a_held_clock_expires_no_queued_change() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let world = World::new().await;
+    let mut item = world
+        .item(
+            1,
+            SummaryAction::Update,
+            vec![describe(world.address, "too late")],
+        )
+        .await;
+    item.expires_at =
+        Timestamp::from_unix_nanos(item.queued_at.unix_nanos() - 3_600_000_000_000).expect("past");
+    world.queue.add(&item).expect("add");
+    let live = world
+        .item(
+            2,
+            SummaryAction::Update,
+            vec![describe(world.address, "later")],
+        )
+        .await;
+    world.queue.add(&live).expect("add");
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 7_200_000,
+        since: item.queued_at,
+        release: Release::Wait,
+        until: None,
+    });
+    let report = world.drainer(None).drain().await.expect("drain");
+    assert_eq!((report.expired, report.applied), (no_ids(), no_ids()));
+    assert!(report.interrupted);
+    assert!(!world.queue.is_empty().expect("queued"));
+    drop(held);
+    let report = world.drainer(None).drain().await.expect("drain");
+    assert_eq!(
+        (report.expired, report.applied),
+        (vec![item.id], vec![live.id])
+    );
+}
+
+#[tokio::test]
 async fn an_item_replayed_after_a_crash_is_not_applied_twice() {
     let world = World::new().await;
     let item = world

@@ -338,7 +338,8 @@ impl ImportService {
         Ok(self.ipam.store().read(consistency).await?)
     }
 
-    /// Loads a session the caller may see; expired sessions are removed and reported.
+    /// Loads a session the caller may see; expired sessions are reported, and removed unless
+    /// the clock guard holds destruction.
     async fn session(
         &self,
         cx: &RequestCtx,
@@ -352,9 +353,11 @@ impl ImportService {
             return Err(not_found(id));
         }
         if session.expires < cx.now {
-            let _ = self
-                .remove(cx, &session, Some(revision), "import.expire", None)
-                .await;
+            if tenko_core::clock::trusted_now().is_ok() {
+                let _ = self
+                    .remove(cx, &session, Some(revision), "import.expire", None)
+                    .await;
+            }
             return Err(IpamError::new(
                 codes::EXPIRED,
                 410,
@@ -700,13 +703,22 @@ impl ImportService {
     /// The store part of the purge: removes expired sessions with their stash, and the
     /// stash of imports that have no session (see [`Stash::purge_orphans`]); returns how
     /// many sessions were removed. The leader runs it with the epoch of its term as
-    /// `fence`, so a deposed leader's purge fails instead of racing the new leader's.
+    /// `fence`, so a deposed leader's purge fails instead of racing the new leader's. It
+    /// removes nothing while the clock guard holds destruction.
     ///
     /// # Errors
     ///
     /// Store errors, the precondition failure of a fenced batch among them.
     pub async fn purge_store(&self, fence: Option<u64>) -> IpamResult<usize> {
-        let cx = RequestCtx::system(tenko_core::SystemComponent::Import);
+        let now = match tenko_core::clock::trusted_now() {
+            Ok(now) => now,
+            Err(held) => {
+                tracing::debug!(?held, "the import purge waits for a trusted clock");
+                return Ok(0);
+            }
+        };
+        let mut cx = RequestCtx::system(tenko_core::SystemComponent::Import);
+        cx.now = now;
         let view = self.view_at(ReadConsistency::Local).await?;
         let sessions =
             view.scan_typed(&SESSIONS, tenko_store::KeyRange::all(), usize::MAX, false)?;

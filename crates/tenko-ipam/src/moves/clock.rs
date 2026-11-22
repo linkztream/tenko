@@ -137,14 +137,19 @@ impl MoveClock {
         Arc::new(ClockService(Arc::clone(self)))
     }
 
-    /// One round at `now`; with `epoch`, the clock's own writes carry the leader fence.
+    /// One round at `now`; with `epoch`, the clock's own writes carry the leader fence. An
+    /// empty round while the clock guard holds destruction.
     ///
     /// # Errors
     ///
     /// A store error of the reads; a step another actor moved on meanwhile is skipped.
     pub async fn tick(&self, now: Timestamp, epoch: Option<u64>) -> IpamResult<ClockRound> {
-        let view = self.store.read(ReadConsistency::Local).await?;
         let mut round = ClockRound::default();
+        if let Err(held) = tenko_core::clock::trusted_now() {
+            tracing::debug!(?held, "the move clock waits for a trusted clock");
+            return Ok(round);
+        }
+        let view = self.store.read(ReadConsistency::Local).await?;
         if !crate::reconcile::moves::any_waiting(view.as_ref())? {
             return Ok(round);
         }

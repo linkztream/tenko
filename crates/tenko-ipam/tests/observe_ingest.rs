@@ -299,6 +299,48 @@ async fn retention_purges_old_facts_with_their_index_rows_and_stale_sightings() 
     assert!(view.get_typed(&LAST_SEEN, &gone).expect("read").is_none());
 }
 
+#[tokio::test]
+async fn a_held_clock_purges_no_fact() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let store: Arc<dyn Store> = Arc::new(MemStore::default());
+    let config = ObserveConfig {
+        retention: Duration::from_secs(24 * 3600),
+        ..ObserveConfig::default()
+    };
+    let connector = ConnectorId::generate();
+    observe::ingest(
+        &store,
+        &batch(
+            connector,
+            vec![host("101", "192.0.2.10", at("08:00"), connector)],
+            at("08:00"),
+        ),
+        &config,
+    )
+    .await
+    .expect("ingest");
+    let later = at("08:00")
+        .checked_add(Duration::from_secs(25 * 3600))
+        .expect("time");
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 25 * 3_600_000,
+        since: later,
+        release: Release::Person,
+        until: None,
+    });
+    let purged = observe::retention::purge(&store, &config, later)
+        .await
+        .expect("purge");
+    assert_eq!(purged, 0);
+    assert_eq!(facts(&store).await.len(), 1);
+    drop(held);
+    let purged = observe::retention::purge(&store, &config, later)
+        .await
+        .expect("purge");
+    assert_eq!(purged, 1);
+}
+
 // ADR 0031: the lease tables are the source `dhcp:<node>`; the ingest writes no fact row of
 // it, the stored facts of it (written by a version before) are never read.
 

@@ -691,11 +691,16 @@ impl Stash {
     /// (an upload that failed before its session was written, a session removed by an
     /// older release) once its key is older than [`ORPHAN_GRACE`], one fenced batch per
     /// import; returns how many. The leader runs it with the epoch of its term as `fence`.
+    /// Nothing is removed while the clock guard holds destruction.
     ///
     /// # Errors
     ///
     /// The store's errors, the precondition failure of a fenced batch among them.
     pub async fn purge_orphans(&self, now: Timestamp, fence: Option<u64>) -> IpamResult<usize> {
+        if let Err(held) = tenko_core::clock::trusted_now() {
+            tracing::debug!(?held, "the orphan stash purge waits for a trusted clock");
+            return Ok(0);
+        }
         let cx = RequestCtx::system(SystemComponent::Import);
         let view = self.store.read(ReadConsistency::Local).await?;
         let keys = view.scan_typed(&STASH_KEYS, KeyRange::all(), usize::MAX, false)?;
@@ -887,5 +892,27 @@ mod tests {
         assert!(error.is("sys.store.precondition_failed"), "{error}");
         assert_eq!(stash.purge_orphans(later, Some(0)).await.expect("purge"), 1);
         assert_eq!(raw_chunks(&store).await.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_held_clock_purges_no_orphan_stash() {
+        use tenko_core::clock::{Held, Reason, Release, testing};
+        let (store, stash) = stash();
+        let id = ImportId::generate();
+        stash.write(&cx(), id, 0, b"x").await.expect("write");
+        let later = Timestamp::now()
+            .checked_add(ORPHAN_GRACE * 2)
+            .expect("in range");
+        let held = testing::hold(Held {
+            reason: Reason::Jump,
+            jump_ms: 3_600_000,
+            since: later,
+            release: Release::Wait,
+            until: None,
+        });
+        assert_eq!(stash.purge_orphans(later, None).await.expect("purge"), 0);
+        assert_eq!(raw_chunks(&store).await.len(), 1);
+        drop(held);
+        assert_eq!(stash.purge_orphans(later, None).await.expect("purge"), 1);
     }
 }

@@ -100,9 +100,11 @@ impl LeaseClock {
     /// When the client is expected to send its next DHCP message after `now`: T1 before
     /// T1, then the RENEWING and REBINDING retransmissions (half the time left to T2, then
     /// to the end, at least 60 seconds), then the end of the lease, when it starts over
-    /// with a DISCOVER; none once the lease has ended.
+    /// with a DISCOVER; none once the lease has ended. A start after `now` was recorded
+    /// before the clock stepped back and counts as `now`.
     pub fn next_activity(&self, now: Timestamp) -> Option<Timestamp> {
-        let elapsed = secs_between(self.start, now);
+        let start = self.start.min(now);
+        let elapsed = secs_between(start, now);
         let (t1, t2, end) = (self.t1_secs(), self.t2_secs(), self.secs);
         if elapsed >= end {
             return None;
@@ -114,7 +116,7 @@ impl LeaseClock {
         } else {
             retransmission(t2, end, elapsed)
         };
-        Some(plus(self.start, next))
+        Some(plus(start, next))
     }
 }
 
@@ -277,6 +279,13 @@ mod tests {
         assert_eq!(hour().next_activity(t(3_500)), Some(t(3_547)));
         assert_eq!(hour().next_activity(t(3_560)), Some(t(3_600)));
         assert_eq!(hour().next_activity(t(3_600)), None);
+    }
+
+    #[test]
+    fn a_client_time_after_now_gives_a_next_activity_no_later_than_t1_from_now() {
+        // Granted at t(7_200) by a clock that has since stepped back two hours.
+        let ahead = LeaseClock::new(t(7_200), 3_600);
+        assert_eq!(ahead.next_activity(t(0)), Some(t(1_800)));
     }
 
     #[test]

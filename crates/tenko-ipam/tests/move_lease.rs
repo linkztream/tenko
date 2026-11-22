@@ -533,6 +533,46 @@ async fn the_job_marks_waits_for_the_short_lease_moves_and_is_verified_by_the_ne
 }
 
 #[tokio::test]
+async fn a_held_clock_completes_no_manual_step() {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    let world = World::new().await;
+    let printer = world
+        .host("printer", AssignmentMode::Reserved, "192.0.2.15")
+        .await;
+    let old = world.address_at("192.0.2.15").await;
+    let source = PrefixId::generate();
+    world
+        .lease(old.vrf, source, "192.0.2.15", Timestamp::now(), 3_600)
+        .await;
+    let job = world.submit(&world.request(printer, false)).await;
+    world.drive_to(job, lease::LEASE).await;
+    // The renewal with the short lease would let the step complete.
+    world
+        .lease(old.vrf, source, "192.0.2.15", Timestamp::now(), 120)
+        .await;
+    let held = testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: Timestamp::now(),
+        release: Release::Wait,
+        until: None,
+    });
+    let round = world
+        .clock
+        .tick(Timestamp::now(), None)
+        .await
+        .expect("tick");
+    assert_eq!(round, tenko_ipam::moves::clock::ClockRound::default());
+    drop(held);
+    let round = world
+        .clock
+        .tick(Timestamp::now(), None)
+        .await
+        .expect("tick");
+    assert_eq!(round.prepared, 1);
+}
+
+#[tokio::test]
 async fn the_rollback_removes_the_marker_before_it_undoes_the_network_change() {
     let world = World::new().await;
     let printer = world

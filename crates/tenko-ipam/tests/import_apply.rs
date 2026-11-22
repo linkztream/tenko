@@ -689,3 +689,70 @@ async fn uploads_expire() {
     assert_eq!(staged_chunks(&env.store).await, 0);
     assert!(env.imports.get(&cx, view.id).await.is_err());
 }
+
+/// An upload made an hour ago with no time to live: expired by every clock after it.
+async fn expired_upload(env: &Env) -> (RequestCtx, tenko_core::ImportId) {
+    let hour_ago = tenko_core::Timestamp::now()
+        .checked_sub(Duration::from_secs(3_600))
+        .expect("time");
+    let cx = RequestCtx {
+        now: hour_ago,
+        ..person()
+    };
+    let view = env
+        .imports
+        .upload(&cx, vec![fixture("ip-plan.xlsx")])
+        .await
+        .expect("upload");
+    (cx, view.id)
+}
+
+fn hold_the_clock() -> tenko_core::clock::testing::Override {
+    tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 7_200_000,
+        since: tenko_core::Timestamp::now(),
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    })
+}
+
+fn no_ttl() -> Env {
+    env_with(
+        true,
+        ImportConfig {
+            staging_dir: staging(),
+            ttl: Duration::ZERO,
+            ..ImportConfig::default()
+        },
+    )
+}
+
+#[tokio::test]
+async fn a_held_clock_purges_no_import_session() {
+    let env = no_ttl();
+    expired_upload(&env).await;
+    let held = hold_the_clock();
+    assert_eq!(env.imports.purge_expired().await.expect("purge"), 0);
+    assert_eq!(staged_chunks(&env.store).await, 1);
+    drop(held);
+    assert_eq!(env.imports.purge_expired().await.expect("purge"), 1);
+    assert_eq!(staged_chunks(&env.store).await, 0);
+}
+
+#[tokio::test]
+async fn a_held_clock_keeps_a_touched_expired_session() {
+    let env = no_ttl();
+    let (cx, id) = expired_upload(&env).await;
+    let now = RequestCtx {
+        now: tenko_core::Timestamp::now(),
+        ..cx
+    };
+    let held = hold_the_clock();
+    let error = env.imports.get(&now, id).await.expect_err("expired");
+    assert!(error.is(codes::EXPIRED));
+    assert_eq!(staged_chunks(&env.store).await, 1, "kept while held");
+    drop(held);
+    env.imports.get(&now, id).await.expect_err("expired");
+    assert_eq!(staged_chunks(&env.store).await, 0);
+}

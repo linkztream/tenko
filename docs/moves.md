@@ -185,7 +185,7 @@ The manual tasks come before the L2 change: a device waits for its ticked tasks 
 1. It reads the controller again. It refuses with 409 `ipam.move.l2_changed` when the device or its port is no longer as the submit found it. That is the case when the port is gone or has a different profile, the device is on another port, other devices are on the port, the device is wired now, or the target network is gone. The step writes nothing then, and the job rolls back.
 2. It plans the change on the controller: read back and diff (CONN-08).
 3. It runs a dry run.
-4. It writes. The connector host refuses the write when writes are off or the plan is older than ten minutes, checks the guardrails against a fresh topology, and after the write plans the same change again and expects an empty diff. A read-back that differs fails the step with `connect.verify_mismatch` and the note that the controller may hold part of the change.
+4. It writes. The connector host refuses the write when writes are off or the plan is older than ten minutes (or, after a step back of the clock while it is held, of unknown age), checks the guardrails against a fresh topology, and after the write plans the same change again and expects an empty diff. A read-back that differs fails the step with `connect.verify_mismatch` and the note that the controller may hold part of the change.
 5. It keeps the controller's diff and the receipt with its undo steps as its output, JSON of `MoveL2Output`. The jobs view shows the diff, when it was written and verified, how many undo steps the receipt carries, and later the rollback.
 
 When the controller already has the change, nothing is written. A step that ran again after an interruption and finds the change made cannot know whether it wrote it; its rollback then asks a person. The step has a timeout of 600 seconds, and each controller call has its own.
@@ -230,7 +230,7 @@ The leader service `ipam.moves` looks at the waiting move jobs every second. Bes
 3. **The verification window.** Once the role saw the device's DHCP message on the target scope (its rebinding through the new relay, or its DISCOVER), the deadline becomes that time plus `verify_secs` (90) when that is earlier: the device should hold its new lease within seconds.
 4. **The extension.** When the role saw a DHCP message of the device in the last `extend_window_secs` (15) before the deadline, the deadline moves by `extend_secs` (60), once per job, so the job does not roll back in the middle of the device's exchange.
 
-Every change of the deadline is a transition of the job with a note that says why (`JobEngine::set_manual_deadline`).
+Every change of the deadline is a transition of the job with a note that says why (`JobEngine::set_manual_deadline`). While the clock is held (finding `sys.clock.jumped` or `sys.clock.held`) the service does nothing: no step completes, verified ones included, and no deadline is set or passes; it goes on once the clock is trusted.
 
 ### 5.5 Settings
 

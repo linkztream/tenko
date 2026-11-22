@@ -1,7 +1,8 @@
 //! Retention: facts whose last sighting is older than the retention are purged with their
 //! index rows, in batches of at most [`PURGE_CHUNK`] facts (`system:reconciler`, audit
 //! action `ipam.observation.purge`). Sightings of intent objects that no longer exist
-//! (`ipam.obs.last_seen`) go with them.
+//! (`ipam.obs.last_seen`) go with them. Nothing is purged while the clock guard holds
+//! destruction (`tenko_core::clock`).
 
 use std::sync::Arc;
 
@@ -56,6 +57,10 @@ pub async fn purge_fenced(
     now: Timestamp,
     epoch: Option<u64>,
 ) -> IpamResult<usize> {
+    if let Err(held) = tenko_core::clock::trusted_now() {
+        tracing::debug!(?held, "the observation purge waits for a trusted clock");
+        return Ok(0);
+    }
     let Some(cutoff) = now
         .unix_nanos()
         .checked_sub(i128::try_from(config.retention.as_nanos()).unwrap_or(i128::MAX))

@@ -250,7 +250,7 @@ The fingerprint covers what the proposal says, not when or with which generated 
 
 - **Same fingerprint:** the proposal is kept. Its evidence, summary, parameters and severity are rewritten only when the newest sighting is at least a refresh interval later or the sighting count grew; otherwise nothing is written.
 - **Other fingerprint:** the open proposal becomes `superseded` and a new one is opened in the same batch.
-- **No candidate:** the open proposal becomes `expired`.
+- **No candidate:** the open proposal becomes `expired`. While the clock guard holds destruction (finding `sys.clock.jumped` or `sys.clock.held`) no proposal expires and no fact is purged (section 2.4): which facts are current follows the clock, so the run waits until the clock is trusted again.
 
 **Rejection memory.** A rejection stores the fingerprint under the subject key. While the rules produce the same fingerprint for that key, the subject is not opened again and the run counts it as suppressed. When the evidence changes, the proposal opens again and the stored rejection is forgotten. A rejected conflict therefore stays quiet until the conflict looks different.
 

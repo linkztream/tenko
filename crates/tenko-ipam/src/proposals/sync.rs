@@ -337,8 +337,13 @@ pub(crate) fn sync(
     Ok(plan)
 }
 
-/// Adds an item expiring each open proposal whose key no candidate has.
+/// Adds an item expiring each open proposal whose key no candidate has; none while the
+/// clock guard holds destruction, since the candidates follow the age of the facts.
 fn expire(snapshot: &Snapshot, keys: &BTreeSet<&str>, plan: &mut SyncPlan) -> IpamResult<()> {
+    if let Err(held) = tenko_core::clock::trusted_now() {
+        tracing::debug!(?held, "no proposal expires until the clock is trusted");
+        return Ok(());
+    }
     let now = snapshot.now;
     for (key, (current, key_revision)) in &snapshot.open {
         if keys.contains(key.as_str()) {

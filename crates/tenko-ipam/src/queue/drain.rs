@@ -126,7 +126,8 @@ impl Drainer {
     }
 
     /// Settles every item once (see the module documentation). Returns at once while the
-    /// store does not accept writes.
+    /// store does not accept writes, and stops at an item while the clock guard holds
+    /// destruction.
     ///
     /// # Errors
     ///
@@ -146,11 +147,16 @@ impl Drainer {
                 Ok(Settled::Expired) => report.expired.push(id),
                 Ok(Settled::Dropped) => report.dropped.push(id),
                 Err(error) => {
-                    tracing::info!(
-                        item = %id,
-                        code = %error.code(),
-                        "the queue drain stops until the store accepts writes: {error}"
-                    );
+                    // The binary logs the hold itself; the drain retries every 30 s.
+                    if error.is(tenko_core::clock::HELD) {
+                        tracing::debug!(item = %id, "the queue drain waits for a trusted clock");
+                    } else {
+                        tracing::info!(
+                            item = %id,
+                            code = %error.code(),
+                            "the queue drain stops here; this item and the later ones stay queued: {error}"
+                        );
+                    }
                     report.interrupted = true;
                     break;
                 }
@@ -159,9 +165,16 @@ impl Drainer {
         Ok(report)
     }
 
-    /// Settles one item; `Err` only for a transient error (the item stays queued).
+    /// Settles one item; `Err` only for a transient error (the item stays queued), a held
+    /// clock among them: it cannot tell an expired item from a live one.
     async fn settle(&self, mut item: QueueItem) -> Result<Settled, IpamError> {
-        let now = Timestamp::now();
+        let now = tenko_core::clock::trusted_now().map_err(|_| {
+            IpamError::new(
+                tenko_core::clock::HELD,
+                503,
+                "the clock is held; queued changes wait until it is trusted",
+            )
+        })?;
         let Some(author) = item.author() else {
             tracing::warn!(
                 item = %item.id,
