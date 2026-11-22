@@ -839,7 +839,8 @@ jobs:
   # WP6.6: the deploy scripts (deploy/install.sh, deploy/proxmox) on every push and pull
   # request: bash -n and shellcheck, the host flows of the Proxmox scripts as dry runs, and
   # the parser checks of both, without Proxmox and without the container tests
-  # (deploy/proxmox/README.md, Testing). Needs Docker for shellcheck, python3 and curl.
+  # (deploy/proxmox/README.md, Testing), and the release build of the Windows takeover
+  # package. Needs Docker for shellcheck, python3, curl and pwsh.
   deploy-scripts:
     name: Deploy scripts
     if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
@@ -863,6 +864,15 @@ jobs:
           docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
             -x -P SCRIPTDIR -S warning "${files[@]}"
           python3 -m py_compile deploy/security/nodeapi.py deploy/security/dnswire.py
+      - name: The Windows takeover package builds with pwsh on Linux
+        # release.yml builds the package on Ubuntu with this command; the takeover-script
+        # job runs on Windows only, so this step catches a Linux-only break before a tag.
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/takeover"
+          mapfile -t files < <(pwsh -NoProfile -NonInteractive -File deploy/windows/takeover/build/New-TakeoverRelease.ps1 -Version 0.0.0 -OutDir "$out")
+          test "${#files[@]}" -eq 4
+          (cd "$out" && sha256sum -- "${files[@]}")
 
   # The Windows DHCP mirror exporter (deploy/windows/mirror, WP14.1 of
   # docs/plans/windows-takeover-plan.md, exit check E72): the Pester suites over the recorded

@@ -816,13 +816,22 @@ Describe 'A failure inside the DHCP window' {
     It 'tells a node that reports no ACK counter apart from a counter of 0, and refuses two items of one job with exit 4' {
         $script:TkAckWaitSec = 0
         try {
+            # Right after the silence: the check stops and says which side serves.
+            $script:world.noCounterByJob = $true
+            Invoke-FakeRun -Answers $script:FirstSitting 3>$null | Should -Be 2
+            $script:lastError | Should -Match "Tenko's node does not report answered clients for 192\.0\.2\.0/24 \(its takeover has no ACK counter\).*Tenko's scopes are on and the Windows DHCP services are stopped: update the node, then run the script again, or run it with -Reverse"
+            (Read-State).steps['5.check'].state | Should -Be 'failed'
+            $script:world.services.dc1.Serving | Should -BeFalse
+            # A later sitting with no failed step reports it and goes on.
+            Install-FakeWorld
             $script:world.acks = 0
             Invoke-FakeRun -Answers $script:FirstSitting 3>$null | Should -Be 3 -Because $script:lastError
-            $script:world.acks = $null
-            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
-            $out[-1] | Should -Be 2
-            $script:lastError | Should -Match "Tenko's node does not report answered clients for 192\.0\.2\.0/24 \(its takeover has no ACK counter\).*update the node"
+            $script:world.noCounterByJob = $true
+            $out = @(Invoke-FakeRun -Answers @('', '') 3>&1 6>&1)
+            $out[-1] | Should -Be 3 -Because $script:lastError
+            (@($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] }).Message -join ' ') | Should -Match "does not report answered clients for 192\.0\.2\.0/24.*The scopes stay recorded as unproven\."
             ($out -join "`n") | Should -Not -Match 'Tenko reports no answered client yet'
+            @((Read-State).values.unproven) | Should -Be @('192.0.2.0/24')
         } finally { $script:TkAckWaitSec = 300 }
         $job = '0190d1c2-0000-7000-8000-000000000001'
         $state = @{ Data = @{ readings = [ordered]@{ dhcp = @([ordered]@{ scopes = @([ordered]@{ cidr = '192.0.2.0/24' }) }) }; jobs = [ordered]@{ 'takeover.192.0.2.0/24' = $job } } }
@@ -836,7 +845,7 @@ Describe 'A failure inside the DHCP window' {
     It 'refuses with exit 4 a node that names one job for two scopes, while Windows still serves' {
         $script:world.twoScopes = $true; $script:world.sameJob = $true
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4
-        $script:lastError | Should -Match 'Tenko named the job \S+ for the takeover of \S+ and of \S+, so the script cannot prove each scope on its own; Windows still serves'
+        $script:lastError | Should -Match 'Tenko named the job \S+ for the takeover of 198\.51\.100\.0/24 and of 192\.0\.2\.0/24, so the script cannot prove each scope on its own\. Windows still serves\. Tenko may hold a takeover job for 198\.51\.100\.0/24 that this run did not record.*cancel it in Tenko before you run the script again'
         $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
         $script:world.services.dc1.Serving | Should -BeTrue
     }

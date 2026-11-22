@@ -3213,7 +3213,7 @@ function Get-TkPhase5 {
                         $job = Invoke-Tenko -Method POST -Path "/migrate/mirrors/$($State.Data.mirrors[$server.name])/scopes/$($scope.cidr -replace '/', '%2F')/takeover"
                         $id = [string](Get-TkField $job 'id')
                         $same = @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' -and [string]$State.Data.jobs[$_] -ceq $id })
-                        if ($same.Count -gt 0) { Exit-TkTakeover 4 "Tenko named the job $id for the takeover of $($scope.cidr) and of $($same[0].Substring(9)), so the script cannot prove each scope on its own; Windows still serves" }
+                        if ($same.Count -gt 0) { Exit-TkTakeover 4 "Tenko named the job $id for the takeover of $($scope.cidr) and of $($same[0].Substring(9)), so the script cannot prove each scope on its own. Windows still serves. Tenko may hold a takeover job for $($scope.cidr) that this run did not record, waiting at its manual step: cancel it in Tenko before you run the script again, since completing it would turn Tenko on beside Windows" }
                         $State.Data.jobs[$key] = $id
                         Save-TkState $State
                     }
@@ -3403,7 +3403,8 @@ function Get-TkUnproven {
         if ($items.Count -gt 1) { Exit-TkTakeover 4 "Tenko lists the job $job of $cidr $($items.Count) times in its takeover list, so the script cannot tell which ACK counter is the scope's" }
         if ($items.Count -eq 0) { $cidr; continue }
         $value = Get-TkField $items[0] 'acks'
-        if ($null -eq $value) { throw "Tenko's node does not report answered clients for $cidr (its takeover has no ACK counter), so the script cannot tell a quiet network from a scope that no server answers: update the node, then run the script again to resume, or run it with -Reverse" }
+        # Read only once Windows is silent: the check step and the sittings after it.
+        if ($null -eq $value) { throw "Tenko's node does not report answered clients for $cidr (its takeover has no ACK counter), so the script cannot tell a quiet network from a scope that no server answers. Tenko's scopes are on and the Windows DHCP services are stopped: update the node, then run the script again, or run it with -Reverse" }
         $acks = [long]0
         if (-not [long]::TryParse([string]$value, [ref]$acks) -or $acks -le 0) { $cidr }
     }
@@ -3814,8 +3815,11 @@ function Invoke-Takeover {
         # A precondition of the first sitting: the node can report answered clients.
         if (-not $Reverse -and $null -eq (Get-TkField $data.phases '2')) { Assert-TkTakeoverList -Code 1 }
         if (-not $Reverse -and @(@(Get-TkField $data.values 'unproven') | Where-Object { $_ }).Count -gt 0) {
-            $unproven = @(Get-TkUnproven -State $state)
-            if ($unproven.Count -eq 0) { $data.values.Remove('unproven'); Write-TkNote 'Tenko reports that it has answered a client of every scope since the DHCP window.' }
+            # A sitting with no failed step only reports here: a node without counters is a warning.
+            $unproven = $null
+            try { $unproven = @(Get-TkUnproven -State $state) } catch { if ($_.Exception.Data.Contains('tk.exit')) { throw }; Write-Warning "$($_.Exception.Message). The scopes stay recorded as unproven." }
+            if ($null -eq $unproven) { Write-Verbose 'the record stays as it was' }
+            elseif ($unproven.Count -eq 0) { $data.values.Remove('unproven'); Write-TkNote 'Tenko reports that it has answered a client of every scope since the DHCP window.' }
             else { $data.values.unproven = $unproven; Write-TkNote "Tenko reports no answered client yet for $($unproven -join ', '): a quiet network, or a client that asks gets no answer (README.md, the quiet network)." }
             Save-TkState $state
         }

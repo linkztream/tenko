@@ -89,7 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
-        nrpt = @(); takeoverList = ''; foreignFirst = $false; ignoreFilter = $false; sameJob = $false
+        nrpt = @(); takeoverList = ''; foreignFirst = $false; ignoreFilter = $false; sameJob = $false; noCounterByJob = $false
         jobScopes = @{}; acksByScope = @{}; prompts = [System.Collections.ArrayList]@()
         forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
@@ -475,6 +475,8 @@ function Invoke-FakeTenko {
             if ($w.foreignFirst) { $items = @([ordered]@{ id = '0190d1c2-0000-7000-8000-0000000000ff'; job = '0190d1c2-0000-7000-8000-0000000000ff'; acks = 9 }) + $items }
             $job = ($query -replace '^job=', '')
             if ($query -and -not $w.ignoreFilter) { $items = @($items | Where-Object { $_.job -eq $job }) }
+            # A node that lists its takeovers by job without their counters (noCounterByJob).
+            if ($query -and $w.noCounterByJob) { $items = @($items | ForEach-Object { [ordered]@{ id = $_.id; job = $_.job } }) }
             return [ordered]@{ items = $items }
         }
         '^POST /migrate/takeovers/[^/]+/resume$' {

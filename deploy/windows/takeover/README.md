@@ -219,8 +219,12 @@ gets no answer, check the relay or the listener, or run `-Reverse`. Every later 
 in one line which scopes Tenko still reports no answered client for, and the finish's
 confirmation names them (it does not refuse). A node that lists a scope's takeover without
 its counter is not a quiet network: the check stops (exit 2) and says that the node does not
-report answered clients; update the node and run the script again. A node that names one
-job for two scopes, or lists one job twice, is refused with exit 4.
+report answered clients, while Tenko's scopes are on and the Windows DHCP services are
+stopped; update the node and run the script again, or run `-Reverse`. A later sitting says
+the same as a warning and keeps the scopes recorded as unproven. A node that names one job
+for two scopes, or lists one job twice, is refused with exit 4; Tenko may then hold an
+unrecorded takeover job for the scope it names, waiting at its manual step: cancel it in
+Tenko before you run the script again.
 
 ## The state, the exit codes and a failed step
 
