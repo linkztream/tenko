@@ -369,17 +369,24 @@ Describe 'The objects of the run' {
 Describe 'The DHCP window' {
     BeforeAll {
         Install-FakeWorld
-        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $out = @(Invoke-FakeRun -Answers $script:FirstSitting 6>&1)
+        $out[-1] | Should -Be 3 -Because $script:lastError
+        $shown = ($out | Select-Object -SkipLast 1) -join "`n"
         $calls = @($script:world.calls)
         $tenko = @($script:world.tenkoCalls)
     }
 
-    It 'asks once, stops DHCPServer on both servers and reads the silence back, completes Tenko''s task, and only then removes both authorizations and reads them back on each controller' {
-        $script:world.choices | Should -Be 1
-        $script:world.lastChoice | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
-        $script:world.lastChoice | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
-        $script:world.lastChoice | Should -Match 'may take some minutes to reach every controller'
-        $script:world.lastChoice | Should -Match 'Tenko-Takeover\.ps1 -Reverse'
+    It 'shows the DHCP window''s warning at the DNS window''s confirmation, which stands for it within 15 minutes: no second question in one sitting' {
+        $script:world.choices | Should -Be 0
+        $shown | Should -Match 'stopped and disabled on dc1\.corp\.example\.test and dc2\.corp\.example\.test'
+        $shown | Should -Match 'Tenko starts answering 192\.0\.2\.0/24 at once'
+        $shown | Should -Match 'may take some minutes to reach every controller'
+        $shown | Should -Match 'Tenko-Takeover\.ps1 -Reverse'
+        $shown | Should -Match "The DNS window's confirmation 0 minutes ago stands for the DHCP window"
+        $shown.IndexOf('The DHCP window makes these changes') | Should -BeLessThan $shown.IndexOf('Phase 4')
+    }
+
+    It 'stops DHCPServer on both servers and reads the silence back, completes Tenko''s task, and only then removes both authorizations and reads them back on each controller' {
         $stop1 = [array]::IndexOf($calls, 'dc1|StopDhcp'); $stop2 = [array]::IndexOf($calls, 'dc2|StopDhcp')
         $task = [array]::IndexOf($calls, 'tenko|task-complete')
         $auth = [array]::IndexOf($calls, 'dc1|SetAuthorization')
@@ -471,16 +478,24 @@ Describe 'A failure inside the DHCP window' {
         @((Read-State).values.stopped).Count | Should -Be 0
     }
 
-    It 'changes nothing on Abort, the default' {
-        $answers = @($script:FirstSitting[0..5]) + 'Abort'
-        Invoke-FakeRun -Answers $answers | Should -Be 3
-        $script:lastError | Should -Match 'aborted at the console'
-        $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
-        $script:world.calls | Should -Not -Contain 'tenko|task-complete'
-        $script:world.services.dc1.Serving | Should -BeTrue
+    It 'asks Abort or Continue when more than 15 minutes have passed since the DNS window''s confirmation, and changes nothing on Abort, the default' {
+        $script:TkWindowHoldSec = 0
+        try {
+            $answers = @($script:FirstSitting) + 'Abort'
+            Invoke-FakeRun -Answers $answers | Should -Be 3
+            $script:world.choices | Should -Be 1
+            $script:world.lastChoice | Should -Match 'The DHCP window makes these changes'
+            $script:lastError | Should -Match 'aborted at the console'
+            $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
+            $script:world.calls | Should -Not -Contain 'tenko|task-complete'
+            $script:world.services.dc1.Serving | Should -BeTrue
+        } finally { $script:TkWindowHoldSec = 900 }
+        # A resumed sitting confirmed no DNS window in this process: it asks.
         Invoke-FakeRun -Answers @('c', '') | Should -Be 3 -Because 'a choice that names neither is Abort'
+        $script:world.choices | Should -Be 2
         $script:world.calls | Should -Not -Contain 'dc1|StopDhcp'
         Invoke-FakeRun -Answers @('c', 'Continue') | Should -Be 3 -Because $script:lastError
+        $script:world.choices | Should -Be 3
         $script:world.scopesOn | Should -BeTrue
     }
 
@@ -490,7 +505,7 @@ Describe 'A failure inside the DHCP window' {
         (Read-State).values.silenced | Should -BeTrue
         $script:world.scopesOn | Should -BeFalse
         Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
-        $script:world.choices | Should -Be 1
+        $script:world.choices | Should -Be 0 -Because 'one sitting asks no second question, and a resume after the silence asks none'
         @($script:world.calls | Where-Object { $_ -like '*|StopDhcp' }).Count | Should -Be 2
         @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
         @($script:world.tenkoCalls | Where-Object { $_ -match '/takeover$' }).Count | Should -Be 1
@@ -589,7 +604,7 @@ Describe 'A failure inside the DHCP window' {
         $script:world.scopesOn | Should -BeTrue
         Invoke-FakeRun -Answers @('c') | Should -Be 3 -Because $script:lastError
         @($script:world.calls | Where-Object { $_ -eq 'tenko|task-complete' }).Count | Should -Be 1
-        $script:world.choices | Should -Be 1
+        $script:world.choices | Should -Be 0
         @($script:world.authorized).Count | Should -Be 0
     }
 
@@ -699,10 +714,32 @@ Describe 'A failure inside the DHCP window' {
         @($script:world.calls | Where-Object { $_ -eq 'dc1|Replicate' }).Count | Should -BeGreaterThan 1
     }
 
-    It 'reports a check with no client answered as a failure' {
-        $script:world.acks = 0
-        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
-        $script:lastError | Should -Match 'answered no client'
+    It 'finishes the check in a quiet network with the warning and the takeover recorded as unproven, and a later sitting says whether Tenko has answered since' {
+        $script:TkAckWaitSec = 0
+        try {
+            $script:world.acks = 0
+            $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1)
+            $out[-1] | Should -Be 3 -Because $script:lastError
+            $text = @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ' '
+            $text | Should -Match ([regex]::Escape($script:TkQuietText))
+            $text | Should -Match '87\.5 percent of the lease time.*ipconfig /renew.*or run -Reverse'
+            (Read-State).steps['5.check'].state | Should -Be 'done'
+            (Read-State).values.unproven | Should -BeTrue
+            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
+            ($out -join "`n") | Should -Match 'Tenko has not answered a client since the DHCP window yet'
+            (Read-State).values.unproven | Should -BeTrue
+            $script:world.acks = 2
+            $out = @(Invoke-FakeRun -Answers @('', '') 6>&1)
+            ($out -join "`n") | Should -Match 'Tenko has answered a client since the DHCP window: the takeover is proven'
+            (Read-State).values.Contains('unproven') | Should -BeFalse
+        } finally { $script:TkAckWaitSec = 300 }
+    }
+
+    It 'gives no warning when a client is answered within the wait' {
+        $out = @(Invoke-FakeRun -Answers $script:FirstSitting 3>&1)
+        $out[-1] | Should -Be 3 -Because $script:lastError
+        @($out | Where-Object { $_ -is [System.Management.Automation.WarningRecord] -and $_.Message -match 'has not answered a client yet' }) | Should -BeNullOrEmpty
+        (Read-State).values.Contains('unproven') | Should -BeFalse
     }
 }
 

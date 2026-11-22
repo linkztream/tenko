@@ -75,7 +75,8 @@ $script:TkApprovalAnswerMs = 5000          # the approval's id and nonce must co
 $script:TkHttpTimeoutMs = 30000            # one request, connect to last byte
 $script:TkHttpMaxBytes = 4MB               # an answer; resource bound, not a property of the data
 $script:TkJsonMaxDepth = 64
-$script:TkAckWaitSec = 300                 # Tenko answers a client within 5 minutes of its scopes on
+$script:TkAckWaitSec = 300                 # the check waits 5 minutes for Tenko's first answer to a client
+$script:TkWindowHoldSec = 900              # the DNS window's confirmation stands for the DHCP window for 15 minutes
 $script:TkPasswordChangeSec = 600          # Tenko changes its account's password within 10 minutes
 $script:TkMinLeaseSec = 3600               # a scope under an hour refuses the DHCP window
 $script:TkPollSec = 5
@@ -2643,8 +2644,10 @@ function Confirm-TkWindow {
     }
     $by = ConvertTo-TkSafeText (Get-TkField $window 'started_by')
     $at = ConvertTo-TkSafeText (Get-TkField $window 'started_at')
-    Write-TkNote "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4), then the DHCP window (phase 5), which asks once more right before Windows stops answering."
-    if (-not (Confirm-TkTyped 'Type the domain''s name to start the DNS window' $State.Data.domain)) { Exit-TkTakeover 3 'the window was not confirmed at the console; nothing was changed' }
+    Write-TkNote "The window was started by $by at $at, according to Tenko; next the DNS window (phase 4), then the DHCP window (phase 5)."
+    Write-TkNote (Get-TkSilenceText -Readings $State.Data.readings)
+    Write-TkNote 'This confirmation stands for the DHCP window too when its stop begins within 15 minutes; later, or in another sitting, it asks Abort or Continue.'
+    if (-not (Confirm-TkTyped 'Type the domain''s name to start the DNS window and then the DHCP window' $State.Data.domain)) { Exit-TkTakeover 3 'the window was not confirmed at the console; nothing was changed' }
     $script:TkWindowWatch = [System.Diagnostics.Stopwatch]::StartNew()
     return , $window
 }
@@ -3073,20 +3076,30 @@ function Read-TkChoice {
     try { return $Choices[$Host.UI.PromptForChoice($Caption, $Message, $options, $Default)] } catch { return $Choices[$Default] }
 }
 
-function Confirm-TkSilence {
-    # The DHCP window's one confirmation, right before anything is stopped; Abort, the
-    # default, changes nothing.
+function Get-TkSilenceText {
+    # The DHCP window's warning, the same at the DNS window's confirmation and at its own.
     param([System.Collections.IDictionary]$Readings)
     $servers = @($Readings.dhcp | ForEach-Object { $_.name })
     $scopes = @($Readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)
-    $message = @(
-        "Continue makes these changes now:"
-        "  1. The DHCP Server service is stopped and disabled on $($servers -join ' and ')."
-        "  2. Tenko starts answering $($scopes -join ', ') at once."
-        "  3. The servers' authorization in the directory is removed right after; it may take some minutes to reach every controller."
-        'To go back later, run Tenko-Takeover.ps1 -Reverse: Tenko keeps answering until Windows answers again.'
-        'Abort changes nothing.'
-    ) -join "`n"
+    return (@(
+            'The DHCP window makes these changes:'
+            "  1. The DHCP Server service is stopped and disabled on $($servers -join ' and ')."
+            "  2. Tenko starts answering $($scopes -join ', ') at once."
+            "  3. The servers' authorization in the directory is removed right after; it may take some minutes to reach every controller."
+            'To go back later, run Tenko-Takeover.ps1 -Reverse: Tenko keeps answering until Windows answers again.'
+        ) -join "`n")
+}
+
+function Confirm-TkSilence {
+    # The DHCP window's confirmation, right before anything is stopped: the DNS window's typed
+    # confirmation of this process stands for it within 15 minutes (a monotonic stopwatch,
+    # never a clock or a time from the state file); otherwise Abort, the default, or Continue.
+    param([System.Collections.IDictionary]$Readings)
+    if ($null -ne $script:TkWindowWatch -and $script:TkWindowWatch.Elapsed.TotalSeconds -le $script:TkWindowHoldSec) {
+        Write-TkNote "The DNS window's confirmation $([int]$script:TkWindowWatch.Elapsed.TotalMinutes) minutes ago stands for the DHCP window."
+        return $true
+    }
+    $message = (Get-TkSilenceText -Readings $Readings) + "`nAbort changes nothing."
     return ((Read-TkChoice -Caption 'The DHCP window' -Message $message -Choices @('&Abort', '&Continue') -Default 0) -replace '&', '') -eq 'Continue'
 }
 
@@ -3288,27 +3301,41 @@ function Get-TkPhase5 {
                 }
                 $State.Data.values.stopped = @()
                 $State.Data.values.deauthorized = @()
-                foreach ($key in @($State.Data.values.Keys | Where-Object { $_ -like 'completed.*' -or $_ -eq 'silenced' -or $_ -eq 'barrier_pending' })) { $State.Data.values.Remove($key) }
+                foreach ($key in @($State.Data.values.Keys | Where-Object { $_ -like 'completed.*' -or $_ -eq 'silenced' -or $_ -eq 'barrier_pending' -or $_ -eq 'unproven' })) { $State.Data.values.Remove($key) }
                 Complete-TkRevert -State $State
             }
         }
         @{ Name = 'check'
             Do = {
                 Sync-TkBarrier -State $State
-                # Tenko's ACK counters: a client answered within five minutes of its scopes on.
+                # Tenko's ACK counters: a client answered within five minutes of its scopes on. A
+                # quiet network may show none yet: the takeover is then done and unproven.
                 $watch = [System.Diagnostics.Stopwatch]::StartNew()
-                foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
-                    while ($true) {
-                        $item = @(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$($State.Data.jobs[$key])") 'items') | Select-Object -First 1
-                        if ($null -ne $item -and [long](Get-TkField $item 'acks') -gt 0) { break }
-                        if ($watch.Elapsed.TotalSeconds -gt $script:TkAckWaitSec) { throw "Tenko has answered no client of $($key.Substring(9)) within five minutes of its scopes on; check the relay or the listener, or run -Reverse" }
-                        Start-Sleep -Seconds $script:TkPollSec
+                while (-not (Test-TkAnswered -State $State)) {
+                    if ($watch.Elapsed.TotalSeconds -gt $script:TkAckWaitSec) {
+                        Write-Warning $script:TkQuietText
+                        $State.Data.values.unproven = $true
+                        Save-TkState $State
+                        break
                     }
+                    Start-Sleep -Seconds $script:TkPollSec
                 }
                 Write-TkNote 'Tenko serves the scopes. The parallel period starts: the exporter''s tasks keep running and read nothing; a push from them now is the alarm.'
             }
         }
     )
+}
+
+$script:TkQuietText = 'Tenko has not answered a client yet. That is normal in a quiet network: a client that holds a lease asks its old server directly until 87.5 percent of the lease time has passed, and only new, restarted or reconnecting clients ask openly. To prove it now, run ipconfig /renew on any client of the scope and look at the lease it gets. If a client that asks gets no answer, check the relay or the listener, or run -Reverse.'
+
+function Test-TkAnswered {
+    # Whether Tenko has answered a client of any of the run's takeovers (its ACK counters).
+    param([hashtable]$State)
+    foreach ($key in @($State.Data.jobs.Keys | Where-Object { $_ -like 'takeover.*' })) {
+        $item = @(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/takeovers?job=$($State.Data.jobs[$key])") 'items') | Select-Object -First 1
+        if ($null -ne $item -and [long](Get-TkField $item 'acks') -gt 0) { return $true }
+    }
+    return $false
 }
 
 function Undo-TkTakeoverJob {
@@ -3689,6 +3716,10 @@ function Invoke-Takeover {
         $data.tenko.fingerprint = $script:TkConn.Pinned
         Save-TkState $state
         Test-TkServedRoot
+        if (-not $Reverse -and (Get-TkField $data.values 'unproven') -eq $true) {
+            if (Test-TkAnswered -State $state) { $data.values.Remove('unproven'); Save-TkState $state; Write-TkNote 'Tenko has answered a client since the DHCP window: the takeover is proven.' }
+            else { Write-TkNote 'Tenko has not answered a client since the DHCP window yet: a quiet network, or a client that asks gets no answer (README.md, the quiet network).' }
+        }
 
         if ($Reverse) {
             if (-not $latest) { Exit-TkTakeover 1 'nothing to reverse' }

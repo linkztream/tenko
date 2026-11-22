@@ -546,5 +546,6 @@ function Invoke-FakeRun {
 }
 
 # The answers of a first sitting: the domain, the DHCP servers' confirmation, the mirror
-# host, Tenko's address, the change list's confirmation, the window's confirmation.
-$script:FirstSitting = @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'corp.example.test', 'Continue')
+# host, Tenko's address, the change list's confirmation, the window's confirmation (which
+# stands for the DHCP window too within 15 minutes).
+$script:FirstSitting = @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'corp.example.test')
