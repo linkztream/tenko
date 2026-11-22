@@ -120,6 +120,12 @@ publishes the releases. For the stronger check, on any machine:
   there no issuer is fetched from a URL the leaf names, while on 5.1 only a Group Policy
   setting stops that fetch. Windows PowerShell 5.1 is the supported and lab-tested runtime.
 - Tenko of the same version as the script (`GET /api/v1/health`).
+- A machine with no Name Resolution Policy Table rule (local or from Group Policy) that sends
+  the domain's names to name servers: the DNS window's check asks Tenko by address, and no
+  form of the query goes around such a rule, so the script stops before any change (and
+  again before that check) when the effective policy lists a name server for the domain or
+  its locator names, a child rule inheriting its parent's included, or cannot be read; a
+  rule with DNSSEC settings only and no covering rule with servers is fine.
 
 ## What you type
 

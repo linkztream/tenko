@@ -34,6 +34,7 @@ $mutations = @(
     @{ Name = 'dns-confirmation-not-held'; File = 'Tenko-Takeover.ps1'; Old = @('if ($null -ne $script:TkWindowWatch -and $script:TkWindowWatch.Elapsed.TotalSeconds -le $script:TkWindowHoldSec) {'); New = @('if ($false) {'); Tests = 'Phases.Tests.ps1'; Filter = @('*no second question in one sitting*') }
     @{ Name = 'quiet-network-fails'; File = 'Tenko-Takeover.ps1'; Old = @('Write-Warning "$($script:TkQuietText) Not answered yet'); New = @('throw "$($script:TkQuietText) Not answered yet'); Tests = 'Phases.Tests.ps1'; Filter = @('*finishes the check in a quiet network*') }
     @{ Name = 'zero-acks-count-as-answered'; File = 'Tenko-Takeover.ps1'; Old = @('-or $acks -le 0) { $key.Substring(9) }'); New = @(') { $key.Substring(9) }'); Tests = 'Phases.Tests.ps1'; Filter = @('*proves each scope on its own*') }
+    @{ Name = 'nrpt-servers-ignored'; File = 'Tenko-Takeover.ps1'; Old = @('        if ($servers.Count -eq 0) { continue }'); New = @('        continue'); Tests = 'Guard.Tests.ps1'; Filter = @('*The name resolution policy*') }
     @{ Name = 'resolver-order'; File = 'Tenko-Takeover.ps1'; Old = @('$candidates = @(@($all | Where-Object { $_.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork }) + @($all | Where-Object { $_.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork }))'); New = @('$candidates = $all'); Tests = 'Http.Tests.ps1'; Filter = @('*tried IPv4 first*') }
 )
 

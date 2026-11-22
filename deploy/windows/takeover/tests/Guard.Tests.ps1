@@ -247,6 +247,46 @@ Describe 'The names listed apart' {
     }
 }
 
+Describe 'The name resolution policy' {
+    # Rules as Get-DnsClientNrptPolicy -Effective returns them (the properties the check reads,
+    # named as the cmdlet names them).
+    BeforeAll {
+        function Get-TestRule {
+            param([string[]]$Namespace, [string[]]$NameServers = @(), [string[]]$DirectAccess = @())
+            [pscustomobject]@{ Namespace = $Namespace; QueryPolicy = ''; SecureNameQueryFallback = ''; NameServers = $NameServers; DirectAccessDnsServers = $DirectAccess; DnsSecValidationRequired = ($NameServers.Count -eq 0); NameEncoding = 'Utf8WithoutMapping' }
+        }
+    }
+
+    It 'stops a run whose domain <case>' -ForEach @(
+        @{ case = 'a rule with name servers covers by suffix'; rules = { @(Get-TestRule -Namespace '.corp.example.test' -NameServers '192.0.2.11') } }
+        @{ case = 'a rule names exactly, with name servers'; rules = { @(Get-TestRule -Namespace 'corp.example.test' -NameServers '192.0.2.11') } }
+        @{ case = 'has its locator names under a rule with name servers'; rules = { @(Get-TestRule -Namespace '._msdcs.corp.example.test' -NameServers '192.0.2.11') } }
+        @{ case = 'falls under a DirectAccess rule with its servers'; rules = { @(Get-TestRule -Namespace '.example.test' -DirectAccess '2001:db8::53') } }
+        @{ case = 'falls under a rule for every name'; rules = { @(Get-TestRule -Namespace '.' -NameServers '192.0.2.11') } }
+        # A more specific entry without servers inherits the covering entry's: the effective
+        # policy lists either the child bare beside its parent, or the child with the parent's servers.
+        @{ case = 'has its locator names under a DNSSEC-only child of a parent with servers'; rules = { @((Get-TestRule -Namespace '._msdcs.corp.example.test'), (Get-TestRule -Namespace '.example.test' -NameServers '192.0.2.11')) } }
+        @{ case = 'has its locator names under a child that lists its parent''s servers'; rules = { @((Get-TestRule -Namespace '._msdcs.corp.example.test' -NameServers '192.0.2.11'), (Get-TestRule -Namespace '.example.test' -NameServers '192.0.2.11')) } }
+    ) {
+        Mock Get-TkNrptRule $rules
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Throw '*sends the names of corp.example.test to fixed servers by policy*run it from a machine without such a rule*'
+    }
+
+    It 'lets a run go on <case>' -ForEach @(
+        @{ case = 'with no rule'; rules = { @() } }
+        @{ case = 'with a covering rule that sets DNSSEC only'; rules = { @(Get-TestRule -Namespace '.corp.example.test') } }
+        @{ case = 'with a rule for another namespace'; rules = { @((Get-TestRule -Namespace '.other.example.test' -NameServers '192.0.2.99'), (Get-TestRule -Namespace 'notcorp.example.test' -NameServers '192.0.2.99')) } }
+    ) {
+        Mock Get-TkNrptRule $rules
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Not -Throw
+    }
+
+    It 'stops a run when the policy cannot be read' {
+        Mock Get-TkNrptRule { throw 'Access is denied' }
+        { Assert-TkDirectAnswer -Domain 'corp.example.test' } | Should -Throw '*could not be read (Access is denied)*run it from a machine whose policy it can read*'
+    }
+}
+
 Describe 'The restore block' {
     # Run here against a test folder for the DNS server's own: the export is staged under its
     # own name and checked by its SHA-256 before the zone is touched.

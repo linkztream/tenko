@@ -89,6 +89,7 @@ function Get-FakeWorld {
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
+        nrpt = @()
         jobScopes = @{}; acksByScope = @{}; prompts = [System.Collections.ArrayList]@()
         forge = $null; creators = @{}; timersTamper = $false; stopFailsOn = ''; choices = 0; lastChoice = ''; objectAcl = @{}; quotaComputer = $false; ttlTamper = $false; zoneScope = @{}; integratedScope = @{}
         tasks = [System.Collections.ArrayList]@()
@@ -503,6 +504,8 @@ function Install-FakeWorld {
     Mock Start-Sleep { }
     Mock Test-WSMan { $true }
     Mock Get-TkPdcName { "dc1.$($script:FakeDomain)" }
+    # The admin machine's Name Resolution Policy Table, as Get-DnsClientNrptPolicy -Effective answers it.
+    Mock Get-TkNrptRule { @($script:world.nrpt) }
     Mock Get-TkDomainLocator { [ordered]@{ name = $script:world.locator.name; address = $script:world.locator.address } }
     Mock Get-TkHostAddress { @($script:world.addresses[$Name] | ForEach-Object { [System.Net.IPAddress]::Parse($_) }) }
     Mock Find-TkPolicyFinding { @{ Passwords = @($script:world.gpp); DhcpStart = @($script:world.startPolicy) } }

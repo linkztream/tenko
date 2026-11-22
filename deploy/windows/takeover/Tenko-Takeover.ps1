@@ -1016,6 +1016,45 @@ function Close-TkSession {
     $script:TkConn.Session = $null
 }
 
+function Get-TkNrptRule {
+    # This machine's effective Name Resolution Policy Table.
+    return @(Get-DnsClientNrptPolicy -Effective -ErrorAction Stop)
+}
+
+function Test-TkNamespaceMatch {
+    # A rule's namespace: '.suffix' covers the suffix and every name below it, '.' every name,
+    # anything else that one name.
+    param([string]$Namespace, [string]$Name)
+    $space = $Namespace.Trim().ToLowerInvariant()
+    $target = $Name.ToLowerInvariant().TrimEnd('.')
+    if ($space -eq '.' -or $space -eq '*') { return $true }
+    if ($space.StartsWith('.')) { return ($target -eq $space.Substring(1) -or $target.EndsWith($space)) }
+    return ($target -eq $space.TrimEnd('.'))
+}
+
+function Assert-TkDirectAnswer {
+    # A query sent to a named server is answered by that server only where the effective Name
+    # Resolution Policy Table lists no name server for the queried name; no query form goes
+    # around such an entry. Decided for the exact names the script queries, from every
+    # effective entry that covers them: a more specific entry without servers inherits those
+    # of a covering one, so any covering entry with servers redirects. Local rules and Group
+    # Policy rules alike; an entry with DNSSEC settings only and no covering entry with servers
+    # changes no server; a policy that cannot be read stops the run as well.
+    param([string]$Domain)
+    $rules = @()
+    try { $rules = @(Get-TkNrptRule) } catch { Exit-TkTakeover 1 "this machine's Name Resolution Policy Table could not be read ($(ConvertTo-TkSafeText $_.Exception.Message)), so the script cannot check which server answers the names of ${Domain}: run it from a machine whose policy it can read" }
+    $names = @($Domain, "_ldap._tcp.dc._msdcs.$Domain")
+    foreach ($rule in $rules) {
+        $servers = @(@($rule.NameServers) + @($rule.DirectAccessDnsServers) | Where-Object { $_ -and [string]$_ })
+        if ($servers.Count -eq 0) { continue }
+        foreach ($space in @($rule.Namespace | Where-Object { $_ })) {
+            if (@($names | Where-Object { Test-TkNamespaceMatch -Namespace ([string]$space) -Name $_ }).Count -gt 0) {
+                Exit-TkTakeover 1 "this machine sends the names of $Domain to fixed servers by policy (the Name Resolution Policy Table rule for $(ConvertTo-TkSafeText $space) names $(ConvertTo-TkSafeText ($servers -join ', '))), so the script cannot check which server answers them: run it from a machine without such a rule"
+            }
+        }
+    }
+}
+
 function Get-TkHostAddress {
     param([string]$Name)
     return @([System.Net.Dns]::GetHostAddresses($Name))
@@ -2960,6 +2999,8 @@ function Get-TkPhase4 {
         @{ Name = 'register'; Do = { foreach ($controller in $r.controllers) { [void](Invoke-TkRemote -Server $controller.name -Name RegisterDns) } } }
         @{ Name = 'check'
             Do = {
+                # The one place the script decides from which server answered a DNS query.
+                Assert-TkDirectAnswer -Domain $r.domain
                 $answer = @(Resolve-DnsName -Name "_ldap._tcp.dc._msdcs.$($r.domain)" -Type SRV -Server $tenkoIp -DnsOnly -ErrorAction SilentlyContinue | Where-Object { $_.Type -eq 'SRV' })
                 $names = @($r.controllers | ForEach-Object { $_.name })
                 if (@($answer | Where-Object { $names -contains ([string]$_.NameTarget).ToLowerInvariant().TrimEnd('.') }).Count -eq 0) { throw "Tenko does not answer the locator records of $($r.domain)" }
@@ -3637,6 +3678,7 @@ function Invoke-Takeover {
     if ($domain -notmatch '^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z0-9-]{1,63}$') { Exit-TkTakeover 1 "$domain is not a domain name" }
 
     if ($DryRun) {
+        Assert-TkDirectAnswer -Domain $domain
         $readings = Get-TkDiscovery -Domain $domain
         Select-TkMirrorHost -Readings $readings
         Show-TkChangeList -Readings $readings -NodeName '<the node>'
@@ -3658,6 +3700,9 @@ function Invoke-Takeover {
             $choice = (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant()
             if ($choice -eq 'r') { $Reverse = $true }
         }
+        # A precondition of the DNS window's check, with the others: before any change.
+        $checked = Get-TkField $data.steps '4.check'
+        if (-not $Reverse -and ($null -eq $checked -or $checked.state -ne 'done')) { Assert-TkDirectAnswer -Domain $domain }
         if ($null -ne $data.readings -and ((Get-TkField $data.phases '4') -eq 'done' -or (Get-TkField $data.phases '4') -eq 'failed')) { Test-TkLocator $data.readings }
 
         # Discovery: always fresh, its controller addresses the class the reverse checks

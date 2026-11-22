@@ -224,6 +224,19 @@ Describe 'The refusals' {
         @($script:world.authorized).Count | Should -Be 2
     }
 
+    It 'a name resolution policy that sends the domain''s names to fixed servers stops the first sitting before any change' {
+        $script:world.nrpt = @([pscustomobject]@{ Namespace = @('.corp.example.test'); NameServers = @('192.0.2.11'); DirectAccessDnsServers = @() })
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
+        $script:lastError | Should -Match 'sends the names of corp\.example\.test to fixed servers by policy'
+        (Get-WindowsChange) | Should -BeNullOrEmpty
+        $script:world.tenkoCalls | Should -BeNullOrEmpty
+    }
+
+    It 'reads the name resolution policy again right before the DNS window''s check' {
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        Should -Invoke Get-TkNrptRule -Times 2 -Exactly
+    }
+
     It 'a second run recorded on the PDC emulator stops with exit 1' {
         $script:world.marker = @{ Run = 'another-run'; Host = 'ADM2'; Time = '2026-11-21T09:00:00Z' }
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
