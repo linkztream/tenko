@@ -930,8 +930,10 @@ fn removed(node: NodeId, at: Timestamp) -> Failure {
         format!(
             "controller {node} was removed from the cluster at {}, as this copy holds it, so \
              it would never start from a forced step here; force the copy of another \
-             controller, or, when no other copy is left, restore a backup into an empty \
-             data directory (docs/backup.md section 7)",
+             controller, or, when no other copy is left, restore a backup from before the \
+             removal, or one under another node id, into an empty data directory \
+             (docs/backup.md section 7): a backup that holds the removal, restored under \
+             this node id, is refused the same way",
             at.to_rfc3339()
         ),
     )
@@ -1782,7 +1784,11 @@ pub(crate) mod tests {
             "{:?}",
             force_checks(&args(), &gone, &[]).expect_err("removed")
         );
-        for part in [codes::REMOVED, "another controller", "restore a backup"] {
+        for part in [
+            codes::REMOVED,
+            "another controller",
+            "a backup from before the removal, or one under another node id",
+        ] {
             assert!(refused.contains(part), "{part} in {refused}");
         }
         assert!(gone.describe().contains("holds the removal"));
