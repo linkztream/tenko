@@ -1229,6 +1229,39 @@ pub trait Store: Send + Sync + 'static {
     /// Returns the [`StoreError`] that stopped the batch; nothing was applied.
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError>;
 
+    /// As [`Store::propose`], and fires `logged` once the batch can no longer be lost or
+    /// refused: the Raft store at the Raft commit of its entry, before the apply, for a batch
+    /// without preconditions and without an idempotency key (the apply cannot refuse it);
+    /// every other batch, a batch forwarded to another member's leader, and a store without
+    /// that path, only with an `Ok` result. An `Ok` result comes with the signal, with one
+    /// exception: a batch this node queued as leader, whose entry openraft then refused
+    /// (`ForwardToLeader`), is forwarded to the new leader and returns `Ok` with `logged`
+    /// dropped, since the first attempt used it up. A `logged` dropped unfired means
+    /// nothing: the caller waits for the result.
+    ///
+    /// When `logged` fires the write may not be readable yet, on this member either (on the
+    /// forward path it fires after the leader's apply and this member's own, at the commit
+    /// before both): read-your-writes holds from the result.
+    ///
+    /// # Errors
+    ///
+    /// As [`Store::propose`]. An error can also come with or before `logged`: after a
+    /// `Timeout` or a shutdown the batch may still commit, and `logged` may fire after the
+    /// error. Such an error is an unknown outcome, not a refusal; a caller stops listening
+    /// to `logged` once it has the result. An error after `logged` leaves the entry committed
+    /// in the log: it applies at the latest at the next start, unless its apply fails there
+    /// too. If its apply fails in this process, the caller gets `ShuttingDown`, and `Local`
+    /// reads serve a state without the answered write until the restart.
+    async fn propose_logged(
+        &self,
+        batch: WriteBatch,
+        logged: tokio::sync::oneshot::Sender<()>,
+    ) -> Result<Committed, StoreError> {
+        let committed = self.propose(batch).await?;
+        let _ = logged.send(());
+        Ok(committed)
+    }
+
     // WP9.6 (ADR 0030): the background class.
     /// As [`Store::propose`], in the background class: a write nobody waits on now (the
     /// DHCP role's history and lease facts). The Raft store packs it behind the foreground
@@ -1289,6 +1322,14 @@ pub trait Store: Send + Sync + 'static {
     /// default limit.
     fn max_batch_bytes(&self) -> usize {
         CoalescerConfig::default().max_batch_bytes
+    }
+
+    /// Whether this member is the only voter of its group (`false` for a store without
+    /// one). The Raft store reads the effective membership, which may not be committed yet,
+    /// as of openraft's last metrics update: a caller that accepts a loss on it re-reads it
+    /// for each decision and never caches it. Not cheap: it clones openraft's metrics.
+    fn sole_voter(&self) -> bool {
+        false
     }
 }
 

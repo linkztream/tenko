@@ -21,6 +21,11 @@
 //! it drains its queue, so the persisted `committed` never points past the entries persisted
 //! by the same or an earlier commit.
 //!
+//! `save_committed` is also the exact Raft commit, on any number of voters: it fires the
+//! waiters of this node's own committed entries ([`Tracker`], `Store::propose_logged`)
+//! before openraft applies them. A follower's snapshot install commits without it; `purge`
+//! then drops the waiters it covers, unfired.
+//!
 //! # On-disk layout
 //!
 //! Two redb tables in one file:
@@ -61,7 +66,7 @@ use std::{
     error::Error,
     fmt::{Debug, Display},
     io,
-    ops::{Bound, RangeBounds},
+    ops::{Bound, RangeBounds, RangeInclusive},
     path::Path,
     sync::{
         Arc, Mutex, MutexGuard, PoisonError,
@@ -69,11 +74,12 @@ use std::{
         mpsc,
     },
     thread::JoinHandle,
+    time::Instant,
 };
 
 use bytes::Bytes;
 use openraft::{
-    AnyError, LogState, RaftLogReader,
+    AnyError, EntryPayload, LogState, RaftLogReader,
     storage::{LogFlushed, RaftLogStorage},
 };
 use redb::{Database, Durability, ReadableDatabase, ReadableTable, TableDefinition};
@@ -164,6 +170,122 @@ struct CommittedSlot {
     unwritten: Option<Bytes>,
 }
 
+/// A part of the commit of an entry this node's coalescer proposed; the series of
+/// [`super::COMMIT_STAGES`], in this order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Stage {
+    /// From a batch's enqueue to the hand-over of its entry to Raft (the wait for a permit,
+    /// a hand-over of leadership, the packing).
+    Queue,
+    /// From the hand-over to the flush of the entry's log record.
+    Append,
+    /// From the flush to the commit: at once on one voter, else the quorum's answer.
+    Commit,
+    /// From the commit to the end of the apply.
+    Apply,
+    /// From the end of the apply to the answer the coalescer gets.
+    Wake,
+}
+
+impl Stage {
+    /// Times this stage of one entry or batch, from `since` to `now`.
+    pub(crate) fn observe(self, since: Instant, now: Instant) {
+        let micros = now.saturating_duration_since(since).as_micros();
+        super::COMMIT_STAGES.observe(self as u16, u64::try_from(micros).unwrap_or(u64::MAX));
+    }
+}
+
+/// An entry this node's coalescer handed to Raft and has no answer for yet.
+struct Track {
+    /// Its log index, once appended.
+    index: Option<u64>,
+    /// The stage it is in, since `since`.
+    stage: Stage,
+    since: Instant,
+    /// Fired at its commit (`Store::propose_logged`).
+    logged: Vec<oneshot::Sender<()>>,
+}
+
+/// The entries this node's coalescer handed to Raft, by their `seq`
+/// ([`super::types::Proposal::seq`]), until the coalescer has their answer: who waits for
+/// each one's commit and where its time goes. `save_committed` fires the waiters of every
+/// entry at or below the commit; `truncate` drops those of the entries it removes unfired,
+/// so an entry another leader replaced never fires; `purge` drops what a snapshot install
+/// covered. It holds about the coalescer's entries in flight.
+#[derive(Default)]
+pub(crate) struct Tracker(Mutex<BTreeMap<u64, Track>>);
+
+impl Tracker {
+    /// The coalescer hands entry `seq` to Raft; `logged` fire at its commit.
+    pub(crate) fn handed(&self, seq: u64, logged: Vec<oneshot::Sender<()>>) {
+        let track = Track {
+            index: None,
+            stage: Stage::Append,
+            since: Instant::now(),
+            logged,
+        };
+        lock(&self.0).insert(seq, track);
+    }
+
+    /// The coalescer has the answer for entry `seq` (or gave up on it): the track goes, and a
+    /// waiter not fired by then never is.
+    pub(crate) fn answered(&self, seq: u64) {
+        if let Some(track) = lock(&self.0).remove(&seq)
+            && track.stage == Stage::Wake
+        {
+            Stage::Wake.observe(track.since, Instant::now());
+        }
+    }
+
+    /// The entries in `indexes` that are in stage `from` go to the next one.
+    pub(crate) fn advance(&self, from: Stage, to: Stage, indexes: RangeInclusive<u64>) {
+        let now = Instant::now();
+        for track in lock(&self.0).values_mut() {
+            if track.stage == from && track.index.is_some_and(|index| indexes.contains(&index)) {
+                from.observe(track.since, now);
+                track.stage = to;
+                track.since = now;
+            }
+        }
+    }
+
+    /// Entry `seq` was appended at `index`.
+    pub(crate) fn appended(&self, seq: u64, index: u64) {
+        if let Some(track) = lock(&self.0).get_mut(&seq) {
+            track.index = Some(index);
+        }
+    }
+
+    /// The entries at or below `upto` committed: their waiters fire.
+    pub(crate) fn committed(&self, upto: u64) {
+        let now = Instant::now();
+        let mut logged = Vec::new();
+        for track in lock(&self.0).values_mut() {
+            if track.stage <= Stage::Commit && track.index.is_some_and(|index| index <= upto) {
+                if track.stage == Stage::Commit {
+                    Stage::Commit.observe(track.since, now);
+                }
+                track.stage = Stage::Apply;
+                track.since = now;
+                logged.append(&mut track.logged);
+            }
+        }
+        for sender in logged {
+            let _ = sender.send(());
+        }
+    }
+
+    /// Drops the tracks whose index is in `indexes`, their waiters unfired.
+    fn remove(&self, indexes: impl RangeBounds<u64>) {
+        lock(&self.0).retain(|_, track| !track.index.is_some_and(|index| indexes.contains(&index)));
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> usize {
+        lock(&self.0).len()
+    }
+}
+
 /// The state the writer thread works on.
 struct Shared {
     db: Database,
@@ -171,6 +293,10 @@ struct Shared {
     pending: Mutex<BTreeMap<u64, Encoded>>,
     committed: Mutex<CommittedSlot>,
     counters: Counters,
+    tracker: Arc<Tracker>,
+    /// The store's data directory, where the test hooks look for their files.
+    #[cfg(feature = "test-hooks")]
+    dir: std::path::PathBuf,
 }
 
 /// What every clone of [`LogStore`] shares. The writer thread holds [`Shared`], never this.
@@ -394,6 +520,12 @@ impl Shared {
         ops: &[WriteOp],
         committed: Option<&Bytes>,
     ) -> Result<Written, redb::Error> {
+        #[cfg(feature = "test-hooks")]
+        if self.dir.join(crate::test_hooks::FAIL_LOG).exists() {
+            return Err(redb::Error::Io(io::Error::other(
+                "the test hook fails the write",
+            )));
+        }
         let mut transaction = self.db.begin_write()?;
         transaction.set_durability(Durability::Immediate)?;
         let mut written = Written::default();
@@ -446,6 +578,17 @@ impl Shared {
         });
         match &result {
             Ok(written) => {
+                // Before the callbacks: openraft may commit an entry as soon as it learns of
+                // the flush.
+                for op in &ops {
+                    if let WriteOp::Append { entries, .. } = op
+                        && let (Some((first, _)), Some((last, _))) =
+                            (entries.first(), entries.last())
+                    {
+                        self.tracker
+                            .advance(Stage::Append, Stage::Commit, *first..=*last);
+                    }
+                }
                 self.counters.commits.fetch_add(1, Ordering::Relaxed);
                 self.counters
                     .entries
@@ -507,6 +650,8 @@ impl Shared {
                     self.restore_committed(encoded);
                 }
             }
+            #[cfg(feature = "test-hooks")]
+            crate::test_hooks::hold_while(&self.dir, crate::test_hooks::STALL_LOG);
             self.commit_group(ops, committed);
         }
         if let Some(encoded) = self.take_unwritten_committed() {
@@ -552,6 +697,9 @@ impl LogStore {
             pending: Mutex::new(BTreeMap::new()),
             committed: Mutex::new(CommittedSlot::default()),
             counters: Counters::default(),
+            tracker: Arc::default(),
+            #[cfg(feature = "test-hooks")]
+            dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
         });
         let (sender, queue) = mpsc::channel();
         let worker = Arc::clone(&shared);
@@ -576,6 +724,11 @@ impl LogStore {
             entries: counters.entries.load(Ordering::Relaxed),
             appended_bytes: counters.appended_bytes.load(Ordering::Relaxed),
         }
+    }
+
+    /// The entries this node's coalescer handed to Raft ([`Tracker`]).
+    pub(crate) fn tracker(&self) -> Arc<Tracker> {
+        Arc::clone(&self.inner.shared.tracker)
     }
 
     /// Number of live `LogStore` handles (clones of this store); the database closes when
@@ -715,9 +868,16 @@ impl RaftLogStorage<TypeConfig> for LogStore {
             return Err(write_msg("the log store is shut down"));
         }
         let encoded = to_cbor(&committed).map_err(write_err)?;
-        let mut slot = lock(&self.inner.shared.committed);
-        slot.latest = SavedCommitted::Set(committed);
-        slot.unwritten = Some(encoded);
+        {
+            let mut slot = lock(&self.inner.shared.committed);
+            slot.latest = SavedCommitted::Set(committed);
+            slot.unwritten = Some(encoded);
+        }
+        // openraft calls this before it applies the entries, and only for entries a quorum
+        // holds in the leader's term (on one voter: after this node's own flush).
+        if let Some(committed) = committed {
+            self.inner.shared.tracker.committed(committed.index);
+        }
         Ok(())
     }
 
@@ -748,6 +908,15 @@ impl RaftLogStorage<TypeConfig> for LogStore {
         let mut encoded = Vec::new();
         for entry in entries {
             let record = encode_record(&entry).map_err(write_err)?;
+            // The leader's own entries arrive as the coalescer built them, `seq` included.
+            if let EntryPayload::Normal(proposal) = &entry.payload
+                && proposal.seq != 0
+            {
+                self.inner
+                    .shared
+                    .tracker
+                    .appended(proposal.seq, entry.log_id.index);
+            }
             encoded.push((entry.log_id.index, Arc::new(record)));
         }
         {
@@ -769,6 +938,7 @@ impl RaftLogStorage<TypeConfig> for LogStore {
 
     async fn truncate(&mut self, log_id: LogId) -> Result<(), StorageError> {
         drop(lock(&self.inner.shared.pending).split_off(&log_id.index));
+        self.inner.shared.tracker.remove(log_id.index..);
         self.sync_op(SyncOp::Truncate(log_id.index), StorageIOError::write_logs)
             .await
     }
@@ -780,6 +950,8 @@ impl RaftLogStorage<TypeConfig> for LogStore {
             let kept = pending.split_off(&log_id.index.saturating_add(1));
             *pending = kept;
         }
+        // A follower's snapshot install commits these without `save_committed`.
+        self.inner.shared.tracker.remove(..=log_id.index);
         let op = SyncOp::Purge {
             last: log_id,
             encoded,
@@ -1046,6 +1218,7 @@ mod tests {
                 batch: Bytes::from(vec![seed; 16 + usize::from(seed)]),
                 fingerprint: None,
             }],
+            seq: 0,
         }
     }
 
@@ -1485,5 +1658,62 @@ mod tests {
             inclusive_bounds(&(Bound::Excluded(4), Bound::Included(5))),
             Some((5, 5))
         );
+    }
+
+    #[tokio::test]
+    async fn a_leaders_own_entry_fires_at_the_commit_and_a_read_back_one_records_nothing() {
+        let dir = LogDir::new("tracked");
+        let store = LogStore::open(&dir.log_path(), CACHE).expect("open");
+        let raft = start_node(store.clone(), dir.path()).await;
+        let tracker = store.tracker();
+
+        let (logged, mut signal) = oneshot::channel();
+        tracker.handed(1, vec![logged]);
+        let own = Proposal {
+            seq: 1,
+            ..proposal(1)
+        };
+        raft.client_write(own).await.expect("write");
+        assert_eq!(signal.try_recv(), Ok(()), "fired at the commit");
+        tracker.answered(1);
+        // An entry with no number (another leader's, or one read back) is not followed,
+        // even when a waiter sits under that number.
+        let (logged, mut signal) = oneshot::channel();
+        tracker.handed(0, vec![logged]);
+        raft.client_write(proposal(2)).await.expect("write");
+        assert_eq!(signal.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+        raft.shutdown().await.expect("shutdown");
+    }
+
+    #[tokio::test]
+    async fn truncate_and_purge_drop_the_waiters_of_the_entries_they_remove_unfired() {
+        use oneshot::error::TryRecvError::{Closed, Empty};
+
+        let dir = LogDir::new("untracked");
+        let mut store = LogStore::open(&dir.log_path(), CACHE).expect("open");
+        let tracker = store.tracker();
+        let mut signals = Vec::new();
+        for (seq, index) in [(1, Some(5)), (2, Some(6)), (3, None)] {
+            let (logged, signal) = oneshot::channel();
+            tracker.handed(seq, vec![logged]);
+            if let Some(index) = index {
+                tracker.appended(seq, index);
+            }
+            signals.push(signal);
+        }
+        store.truncate(log_id(1, 1, 6)).await.expect("truncate");
+        assert_eq!(tracker.len(), 2);
+        store.purge(log_id(1, 1, 5)).await.expect("purge");
+        assert_eq!(tracker.len(), 1, "the entry not appended yet stays");
+        store
+            .save_committed(Some(log_id(1, 1, 9)))
+            .await
+            .expect("save committed");
+        assert_eq!(signals[0].try_recv(), Err(Closed), "purged unfired");
+        assert_eq!(signals[1].try_recv(), Err(Closed), "truncated unfired");
+        assert_eq!(signals[2].try_recv(), Err(Empty), "no index, no commit");
+        tracker.answered(3);
+        assert_eq!(signals[2].try_recv(), Err(Closed), "the answer drops it");
+        assert_eq!(tracker.len(), 0);
     }
 }

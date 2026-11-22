@@ -540,6 +540,7 @@ mod tests {
                 batch: Bytes::from(cbor(&seed_batch())),
                 fingerprint: None,
             }],
+            seq: 0,
         };
         let heartbeat = AppendRequest {
             vote,

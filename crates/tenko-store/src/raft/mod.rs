@@ -186,6 +186,26 @@ pub static COMMIT_DURATION: tenko_core::metrics::Histogram =
         1_000_000,
     ));
 
+/// `tenko_store_commit_stage_duration_seconds{stage}`: where the time of a commit goes on the
+/// member whose coalescer proposed the entry (usually the leader; a former leader whose
+/// entry commits after it stepped down observes `commit`, `apply` and `wake` too). `queue`:
+/// from a batch's enqueue to the hand-over of its entry to Raft (the wait for an in-flight
+/// permit, a hand-over of leadership and the packing of the entry), once per batch;
+/// `append`: to the flush of the entry's log record; `commit`: to the Raft commit (at once
+/// on one voter, else the quorum's answer); `apply`: to the end of the apply; `wake`: to
+/// the answer the proposers get. [`COMMIT_DURATION`] keeps timing the whole.
+pub static COMMIT_STAGES: tenko_core::metrics::HistogramVec =
+    tenko_core::metrics::HistogramVec::fixed(
+        tenko_core::metrics::Desc::histogram(
+            "tenko_store_commit_stage_duration_seconds",
+            "Time of each stage of a commit on the leader.",
+            &COMMIT_BOUNDS,
+            1_000_000,
+        )
+        .labels(&["stage"]),
+        &[&["queue"], &["append"], &["commit"], &["apply"], &["wake"]],
+    );
+
 /// Marks `dir` (a store directory) as joining a cluster; creates the directory.
 ///
 /// # Errors
@@ -833,6 +853,7 @@ impl RaftStore {
             config.journal_max_bytes,
         );
         let hold: Hold = Arc::new(tokio::sync::RwLock::new(()));
+        sm.track(log.tracker());
         let coalescer = coalescer::spawn(
             raft.clone(),
             config.coalescer,
@@ -840,6 +861,7 @@ impl RaftStore {
             receiver,
             Arc::clone(&coalescer_stats),
             Arc::clone(&hold),
+            log.tracker(),
         );
         let isolation_after = config.isolation_after;
         let confirmer = Arc::new(Confirmer::of_raft(
@@ -1195,7 +1217,7 @@ impl RaftStore {
             None => None,
         };
         match inner
-            .queue_local(ProposedBatch { batch, fingerprint }, false)
+            .queue_local(ProposedBatch { batch, fingerprint }, false, None)
             .await
         {
             Ok(committed) => Ok(committed),
@@ -1543,7 +1565,8 @@ async fn release(raft: Raft, log: &LogStore, sm: &StateMachine) {
     }
 }
 
-/// Whether `node` is the only voter of the membership `raft` knows.
+/// Whether `node` is the only voter of the effective membership `raft` knows (possibly not
+/// committed yet, as of the last metrics update).
 fn sole_voter(raft: &Raft, node: RaftNodeId) -> bool {
     let metrics = raft.metrics().borrow().clone();
     let voters: BTreeSet<RaftNodeId> = metrics.membership_config.membership().voter_ids().collect();
@@ -1757,12 +1780,14 @@ impl Inner {
 
     /// Queues an encoded batch to this node's coalescer and waits for its answer, in the
     /// span `tenko.store.coalesce` (from the enqueue to the commit notification).
+    /// `logged` fires at the entry's Raft commit.
     async fn queue_local(
         &self,
         batch: ProposedBatch,
         background: bool,
+        logged: Option<oneshot::Sender<()>>,
     ) -> Result<Committed, Refused> {
-        self.queue_and_wait(batch, background)
+        self.queue_and_wait(batch, background, logged)
             .instrument(tracing::info_span!("tenko.store.coalesce"))
             .await
     }
@@ -1771,6 +1796,7 @@ impl Inner {
         &self,
         batch: ProposedBatch,
         background: bool,
+        logged: Option<oneshot::Sender<()>>,
     ) -> Result<Committed, Refused> {
         let sender = lock(&self.queue)
             .clone()
@@ -1781,6 +1807,8 @@ impl Inner {
                 batch,
                 reply,
                 background,
+                logged,
+                at: Instant::now(),
             })
             .await
             .map_err(|_| Refused::Store(StoreError::ShuttingDown))?;
@@ -1853,17 +1881,19 @@ impl Inner {
 
     /// Proposes an encoded batch: on the leader through the coalescer, on any other member
     /// by forwarding it to the leader and waiting until this node has applied the commit.
-    /// Runs in the span `tenko.store.propose`.
+    /// Runs in the span `tenko.store.propose`. `logged` fires at the Raft commit of the
+    /// batch's entry on this node, or with the `Ok` of a forwarded batch.
     async fn propose_encoded(
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
         background: bool,
+        logged: Option<oneshot::Sender<()>>,
     ) -> Result<Committed, StoreError> {
         let span = propose_span(encoded.len());
         let mut route = Route::default();
         let result = self
-            .propose_routed(encoded, fingerprint, background, &mut route)
+            .propose_routed(encoded, fingerprint, background, logged, &mut route)
             .instrument(span.clone())
             .await;
         if let Some(leader) = route.leader {
@@ -1888,6 +1918,7 @@ impl Inner {
         encoded: Bytes,
         fingerprint: Option<Digest>,
         background: bool,
+        mut logged: Option<oneshot::Sender<()>>,
         route: &mut Route,
     ) -> Result<Committed, StoreError> {
         let started = Instant::now();
@@ -1910,7 +1941,7 @@ impl Inner {
                         batch: encoded.clone(),
                         fingerprint,
                     };
-                    match self.queue_local(batch, background).await {
+                    match self.queue_local(batch, background, logged.take()).await {
                         Ok(committed) => return Ok(committed),
                         Err(Refused::Store(error)) => return Err(error),
                         // openraft refused the entry: nothing was appended.
@@ -1924,6 +1955,9 @@ impl Inner {
                 {
                     Ok(committed) => {
                         self.wait_applied(committed.revision, deadline).await?;
+                        if let Some(logged) = logged.take() {
+                            let _ = logged.send(());
+                        }
                         return Ok(committed);
                     }
                     Err(error) if error.not_queued() => {
@@ -2071,11 +2105,13 @@ fn remove_when_released(dir: &std::path::Path) {
 }
 
 impl RaftStore {
-    /// [`Store::propose`] in the foreground or the background class of the coalescer.
+    /// [`Store::propose`] in the foreground or the background class of the coalescer;
+    /// `logged` fires at the Raft commit of the batch's entry ([`Store::propose_logged`]).
     async fn propose_class(
         &self,
         batch: WriteBatch,
         background: bool,
+        logged: Option<oneshot::Sender<()>>,
     ) -> Result<Committed, StoreError> {
         let started = Instant::now();
         let inner = &self.inner;
@@ -2090,7 +2126,7 @@ impl RaftStore {
         };
         let encoded = to_cbor(&batch)?;
         let committed = inner
-            .propose_encoded(encoded, fingerprint, background)
+            .propose_encoded(encoded, fingerprint, background, logged)
             .await?;
         COMMIT_DURATION.observe(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
         Ok(committed)
@@ -2222,12 +2258,31 @@ pub fn snapshot_decision(
 #[async_trait::async_trait]
 impl Store for RaftStore {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
-        self.propose_class(batch, false).await
+        self.propose_class(batch, false, None).await
+    }
+
+    async fn propose_logged(
+        &self,
+        batch: WriteBatch,
+        logged: oneshot::Sender<()>,
+    ) -> Result<Committed, StoreError> {
+        // `validate` refuses what the apply would, except preconditions and idempotency
+        // keys: such a batch is signaled with its result.
+        if batch.preconditions.is_empty() && batch.idempotency.is_none() {
+            return self.propose_class(batch, false, Some(logged)).await;
+        }
+        let committed = self.propose(batch).await?;
+        let _ = logged.send(());
+        Ok(committed)
     }
 
     // WP9.6 (ADR 0030): the background class of the coalescer.
     async fn propose_background(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
-        self.propose_class(batch, true).await
+        self.propose_class(batch, true, None).await
+    }
+
+    fn sole_voter(&self) -> bool {
+        sole_voter(&self.inner.raft, self.inner.me())
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {

@@ -432,6 +432,7 @@ async fn a_batch_a_member_cannot_decode_stops_its_state_machine() {
             batch: Bytes::from(encoded),
             fingerprint: None,
         }],
+        seq: 0,
     };
     let entry = leader
         .raft()

@@ -57,7 +57,7 @@ pub struct SnapshotFile {
 /// The application payload of one Raft entry: write batches in queue order. A replicated
 /// command: a field this binary does not know fails the decode (of the entry on the wire or
 /// in the log) instead of being ignored, like the batches in it (`apply`).
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Proposal {
     /// Change sets the journal keeps (from the leader's configuration, so every replica
@@ -69,6 +69,30 @@ pub struct Proposal {
     pub journal_max_bytes: u64,
     /// The batches, applied in this order.
     pub batches: Vec<ProposedBatch>,
+    /// The coalescer's number for this entry on the node that proposed it, counted from 1,
+    /// by which the log store finds who waits for the entry's commit. Never encoded: an
+    /// entry read back from the log or the wire has `0`, which nobody waits for.
+    #[serde(skip)]
+    pub seq: u64,
+}
+
+/// `seq` is left out: an entry read back equals the one written.
+impl PartialEq for Proposal {
+    fn eq(&self, other: &Self) -> bool {
+        // Destructured, so that a new field cannot drop out of the comparison unseen.
+        let Self {
+            journal_retention,
+            journal_max_bytes,
+            batches,
+            seq: _,
+        } = self;
+        (journal_retention, journal_max_bytes, batches)
+            == (
+                &other.journal_retention,
+                &other.journal_max_bytes,
+                &other.batches,
+            )
+    }
 }
 
 /// One write batch inside a [`Proposal`].
@@ -123,7 +147,8 @@ pub struct ApplyResponse {
 }
 
 /// The deterministic result of applying one batch. Storage failures and batches this binary
-/// cannot decode are not outcomes: they stop the state machine (`apply`).
+/// cannot decode are not outcomes: they stop the state machine (`apply`). A new refusing
+/// variant must also be excluded from the early signal in `RaftStore::propose_logged`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatchOutcome {
     /// The batch committed (or replayed an earlier commit).
@@ -151,5 +176,30 @@ impl BatchOutcome {
             BatchOutcome::IdempotencyMismatch => Err(StoreError::IdempotencyMismatch),
             BatchOutcome::ReservedTable(table) => Err(StoreError::ReservedTable { table }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tenko_core::codec::{from_cbor, to_cbor};
+
+    use super::*;
+
+    #[test]
+    fn seq_is_never_encoded_and_takes_no_part_in_equality() {
+        let proposal = |seq| Proposal {
+            journal_retention: 3,
+            journal_max_bytes: 0,
+            batches: vec![ProposedBatch {
+                batch: Bytes::from_static(b"batch"),
+                fingerprint: None,
+            }],
+            seq,
+        };
+        let written = to_cbor(&proposal(7)).expect("encode");
+        assert_eq!(written, to_cbor(&proposal(0)).expect("encode"));
+        let read: Proposal = from_cbor(&written).expect("decode");
+        assert_eq!(read.seq, 0, "an entry read back waits for nothing");
+        assert_eq!(read, proposal(7));
     }
 }

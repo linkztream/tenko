@@ -945,6 +945,7 @@ mod tests {
                     batch: Bytes::from(vec![7_u8; bytes]),
                     fingerprint: None,
                 }],
+                seq: 0,
             }),
         }
     }

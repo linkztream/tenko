@@ -242,6 +242,7 @@ pub(crate) fn register(registry: &Registry) {
         &BACKUP_AGE,
         // Observed by the store and the reconciler (the samples of the `metrics` topic).
         &tenko_store::raft::COMMIT_DURATION,
+        &tenko_store::raft::COMMIT_STAGES,
         &tenko_ipam::reconcile::INGEST_BATCHES,
         &tenko_ipam::reconcile::INGEST_FACTS,
     ] {
@@ -699,6 +700,7 @@ mod tests {
         let text = render(&state);
         for line in [
             "# TYPE tenko_store_commit_duration_seconds histogram\n",
+            "# TYPE tenko_store_commit_stage_duration_seconds histogram\n",
             "# TYPE tenko_ipam_ingest_batches counter\n",
             "# TYPE tenko_ipam_ingest_facts counter\n",
         ] {

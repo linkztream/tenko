@@ -21,18 +21,28 @@
 //! waited [`BACKGROUND_MAX_WAIT`] is packed as if no foreground batch waited, so the
 //! background class is never starved. The two classes keep no order between them.
 //!
+//! Each entry gets a number (`seq`, from 1) by which the log store's [`Tracker`] finds the
+//! batches that wait for its commit ([`crate::Store::propose_logged`]) and times its stages.
+//!
 //! When openraft refuses an entry because this node no longer leads, every proposer of the
 //! entry learns it as [`Refused::NotLeader`]: nothing was appended, so the store forwards
 //! the batch to the new leader. A hand-over of leadership holds the coalescer
 //! ([`Hold`]) so that no entry refreshes the followers' leader lease meanwhile.
 
-use std::{collections::VecDeque, sync::Arc, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, oneshot};
 
 use openraft::raft::ClientWriteResult;
 
-use super::types::{BatchOutcome, Proposal, ProposedBatch, Raft, TypeConfig};
+use super::{
+    log::{Stage, Tracker},
+    types::{BatchOutcome, Proposal, ProposedBatch, Raft, TypeConfig},
+};
 use crate::api::{CoalescerConfig, Committed, StoreError};
 
 /// Why the coalescer did not commit a batch.
@@ -50,6 +60,10 @@ pub(crate) struct Queued {
     pub(crate) reply: oneshot::Sender<Result<Committed, Refused>>,
     /// WP9.6: a background batch (ADR 0030).
     pub(crate) background: bool,
+    /// Fired at the Raft commit of the batch's entry.
+    pub(crate) logged: Option<oneshot::Sender<()>>,
+    /// When the batch was queued.
+    pub(crate) at: Instant,
 }
 
 /// The encoded bytes of background batches an entry with foreground batches may carry: one
@@ -161,8 +175,9 @@ pub(crate) fn spawn(
     queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
     hold: Hold,
+    tracker: Arc<Tracker>,
 ) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(run(raft, config, journal, queue, stats, hold))
+    tokio::spawn(run(raft, config, journal, queue, stats, hold, tracker))
 }
 
 async fn run(
@@ -172,7 +187,9 @@ async fn run(
     mut queue: mpsc::Receiver<Queued>,
     stats: Arc<CoalescerStats>,
     hold: Hold,
+    tracker: Arc<Tracker>,
 ) {
+    let mut seq = 0_u64;
     let inflight = Arc::new(Semaphore::new(config.max_inflight_entries.max(1)));
     let mut waiting = Waiting::default();
     loop {
@@ -208,33 +225,55 @@ async fn run(
             u64::try_from(entry.len()).unwrap_or(u64::MAX),
             std::sync::atomic::Ordering::Relaxed,
         );
-        let (batches, replies): (Vec<ProposedBatch>, Vec<_>) = entry
-            .into_iter()
-            .map(|queued| (queued.batch, queued.reply))
-            .unzip();
+        let (batches, replies, logged) = unpack(entry);
+        seq += 1;
+        tracker.handed(seq, logged);
         let proposal = Proposal {
             journal_retention,
             journal_max_bytes,
             batches,
+            seq,
         };
         let Ok(response) = raft.client_write_ff(proposal).await else {
+            tracker.answered(seq);
             for reply in replies {
                 let _ = reply.send(Err(Refused::Store(StoreError::ShuttingDown)));
             }
             return;
         };
         drop(not_held);
-        tokio::spawn(answer(response, replies, permit));
+        tokio::spawn(answer(response, replies, permit, tracker.clone(), seq));
     }
+}
+
+type Reply = oneshot::Sender<Result<Committed, Refused>>;
+
+/// An entry's batches, their replies and the signals of its commit, in queue order; times
+/// each batch's wait in the queue.
+fn unpack(entry: Vec<Queued>) -> (Vec<ProposedBatch>, Vec<Reply>, Vec<oneshot::Sender<()>>) {
+    let now = Instant::now();
+    let mut batches = Vec::with_capacity(entry.len());
+    let mut replies = Vec::with_capacity(entry.len());
+    let mut logged = Vec::new();
+    for queued in entry {
+        Stage::Queue.observe(queued.at, now);
+        batches.push(queued.batch);
+        replies.push(queued.reply);
+        logged.extend(queued.logged);
+    }
+    (batches, replies, logged)
 }
 
 /// Waits for an entry's response and answers each proposer.
 async fn answer<E>(
     response: impl Future<Output = Result<ClientWriteResult<TypeConfig>, E>>,
-    replies: Vec<oneshot::Sender<Result<Committed, Refused>>>,
+    replies: Vec<Reply>,
     permit: OwnedSemaphorePermit,
+    tracker: Arc<Tracker>,
+    seq: u64,
 ) {
     let result = response.await;
+    tracker.answered(seq);
     drop(permit);
     let outcomes = match result {
         Ok(Ok(written)) => written.data.outcomes,
@@ -287,8 +326,6 @@ fn fail(queued: Vec<Queued>, error: &Refused) {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Instant;
-
     use bytes::Bytes;
 
     use super::*;
@@ -305,6 +342,8 @@ mod tests {
             },
             reply: oneshot::channel().0,
             background,
+            logged: None,
+            at: Instant::now(),
         }
     }
 
@@ -397,5 +436,46 @@ mod tests {
             "overdue: the background batches up to the bound"
         );
         assert!(bytes(&entry) <= ENTRY_BOUND.max_entry_bytes);
+    }
+
+    #[test]
+    fn each_logged_batch_of_an_entry_gets_its_own_signal_at_the_commit() {
+        let mut waiting = Waiting::default();
+        waiting.push(queued(1_000, 1, true));
+        let mut signals = Vec::new();
+        for tag in 10..13 {
+            let (logged, signal) = oneshot::channel();
+            let mut batch = queued(1_000, tag, false);
+            batch.logged = Some(logged);
+            waiting.push(batch);
+            signals.push(signal);
+        }
+        waiting.push(queued(1_000, 13, false));
+        let entry = waiting.next_entry(&ENTRY_BOUND);
+        assert_eq!(
+            tags(&entry),
+            [
+                (10, false),
+                (11, false),
+                (12, false),
+                (13, false),
+                (1, true)
+            ],
+            "the logged batches beside a foreground and a background one"
+        );
+        let (batches, replies, logged) = unpack(entry);
+        assert_eq!((batches.len(), replies.len(), logged.len()), (5, 5, 3));
+
+        let tracker = Tracker::default();
+        tracker.handed(1, logged);
+        tracker.appended(1, 7);
+        tracker.committed(6);
+        for signal in &mut signals {
+            assert_eq!(signal.try_recv(), Err(oneshot::error::TryRecvError::Empty));
+        }
+        tracker.committed(7);
+        for signal in &mut signals {
+            assert_eq!(signal.try_recv(), Ok(()), "each batch gets its own signal");
+        }
     }
 }

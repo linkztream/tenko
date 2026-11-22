@@ -443,6 +443,8 @@ type ServiceQueue = (tokio::sync::Mutex<()>, Duration);
 pub struct InProcessNetwork {
     nodes: Arc<RwLock<BTreeMap<RaftNodeId, WeakRaftStore>>>,
     isolated: Arc<RwLock<BTreeSet<RaftNodeId>>>,
+    /// Nodes whose appends reach their targets while the answers to them are lost.
+    deaf: Arc<RwLock<BTreeSet<RaftNodeId>>>,
     /// Nodes that serve appends one at a time, each taking at least the duration.
     slow: Arc<RwLock<BTreeMap<RaftNodeId, Arc<ServiceQueue>>>>,
 }
@@ -498,6 +500,17 @@ impl InProcessNetwork {
         }
     }
 
+    /// Loses the answers to the appends a node sends (`true`), as a link that fails one
+    /// way: its followers take its entries and it learns nothing of it; `false` heals it.
+    pub fn set_deaf(&self, node: RaftNodeId, deaf: bool) {
+        let mut set = self.deaf.write().unwrap_or_else(PoisonError::into_inner);
+        if deaf {
+            set.insert(node);
+        } else {
+            set.remove(&node);
+        }
+    }
+
     /// Makes a node serve the appends it receives (replication and heartbeats) one at a
     /// time, each taking at least `service`, like a loaded host; `None` makes it fast again.
     pub fn set_service_time(&self, node: RaftNodeId, service: Option<Duration>) {
@@ -536,9 +549,8 @@ impl PeerTransport for InProcessNetwork {
         _node: &BasicNode,
         rpc: AppendEntriesRequest<TypeConfig>,
     ) -> AppendResult {
-        let store = self
-            .target(rpc.vote.leader_id().voted_for().unwrap_or_default(), target)
-            .map_err(RPCError::Unreachable)?;
+        let sender = rpc.vote.leader_id().voted_for().unwrap_or_default();
+        let store = self.target(sender, target).map_err(RPCError::Unreachable)?;
         let service = self
             .slow
             .read()
@@ -553,10 +565,19 @@ impl PeerTransport for InProcessNetwork {
             }
             None => None,
         };
-        store
+        let answer = store
             .handle_append_entries(rpc)
             .await
-            .map_err(|error| RPCError::RemoteError(RemoteError::new(target, error)))
+            .map_err(|error| RPCError::RemoteError(RemoteError::new(target, error)));
+        if self
+            .deaf
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .contains(&sender)
+        {
+            return Err(RPCError::Unreachable(unreachable("the answer is lost")));
+        }
+        answer
     }
 
     async fn vote(

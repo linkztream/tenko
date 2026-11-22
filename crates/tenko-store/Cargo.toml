@@ -13,7 +13,8 @@ testing = ["dep:arc-swap"]
 # The production store (`tenko_store::raft::RaftStore`): openraft over redb (WP1.1).
 raft = ["dep:flate2", "dep:openraft", "dep:redb", "dep:sha2", "dep:tracing"]
 # WP6.2: the test hooks of the store (`tenko_store::test_hooks`), for the acceptance tests
-# through the binary; never in a release build.
+# through the binary; never in a release build, and never for a measurement: they add file
+# checks to every log group and every apply.
 test-hooks = []
 
 [dependencies]
@@ -34,8 +35,8 @@ tracing = { workspace = true, optional = true }
 
 [dev-dependencies]
 tenko-core = { workspace = true, features = ["testing"] }
-# Enables the conformance suite for this package's own integration tests.
-tenko-store = { path = ".", features = ["testing", "raft"] }
+# Enables the conformance suite and the test hooks for this package's own integration tests.
+tenko-store = { path = ".", features = ["testing", "raft", "test-hooks"] }
 # Captures what a test logs (a lost Raft log is reported as a warning).
 tracing-subscriber = { workspace = true }
 

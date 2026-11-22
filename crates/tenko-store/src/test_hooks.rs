@@ -1,14 +1,38 @@
 //! Test hooks of the store, compiled only with the feature `test-hooks` (the acceptance
-//! tests of the `tenko` binary turn it on; a release build never has it).
+//! tests of the `tenko` binary turn it on; a release build never has it). A build with them
+//! is never measured: they look for their files at every log group and every apply.
 //!
 //! [`writes_refused`]: while the file that the environment variable
 //! [`REFUSE_WRITES_FILE`] names exists, the Raft store refuses every write with
 //! [`crate::StoreError::NoQuorum`], as a controller without a quorum does (OPS-26), and
 //! reads go on. A test creates the file to cut the quorum on one node and removes it to
 //! heal, without a second process.
+//!
+//! [`HOLD_APPLY`], [`STALL_LOG`] and [`FAIL_LOG`] act on one Raft store: while a file of
+//! that name exists in the store's data directory, its state machine holds every apply (a
+//! commit that has not applied yet), its log writer holds every group commit (a stalled
+//! disk), or every group commit of its log writer fails. The file is only looked for, never
+//! read.
 
 /// The environment variable naming the file whose presence refuses writes.
 pub const REFUSE_WRITES_FILE: &str = "TENKO_TEST_REFUSE_WRITES_FILE";
+
+/// The file in a store's data directory whose presence holds every apply.
+pub const HOLD_APPLY: &str = "test-hold-apply";
+/// The file in a store's data directory whose presence holds every log group commit.
+pub const STALL_LOG: &str = "test-stall-log";
+/// The file in a store's data directory whose presence fails every log group commit.
+pub const FAIL_LOG: &str = "test-fail-log";
+
+/// Waits (blocking the thread) while the file `name` exists in `dir`.
+#[cfg(all(feature = "raft", feature = "test-hooks"))]
+pub(crate) fn hold_while(dir: &std::path::Path, name: &str) {
+    let path = dir.join(name);
+    while path.exists() {
+        // test-lint: allow sleep the pace of a hook that polls for a file another process may remove
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
 
 /// Whether writes are refused now.
 pub fn writes_refused() -> bool {

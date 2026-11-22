@@ -521,6 +521,7 @@ async fn batches_in_one_entry_apply_in_order_and_fail_alone() {
             .into_iter()
             .map(proposed)
             .collect(),
+        seq: 0,
     };
     let response = store
         .raft()

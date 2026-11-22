@@ -109,6 +109,8 @@ fn normal_entry() -> Entry {
                 fingerprint: Some(batch.fingerprint().expect("fingerprint")),
                 batch: to_cbor(&batch).expect("batch"),
             }],
+            // Never encoded: the golden bytes hold with a number set.
+            seq: 9,
         }),
     }
 }

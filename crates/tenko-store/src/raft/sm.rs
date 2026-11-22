@@ -46,7 +46,7 @@ use std::{
     io::Write as _,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex, MutexGuard, PoisonError, RwLock,
+        Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -66,6 +66,7 @@ use tokio::sync::watch;
 use super::{
     apply::{Applier, TxnTables},
     index::{Capture, Registered, Registry, replay},
+    log::{Stage, Tracker},
     snapshot::{
         FORMAT, Record, SnapshotHeader, SnapshotReader, read_header, records_bound, write_snapshot,
     },
@@ -148,6 +149,8 @@ struct Shared {
     stats: SmStats,
     /// Where the state machine stopped applying, once it did.
     stopped: Mutex<Option<ApplyStopped>>,
+    /// The log store's entries of this node's coalescer, whose apply is timed here.
+    tracker: OnceLock<Arc<Tracker>>,
 }
 
 #[derive(Default)]
@@ -367,6 +370,7 @@ impl StateMachine {
                 snapshots: Mutex::new(snapshots),
                 stats: SmStats::default(),
                 stopped: Mutex::new(None),
+                tracker: OnceLock::new(),
             }),
         })
     }
@@ -471,12 +475,21 @@ impl StateMachine {
         lock(&self.shared.retired).retain(|path| fs::remove_file(path).is_err() && path.exists());
     }
 
+    /// Times the applies of the entries `tracker` follows (once; the Raft store's open).
+    pub(crate) fn track(&self, tracker: Arc<Tracker>) {
+        let _ = self.shared.tracker.set(tracker);
+    }
+
     /// Applies committed entries in one transaction (blocking).
     pub(crate) fn apply_entries(
         &self,
         entries: Vec<Entry>,
     ) -> Result<Vec<ApplyResponse>, StoreError> {
         let shared = &*self.shared;
+        #[cfg(feature = "test-hooks")]
+        crate::test_hooks::hold_while(&shared.dir, crate::test_hooks::HOLD_APPLY);
+        let indexes = (entries.first().zip(entries.last()))
+            .map(|(first, last)| first.log_id.index..=last.log_id.index);
         let mut registry = lock(&shared.registry);
         // The state file only switches under the registry lock, so `db` stays the active one.
         let db = self.db();
@@ -542,6 +555,9 @@ impl StateMachine {
             *current = revision;
             changed
         });
+        if let (Some(tracker), Some(indexes)) = (shared.tracker.get(), indexes) {
+            tracker.advance(Stage::Apply, Stage::Wake, indexes);
+        }
         Ok(responses)
     }
 
@@ -1199,6 +1215,7 @@ mod tests {
                     batch: to_cbor(&batch).expect("encode"),
                     fingerprint: None,
                 }],
+                seq: 0,
             }),
         }
     }
@@ -1508,6 +1525,7 @@ mod tests {
                     batch: Bytes::from(bytes),
                     fingerprint: None,
                 }],
+                seq: 0,
             }),
         };
         for (place, after) in [
