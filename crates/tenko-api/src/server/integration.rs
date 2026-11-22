@@ -13,7 +13,8 @@
 //!   passing is closed at once, also in the middle of a long answer: at a change of the
 //!   records, at the next moment its acceptance can change by time alone (its end, the end of
 //!   its overlap, the bound of unread records), and once the controller has been cut off
-//!   from its quorum for longer than the isolation limit.
+//!   from its quorum for longer than the isolation limit (at once while the clock guard holds
+//!   issuing).
 //! - It reads no PROXY protocol header, no forwarded header and no cookie: the client
 //!   address is the TCP peer.
 
@@ -47,7 +48,7 @@ use tower::ServiceExt as _;
 use super::forwarded::{ConnInfo, IntegrationClient};
 use crate::{
     middleware::{
-        Quota, RateLimitConfig, RateLimiter, integration::ISOLATION_LIMIT, quorum::Staleness,
+        Quota, RateLimitConfig, RateLimiter, integration::isolated_too_long, quorum::Staleness,
     },
     routes::integrations::CaIssuer,
 };
@@ -430,7 +431,7 @@ fn stands(shared: &Shared, client: &IntegrationClient, full: bool) -> bool {
 fn cut_off(store: &dyn Store, now: Timestamp) -> bool {
     let status = store.status();
     Staleness::of(&status.quorum, status.revision)
-        .is_some_and(|staleness| now.saturating_since(staleness.since) > ISOLATION_LIMIT)
+        .is_some_and(|staleness| isolated_too_long(staleness.since, now))
 }
 
 /// Sleeps `after` (a moment just past it, so the boundary itself has gone), or forever.

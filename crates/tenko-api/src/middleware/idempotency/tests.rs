@@ -1813,3 +1813,64 @@ async fn the_sweep_indexes_or_removes_the_records_of_an_earlier_version() {
         "the legacy records, not the current ones"
     );
 }
+
+/// Held after a forward jump of an hour, for the calling test.
+fn held() -> tenko_core::clock::testing::Override {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: Release::Wait,
+        until: None,
+    })
+}
+
+#[tokio::test]
+async fn a_held_clock_purges_no_record_and_keeps_an_old_one_live() {
+    let store = MemStore::default();
+    seed(&store, "old", 3, hours_ago(30)).await;
+    let now = hours_ago(0);
+    let _held = held();
+    let purged = purge_expired(&store, TTL, now, None).await.expect("purge");
+    assert_eq!(purged, 0);
+    assert_eq!(count(&store, &TABLE).await, 3);
+    let key = record_key(&principal(), &IdempotencyKey::new("old-0").expect("key"));
+    let found = lookup(&store, &key, now, TTL).await;
+    assert!(matches!(found, Ok(Found::Live(_))));
+}
+
+#[tokio::test]
+async fn a_held_clock_indexes_an_old_record_of_an_earlier_version_instead_of_removing_it() {
+    let store = MemStore::default();
+    let principal = principal();
+    let key = record_key(&principal, &IdempotencyKey::new("gone").expect("key"));
+    let legacy = StoredResponse {
+        fingerprint: Bytes::from_static(&[1; 32]),
+        status: 201,
+        headers: Vec::new(),
+        body: Bytes::new(),
+        created: hours_ago(30),
+        replay_unavailable: false,
+        key_id: Bytes::new(),
+        format: 0,
+        checks: Vec::new(),
+        scopes: Vec::new(),
+        body_len: 0,
+        fresh_session: false,
+        stamp: Bytes::new(),
+    };
+    let mut batch = WriteBatch::new(principal.clone(), Timestamp::now());
+    batch.put(
+        TABLE,
+        Bytes::copy_from_slice(&key),
+        to_cbor(&legacy).expect("cbor"),
+    );
+    store.propose(batch).await.expect("legacy");
+    let _held = held();
+    sweep_unindexed(&store, TTL, Timestamp::now(), None)
+        .await
+        .expect("sweep");
+    assert_eq!(count(&store, &TABLE).await, 1);
+    assert_eq!(count(&store, &EXPIRY_TABLE).await, 1);
+}

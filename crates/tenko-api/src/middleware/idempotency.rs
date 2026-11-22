@@ -14,7 +14,9 @@
 //!    body with `Idempotency-Replayed: true`; the same key with another request is 422
 //!    `sys.idempotency_mismatch`; a retry while the first request still runs is 409
 //!    `sys.idempotency_in_flight` with `Retry-After: 1`. Failed requests are not stored, so
-//!    they can be retried.
+//!    they can be retried. While the clock guard holds the clock
+//!    ([`tenko_core::clock::trusted_now`]), a record older than the TTL still counts as
+//!    within it, and no record is purged by its age.
 //!
 //! **Nothing is buffered before the handler.** The record is looked up by its key before the
 //! body is read. A first request streams its body through the fingerprint to the handler,
@@ -689,10 +691,16 @@ async fn lookup(
         });
     Ok(match existing {
         None => Found::Nothing,
-        Some((stored, revision)) if now.saturating_since(stored.created) >= ttl => Found::Expired {
-            revision,
-            created: stored.created,
-        },
+        // A clock the guard holds may misjudge the age: the record stays live.
+        Some((stored, revision))
+            if now.saturating_since(stored.created) >= ttl
+                && tenko_core::clock::trusted_now().is_ok() =>
+        {
+            Found::Expired {
+                revision,
+                created: stored.created,
+            }
+        }
         Some((stored, _)) => Found::Live(Box::new(stored)),
     })
 }
@@ -1244,7 +1252,8 @@ const SWEEP_PAGE: usize = 16;
 ///
 /// The server runs it hourly on the leader. The work is bounded by the number of expired
 /// rows: [`PURGE_PAGE`] rows per batch, one batch per page, and pages until a page comes
-/// back short.
+/// back short. Nothing is deleted while the clock guard holds the clock
+/// ([`tenko_core::clock::trusted_now`]).
 ///
 /// # Errors
 ///
@@ -1265,6 +1274,9 @@ async fn purge_pages(
     fence: Option<u64>,
     page: usize,
 ) -> Result<usize, ApiError> {
+    if tenko_core::clock::trusted_now().is_err() {
+        return Ok(0);
+    }
     let Some(cutoff) = now.checked_sub(ttl) else {
         return Ok(0);
     };
@@ -1321,8 +1333,9 @@ async fn purge_pages(
 /// by an earlier version or, during a rolling upgrade, by a controller of one. An expired
 /// one is deleted; a live one gets its expiry row, so that the purge finds it. Reads the
 /// whole table in pages of [`SWEEP_PAGE`] records, yielding between them, fenced like
-/// [`purge_expired`]; returns how many records it deleted or indexed. The server runs it
-/// on the leader when it takes office and once a day.
+/// [`purge_expired`]; returns how many records it deleted or indexed. While the clock guard
+/// holds the clock every readable record counts as live and is indexed, for the purge to
+/// judge later. The server runs it on the leader when it takes office and once a day.
 ///
 /// # Errors
 ///
@@ -1333,6 +1346,7 @@ pub async fn sweep_unindexed(
     now: Timestamp,
     fence: Option<u64>,
 ) -> Result<usize, ApiError> {
+    let trusted = tenko_core::clock::trusted_now().is_ok();
     let mut range = KeyRange::all();
     let mut changed = 0;
     loop {
@@ -1352,7 +1366,7 @@ pub async fn sweep_unindexed(
             let stored = from_cbor::<StoredResponse>(&versioned.value).ok();
             match stored {
                 Some(stored) if stored.format >= RECORD_FORMAT => {}
-                Some(stored) if now.saturating_since(stored.created) < ttl => {
+                Some(stored) if !trusted || now.saturating_since(stored.created) < ttl => {
                     if view
                         .get(&EXPIRY_TABLE, &expiry_key(stored.created, &key))?
                         .is_some()
