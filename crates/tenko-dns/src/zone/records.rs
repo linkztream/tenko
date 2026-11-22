@@ -22,7 +22,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use tenko_core::{
-    ObjectRef, RequestCtx, Revision,
+    ObjectRef, Principal, RequestCtx, Revision, SystemComponent,
     audit::AuditDraft,
     dns::{
         DnsError, DnsName, JournalEntry, JournalRecord, MAX_TTL, Origin, Rdata, RecordData, RrSet,
@@ -34,8 +34,8 @@ use tenko_core::{
 use tenko_store::{ReadView, ReadViewExt, StoreError, WriteBatch};
 
 use super::{
-    JournalLimits, Planned, Written, ZoneError, ZoneResult, ZoneService, holds_data, journal,
-    journal_records, node, serial, soa_rrset, soa_serial, stage_delete, stage_put,
+    JournalLimits, Planned, PlannedWrite, Written, ZoneError, ZoneResult, ZoneService, holds_data,
+    journal, journal_records, node, serial, soa_rrset, soa_serial, stage_delete, stage_put,
 };
 
 /// What a change does to an RRset.
@@ -686,18 +686,56 @@ impl ZoneService {
                 written: None,
             });
         }
+        self.write_records(cx, zone, changes, true).await
+    }
+
+    /// Applies DHCP's name updates to a zone as [`ZoneService::change_records`] does. Made
+    /// by the DHCP component itself, the change set runs without a job: a client can
+    /// change its lease without limit, and so would the job rows. It keeps its audit
+    /// record `dns.record.change` and its journal entry. Any other principal's change set
+    /// is a job.
+    ///
+    /// # Errors
+    ///
+    /// As [`ZoneService::change_records`].
+    pub async fn change_dhcp_names(
+        &self,
+        cx: &RequestCtx,
+        zone: ZoneId,
+        changes: &[Change],
+    ) -> ZoneResult<BatchOutcome> {
+        let job = cx.principal != Principal::system(SystemComponent::Dhcp);
+        self.write_records(cx, zone, changes, job).await
+    }
+
+    async fn write_records(
+        &self,
+        cx: &RequestCtx,
+        zone: ZoneId,
+        changes: &[Change],
+        job: bool,
+    ) -> ZoneResult<BatchOutcome> {
+        let limits = self.config.journal;
+        let max_changes = self.config.max_changes;
         let ((diff, serials), written) = self
             .execute(cx, |view| {
                 let row = Self::zone(view, zone)?;
                 let planned = plan(view, &row.zone, changes, cx, limits, max_changes)?;
                 let result = (planned.diff, planned.serials);
                 Ok(match planned.batch {
-                    Some(batch) => Planned::write(
+                    Some(batch) => Planned {
                         result,
-                        batch,
-                        format!("change {} RRsets of zone {}", changes.len(), row.zone.name),
-                        vec![ObjectRef::from(zone)],
-                    ),
+                        write: Some(PlannedWrite {
+                            batch,
+                            summary: format!(
+                                "change {} RRsets of zone {}",
+                                changes.len(),
+                                row.zone.name
+                            ),
+                            targets: vec![ObjectRef::from(zone)],
+                            job,
+                        }),
+                    },
                     None => Planned::nothing(result),
                 })
             })

@@ -5,7 +5,7 @@
 //! the expiry the Hardened profile requires) are the callers' facts, passed in.
 
 use tenko_core::{
-    ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp,
+    JobId, ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp,
     audit::AuditDraft,
     dns::{
         AnchorKey, DnsName, NegativeTrustAnchor, NtaId, TrustAnchor, audit, codes,
@@ -208,15 +208,12 @@ impl ZoneService {
     }
 
     /// Asks the trust anchor service to refresh `zone` now: the row's next query is now.
+    /// Returns the inline job of the write.
     ///
     /// # Errors
     ///
     /// `dns.trust_anchor.not_found`, or a store or job error.
-    pub async fn refresh_trust_anchor(
-        &self,
-        cx: &RequestCtx,
-        zone: &DnsName,
-    ) -> ZoneResult<Written> {
+    pub async fn refresh_trust_anchor(&self, cx: &RequestCtx, zone: &DnsName) -> ZoneResult<JobId> {
         let ((), written) = self
             .execute(cx, |view| {
                 let row = Self::trust_anchor(view, zone)?;
@@ -238,7 +235,9 @@ impl ZoneService {
                 ))
             })
             .await?;
-        written.ok_or_else(nothing_written)
+        written
+            .and_then(|written| written.job)
+            .ok_or_else(nothing_written)
     }
 
     /// Every negative trust anchor row that has not expired at `now`, by zone.

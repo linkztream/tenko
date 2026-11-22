@@ -1,11 +1,11 @@
 //! The DDNS worker for DHCPv6 leases over the in-memory store (WP9.1, plan section 2.9):
 //! `dhcp.leases6` rows are written as the committer and the expiry service write them, and
 //! the worker follows them into the zones through the zone service, as `ddns.rs` does for
-//! DHCPv4.
+//! DHCPv4; the zone service writes through the job engine.
 //!
 //! - A lease with option 39 (S and E set) gets its AAAA record, its DHCID of identifier
-//!   type 2 over the DUID and its PTR under `ip6.arpa`, all of origin `dhcp`; the outcome
-//!   lands on the row.
+//!   type 2 over the DUID and its PTR under `ip6.arpa`, all of origin `dhcp`, and no job;
+//!   the outcome lands on the row.
 //! - A second DUID that claims the name is refused by name protection.
 //! - A release removes the AAAA, the DHCID and the PTR.
 //! - A client that writes its own AAAA record gets only its PTR.
@@ -49,11 +49,13 @@ use tenko_dhcp::{
     v4::ClientFqdn,
 };
 use tenko_dns::zone::{
-    NewZone, ZoneConfig, ZoneService,
+    ImportStaging, NewZone, ZoneConfig, ZoneService,
     records::{Change, Op},
+    register_steps,
 };
 use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES, PREFIX_RANGES, PREFIXES, RANGES};
-use tenko_store::{MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch};
+use tenko_jobs::{EngineConfig, JobEngine, tables::JOBS};
+use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch};
 use tokio_util::sync::CancellationToken;
 
 /// The forward zone.
@@ -204,7 +206,17 @@ fn new_scope(prefix: PrefixId, v6: bool, forward: ZoneId) -> NewScope {
 
 async fn lab() -> Lab {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
-    let zones = ZoneService::with_direct_jobs(Arc::clone(&store), None, ZoneConfig::default());
+    // The zone service writes through the job engine, as the server's does.
+    let staging = Arc::new(ImportStaging::default());
+    let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
+    register_steps(&mut engine, &staging);
+    let zones = ZoneService::new(
+        Arc::clone(&store),
+        Arc::new(engine),
+        None,
+        staging,
+        ZoneConfig::default(),
+    );
     let mut ids = Vec::new();
     for apex in [FORWARD, REVERSE6, REVERSE4] {
         ids.push(
@@ -481,9 +493,21 @@ fn the_reverse_zone_of_the_scope_is_the_one_the_test_names() {
     assert!(ptr6(ip6(0)).ends_with(REVERSE6));
 }
 
+/// The jobs in the store.
+async fn jobs(store: &dyn Store) -> usize {
+    store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view")
+        .scan_typed(&JOBS, KeyRange::all(), usize::MAX, false)
+        .expect("jobs")
+        .len()
+}
+
 #[tokio::test]
 async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_away() {
     let lab = lab().await;
+    let before = jobs(lab.store.as_ref()).await;
     let lease = lab.lease6(0x10, 1, Some(("laptop", FLAGS_S_E)));
     let key = lease.client_key();
     lab.commit6(lease).await;
@@ -494,6 +518,11 @@ async fn a_dhcpv6_lease_gets_its_aaaa_dhcid_and_ptr_and_a_release_takes_them_awa
             && lab.ddns6(0x10).await.dhcid.is_some()
     })
     .await;
+    assert_eq!(
+        jobs(lab.store.as_ref()).await,
+        before,
+        "the name updates wrote no job"
+    );
 
     // The AAAA record carries the lease's address, of origin dhcp, with a third of the
     // lease time as its TTL.

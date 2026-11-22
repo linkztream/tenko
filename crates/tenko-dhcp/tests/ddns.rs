@@ -1,7 +1,14 @@
 //! The DDNS worker over the in-memory store (WP8.3, plan section 2.9, ADR 0020): lease
 //! rows are written as the committer and the expiry service write them, and the worker
-//! follows them into the zones through the zone service.
+//! follows them into the zones through the zone service, which writes through the job
+//! engine as the server's does.
 //!
+//! - Name updates write no job: new clients at every address of the pool, round after
+//!   round, leave the job tables and the job audit records as they were, and each change
+//!   set is audited at the time it was written, while an operator's edit through the same
+//!   zone service is a job. Only the DHCP component itself, through
+//!   `change_dhcp_names`, writes without a job. A stale name update is planned again; one
+//!   the store refuses shows on the lease and in `tenko_dhcp_ddns_total{outcome="failed"}`.
 //! - A client with option 81 and a legacy client with option 12 only get their A record,
 //!   their DHCID and their PTR; the lease rows record the names and the DHCID.
 //! - A second client that claims the first one's name is refused by name protection, and
@@ -31,7 +38,8 @@ use std::{
 
 use tenko_core::testing::wait_until_async;
 use tenko_core::{
-    AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp, VrfId,
+    AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp,
+    UserId, VrfId,
     cluster::LeaderService as _,
     dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, tables::LEASES},
     dns::{
@@ -47,15 +55,28 @@ use tenko_dhcp::{
         ConfigService,
         scopes::{NewScope, ScopeChange},
     },
-    ddns::{DdnsProfile, DdnsService, DdnsSettings, dhcid, plan::DHCID},
+    ddns::{
+        DdnsProfile, DdnsService, DdnsSettings, dhcid,
+        metrics::{OUTCOMES, Outcome},
+        plan::DHCID,
+    },
     v4::ClientFqdn,
 };
 use tenko_dns::zone::{
-    NewZone, ZoneConfig, ZoneService,
+    ImportStaging, NewZone, ZoneConfig, ZoneService,
     records::{Change, Op},
+    register_steps,
 };
 use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES, PREFIX_RANGES, PREFIXES, RANGES};
-use tenko_store::{MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch};
+use tenko_jobs::{
+    EngineConfig, JobEngine,
+    tables::{BY_STATE, BY_TARGET, IDEMPOTENCY, JOBS, PREVIEWS, TRANSITIONS},
+};
+use tenko_store::{
+    ChangeStream, Committed, DerivedIndex, KeyRange, Leadership, MemStore, ReadConsistency,
+    ReadView, ReadViewExt as _, Store, StoreError, StoreStatus, WatchFilter, WriteBatch,
+    tables::AUDIT,
+};
 use tokio_util::sync::CancellationToken;
 
 fn name(text: &str) -> DnsName {
@@ -120,13 +141,27 @@ fn new_zone(apex: &str, update: UpdatePolicy) -> NewZone {
     }
 }
 
+async fn lab(profile: DdnsProfile, update: UpdatePolicy) -> Lab {
+    lab_on(profile, update, Arc::new(MemStore::default())).await
+}
+
+/// A lab on `store` whose zone service writes through the job engine, as the server's
+/// does.
 #[allow(
     clippy::too_many_lines,
     reason = "the zones, the network, the scope and the worker of one lab"
 )]
-async fn lab(profile: DdnsProfile, update: UpdatePolicy) -> Lab {
-    let store: Arc<dyn Store> = Arc::new(MemStore::default());
-    let zones = ZoneService::with_direct_jobs(Arc::clone(&store), None, ZoneConfig::default());
+async fn lab_on(profile: DdnsProfile, update: UpdatePolicy, store: Arc<dyn Store>) -> Lab {
+    let staging = Arc::new(ImportStaging::default());
+    let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
+    register_steps(&mut engine, &staging);
+    let zones = ZoneService::new(
+        Arc::clone(&store),
+        Arc::new(engine),
+        None,
+        staging,
+        ZoneConfig::default(),
+    );
     let forward = zones
         .create(&cx(), new_zone("lan.example.test", update.clone()))
         .await
@@ -354,6 +389,286 @@ async fn nothing_at(lab: &Lab, zones: [ZoneId; 2], owner: &str) {
             );
         }
     }
+}
+
+/// The rows of the job engine's tables, and the audit records the engine writes (`jobs.*`).
+async fn job_rows(store: &dyn Store) -> (usize, usize) {
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let rows = [
+        JOBS.name(),
+        TRANSITIONS.name(),
+        BY_STATE.name(),
+        BY_TARGET.name(),
+        PREVIEWS.name(),
+        IDEMPOTENCY.name(),
+    ]
+    .into_iter()
+    .map(|table| {
+        view.scan(table, KeyRange::all(), usize::MAX, false)
+            .expect("job rows")
+            .len()
+    })
+    .sum();
+    let records = view
+        .scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.draft.action.as_str().starts_with("jobs."))
+        .count();
+    (rows, records)
+}
+
+#[tokio::test]
+async fn new_clients_at_every_address_leave_no_job_and_an_operator_edit_still_is_one() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let before = job_rows(lab.store.as_ref()).await;
+    // Four rounds over the pool's 50 addresses, every lease a new MAC address with a name.
+    // The last round starts after `last_round`, long after the worker started.
+    let mut last_round = Timestamp::now();
+    for round in 0..4u8 {
+        if round == 3 {
+            last_round = Timestamp::now();
+        }
+        for last in 50..100u8 {
+            let who = round * 50 + (last - 50);
+            lab.commit(lab.lease(last, who, None, Some(format!("host-{who}").as_str())))
+                .await;
+        }
+        wait_until_async("the round's names", async || {
+            for last in 50..100u8 {
+                let want = name(&format!(
+                    "host-{}.lan.example.test",
+                    round * 50 + (last - 50)
+                ));
+                if lab.ddns(last).await.forward != Some(want) {
+                    return false;
+                }
+            }
+            true
+        })
+        .await;
+    }
+    assert_eq!(
+        job_rows(lab.store.as_ref()).await,
+        before,
+        "name updates write no job row and no job audit record"
+    );
+    let view = lab.store.read(ReadConsistency::Local).await.expect("view");
+    // What stays per name update is the lease row's DDNS state: one per address.
+    let leases = view
+        .scan_typed(&LEASES, KeyRange::all(), usize::MAX, false)
+        .expect("leases");
+    assert_eq!(leases.len(), 50);
+    let audited: Vec<_> = view
+        .scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+        .expect("audit")
+        .into_iter()
+        .map(|(_, record, _)| record)
+        .filter(|record| {
+            record.draft.action.as_str() == "dns.record.change"
+                && record.principal == Principal::system(SystemComponent::Dhcp)
+        })
+        .collect();
+    assert!(audited.len() >= 4, "the change sets are audited");
+    // Each change set is stamped with the time it was written, not the worker's start.
+    let last = audited.last().expect("a record");
+    assert!(last.at >= last_round, "{} before {last_round}", last.at);
+
+    // An operator's change through the same zone service is still a job.
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.forward,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("nas.lan.example.test"),
+                rtype: Rtype::A,
+                ttl: None,
+                records: vec![a_of(9)],
+                take_over: false,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("manual record");
+    let (rows, records) = job_rows(lab.store.as_ref()).await;
+    assert!(rows > before.0 && records > before.1, "the edit is a job");
+}
+
+/// A memory store that refuses the next `refuse` record change sets: as a stale write when
+/// `stale` is set, else as a store without a quorum.
+#[derive(Default)]
+struct Refusing {
+    inner: MemStore,
+    refuse: Mutex<usize>,
+    stale: AtomicBool,
+}
+
+impl Refusing {
+    fn refuse(&self) -> std::sync::MutexGuard<'_, usize> {
+        self.refuse.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+#[async_trait::async_trait]
+impl Store for Refusing {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let records = batch
+            .audit
+            .iter()
+            .any(|draft| draft.action.as_str() == "dns.record.change");
+        let refused = records && {
+            let mut left = self.refuse();
+            let refused = *left > 0;
+            *left = left.saturating_sub(1);
+            refused
+        };
+        if refused {
+            return Err(if self.stale.load(Ordering::SeqCst) {
+                StoreError::PreconditionFailed(Vec::new())
+            } else {
+                StoreError::NoQuorum
+            });
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        self.inner.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<tenko_core::Revision>,
+        filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>> {
+        self.inner.leadership()
+    }
+}
+
+fn dhcp_a(owner: &str, last: u8) -> Change {
+    Change {
+        op: Op::Set,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype: Rtype::A,
+        ttl: None,
+        records: vec![a_of(last)],
+        take_over: false,
+        origin: Origin::Dhcp,
+    }
+}
+
+#[tokio::test]
+async fn a_name_update_the_store_refuses_shows_on_the_lease_and_in_the_counter() {
+    let store = Arc::new(Refusing::default());
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    *store.refuse() = usize::MAX;
+    // The counter is the process's: nextest runs each test in a process of its own, so
+    // only this test moves it.
+    let failed = OUTCOMES.get(Outcome::Failed as u16);
+    lab.commit(lab.lease(50, 1, None, Some("printer"))).await;
+    wait_until_async("the failure on the lease", async || {
+        lab.ddns(50)
+            .await
+            .last_error
+            .is_some_and(|error| error.contains("sys.store.no_quorum"))
+    })
+    .await;
+    assert!(OUTCOMES.get(Outcome::Failed as u16) > failed);
+    assert_eq!(
+        lab.a("printer.lan.example.test").await,
+        Vec::<RecordData>::new()
+    );
+}
+
+#[tokio::test]
+async fn a_stale_name_update_is_planned_again_and_written_without_a_job() {
+    let store = Arc::new(Refusing::default());
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    let before = job_rows(lab.store.as_ref()).await;
+    store.stale.store(true, Ordering::SeqCst);
+    *store.refuse() = 1;
+    let outcome = lab
+        .zones
+        .change_dhcp_names(
+            &RequestCtx::system(SystemComponent::Dhcp),
+            lab.forward,
+            &[dhcp_a("stale.lan.example.test", 7)],
+        )
+        .await
+        .expect("planned again");
+    assert_eq!(*store.refuse(), 0, "one write was stale");
+    assert_eq!(outcome.written.expect("written").job, None);
+    assert_eq!(lab.a("stale.lan.example.test").await, vec![a_of(7)]);
+    assert_eq!(job_rows(lab.store.as_ref()).await, before);
+}
+
+#[tokio::test]
+async fn only_the_dhcp_component_itself_writes_names_without_a_job() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    let dhcp = RequestCtx::system(SystemComponent::Dhcp);
+    let mut for_user = RequestCtx::system(SystemComponent::Dhcp);
+    for_user.principal = Principal::System {
+        component: SystemComponent::Dhcp,
+        on_behalf_of: Some(UserId::generate()),
+    };
+    let dns = RequestCtx::system(SystemComponent::Dns);
+    for (index, (cx, job)) in [(&dhcp, false), (&for_user, true), (&dns, true)]
+        .into_iter()
+        .enumerate()
+    {
+        let before = job_rows(lab.store.as_ref()).await;
+        let owner = format!("h{index}.lan.example.test");
+        let outcome = lab
+            .zones
+            .change_dhcp_names(cx, lab.forward, &[dhcp_a(&owner, 10)])
+            .await
+            .expect("names");
+        let after = job_rows(lab.store.as_ref()).await;
+        assert_eq!(
+            outcome.written.expect("written").job.is_some(),
+            job,
+            "{owner}"
+        );
+        assert_eq!(after.0 > before.0, job, "{owner}");
+    }
+    // The DHCP component's other record changes are jobs too.
+    let before = job_rows(lab.store.as_ref()).await;
+    lab.zones
+        .change_records(
+            &dhcp,
+            lab.forward,
+            &[dhcp_a("h3.lan.example.test", 10)],
+            false,
+        )
+        .await
+        .expect("records");
+    assert!(job_rows(lab.store.as_ref()).await.0 > before.0);
 }
 
 #[tokio::test]

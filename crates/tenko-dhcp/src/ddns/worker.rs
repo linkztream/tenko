@@ -14,10 +14,11 @@
 //!    address, a release or expiry), then the A and DHCID set at the forward name and the
 //!    PTR in the reverse zone;
 //! 3. one change set per zone through the zone service with the origin `dhcp` and the
-//!    principal `system:dhcp` (audited by the zone service, journalled, so IXFR carries
-//!    it); a zone write the store refuses is retried with a doubling backoff
-//!    (`[dhcp.ddns] retries`, `backoff_ms`); a change set refused as a whole is applied
-//!    lease by lease so one bad lease does not hold up the others;
+//!    principal `system:dhcp`, stamped with the time it is written (audited by the zone
+//!    service, journalled, so IXFR carries it, and written without a job record); a zone
+//!    write the store refuses is retried with a doubling backoff (`[dhcp.ddns] retries`,
+//!    `backoff_ms`); a change set refused as a whole is applied lease by lease so one bad
+//!    lease does not hold up the others;
 //! 4. the outcome on the lease row (`DdnsState`: the names written, the DHCID, the last
 //!    refusal or failure, the time), written with the row's version as precondition so a
 //!    newer commit is never overwritten, and counted in `tenko_dhcp_ddns_total{outcome}`.
@@ -43,7 +44,7 @@ use std::{
 
 use futures::StreamExt as _;
 use tenko_core::{
-    RequestCtx, SystemComponent, Timestamp, VrfId,
+    Principal, RequestCtx, SystemComponent, Timestamp, VrfId,
     dhcp::{
         BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, Lease6Kind,
         tables,
@@ -272,7 +273,6 @@ fn retryable(status: u16, code: &str) -> bool {
 struct Worker<'a> {
     service: &'a DdnsService,
     epoch: u64,
-    cx: RequestCtx,
     memory: HashMap<Key, Memo>,
     image: Option<ConfigImage>,
     queue: MemDdnsQueue,
@@ -316,7 +316,6 @@ impl<'a> Worker<'a> {
         Self {
             service,
             epoch,
-            cx: RequestCtx::system(SystemComponent::Dhcp),
             memory: HashMap::new(),
             image: None,
             queue: MemDdnsQueue::new(service.settings.queue.max(1)),
@@ -894,10 +893,13 @@ impl<'a> Worker<'a> {
         let mut pause = settings.backoff;
         let mut attempt = 0;
         loop {
+            // A context per attempt: its time stamps the audit record, the RRsets, the
+            // serial and the journal entry.
+            let cx = RequestCtx::system(SystemComponent::Dhcp);
             match self
                 .service
                 .zones
-                .change_records(&self.cx, zone, changes, false)
+                .change_dhcp_names(&cx, zone, changes)
                 .await
             {
                 Ok(_) => return Ok(()),
@@ -932,7 +934,8 @@ impl<'a> Worker<'a> {
                     return;
                 }
             };
-            let mut batch = WriteBatch::new(self.cx.principal.clone(), Timestamp::now());
+            let mut batch =
+                WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
             batch.preconditions.push(fence(self.epoch));
             let mut staged = Vec::new();
             for (key, client, state) in &todo {

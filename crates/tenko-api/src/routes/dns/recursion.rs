@@ -334,11 +334,11 @@ async fn refresh_dns_trust_anchor(
         &anywhere(ObjectKind::DnsKey),
     )?;
     let service = zones.get()?;
-    let written = service.refresh_trust_anchor(&cx, &zone).await?;
+    let job = service.refresh_trust_anchor(&cx, &zone).await?;
     Ok((
         StatusCode::ACCEPTED,
         Json(DnsCommandAccepted {
-            command_id: written.job.uuid(),
+            command_id: job.uuid(),
         }),
     )
         .into_response())

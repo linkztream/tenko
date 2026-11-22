@@ -10,6 +10,10 @@
 //! - TSIG keys are not written through a job: their batch holds a vault envelope, and the
 //!   operator secrets of the vault are proposed directly for the same reason (a job record
 //!   would keep a copy of the envelope after the key is deleted).
+//! - DHCP's name updates are proposed directly too, when the DHCP component itself writes
+//!   them through `ZoneService::change_dhcp_names`: a client can change its lease without
+//!   limit, and so would the job rows. The change set keeps its audit record
+//!   `dns.record.change` and its journal entry.
 //!
 //! [`ZoneJobs`] is implemented by the job engine and by [`DirectJobs`], which runs the
 //! steps in place for tests and tools without an engine.
@@ -194,13 +198,13 @@ impl StepHandler for WriteStep {
     }
 }
 
-/// What a committed inline job reports.
+/// What a committed write reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Written {
     /// The revision of the write.
     pub revision: Revision,
-    /// The inline job.
-    pub job: JobId,
+    /// The inline job; none for a name update of DHCP.
+    pub job: Option<JobId>,
 }
 
 /// Commits `batch` as an inline job `dns.edit` through `jobs`.
@@ -247,7 +251,7 @@ pub(crate) async fn commit(
         .ok_or_else(|| ZoneError::new("jobs.failed", 500, "the write step reported no result"))?;
     Ok(Written {
         revision,
-        job: job.id,
+        job: Some(job.id),
     })
 }
 

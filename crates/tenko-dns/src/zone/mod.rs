@@ -20,7 +20,7 @@
 //! | [`keys`] | TSIG keys, the secret in the vault |
 //! | [`kerberos`] | the Kerberos account of secure updates: adopt, import, rotation, self-test, the watcher (WP13.3) |
 //! | [`ownership`] | the owners of names: the locator-name list, the owner view, release and assignment (WP13.4) |
-//! | [`jobs`] | the inline job of every change and the job runner stand-in |
+//! | [`jobs`] | the inline job of every change but DHCP's name updates, and the job runner stand-in |
 //! | [`views`] | views, their positions and the scope rule (WP6.4) |
 //! | [`secondary`] | secondary and catalog zones: transfers in as a leader service (WP6.1) |
 //! | [`signing`] | the signing state, the writes of a signing pass, the rollover's start (WP6.3) |
@@ -510,9 +510,10 @@ impl ZoneService {
         Ok(self.store.read(consistency).await?)
     }
 
-    /// Plans with `plan` against fresh views and commits its batch as an inline job,
-    /// planning again after a stale write. `plan` returns the batch, a summary line, the
-    /// targets and its own result, or `None` when there is nothing to write.
+    /// Plans with `plan` against fresh views and commits its batch as an inline job (one
+    /// planned without a job directly), planning again after a stale write. `plan`
+    /// returns the batch, a summary line, the targets and its own result, or `None` when
+    /// there is nothing to write.
     pub(crate) async fn execute<T, F>(
         &self,
         cx: &RequestCtx,
@@ -543,15 +544,28 @@ impl ZoneService {
             let Some(write) = planned.write else {
                 return Ok((planned.result, None));
             };
-            match jobs::commit(
-                self.jobs.as_ref(),
-                cx,
-                write.summary,
-                write.targets,
-                write.batch,
-            )
-            .await
-            {
+            // Only DHCP's name updates are planned without a job
+            // ([`ZoneService::change_dhcp_names`]); the batch keeps its audit record.
+            let written = if write.job {
+                jobs::commit(
+                    self.jobs.as_ref(),
+                    cx,
+                    write.summary,
+                    write.targets,
+                    write.batch,
+                )
+                .await
+            } else {
+                self.store
+                    .propose(write.batch)
+                    .await
+                    .map(|committed| Written {
+                        revision: committed.revision,
+                        job: None,
+                    })
+                    .map_err(ZoneError::from)
+            };
+            match written {
                 Ok(written) => return Ok((planned.result, Some(written))),
                 Err(error) if error.is_stale() => {
                     tracing::debug!(attempt, "zone write stale; planning again");
@@ -785,7 +799,7 @@ impl ZoneService {
         Ok(ZoneWritten {
             zone,
             revision: written.revision,
-            job: Some(written.job),
+            job: written.job,
         })
     }
 
@@ -893,7 +907,7 @@ impl ZoneService {
         Ok(ZoneWritten {
             zone: if written.is_some() { row.zone } else { zone },
             revision: written.map_or(row.revision, |w| w.revision),
-            job: written.map(|w| w.job),
+            job: written.and_then(|w| w.job),
         })
     }
 
@@ -1266,6 +1280,8 @@ pub(crate) struct PlannedWrite {
     pub(crate) batch: WriteBatch,
     pub(crate) summary: String,
     pub(crate) targets: Vec<ObjectRef>,
+    /// Whether the write runs as an inline job; only DHCP's name updates do not.
+    pub(crate) job: bool,
 }
 
 impl<T> Planned<T> {
@@ -1281,6 +1297,7 @@ impl<T> Planned<T> {
                 batch,
                 summary,
                 targets,
+                job: true,
             }),
         }
     }
