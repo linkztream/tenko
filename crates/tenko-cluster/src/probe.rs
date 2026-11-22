@@ -738,11 +738,11 @@ impl ProbeBatch {
             .sightings
             .into_iter()
             .map(|sighting| {
-                let expires_at = sighting.ttl_secs.and_then(|ttl| {
-                    sighting
-                        .observed_at
-                        .checked_add(Duration::from_secs(u64::from(ttl)))
-                });
+                // A sighting stamped after it arrived is taken as seen on arrival.
+                let observed_at = sighting.observed_at.min(received_at);
+                let expires_at = sighting
+                    .ttl_secs
+                    .and_then(|ttl| observed_at.checked_add(Duration::from_secs(u64::from(ttl))));
                 let subject = match sighting.subject {
                     SightingSubject::Address { ip, mac } => Observed::Address { vrf, ip, mac },
                     SightingSubject::Services {
@@ -787,7 +787,7 @@ impl ProbeBatch {
                     id: ObservationId::generate(),
                     source: source.clone(),
                     subject,
-                    observed_at: sighting.observed_at,
+                    observed_at,
                     received_at,
                     expires_at,
                 }
@@ -976,6 +976,16 @@ mod tests {
         assert_eq!(observations[0].expires_at, Some(at("2026-10-10T08:10:01Z")));
         assert_eq!(observations[1].expires_at, None);
         assert!(observations.iter().all(|o| o.received_at == received));
+    }
+
+    #[test]
+    fn a_sighting_from_the_future_is_taken_as_seen_on_arrival() {
+        // The probe's clock runs ahead: its sightings are stamped after they arrive.
+        let received = at("2026-10-10T07:00:00Z");
+        let (_, observations) =
+            batch().into_observations(NodeId(1001), VrfId::generate(), received);
+        assert!(observations.iter().all(|o| o.observed_at == received));
+        assert_eq!(observations[0].expires_at, Some(at("2026-10-10T07:10:00Z")));
     }
 
     #[test]
