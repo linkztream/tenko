@@ -706,7 +706,9 @@ impl KekAdmin {
                         }
                     };
                     let timeout = self.distribute_timeout();
-                    if ctx.now.saturating_since(since) <= timeout {
+                    if ctx.now.saturating_since(since) <= timeout
+                        || tenko_core::clock::trusted_now().is_err()
+                    {
                         return Err(error);
                     }
                     let error = format!(
@@ -819,7 +821,7 @@ impl KekAdmin {
         }
         let since = rotation.distributing_since.unwrap_or(rotation.updated_at);
         let timeout = self.distribute_timeout();
-        if ctx.now.saturating_since(since) > timeout {
+        if ctx.now.saturating_since(since) > timeout && tenko_core::clock::trusted_now().is_ok() {
             let leader = if waiting.contains(&self.node) {
                 " (the leader could not fetch it from any controller)"
             } else {

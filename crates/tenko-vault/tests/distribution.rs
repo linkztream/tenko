@@ -585,6 +585,67 @@ async fn a_rewrap_that_fails_half_done_keeps_every_secret_and_counts_its_progres
     assert_reads(one.vault(), &secrets).await;
 }
 
+/// Held after a forward jump, for the calling test.
+fn held() -> tenko_core::clock::testing::Override {
+    use tenko_core::clock::{Held, Reason, Release, testing};
+    testing::hold(Held {
+        reason: Reason::Jump,
+        jump_ms: 3_600_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: Release::Wait,
+        until: None,
+    })
+}
+
+#[tokio::test]
+async fn a_held_clock_fails_no_distribution_past_its_timeout() {
+    let root_guard = TempDir::new("dist-held");
+    let root = root_guard.join("data");
+    let store = ClusterStore::new();
+    let one = first(&store, &root.join("c1")).await;
+    let _two = join(&store, &root.join("c2"), 1001, &one).await;
+    store.set_members(&[(1, true), (1001, true)]);
+    one.admin.set_distribute_timeout(Duration::ZERO);
+    one.admin.request_rotation(&ctx()).await.expect("request");
+    one.admin.rotation_step(0).await.expect("create");
+    clock_moves().await;
+    let phase = || async { state(&store).await.rotation.expect("rotation").phase };
+    {
+        let _held = held();
+        one.admin.rotation_step(0).await.expect("waits");
+        assert_eq!(phase().await, RotationPhase::Distributing);
+    }
+    one.admin.rotation_step(0).await.expect("time out");
+    assert_eq!(phase().await, RotationPhase::Failed);
+}
+
+#[tokio::test]
+async fn a_held_clock_fails_no_rewrap_past_its_timeout() {
+    let root_guard = TempDir::new("dist-held-rewrap");
+    let root = root_guard.join("data");
+    let store = ClusterStore::new();
+    let one = first(&store, &root.join("c1")).await;
+    put_secrets(one.vault(), 2).await;
+    one.admin.request_rotation(&ctx()).await.expect("request");
+    one.admin.rotation_step(0).await.expect("create");
+    one.admin.rotation_step(0).await.expect("activate");
+    one.admin.set_distribute_timeout(Duration::ZERO);
+    store.script_secret_writes(&[true, true, true]);
+    one.admin.rotation_step(0).await.expect_err("refused");
+    clock_moves().await;
+    let phase = || async { state(&store).await.rotation.expect("rotation").phase };
+    {
+        let _held = held();
+        one.admin.rotation_step(0).await.expect_err("refused again");
+        assert_eq!(phase().await, RotationPhase::Rewrapping);
+    }
+    one.admin
+        .rotation_step(0)
+        .await
+        .expect("fails the rotation");
+    assert_eq!(phase().await, RotationPhase::Failed);
+}
+
 #[tokio::test]
 async fn a_rewrap_that_starts_late_still_runs() {
     let root_guard = TempDir::new("dist-late");
