@@ -3447,6 +3447,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "flate2",
+ "fs4",
  "futures",
  "openraft",
  "redb",

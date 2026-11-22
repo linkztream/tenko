@@ -11,8 +11,9 @@
 //! [`HOLD_APPLY`], [`STALL_LOG`] and [`FAIL_LOG`] act on one Raft store: while a file of
 //! that name exists in the store's data directory, its state machine holds every apply (a
 //! commit that has not applied yet), its log writer holds every group commit (a stalled
-//! disk), or every group commit of its log writer fails. The file is only looked for, never
-//! read.
+//! disk), or every group commit of its log writer fails. Those files are only looked for,
+//! never read. [`FREE_BYTES`] holds a byte count that stands in for the free space of the
+//! store's file system.
 
 /// The environment variable naming the file whose presence refuses writes.
 pub const REFUSE_WRITES_FILE: &str = "TENKO_TEST_REFUSE_WRITES_FILE";
@@ -23,6 +24,9 @@ pub const HOLD_APPLY: &str = "test-hold-apply";
 pub const STALL_LOG: &str = "test-stall-log";
 /// The file in a store's data directory whose presence fails every log group commit.
 pub const FAIL_LOG: &str = "test-fail-log";
+/// The file in a store's data directory whose content, a byte count, stands in for the free
+/// space of its file system (the disk guard, `raft::disk`).
+pub const FREE_BYTES: &str = "test-free-bytes";
 
 /// Waits (blocking the thread) while the file `name` exists in `dir`.
 #[cfg(all(feature = "raft", feature = "test-hooks"))]

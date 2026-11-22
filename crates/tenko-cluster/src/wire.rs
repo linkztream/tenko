@@ -161,6 +161,15 @@ pub enum WireStoreError {
     Storage(String),
     /// [`StoreError::Codec`].
     Codec(String),
+    /// [`StoreError::Stopped`].
+    Stopped,
+    /// [`StoreError::DiskReserve`].
+    DiskReserve {
+        /// The free bytes.
+        free: u64,
+        /// The line in bytes.
+        needed: u64,
+    },
 }
 
 impl From<&StoreError> for WireStoreError {
@@ -184,6 +193,11 @@ impl From<&StoreError> for WireStoreError {
             },
             StoreError::Storage(detail) => Self::Storage(detail.clone()),
             StoreError::Codec(detail) => Self::Codec(detail.clone()),
+            StoreError::Stopped => Self::Stopped,
+            StoreError::DiskReserve { free, needed } => Self::DiskReserve {
+                free: *free,
+                needed: *needed,
+            },
         }
     }
 }
@@ -202,6 +216,8 @@ impl From<WireStoreError> for StoreError {
             WireStoreError::PlaintextSecret { table } => Self::PlaintextSecret { table },
             WireStoreError::Storage(detail) => Self::Storage(detail),
             WireStoreError::Codec(detail) => Self::Codec(detail),
+            WireStoreError::Stopped => Self::Stopped,
+            WireStoreError::DiskReserve { free, needed } => Self::DiskReserve { free, needed },
         }
     }
 }

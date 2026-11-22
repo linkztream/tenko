@@ -65,9 +65,9 @@ pub mod test_hooks;
 pub use api::{
     AnchorResolver, ApplyStopped, Change, ChangeSet, ChangeStream, CoalescerConfig, Committed,
     DerivedIndex, FailedPrecondition, FenceReason, IndexImage, IndexStatus, KeyRange, Leadership,
-    MemberStatus, Mutation, Precondition, QuorumState, ReadConsistency, ReadView, ReadViewExt,
-    Store, StoreError, StoreRole, StoreStatus, Versioned, WatchError, WatchFilter, WriteBatch,
-    downcast_image, fence, tables,
+    MemberStatus, Mutation, Precondition, Pressure, QuorumState, ReadConsistency, ReadView,
+    ReadViewExt, Store, StoreError, StoreRole, StoreSafety, StoreStatus, Versioned, WatchError,
+    WatchFilter, WriteBatch, downcast_image, fence, tables,
 };
 pub use layout::sync_dir;
 pub use mem::{MemStore, MemStoreConfig};

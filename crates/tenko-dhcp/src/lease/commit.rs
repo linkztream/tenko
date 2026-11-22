@@ -348,6 +348,8 @@ fn is_refusal(error: &StoreError) -> bool {
         StoreError::NoQuorum
             | StoreError::Timeout
             | StoreError::ShuttingDown
+            | StoreError::Stopped
+            | StoreError::DiskReserve { .. }
             | StoreError::Storage(_)
     )
 }

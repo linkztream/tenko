@@ -1076,6 +1076,67 @@ impl StoreStatus {
 /// entry (for an entry of a newer release: until it runs that release).
 pub const APPLY_STOPPED: &str = "sys.store.apply_stopped";
 
+/// The code of a snapshot file the store could not write: the log keeps the entries it
+/// would cover until a snapshot can be written ([`StoreSafety::snapshot_failed`]).
+pub const SNAPSHOT_FAILED: &str = "sys.store.snapshot_failed";
+
+/// The free space of a store's data directory against the two lines the store keeps there
+/// (`docs/cluster.md` section 12.12): `reserve` (the live data, twice the latest snapshot
+/// and 256 MiB) and `margin` (twice the reserve).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Pressure {
+    /// Above the margin: every write passes.
+    #[default]
+    Normal,
+    /// Below the margin: only writes that free space pass ([`StoreError::DiskReserve`]).
+    Margin,
+    /// Below the reserve: no write passes; only the store's own snapshot and compaction run.
+    Reserve,
+}
+
+/// What keeps a store running on its disk, for the status: the free space against its two
+/// lines, the work that frees space, and a stopped Raft core ([`StoreError::Stopped`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StoreSafety {
+    /// Free bytes of the data directory's file system, as last read.
+    pub free_bytes: u64,
+    /// The reserve line in bytes.
+    pub reserve_bytes: u64,
+    /// The margin line in bytes.
+    pub margin_bytes: u64,
+    /// Where the free space stands against the lines.
+    pub pressure: Pressure,
+    /// A compaction of the state file runs now.
+    pub compacting: bool,
+    /// A snapshot is being built now.
+    pub snapshotting: bool,
+    /// The last snapshot file could not be written; the log keeps its entries and the
+    /// snapshot is retried once a snapshot fits.
+    pub snapshot_failed: bool,
+    /// Why the Raft core stopped, once it did: the process ends with a failure status as
+    /// soon as the free space covers a start, and the service manager starts it again.
+    pub stopped: Option<String>,
+    /// Seconds since the store opened.
+    pub running_secs: u64,
+}
+
+/// The shortest run of a store before its process ends for a restart: systemd stops a unit
+/// for good after five starts in 300 seconds, so one start a minute at most stays below.
+pub const RESTART_AFTER_SECS: u64 = 61;
+
+impl StoreSafety {
+    /// Whether the process should end now so that its service manager starts it again: the
+    /// Raft core stopped, the free space covers a start (it is above the reserve), and the
+    /// store ran [`RESTART_AFTER_SECS`]. A process that ended into a full disk, or that
+    /// stops again at once, would fail its starts until the service manager gives up.
+    pub fn restart_due(&self) -> bool {
+        self.stopped.is_some()
+            && self.pressure != Pressure::Reserve
+            && self.running_secs >= RESTART_AFTER_SECS
+    }
+}
+
 /// Store errors.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum StoreError {
@@ -1102,6 +1163,19 @@ pub enum StoreError {
     /// The store is shutting down.
     #[error("store is shutting down")]
     ShuttingDown,
+    /// The Raft core stopped on a storage failure; the process restarts once a start fits
+    /// on the disk.
+    #[error("the store stopped on a storage failure and restarts once its disk has room")]
+    Stopped,
+    /// The data directory's free space is below the line the store keeps for its snapshot
+    /// and compaction; only writes that free space pass.
+    #[error("{free} bytes free on the store's disk, below the {needed} it keeps free")]
+    DiskReserve {
+        /// The free bytes.
+        free: u64,
+        /// The line in bytes.
+        needed: u64,
+    },
     /// The requested revision is older than the journal retains.
     #[error("journal compacted; the oldest retained revision is {oldest}")]
     Compacted {
@@ -1156,6 +1230,10 @@ impl StoreError {
     pub const TIMEOUT: &'static str = "sys.store.timeout";
     /// [`StoreError::ShuttingDown`].
     pub const SHUTTING_DOWN: &'static str = "sys.store.shutting_down";
+    /// [`StoreError::Stopped`].
+    pub const STOPPED: &'static str = "sys.store.stopped";
+    /// [`StoreError::DiskReserve`].
+    pub const DISK_RESERVE: &'static str = "sys.store.disk_reserve";
     /// [`StoreError::Compacted`].
     pub const COMPACTED: &'static str = "sys.store.compacted";
     /// [`StoreError::ReservedTable`].
@@ -1177,6 +1255,8 @@ impl Coded for StoreError {
             StoreError::NoQuorum => Self::NO_QUORUM,
             StoreError::Timeout => Self::TIMEOUT,
             StoreError::ShuttingDown => Self::SHUTTING_DOWN,
+            StoreError::Stopped => Self::STOPPED,
+            StoreError::DiskReserve { .. } => Self::DISK_RESERVE,
             StoreError::Compacted { .. } => Self::COMPACTED,
             StoreError::ReservedTable { .. } => Self::RESERVED_TABLE,
             StoreError::PlaintextSecret { .. } => Self::PLAINTEXT_SECRET,
@@ -1190,7 +1270,12 @@ impl Coded for StoreError {
             StoreError::PreconditionFailed(_) => 409,
             StoreError::IdempotencyMismatch => 422,
             StoreError::BatchTooLarge { .. } => 413,
-            StoreError::NoQuorum | StoreError::Timeout | StoreError::ShuttingDown => 503,
+            StoreError::NoQuorum
+            | StoreError::Timeout
+            | StoreError::ShuttingDown
+            | StoreError::Stopped => 503,
+            // Insufficient Storage (RFC 4918).
+            StoreError::DiskReserve { .. } => 507,
             StoreError::Compacted { .. } => 410,
             StoreError::ReservedTable { .. }
             | StoreError::PlaintextSecret { .. }
@@ -1208,6 +1293,9 @@ impl Coded for StoreError {
                 [("size", size.to_string()), ("limit", limit.to_string())].into()
             }
             StoreError::Compacted { oldest } => [("oldest", oldest.to_string())].into(),
+            StoreError::DiskReserve { free, needed } => {
+                [("free", free.to_string()), ("needed", needed.to_string())].into()
+            }
             StoreError::ReservedTable { table } | StoreError::PlaintextSecret { table } => {
                 [("table", table.to_string())].into()
             }
@@ -1250,7 +1338,7 @@ pub trait Store: Send + Sync + 'static {
     /// error. Such an error is an unknown outcome, not a refusal; a caller stops listening
     /// to `logged` once it has the result. An error after `logged` leaves the entry committed
     /// in the log: it applies at the latest at the next start, unless its apply fails there
-    /// too. If its apply fails in this process, the caller gets `ShuttingDown`, and `Local`
+    /// too. If its apply fails in this process, the caller gets `Stopped`, and `Local`
     /// reads serve a state without the answered write until the restart.
     async fn propose_logged(
         &self,
@@ -1324,6 +1412,19 @@ pub trait Store: Send + Sync + 'static {
         CoalescerConfig::default().max_batch_bytes
     }
 
+    /// The pressure on the store's disk ([`Pressure`]), to wait on: work that frees space
+    /// (prunes) runs when it leaves [`Pressure::Normal`]. A store without a disk guard
+    /// stays normal.
+    fn pressure(&self) -> tokio::sync::watch::Receiver<Pressure> {
+        tokio::sync::watch::channel(Pressure::Normal).1
+    }
+
+    /// The disk guard and the Raft core's state ([`StoreSafety`]); `None` for a store
+    /// without them.
+    fn safety(&self) -> Option<StoreSafety> {
+        None
+    }
+
     /// Whether this member is the only voter of its group (`false` for a store without
     /// one). The Raft store reads the effective membership, which may not be committed yet,
     /// as of openraft's last metrics update: a caller that accepts a loss on it re-reads it
@@ -1373,6 +1474,8 @@ mod tests {
             StoreError::NoQuorum,
             StoreError::Timeout,
             StoreError::ShuttingDown,
+            StoreError::Stopped,
+            StoreError::DiskReserve { free: 1, needed: 2 },
             StoreError::Compacted {
                 oldest: Revision(1),
             },
@@ -1391,6 +1494,8 @@ mod tests {
                 | StoreError::NoQuorum
                 | StoreError::Timeout
                 | StoreError::ShuttingDown
+                | StoreError::Stopped
+                | StoreError::DiskReserve { .. }
                 | StoreError::Compacted { .. }
                 | StoreError::ReservedTable { .. }
                 | StoreError::PlaintextSecret { .. }
@@ -1405,6 +1510,8 @@ mod tests {
             StoreError::NO_QUORUM,
             StoreError::TIMEOUT,
             StoreError::SHUTTING_DOWN,
+            StoreError::STOPPED,
+            StoreError::DISK_RESERVE,
             StoreError::COMPACTED,
             StoreError::RESERVED_TABLE,
             StoreError::PLAINTEXT_SECRET,
@@ -1420,6 +1527,34 @@ mod tests {
             "sys.store.precondition_failed"
         );
         assert_eq!(StoreError::NO_QUORUM, "sys.store.no_quorum");
+    }
+
+    #[test]
+    fn a_stopped_store_restarts_only_once_a_start_fits_and_after_a_minute() {
+        let safety = |pressure, running_secs, stopped: bool| StoreSafety {
+            free_bytes: 0,
+            reserve_bytes: 0,
+            margin_bytes: 0,
+            pressure,
+            compacting: false,
+            snapshotting: false,
+            snapshot_failed: false,
+            stopped: stopped.then(|| "a storage failure".to_owned()),
+            running_secs,
+        };
+        assert!(safety(Pressure::Margin, RESTART_AFTER_SECS, true).restart_due());
+        assert!(
+            !safety(Pressure::Margin, RESTART_AFTER_SECS, false).restart_due(),
+            "running"
+        );
+        assert!(
+            !safety(Pressure::Reserve, RESTART_AFTER_SECS, true).restart_due(),
+            "a start would not fit"
+        );
+        assert!(
+            !safety(Pressure::Normal, RESTART_AFTER_SECS - 1, true).restart_due(),
+            "it stopped right after a start"
+        );
     }
 
     #[test]
