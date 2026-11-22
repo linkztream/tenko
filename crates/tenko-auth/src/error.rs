@@ -217,10 +217,8 @@ impl AuthError {
         match self {
             Self::SessionExpired => AuthFailure::Expired,
             Self::Throttled { .. } => AuthFailure::Locked,
-            Self::Unavailable(_)
-            | Self::Store(_)
-            | Self::Internal(_)
-            | Self::Approval(crate::approval::Refusal::ClockHeld) => AuthFailure::Unavailable,
+            Self::Unavailable(_) | Self::Store(_) | Self::Internal(_) => AuthFailure::Unavailable,
+            Self::Approval(crate::approval::Refusal::ClockHeld) => AuthFailure::ClockHeld,
             _ => AuthFailure::Invalid,
         }
     }
@@ -478,6 +476,10 @@ mod tests {
         assert_eq!(
             AuthError::internal("x").to_failure(),
             AuthFailure::Unavailable
+        );
+        assert_eq!(
+            AuthError::Approval(crate::approval::Refusal::ClockHeld).to_failure(),
+            AuthFailure::ClockHeld
         );
     }
 }

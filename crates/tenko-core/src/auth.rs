@@ -151,6 +151,9 @@ pub enum AuthFailure {
     /// The authentication service cannot answer right now.
     #[error("authentication is not available")]
     Unavailable,
+    /// A delegated session while the clock guard holds issuing on this controller.
+    #[error("this controller's clock is held: an administrator confirms the clock first")]
+    ClockHeld,
 }
 
 impl Coded for AuthFailure {
@@ -159,13 +162,14 @@ impl Coded for AuthFailure {
             Self::Missing | Self::Invalid | Self::Locked => "auth.unauthenticated",
             Self::Expired => "auth.session_expired",
             Self::Unavailable => "auth.unavailable",
+            Self::ClockHeld => "auth.approval.clock_held",
         }
     }
 
     fn http_status(&self) -> u16 {
         match self {
             Self::Missing | Self::Invalid | Self::Locked | Self::Expired => 401,
-            Self::Unavailable => 503,
+            Self::Unavailable | Self::ClockHeld => 503,
         }
     }
 }
@@ -244,5 +248,7 @@ mod tests {
         assert_eq!(AuthFailure::Expired.code(), "auth.session_expired");
         assert_eq!(AuthFailure::Expired.http_status(), 401);
         assert_eq!(AuthFailure::Unavailable.http_status(), 503);
+        assert_eq!(AuthFailure::ClockHeld.code(), "auth.approval.clock_held");
+        assert_eq!(AuthFailure::ClockHeld.http_status(), 503);
     }
 }
