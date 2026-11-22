@@ -1223,6 +1223,115 @@ async fn a_single_controller_removes_a_spent_record_of_an_earlier_version() {
     assert!(env.vault.meta(own.key).await.expect("meta").is_some());
 }
 
+/// A record of an earlier version whose certificate does not read is reused by no version
+/// and goes with its key at the first check of a controller with other names.
+#[tokio::test]
+async fn an_unreadable_record_of_an_earlier_version_goes_at_once() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    env.material(&ca, &ctx, &ServerIdentity::new("renamed.example.net"))
+        .await
+        .expect("old names");
+    let mut record = env.as_an_earlier_version_left_it(&ctx).await;
+    record.chain_pem = "not a certificate".to_owned();
+    let mut batch = WriteBatch::for_request(&ctx);
+    batch
+        .put_typed(&tables::SERVER_CERT, &(), &record)
+        .expect("put");
+    env.store.propose(batch).await.expect("write");
+
+    env.material(&ca, &ctx, &identity())
+        .await
+        .expect("new names");
+    assert!(env.legacy_record().await.is_none());
+    assert!(env.vault.meta(record.key).await.expect("meta").is_none());
+}
+
+/// A store that refuses every write touching `cluster.server_cert`, as one that lost its
+/// quorum right after another write would.
+struct RefusesLegacyWrites(Arc<MemStore>);
+
+#[async_trait::async_trait]
+impl Store for RefusesLegacyWrites {
+    async fn propose(
+        &self,
+        batch: WriteBatch,
+    ) -> Result<tenko_store::Committed, tenko_store::StoreError> {
+        let legacy = tables::SERVER_CERT.name().clone();
+        if batch.mutations.iter().any(|mutation| match mutation {
+            tenko_store::Mutation::Put { table, .. }
+            | tenko_store::Mutation::Delete { table, .. } => *table == legacy,
+            tenko_store::Mutation::Bump { .. } => false,
+        }) {
+            return Err(tenko_store::StoreError::NoQuorum);
+        }
+        self.0.propose(batch).await
+    }
+
+    async fn read(
+        &self,
+        consistency: ReadConsistency,
+    ) -> Result<Arc<dyn tenko_store::ReadView>, tenko_store::StoreError> {
+        self.0.read(consistency).await
+    }
+
+    fn watch(
+        &self,
+        from: Option<tenko_core::Revision>,
+        filter: tenko_store::WatchFilter,
+    ) -> Result<tenko_store::ChangeStream, tenko_store::StoreError> {
+        self.0.watch(from, filter)
+    }
+
+    fn register_index(
+        &self,
+        index: Arc<dyn tenko_store::DerivedIndex>,
+    ) -> Result<(), tenko_store::StoreError> {
+        self.0.register_index(index)
+    }
+
+    fn status(&self) -> tenko_store::StoreStatus {
+        self.0.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.0.leadership()
+    }
+}
+
+/// A removal of a spent record that fails only logs: the issue at a start and the daily
+/// check both succeed, and the record and its key stay for the next pass, which removes
+/// them.
+#[tokio::test]
+async fn a_failed_removal_of_a_spent_record_changes_nothing_else() {
+    let env = Env::new();
+    let ctx = ctx_at(t0());
+    let ca = env.init(&ctx).await;
+    env.material(&ca, &ctx, &ServerIdentity::new("renamed.example.net"))
+        .await
+        .expect("old names");
+    let record = env.as_an_earlier_version_left_it(&ctx).await;
+    let refusing = RefusesLegacyWrites(Arc::clone(&env.store));
+    let spent = ctx_at(after(t0(), 370));
+    for pass in ["the issue at a start", "the daily check"] {
+        ca.server_material(&refusing, &env.vault, &spent, NodeId(1), &identity())
+            .await
+            .expect(pass);
+        assert!(env.legacy_record().await.is_some(), "{pass}");
+        assert!(
+            env.vault.meta(record.key).await.expect("meta").is_some(),
+            "{pass}"
+        );
+    }
+    assert!(env.server_record().await.is_some(), "its own was issued");
+    env.material(&ca, &spent, &identity())
+        .await
+        .expect("next pass");
+    assert!(env.legacy_record().await.is_none());
+    assert!(env.vault.meta(record.key).await.expect("meta").is_none());
+}
+
 #[tokio::test]
 async fn the_record_of_an_earlier_version_is_renewed_into_the_controllers_own() {
     let env = Env::new();
