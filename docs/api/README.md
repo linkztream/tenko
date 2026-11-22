@@ -66,6 +66,7 @@ Refused for a delegated session until the plan checks exist: a mirror's `GET`, `
 | `auth.approval.denied` | 403 | the person denied it |
 | `auth.approval.consumed` | 409 | approved or collected before |
 | `auth.approval.expired` | 410 | ten minutes after the request on Tenko's clock, or later than the delegated session could live |
+| `auth.approval.clock_held` | 503 | the controller's clock guard holds issuing (the lookup, the approval and the collect): an administrator confirms the clock first; a delegated session is then refused with 503 `auth.unavailable` and kept |
 | `auth.delegation.refused` | 403 | a delegated session outside its allow-list, behind a recent sign-in, or with a body outside its plan |
 | `tls.no_internal_ca` | 404 | the API listener does not serve the internal authority's root |
 | `sys.body_too_large` | 413 | a request body above 64 KiB, a collect body above 1 KiB |
