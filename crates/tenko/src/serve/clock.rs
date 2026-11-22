@@ -302,6 +302,7 @@ mod tests {
             destroy: true,
             issue: true,
             forward_ms: 60_000,
+            forward_from: None,
         };
         assert!(due(None, None), "the first look");
         assert!(!due(Some((None, Duration::from_secs(59))), None));

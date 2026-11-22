@@ -1,11 +1,17 @@
 //! The guard driven by synthetic looks: a monotonic instant and a wall time that move together
 //! unless a test steps the wall clock.
 
-use std::time::{Duration, Instant};
+use std::{
+    sync::{Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
 use super::*;
 
 const DAY_MS: i64 = 24 * 3_600 * 1_000;
+
+/// The tests that reach the process guard take turns, also under `cargo test`.
+static GLOBAL: Mutex<()> = Mutex::new(());
 
 /// The wall time of the first look of a node.
 fn w0() -> Timestamp {
@@ -60,7 +66,7 @@ fn a_step_over_five_seconds_holds() {
     );
     assert_eq!(
         sim.guard.forward_hold(),
-        Some((Duration::from_secs(6), w0()))
+        Some((Duration::from_secs(6), at(5_000)))
     );
     assert_eq!(sim.guard.plausible().unwrap_err().release, Release::Person);
 
@@ -311,7 +317,7 @@ fn a_saved_hold_survives_a_restart_and_waits_again() {
     assert_eq!((held.reason, held.jump_ms), (Reason::Jump, 60_000));
     assert_eq!(
         second.guard.forward_hold(),
-        Some((Duration::from_secs(60), w0()))
+        Some((Duration::from_secs(60), at(5_000)))
     );
     assert_eq!(
         second.look(59_000, 0).trusted().unwrap_err().release,
@@ -334,7 +340,7 @@ fn a_restart_during_a_forward_hold_keeps_forward_hold_at_the_saved_jump() {
     );
     assert_eq!(
         second.guard.forward_hold(),
-        Some((Duration::from_secs(60), w0()))
+        Some((Duration::from_secs(60), at(5_000)))
     );
     assert_eq!(
         second.guard.plausible().unwrap_err().reason,
@@ -365,7 +371,7 @@ fn a_saved_jump_restarted_after_downtime_does_not_widen_forward_hold() {
     );
     assert_eq!(
         second.guard.forward_hold(),
-        Some((Duration::from_secs(60), w0())),
+        Some((Duration::from_secs(60), at(5_000))),
         "the saved jump alone, never the week"
     );
     assert_eq!(
@@ -386,13 +392,14 @@ fn a_restored_forward_hold_is_at_most_the_saved_jump_forward() {
             destroy: true,
             issue: true,
             forward_ms,
+            forward_from: None,
         }),
     };
     // Restarted at once, the clock still as far from the last trusted look as saved.
     let edited = Sim::new(Some(saved(60_000, i64::MAX)), 60_000);
     assert_eq!(
         edited.guard.forward_hold(),
-        Some((Duration::from_secs(60), w0()))
+        Some((Duration::from_secs(60), at(5_000)))
     );
     let back = Sim::new(Some(saved(-60_000, 60_000)), -60_000);
     assert_eq!(
@@ -406,11 +413,11 @@ fn a_restored_forward_hold_is_at_most_the_saved_jump_forward() {
 fn the_forward_hold_counts_from_the_last_trusted_look_also_across_a_restart() {
     let mut first = Sim::new(None, 0);
     first.look(1_000, 0);
-    // A jump that waits for a person, from the trusted look at second 1.
+    // A jump that waits for a person, from the trusted look at second 1: what was written up
+    // to the tolerance after that look, the second before the jump included, is before it.
     let jump_ms = DAY_MS + 60_000;
     first.look(1_000, jump_ms);
-    let since = at(2_000 + jump_ms);
-    let reading = Some((Duration::from_millis(jump_ms.unsigned_abs()), at(1_000)));
+    let reading = Some((Duration::from_millis(jump_ms.unsigned_abs()), at(6_000)));
     assert_eq!(first.guard.forward_hold(), reading);
     first.look(3 * DAY_MS, 0);
     assert_eq!(
@@ -418,17 +425,65 @@ fn the_forward_hold_counts_from_the_last_trusted_look_also_across_a_restart() {
         reading,
         "a hold longer than its jump"
     );
-    // Restarted: from the saved last trusted time, with the forward amount.
+    // Restarted: from the saved reading, with the forward amount.
     let second = Sim::new(Some(first.guard.saved()), first.wall_ms + 10_000);
     assert_eq!(second.guard.forward_hold(), reading);
-    // A file whose last trusted time lies after the hold began reads as the hold's start.
+    // A file whose reading lies after the restart reads as the restart.
     let mut edited = first.guard.saved();
-    edited.last_trusted_at = at(first.wall_ms + 5_000);
+    if let Some(held) = &mut edited.held {
+        held.forward_from = Some(at(first.wall_ms + 60_000));
+    }
     let third = Sim::new(Some(edited), first.wall_ms + 10_000);
     assert_eq!(
         third.guard.forward_hold().map(|(_, from)| from),
-        Some(since)
+        Some(at(first.wall_ms + 10_000))
     );
+}
+
+#[test]
+fn a_jump_that_grows_counts_from_the_look_before_its_last_step() {
+    let mut sim = Sim::new(None, 0);
+    sim.look(1_000, 0);
+    sim.look(1_000, 10_000);
+    sim.look(1_000, 0);
+    // A further step of 20 s: what was written at second 13, between the steps, is shifted
+    // by the whole 30 s.
+    sim.look(1_000, 20_000);
+    assert_eq!(
+        sim.guard.forward_hold(),
+        Some((Duration::from_secs(30), at(13_000 + 5_000)))
+    );
+    let mut restarted = Sim::new(Some(sim.guard.saved()), sim.wall_ms);
+    assert_eq!(
+        restarted.look(0, 0).forward_hold().map(|(_, from)| from),
+        Some(at(18_000))
+    );
+}
+
+/// The process guard: the pair a restore makes is what `forward_hold` answers without an
+/// override, and a confirm takes it away.
+#[test]
+fn the_process_guard_publishes_its_forward_hold() {
+    let _global = GLOBAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let now = Timestamp::now();
+    let before = now.checked_sub(Duration::from_secs(60)).expect("a time");
+    restore(Some(Saved {
+        last_trusted_at: before,
+        held: Some(SavedHold {
+            reason: Reason::Jump,
+            jump_ms: 60_000,
+            since: now,
+            destroy: true,
+            issue: true,
+            forward_ms: 60_000,
+            forward_from: None,
+        }),
+    }));
+    let reading = before.checked_add(TOLERANCE).expect("a time");
+    assert_eq!(forward_hold(), Some((Duration::from_secs(60), reading)));
+    confirm();
+    assert_eq!(forward_hold(), None);
+    restore(None);
 }
 
 #[test]
@@ -502,6 +557,38 @@ fn a_file_without_the_two_answers_holds_both() {
 }
 
 #[test]
+fn a_file_with_and_without_the_forward_reading_restores() {
+    let file = |from: &str| {
+        format!(
+            r#"{{"last_trusted_at":"{}","held":{{"reason":"jump","jump_ms":60000,"since":"{}","forward_ms":60000{from}}}}}"#,
+            at(0).to_rfc3339(),
+            at(60_000).to_rfc3339()
+        )
+    };
+    let restored = |text: String| {
+        let saved: Saved = serde_json::from_str(&text).expect("a file");
+        Sim::new(Some(saved), 60_000).guard.forward_hold()
+    };
+    // A file of the earlier version counts from its last trusted time.
+    assert_eq!(
+        restored(file("")),
+        Some((Duration::from_secs(60), at(5_000)))
+    );
+    let from = format!(r#","forward_from":"{}""#, at(30_000).to_rfc3339());
+    assert_eq!(
+        restored(file(&from)),
+        Some((Duration::from_secs(60), at(35_000)))
+    );
+    // Without a forward amount the reading stays out of the file.
+    let gap = Saved {
+        last_trusted_at: at(-90_000),
+        held: None,
+    };
+    let written = serde_json::to_string(&Sim::new(Some(gap), 0).guard.saved()).expect("json");
+    assert!(!written.contains("forward_from"), "{written}");
+}
+
+#[test]
 fn a_start_gap_is_not_released_by_a_step_back_of_the_gap() {
     let saved = Saved {
         last_trusted_at: at(-7 * DAY_MS),
@@ -539,6 +626,7 @@ fn confirm_ends_a_wait_early() {
 
 #[test]
 fn the_test_override_is_per_thread() {
+    let _global = GLOBAL.lock().unwrap_or_else(PoisonError::into_inner);
     let held = Held {
         reason: Reason::Jump,
         jump_ms: 3_600_000,

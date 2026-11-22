@@ -26,7 +26,7 @@
 //! A start gap never widens [`forward_hold`], since it is mostly real downtime, and a forward
 //! one holds destruction only, unless issuing was held already. A forward jump made while the
 //! node ran keeps feeding [`forward_hold`] across a restart, by its own saved amount and from
-//! the saved last trusted time, which stays the reading before the jump while it is held.
+//! its own saved reading.
 //!
 //! One guard per process, behind one lock: every call looks. Tests drive [`Guard`] with
 //! synthetic instants; [`testing::hold`] and [`testing::hold_issuing`] hold the clock for the
@@ -139,6 +139,10 @@ pub struct SavedHold {
     /// waits out.
     #[serde(default)]
     pub forward_ms: i64,
+    /// The wall reading [`forward_hold`] counts from, while it has a forward amount; a file
+    /// without it counts from `last_trusted_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_from: Option<Timestamp>,
 }
 
 /// The guard's state as the server binary keeps it across a restart.
@@ -164,6 +168,9 @@ struct Hold {
     issue: bool,
     /// The forward part of a jump made while running; a start gap never sets it.
     forward: i128,
+    /// The last wall reading before the jump, or before its last growth past the tolerance:
+    /// what was written at or before it is judged by the clock before the jump.
+    from: Timestamp,
 }
 
 impl Hold {
@@ -187,6 +194,7 @@ impl Hold {
             } else {
                 0
             },
+            from: since,
         }
     }
 
@@ -243,6 +251,11 @@ impl Guard {
         let Some(saved) = saved else { return guard };
         let gap = offset - saved.last_trusted_at.unix_nanos();
         let far = gap.unsigned_abs() > TOLERANCE_NS;
+        let from = saved
+            .held
+            .as_ref()
+            .and_then(|held| held.forward_from)
+            .unwrap_or(saved.last_trusted_at);
         let (reason, since, jump, destroy, issue, forward_ms) = match saved.held {
             Some(held) => {
                 let jump = i128::from(held.jump_ms) * 1_000_000;
@@ -265,6 +278,7 @@ impl Guard {
         let mut hold = Hold::new(reason, since, (offset - jump, jump), (mono, wall), issue);
         hold.destroy = destroy;
         hold.forward = i128::from(forward_ms) * 1_000_000;
+        hold.from = from;
         guard.hold = (destroy || issue).then_some(hold);
         guard
     }
@@ -275,6 +289,7 @@ impl Guard {
             return;
         }
         let offset = wall.unix_nanos() - nanos(before.saturating_duration_since(self.anchor));
+        let previous = self.last.1;
         self.last = (before, wall);
         if let Some(hold) = &mut self.hold {
             let jump = offset - hold.base;
@@ -294,6 +309,8 @@ impl Guard {
                 }
                 if jump.unsigned_abs() > hold.wait.2.unsigned_abs() + TOLERANCE_NS {
                     hold.wait = (before, wall, jump);
+                    // What was written before this step counts as from before the jump.
+                    hold.from = previous;
                 } else if hold.need() <= SELF_RELEASE_MAX.as_nanos()
                     && before.saturating_duration_since(hold.wait.0).as_nanos() >= hold.need()
                 {
@@ -314,13 +331,16 @@ impl Guard {
             || (offset - self.mark.1).unsigned_abs() > TOLERANCE_NS
         {
             let base = self.mark.1;
-            self.hold = Some(Hold::new(
-                Reason::Jump,
-                wall,
-                (base, offset - base),
-                (before, wall),
-                true,
-            ));
+            self.hold = Some(Hold {
+                from: self.last_trusted,
+                ..Hold::new(
+                    Reason::Jump,
+                    wall,
+                    (base, offset - base),
+                    (before, wall),
+                    true,
+                )
+            });
         } else {
             self.last_trusted = wall;
             if before.saturating_duration_since(self.mark.0) >= WINDOW {
@@ -376,15 +396,22 @@ impl Guard {
     }
 
     /// The forward jump that the reuse of another client's address waits out, while a runtime
-    /// jump holds destruction, and the last wall reading trusted before it (never after the
-    /// hold began): what was written at or before it is from before the jump.
+    /// jump holds destruction, and the reading it counts from: what was written at or before
+    /// it is from before the jump.
+    ///
+    /// The reading is the last trusted look before the jump plus [`TOLERANCE`], so the second
+    /// between that look and the jump counts as before it, and never after the current wait
+    /// began. When the jump grows past the tolerance, it moves to the look before that further
+    /// step: what was written between the steps is then judged earlier by the whole jump, so
+    /// it is kept up to the first jump too long, never freed early.
     pub fn forward_hold(&self) -> Option<(Duration, Timestamp)> {
         self.hold
             .as_ref()
             .filter(|hold| hold.destroy && hold.forward > 0)
             .map(|hold| {
                 let jump = Duration::from_nanos(u64::try_from(hold.forward).unwrap_or(u64::MAX));
-                (jump, self.last_trusted.min(hold.since))
+                let from = hold.from.checked_add(TOLERANCE).unwrap_or(hold.from);
+                (jump, from.min(hold.wait.1))
             })
     }
 
@@ -401,6 +428,7 @@ impl Guard {
                     destroy: hold.destroy,
                     issue: hold.issue,
                     forward_ms: i64::try_from(hold.forward / 1_000_000).unwrap_or(i64::MAX),
+                    forward_from: (hold.forward > 0).then_some(hold.from),
                 }
             }),
         }
@@ -486,11 +514,12 @@ pub fn plausible_now() -> Result<Timestamp, Held> {
     })
 }
 
-/// The forward jump during a runtime hold of destruction and the last wall reading trusted
-/// before it. A binding whose client time is not later than that reading is from before the
-/// jump, so its end is on the clock before it and its reuse is judged earlier by the jump;
-/// one written since, also in the second before the guard's next look, carries the jumped
-/// clock and is judged as it is. One atomic load, and a second only while a jump is held.
+/// The forward jump during a runtime hold of destruction and the reading it counts from
+/// ([`Guard::forward_hold`]). A binding whose client time is not later than that reading is
+/// from before the jump, so its end is on the clock before it and its reuse is judged earlier
+/// by the jump; one written since, also in the second before the guard's next look, carries
+/// the jumped clock and is judged as it is. One atomic load, and a second only while a jump
+/// is held.
 pub fn forward_hold() -> Option<(Duration, Timestamp)> {
     if let Some((held, destroy)) = testing::current() {
         return (destroy && held.reason == Reason::Jump && held.jump_ms > 0).then(|| {
