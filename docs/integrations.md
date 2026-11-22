@@ -89,7 +89,7 @@ and lists both addresses (`["0.0.0.0:8445", "[::]:8445"]`) when integrations com
 | Open connections from one address, counted before the handshake (an IPv6 source counts by its /64) | 16 |
 | New handshakes from one address (an IPv6 source by its /64) | 4 a second, a burst of 32 |
 | Time for the handshake | 5 seconds |
-| Answer without quorum | 503 `integration.isolated` after 30 seconds without contact to the cluster |
+| Answer without quorum | 503 `integration.isolated` after 30 seconds without contact to the cluster; at once while the clock guard holds issuing (OPS-09) or the clock stands more than five seconds before the loss of contact |
 
 The limits are the listener's own, apart from the limits of 8443, so a flood on one does not starve the other. Hosts behind one NAT address share one source: a script that opens a new connection for every call from many such hosts can meet the handshake rate, and a refused connection is dropped without an answer, so reuse a connection (`curl` with several URLs in one call, or a keep-alive session in PowerShell) or spread the calls. A controller that has been `isolated` or `electing` ([cluster.md](cluster.md)) for more than 30 seconds answers every request with 503: it cannot know of a revocation made on another controller. A single controller is never isolated.
 
@@ -721,7 +721,7 @@ Within a lineage there is at most one current certificate and one pending succes
 
 **Revocation.** An administrator revokes a whole lineage with `DELETE /api/v1/integrations/certificates/{serial}` (any serial of it; 204; no fresh sign-in needed; audited `auth.client_cert.revoke`), or in the UI under **Access → Integration certificates** with its consequence shown first. It takes effect on every controller within the store's replication, also on open connections, and the lineage's bound tokens are revoked in the same commit. The key can never enroll again. Deleting or disabling the service account ends its certificates at once; a reuse of a bound token's family (IAM-21), which can happen only once the key was proven, revokes the lineage too.
 
-**Lapse.** A lineage whose certificates have all expired is dead: its bound tokens are removed by the hourly sweep (audited `auth.client_cert.lapse`) and never move. Recovery is a new enrollment, a new lineage and new tokens. The same sweep deletes the records of replaced, withdrawn and revoked certificates 15 minutes after they expired, so they leave the list; their keys still never enroll again.
+**Lapse.** A lineage whose certificates have all expired is dead: its bound tokens are removed by the hourly sweep (audited `auth.client_cert.lapse`) and never move. Recovery is a new enrollment, a new lineage and new tokens. The same sweep deletes the records of replaced, withdrawn and revoked certificates 15 minutes after they expired, so they leave the list; their keys still never enroll again. While the clock guard holds issuing (OPS-09), the sweep removes nothing, and neither does the prune of enrollment codes.
 
 **The expiry notice.** A current certificate that has entered the last sixth of its lifetime without a successor raises the status condition `integration.certificate_expiring` (in `GET /api/v1/system/status` and on the start page, with the count, the label and the end of the first one), which the findings and notifications of OPS-29 read like every status condition. It means the renewal timer of that host is not working: check the unit or the scheduled task and its output.
 
@@ -757,7 +757,7 @@ A handshake that fails shows no HTTP answer; the client reports a TLS error. The
 | 401 `integration.token.required`, 403 `integration.token.wrong_account` | No token, or a token of another account than the certificate's |
 | 401 `auth.unauthenticated` for a `tnkb_` token | The token is bound and was presented without a certificate of its lineage, on the wrong port or with another lineage's certificate. The audit log holds `auth.token.binding_refused`. Nothing was revoked |
 | 401 `auth.unauthenticated` for an unbound service-account token | TGL-47 requires binding, and this token is not bound: it is refused at every use (`auth.token.binding_refused`). Create a bound token (section 7) |
-| 503 `integration.isolated` | The controller lost contact to its cluster more than 30 seconds ago. Use another controller, or wait for it to rejoin |
+| 503 `integration.isolated` | The controller lost contact to its cluster more than 30 seconds ago, or lost it while its clock guard holds issuing (section 3.4). Use another controller, or wait for it to rejoin |
 | 503 `integration.unavailable` | Integration certificates are not available on this controller |
 | 401 `integration.code.invalid` | A wrong proof, an unknown or withdrawn code, or a malformed header. The audit log holds the refusal (`auth.client_cert.issue`) only when the code exists. Check the proof against the test vector (section 4.4), that the secret is the decoded hexadecimal, that the SPKI is the canonical 91 octets, and that the label in the proof is the label in `?label=` |
 | 401 `integration.code.used`, `integration.code.expired` | The code was used or expired. Ask for a new one |

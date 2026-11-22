@@ -640,6 +640,8 @@ Work that must happen once for the whole installation runs on the leader only, u
 | `import.purge` | The hourly purge of expired import uploads and of staged uploads without an import |
 | `cluster.clock` | Every minute, writes the leader's clock so every controller can compare its own with it |
 
+While the leader's clock guard holds its clock (OPS-09), `cluster.prune` keeps old enrollment tokens, `api.idempotency_purge` deletes no record by its age (its sweep indexes the old records of an earlier version instead), `auth.used_challenges_purge` deletes nothing, and `vault.kek_rotation` fails no rotation by its timeout. `cluster.prune` keeps expired revocations as long as the guard holds issuing, which after a step of the clock lasts until a person confirms the clock.
+
 `GET /api/v1/system/status` shows the office under `leader`: whether this controller leads (`leads`), its epoch and since when, every service with its state (`idle` on a follower; `running`, `restarting` or `finished` on the leader), its restarts and its last error, and `clock_skew_ms` (below). A service that waits for its restart is the warning `cluster.leader.service_failing`.
 
 Jobs whose steps are tied to one host run on that controller's own runner instead: the install of a release runs on the controller that downloaded or received it. Installing a release from the web UI stays refused on a cluster (`update.install_blocked` with the reason `cluster`); update the controllers one at a time as described in [upgrades.md](upgrades.md).
@@ -652,7 +654,7 @@ What any controller can finish, whichever started it:
 
 The cluster key (`sys.cluster_key`) is 32 random bytes kept as a system secret in the vault, created by the first controller that starts with this release.
 
-**Clocks.** Ceremonies and tokens expire by the clock of the controller that checks them. Every controller compares its clock with the leader's beat (`cluster.clock`); a difference of more than five seconds is the warning `cluster.clock_skew` in `GET /api/v1/system/status` (params `skew_ms`, this controller's clock minus the leader's, and `tolerance_ms`) and a log line. Keep the controllers' clocks synchronized with NTP.
+**Clocks.** Ceremonies and tokens expire by the clock of the controller that checks them. Every controller compares its clock with the leader's beat (`cluster.clock`); a difference of more than five seconds is the warning `cluster.clock_skew` in `GET /api/v1/system/status` (params `skew_ms`, this controller's clock minus the leader's, and `tolerance_ms`) and a log line. Keep the controllers' clocks synchronized with NTP. A controller whose clock stands more than five seconds before the time a sign-in, a takeover approval, a delegated session's approval or last request, an integration enrollment code or a node enrollment token was made counts it as no longer recent or valid, and refuses a ceremony whose end lies further ahead than a ceremony lives. While its clock guard holds issuing after a step back, the steps of an approval and a delegated session are judged at the clock moved ahead by the step, so that step never lengthens them; one made after the step ends sooner by as much (an approval made after a step back of ten minutes or more, and a delegated session after one longer than its idle limit, can be used only after that hold ends: when a person confirms the clock, or when the clock comes back to within five seconds of where it was trusted), and a forward jump or a start gap moves nothing.
 
 ### 12.9 Limits per controller
 
