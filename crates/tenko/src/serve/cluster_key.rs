@@ -192,6 +192,7 @@ mod tests {
                     generation: 0,
                 },
                 now,
+                tenko_core::Revision::ZERO,
             )
             .expect("sealed");
         assert!(elsewhere.take(&id, now).is_ok());

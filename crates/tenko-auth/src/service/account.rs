@@ -627,6 +627,7 @@ impl AuthService {
                 secret,
             },
             ctx.now,
+            self.store.status().revision,
         )?;
         Ok(TotpEnrollment {
             enrollment_id,
@@ -836,6 +837,7 @@ impl AuthService {
                 hardware_key,
             },
             ctx.now,
+            self.store.status().revision,
         )?;
         Ok(WebAuthnRegisterOptions {
             ceremony_id,

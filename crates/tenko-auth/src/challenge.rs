@@ -33,11 +33,12 @@
 //! the ceremony (the session, the credential, the enrollment). The ceremony is consumed
 //! exactly when that batch commits; a replay on another controller is refused by the row, or
 //! by the version precondition of the batch when both race. [`purge_used`] removes the rows
-//! a day after their ceremonies expired and keeps the latest end it removed, which refuses
-//! every ceremony that ended by then whatever the clock says; the leader runs it hourly as a
-//! leader-only service.
-//! On a trusted clock a row stays at most a day and one ceremony lifetime, so the rows number
-//! at most the ceremonies finished in that time, one small row each.
+//! a day after their ceremonies expired, and keeps one mark: the latest store revision at
+//! which a row it removed was written. A ceremony carries the revision it was opened at under
+//! the seal, and one opened before the mark is refused, whatever any clock says: its row, if it
+//! had one, may be gone. The leader runs the purge hourly as a leader-only service. On a
+//! trusted clock a row stays at most a day and one ceremony lifetime, so the rows number at
+//! most the ceremonies finished in that time, one small row each, and the mark.
 //!
 //! Every finishing handler of the service does this: the TOTP and recovery code logins,
 //! the passkey login, the TOTP enrollment and the passkey registration. The passkey step of
@@ -75,7 +76,8 @@ use aws_lc_rs::{
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    AuthStrength, Principal, SessionId, SystemComponent, Timestamp, UserId, table::TableDef,
+    AuthStrength, Principal, Revision, SessionId, SystemComponent, Timestamp, UserId,
+    table::TableDef,
 };
 use tenko_store::{
     KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError, WriteBatch,
@@ -292,6 +294,10 @@ struct Sealed {
     /// When the ceremony ends, by the clock of the controller that opened it.
     expires_at: Timestamp,
     pending: SealedPending,
+    /// The store revision this controller had applied when it opened the ceremony; absent in a
+    /// ceremony of an earlier version, which [`PURGED_THROUGH`] then does not refuse.
+    #[serde(default)]
+    opened_at: Option<Revision>,
 }
 
 /// A serde mirror of [`Pending`]; the public type keeps its shape. Byte strings are CBOR
@@ -522,14 +528,18 @@ mod secret_bytes {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsedChallenge {
     /// When the row may be purged: [`SELF_RELEASE_MAX`](tenko_core::clock::SELF_RELEASE_MAX)
-    /// after the ceremony expires. In the row [`PURGED_THROUGH`], the latest such time that
-    /// [`purge_used`] removed.
+    /// after the ceremony expires.
     pub expires_at: Timestamp,
+    /// In the row [`PURGED_THROUGH`] only: the latest revision at which a row the purge
+    /// removed was written.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_through: Option<Revision>,
 }
 
-/// The key of the row in [`USED_CHALLENGES`] that holds the latest end the purge removed (no
-/// ceremony key is empty): a ceremony whose row would end at or before it is refused whatever
-/// the clock says, so a row that went cannot open a replay, also after a step back.
+/// The key of the row in [`USED_CHALLENGES`] of the purge's mark (no ceremony key is empty). A
+/// ceremony's row is written after it was opened, so one opened before the mark's
+/// `written_through` may have had its row purged and is refused; one opened at or after it
+/// never is, whatever any clock did.
 const PURGED_THROUGH: &str = "";
 
 /// The use of one ceremony, to be staged into the write batch that completes it; see
@@ -565,17 +575,14 @@ impl StagedUse {
             &USED_CHALLENGES,
             &self.ceremony,
             &UsedChallenge {
-                expires_at: self.row_end(),
+                expires_at: self
+                    .expires_at
+                    .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
+                    .unwrap_or(self.expires_at),
+                written_through: None,
             },
         )?;
         Ok(())
-    }
-
-    /// When the row of the use may be purged.
-    fn row_end(&self) -> Timestamp {
-        self.expires_at
-            .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
-            .unwrap_or(self.expires_at)
     }
 }
 
@@ -674,17 +681,24 @@ impl Ceremonies {
     }
 
     /// Opens a ceremony and returns its id: the pending state sealed under the key, valid
-    /// for [`CEREMONY_TTL`] from `now`. Writes nothing, here or in the store.
+    /// for [`CEREMONY_TTL`] from `now`, with `opened_at`, the store revision this controller
+    /// has applied. Writes nothing, here or in the store.
     ///
     /// # Errors
     ///
     /// [`AuthError::Internal`] if the random source fails or the state cannot be encoded.
-    pub fn open(&self, pending: Pending, now: Timestamp) -> Result<String, AuthError> {
+    pub fn open(
+        &self,
+        pending: Pending,
+        now: Timestamp,
+        opened_at: Revision,
+    ) -> Result<String, AuthError> {
         let ceremony = URL_SAFE_NO_PAD.encode(random::array::<CEREMONY_KEY_LEN>()?);
         let sealed = Sealed {
             ceremony,
             expires_at: now.checked_add(CEREMONY_TTL).unwrap_or(now),
             pending: SealedPending::from(pending),
+            opened_at: Some(opened_at),
         };
         self.key
             .read()
@@ -705,6 +719,7 @@ impl Ceremonies {
             ceremony,
             expires_at,
             pending,
+            ..
         } = sealed;
         // An end further ahead than a ceremony lives was sealed before the clock was set back.
         if expires_at <= now
@@ -773,7 +788,12 @@ impl Ceremonies {
         if view
             .get_typed(&USED_CHALLENGES, &staged.ceremony)?
             .is_some()
-            || purged.is_some_and(|(mark, _)| staged.row_end() <= mark.expires_at)
+            || purged.is_some_and(|(mark, _)| {
+                sealed
+                    .opened_at
+                    .zip(mark.written_through)
+                    .is_some_and(|(opened, through)| opened < through)
+            })
         {
             return Err(AuthError::ChallengeInvalid);
         }
@@ -841,8 +861,8 @@ impl Ceremonies {
 
 /// Deletes the rows of [`USED_CHALLENGES`] that are due (`expires_at <= now`, a day after
 /// their ceremony ended), at most [`PURGE_PAGE`] rows per batch so a backlog stays far below
-/// the batch size limit, and moves [`PURGED_THROUGH`] to the latest end it removed; returns
-/// how many rows went. The leader runs it hourly as a leader-only service, with the leader
+/// the batch size limit, and moves the mark [`PURGED_THROUGH`] to the latest revision at
+/// which a row it removed was written; returns how many rows went. The leader runs it hourly as a leader-only service, with the leader
 /// epoch of its term as `fence` (`tenko_store::fence`), so a deposed leader's purge fails
 /// instead of racing the new leader's. Nothing is proposed when no row is due, or while the
 /// clock guard holds the clock.
@@ -871,7 +891,7 @@ pub async fn purge_used(
         expired.extend(
             page.into_iter()
                 .filter(|(key, row, _)| key != PURGED_THROUGH && row.expires_at <= now)
-                .map(|(key, row, revision)| (key, row.expires_at, revision)),
+                .map(|(key, _, revision)| (key, revision)),
         );
         match last {
             Some(last) => range = KeyRange::all().after(last),
@@ -881,22 +901,22 @@ pub async fn purge_used(
     let mark = view.get_typed(&USED_CHALLENGES, &PURGED_THROUGH.to_owned())?;
     let through = expired
         .iter()
-        .map(|(_, end, _)| *end)
-        .chain(mark.map(|(mark, _)| mark.expires_at))
+        .map(|(_, revision)| *revision)
+        .chain(mark.and_then(|(mark, _)| mark.written_through))
         .max();
     for (index, chunk) in expired.chunks(PURGE_PAGE).enumerate() {
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
         if let Some(epoch) = fence {
             batch.preconditions.push(tenko_store::fence(epoch));
         }
-        if let Some(expires_at) = through.filter(|_| index == 0) {
-            batch.put_typed(
-                &USED_CHALLENGES,
-                &PURGED_THROUGH.to_owned(),
-                &UsedChallenge { expires_at },
-            )?;
+        if index == 0 {
+            let mark = UsedChallenge {
+                expires_at: now,
+                written_through: through,
+            };
+            batch.put_typed(&USED_CHALLENGES, &PURGED_THROUGH.to_owned(), &mark)?;
         }
-        for (key, _, revision) in chunk {
+        for (key, revision) in chunk {
             batch
                 .expect_typed(&USED_CHALLENGES, key, Some(*revision))
                 .delete_typed(&USED_CHALLENGES, key);
@@ -913,6 +933,13 @@ mod tests {
 
     use super::*;
     use crate::clock::{Clock, MockClock};
+
+    impl Ceremonies {
+        /// [`Ceremonies::open`] at the revision of an empty store.
+        fn opened(&self, pending: Pending, now: Timestamp) -> Result<String, AuthError> {
+            self.open(pending, now, Revision::ZERO)
+        }
+    }
 
     #[test]
     fn a_totp_challenge_sealed_by_0_0_11_still_opens() {
@@ -985,13 +1012,17 @@ mod tests {
     fn ceremonies_are_single_use_and_expire() {
         let clock = MockClock::fixed();
         let ceremonies = Ceremonies::new(10);
-        let id = ceremonies.open(second_factor(), clock.now()).expect("open");
+        let id = ceremonies
+            .opened(second_factor(), clock.now())
+            .expect("open");
         assert!(ceremonies.take(&id, clock.now()).is_ok());
         assert!(matches!(
             ceremonies.take(&id, clock.now()),
             Err(AuthError::ChallengeInvalid)
         ));
-        let id = ceremonies.open(second_factor(), clock.now()).expect("open");
+        let id = ceremonies
+            .opened(second_factor(), clock.now())
+            .expect("open");
         clock.advance(CEREMONY_TTL);
         assert!(ceremonies.take(&id, clock.now()).is_err());
     }
@@ -1001,7 +1032,9 @@ mod tests {
         let clock = MockClock::fixed();
         let ceremonies = Ceremonies::new(3);
         for _ in 0..10 {
-            let id = ceremonies.open(second_factor(), clock.now()).expect("open");
+            let id = ceremonies
+                .opened(second_factor(), clock.now())
+                .expect("open");
             ceremonies.take(&id, clock.now()).expect("take");
             clock.advance(Duration::from_secs(1));
         }
@@ -1018,7 +1051,9 @@ mod tests {
         let clock = MockClock::fixed();
         let ceremonies = Ceremonies::new(3);
         for _ in 0..20 {
-            ceremonies.open(second_factor(), clock.now()).expect("open");
+            ceremonies
+                .opened(second_factor(), clock.now())
+                .expect("open");
         }
         assert!(ceremonies.is_empty());
         assert_eq!(ceremonies.len(), 0);
@@ -1028,14 +1063,20 @@ mod tests {
     fn expired_entries_make_room_before_live_ones() {
         let clock = MockClock::fixed();
         let ceremonies = Ceremonies::new(2);
-        let old = ceremonies.open(second_factor(), clock.now()).expect("open");
+        let old = ceremonies
+            .opened(second_factor(), clock.now())
+            .expect("open");
         ceremonies.take(&old, clock.now()).expect("take");
         clock.advance(Duration::from_secs(100));
-        let live = ceremonies.open(second_factor(), clock.now()).expect("open");
+        let live = ceremonies
+            .opened(second_factor(), clock.now())
+            .expect("open");
         ceremonies.take(&live, clock.now()).expect("take");
         clock.advance(Duration::from_secs(200));
         // `old` has expired and makes room; `live` stays and is still refused.
-        let newer = ceremonies.open(second_factor(), clock.now()).expect("open");
+        let newer = ceremonies
+            .opened(second_factor(), clock.now())
+            .expect("open");
         ceremonies.take(&newer, clock.now()).expect("take");
         assert_eq!(ceremonies.len(), 2);
         assert!(refused(&ceremonies, &live, clock.now()));
@@ -1095,7 +1136,9 @@ mod tests {
         let ceremonies = controller(1);
         let seed = b"correct horse battery";
         let pending = totp_enrollment(seed);
-        let id = ceremonies.open(pending.clone(), clock.now()).expect("open");
+        let id = ceremonies
+            .opened(pending.clone(), clock.now())
+            .expect("open");
         let bytes = decode(&id);
         assert_eq!(bytes[0], 1, "version");
         assert!(bytes.len() > 1 + NONCE_LEN + AES_256_GCM.tag_len());
@@ -1104,7 +1147,7 @@ mod tests {
             "the seed is not in the id in the clear"
         );
         // The same state seals differently every time (fresh ceremony key and nonce).
-        let again = ceremonies.open(pending, clock.now()).expect("open");
+        let again = ceremonies.opened(pending, clock.now()).expect("open");
         assert_ne!(id, again);
         assert_ne!(decode(&id)[1..=NONCE_LEN], decode(&again)[1..=NONCE_LEN]);
     }
@@ -1118,7 +1161,7 @@ mod tests {
         let session = SessionId::generate();
 
         let id = a
-            .open(
+            .opened(
                 Pending::WebAuthnLogin {
                     challenge: [9; 32],
                     user: Some(user),
@@ -1150,7 +1193,7 @@ mod tests {
 
         let seed = vec![0, 1, 2, 3, 250, 251, 252, 253, 254, 255];
         let id = a
-            .open(
+            .opened(
                 Pending::TotpEnrollment {
                     user,
                     session,
@@ -1173,7 +1216,7 @@ mod tests {
         assert_eq!(&secret[..], &seed[..]);
 
         let id = a
-            .open(
+            .opened(
                 Pending::WebAuthnRegister {
                     challenge: [3; 32],
                     user,
@@ -1199,7 +1242,7 @@ mod tests {
         assert_eq!(label, "Laptop \u{1f511}");
         assert!(hardware_key);
 
-        let id = a.open(second_factor(), clock.now()).expect("open");
+        let id = a.opened(second_factor(), clock.now()).expect("open");
         let Pending::SecondFactor {
             first, attempts, ..
         } = b
@@ -1216,7 +1259,7 @@ mod tests {
         let clock = MockClock::fixed();
         let now = clock.now();
         let a = controller(7);
-        let id = a.open(webauthn_login(), now).expect("open");
+        let id = a.opened(webauthn_login(), now).expect("open");
 
         // Another key.
         assert!(refused(&controller(8), &id, now));
@@ -1283,12 +1326,12 @@ mod tests {
         let a = controller(7);
         let b = controller(7);
         let start = clock.now();
-        let id = a.open(second_factor(), start).expect("open");
+        let id = a.opened(second_factor(), start).expect("open");
         // One tick before the end, another controller still opens it.
         clock.advance(Duration::from_millis(299_999));
         assert!(b.take(&id, clock.now()).is_ok());
 
-        let id = a.open(second_factor(), start).expect("open");
+        let id = a.opened(second_factor(), start).expect("open");
         clock.set(start.checked_add(CEREMONY_TTL).expect("in range"));
         assert!(refused(&b, &id, clock.now()));
         clock.advance(Duration::from_secs(3_600));
@@ -1304,10 +1347,10 @@ mod tests {
         };
         let a = controller(7);
         // Opened an hour ahead of the clock that now takes it: it would last an hour longer.
-        let id = a.open(second_factor(), ahead(3_600)).expect("open");
+        let id = a.opened(second_factor(), ahead(3_600)).expect("open");
         assert!(refused(&controller(7), &id, now));
         // Within the tolerance of the clock it still opens.
-        let id = a.open(second_factor(), ahead(5)).expect("open");
+        let id = a.opened(second_factor(), ahead(5)).expect("open");
         assert!(controller(7).take(&id, now).is_ok());
     }
 
@@ -1315,7 +1358,7 @@ mod tests {
     fn a_replay_on_the_same_controller_is_refused() {
         let clock = MockClock::fixed();
         let a = controller(7);
-        let id = a.open(webauthn_login(), clock.now()).expect("open");
+        let id = a.opened(webauthn_login(), clock.now()).expect("open");
         assert!(a.take(&id, clock.now()).is_ok());
         assert_eq!(a.len(), 1);
         for _ in 0..3 {
@@ -1331,7 +1374,7 @@ mod tests {
         let a = controller(7);
         let user = UserId::generate();
         let id = a
-            .open(
+            .opened(
                 Pending::SecondFactor {
                     user,
                     first: AuthStrength::Password,
@@ -1381,10 +1424,10 @@ mod tests {
     fn replacing_the_key_ends_the_ceremonies_of_the_old_one() {
         let clock = MockClock::fixed();
         let a = controller(7);
-        let before = a.open(second_factor(), clock.now()).expect("open");
+        let before = a.opened(second_factor(), clock.now()).expect("open");
         a.set_key(cluster_key(8));
         assert!(refused(&a, &before, clock.now()));
-        let after = a.open(second_factor(), clock.now()).expect("open");
+        let after = a.opened(second_factor(), clock.now()).expect("open");
         assert!(refused(&controller(7), &after, clock.now()));
         assert!(controller(8).take(&after, clock.now()).is_ok());
         // The old key still opens the old id elsewhere; only this instance moved on.
@@ -1418,7 +1461,9 @@ mod tests {
         let store = MemStore::default();
         let a = controller(7);
         let b = controller(7);
-        let id = a.open(totp_enrollment(b"seed"), clock.now()).expect("open");
+        let id = a
+            .opened(totp_enrollment(b"seed"), clock.now())
+            .expect("open");
 
         let view = store.read(ReadConsistency::Local).await.expect("view");
         let (pending, staged) = a
@@ -1467,7 +1512,7 @@ mod tests {
         let store = MemStore::default();
         let a = controller(7);
         let b = controller(7);
-        let id = a.open(webauthn_login(), clock.now()).expect("open");
+        let id = a.opened(webauthn_login(), clock.now()).expect("open");
 
         // Both read before either commits, so both are let through.
         let view_a = store.read(ReadConsistency::Local).await.expect("view");
@@ -1498,7 +1543,7 @@ mod tests {
         let store = MemStore::default();
         let a = controller(7);
         let user = UserId::generate();
-        let id = a.open(second_factor(), clock.now()).expect("open");
+        let id = a.opened(second_factor(), clock.now()).expect("open");
 
         let view = store.read(ReadConsistency::Local).await.expect("view");
         let (_, first) = a
@@ -1550,13 +1595,13 @@ mod tests {
             Err(AuthError::ChallengeInvalid)
         ));
         let id = controller(8)
-            .open(second_factor(), clock.now())
+            .opened(second_factor(), clock.now())
             .expect("open");
         assert!(matches!(
             a.take_staged(&id, clock.now(), view.as_ref()),
             Err(AuthError::ChallengeInvalid)
         ));
-        let id = a.open(second_factor(), clock.now()).expect("open");
+        let id = a.opened(second_factor(), clock.now()).expect("open");
         clock.advance(CEREMONY_TTL);
         assert!(matches!(
             a.take_staged(&id, clock.now(), view.as_ref()),
@@ -1573,7 +1618,10 @@ mod tests {
             .put_typed(
                 &USED_CHALLENGES,
                 &name.to_owned(),
-                &UsedChallenge { expires_at },
+                &UsedChallenge {
+                    expires_at,
+                    written_through: None,
+                },
             )
             .expect("encode");
         store.propose(batch).await.expect("commit");
@@ -1651,7 +1699,10 @@ mod tests {
                 .put_typed(
                     &USED_CHALLENGES,
                     &format!("row {index:05}"),
-                    &UsedChallenge { expires_at },
+                    &UsedChallenge {
+                        expires_at,
+                        written_through: None,
+                    },
                 )
                 .expect("encode");
         }
@@ -1701,7 +1752,7 @@ mod tests {
         let store = MemStore::default();
         let a = controller(7);
         let b = controller(7);
-        let id = a.open(second_factor(), clock.now()).expect("open");
+        let id = a.opened(second_factor(), clock.now()).expect("open");
         let view = store.read(ReadConsistency::Local).await.expect("view");
         let (_, staged) = a
             .take_staged(&id, clock.now(), view.as_ref())
@@ -1738,6 +1789,37 @@ mod tests {
             .expect("in range");
         assert!(matches!(
             controller(7).take_staged(&id, opened, view.as_ref()),
+            Err(AuthError::ChallengeInvalid)
+        ));
+    }
+
+    /// The mark is a store revision, not a time: a purge on a clock two days ahead refuses no
+    /// ceremony opened after it once the clock is right again, and one opened before the
+    /// newest purged row was written is refused, whatever the clock says.
+    #[tokio::test]
+    async fn the_purge_s_mark_refuses_by_revision_whatever_the_clock_did() {
+        let now = MockClock::fixed().now();
+        let ahead = now
+            .checked_add(Duration::from_secs(2 * 86_400))
+            .expect("in range");
+        let store = MemStore::default();
+        let a = controller(7);
+        let before = a.opened(second_factor(), now).expect("open");
+        put_used(&store, "written on a fast clock", ahead).await;
+        let between = a
+            .open(second_factor(), now, store.status().revision)
+            .expect("open");
+        let later = ahead.checked_add(Duration::from_secs(1)).expect("in range");
+        assert_eq!(purge_used(&store, later, Some(0)).await.expect("purge"), 1);
+        let after = a
+            .open(second_factor(), now, store.status().revision)
+            .expect("open");
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        for id in [&between, &after] {
+            assert!(controller(7).take_staged(id, now, view.as_ref()).is_ok());
+        }
+        assert!(matches!(
+            controller(7).take_staged(&before, now, view.as_ref()),
             Err(AuthError::ChallengeInvalid)
         ));
     }

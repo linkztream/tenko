@@ -406,6 +406,7 @@ impl AuthService {
                 generation: user.sessions_generation,
             },
             ctx.now,
+            self.store.status().revision,
         )?;
         Ok(LoginOutcome::SecondFactor {
             challenge_id,
@@ -759,6 +760,7 @@ impl AuthService {
                 continuation,
             },
             ctx.now,
+            self.store.status().revision,
         )?;
         Ok(WebAuthnLoginOptions {
             ceremony_id,
