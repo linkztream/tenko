@@ -576,7 +576,8 @@ impl Tracked {
     }
 
     /// Moves an entry whose last failure stands ahead of `now` (the clock was set back) back by
-    /// as much, so a step back neither ends nor lengthens its delay or its lock.
+    /// as much, so a step back ends neither its delay nor its lock; each starts again at its
+    /// full length, so it is lengthened by at most that length.
     fn rebase(&mut self, now: Timestamp) {
         if !tenko_core::clock::stands_before(now, self.last_failure) {
             return;
@@ -764,8 +765,12 @@ impl Throttle {
 
     /// The lock `key` holds at `now`, if any, ignoring its delay.
     pub fn lock_of(&self, key: &ThrottleKey, now: Timestamp) -> Option<Retry> {
-        let table = self.table();
-        let tracked = table.get(key).filter(|tracked| tracked.is_live(now))?;
+        let mut table = self.table();
+        let tracked = table.get_mut(key)?;
+        tracked.rebase(now);
+        if !tracked.is_live(now) {
+            return None;
+        }
         tracked.active_lock(now).map(|until| Retry {
             after: remaining(until, now),
         })
@@ -1213,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn a_clock_set_back_neither_lengthens_nor_ends_a_delay() {
+    fn a_clock_set_back_neither_freezes_nor_ends_a_delay() {
         let lock = LockPolicy::default();
         let source = Some("192.0.2.10".parse().expect("an address"));
         for (key, policy) in [
@@ -1242,6 +1247,23 @@ mod tests {
             let later = back.checked_add(delay).expect("in range");
             assert_eq!(throttle.check(&key, &policy, later), Ok(()), "{key:?}");
         }
+    }
+
+    #[test]
+    fn a_clock_set_back_freezes_no_lock() {
+        let throttle = Throttle::new(4);
+        let mut policy = doubling(0, secs(1));
+        policy.mode = LockoutMode::DelayThenTemporaryLock;
+        policy.lock_after = 1;
+        policy.lock_duration = secs(900);
+        let key = ThrottleKey::account_source("alice", None);
+        throttle.record_failure(&key, &policy, at(10_000));
+        assert_eq!(
+            throttle.lock_of(&key, at(10_000 - 3_600)),
+            Some(Retry {
+                after: Some(secs(900))
+            })
+        );
     }
 
     #[test]

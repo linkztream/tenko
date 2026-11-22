@@ -439,6 +439,19 @@ async fn a_held_clock_sweeps_no_ended_known_device() {
     assert_eq!(device_rows(&env, other).await, 0);
 }
 
+/// While the clock guard holds the clock a sign-in removes no other mark of the account past
+/// its end, as the sweep keeps it.
+#[tokio::test]
+async fn a_held_clock_removes_no_ended_mark_at_a_sign_in() {
+    let (env, _) = TestEnv::installed(Profile::Home).await;
+    let other = env.add_admin(OTHER_USER, OTHER_PASSWORD).await;
+    session(login(&env, HOME, OTHER_USER, OTHER_PASSWORD, &no_marks()).await);
+    env.clock.advance(Duration::from_secs(30 * 86_400));
+    let _held = tenko_core::clock::testing::hold_jump(3_600_000, env.now());
+    session(login(&env, HOME, OTHER_USER, OTHER_PASSWORD, &no_marks()).await);
+    assert_eq!(device_rows(&env, other).await, 2);
+}
+
 /// The person and an administrator see the known devices and forget them; the hourly
 /// sweep removes ended ones.
 #[tokio::test]

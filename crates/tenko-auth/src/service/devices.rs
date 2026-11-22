@@ -408,14 +408,16 @@ impl AuthService {
             }
         }
         let id = own.as_ref().map_or_else(KnownDeviceId::generate, |r| r.id);
-        // The account's other marks: ended ones go, and the oldest beyond the cap.
+        // The account's other marks: ended ones go (by their time only on a clock the guard
+        // trusts, as the sweep judges them), and the oldest beyond the cap.
+        let at = tenko_core::clock::trusted_now().map_or(Timestamp::UNIX_EPOCH, |_| now);
         let mut live: Vec<(Vec<u8>, Timestamp)> = Vec::new();
         for ((_, digest), other, _) in Self::user_device_index(view, user.id)? {
             if marks.digests().any(|(_, carried)| carried == digest) {
                 continue; // Removed above.
             }
             match view.get_typed(&KNOWN_DEVICES, &digest)?.map(|(r, _)| r) {
-                Some(record) if other != id && holds(&record, user, u32::MAX, now) => {
+                Some(record) if other != id && holds(&record, user, u32::MAX, at) => {
                     live.push((digest, record.issued_at));
                 }
                 // Ended, or another mark of this device (renewed twice at once): it goes.
