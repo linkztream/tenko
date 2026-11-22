@@ -947,10 +947,7 @@ impl Agent {
                 () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
                 _ = tick.tick() => {}
             }
-            let buffer = self.buffer.clone();
-            // Asked here: the guard's test hold does not reach the blocking thread.
-            let trusted = tenko_core::clock::trusted_now().is_ok();
-            match tokio::task::spawn_blocking(move || buffer.adopt_incoming(trusted)).await {
+            match adopt_blocking(self.buffer.clone()).await {
                 Ok(Ok(0)) => {}
                 Ok(Ok(count)) => {
                     tracing::info!(count, "queued batches from the incoming directory");
@@ -1591,9 +1588,47 @@ pub async fn renew_once(paths: &NodePaths, version: &str) -> Result<Credentials,
     Err(last)
 }
 
+/// Adopts the incoming files of `buffer` on a blocking thread, with the clock guard asked here:
+/// its test hold does not reach that thread.
+async fn adopt_blocking(
+    buffer: ObservationBuffer,
+) -> Result<Result<usize, crate::buffer::BufferError>, tokio::task::JoinError> {
+    let trusted = tenko_core::clock::trusted_now().is_ok();
+    tokio::task::spawn_blocking(move || buffer.adopt_incoming(trusted)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn the_adoption_asks_the_clock_guard_before_the_blocking_thread() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let buffer = ObservationBuffer::open(BufferConfig::new(dir.path())).expect("a buffer");
+        let incoming = dir.path().join("incoming");
+        std::fs::create_dir(&incoming).expect("incoming");
+        let stale = incoming.join("old.tmp");
+        std::fs::write(&stale, b"abandoned").expect("a file");
+        std::fs::File::options()
+            .write(true)
+            .open(&stale)
+            .and_then(|file| {
+                file.set_modified(std::time::SystemTime::now() - Duration::from_secs(7_200))
+            })
+            .expect("an old file");
+        let held = tenko_core::clock::testing::hold_jump(3_600_000, Timestamp::UNIX_EPOCH);
+        adopt_blocking(buffer.clone())
+            .await
+            .expect("joined")
+            .expect("adopted");
+        assert!(stale.exists(), "kept while the clock is held");
+        drop(held);
+        adopt_blocking(buffer)
+            .await
+            .expect("joined")
+            .expect("adopted");
+        assert!(!stale.exists(), "deleted on a trusted clock");
+    }
 
     #[test]
     fn only_quorum_and_lag_refusals_rotate_at_once() {

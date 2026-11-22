@@ -1433,11 +1433,9 @@ impl NodeRegistry {
             )));
         }
         // A token made after the clock that judges it (set back since) counts as expired.
-        let before = cx
-            .now
-            .checked_add(tenko_core::clock::TOLERANCE)
-            .is_none_or(|now| now < record.created_at);
-        if before || cx.now >= record.expires_at {
+        if tenko_core::clock::stands_before(cx.now, record.created_at)
+            || cx.now >= record.expires_at
+        {
             return Err(with_token(ClusterError::new(
                 "cluster.enrollment.expired",
                 401,
@@ -3559,24 +3557,20 @@ mod tests {
         assert_eq!(registry.prune(cx.now).await.expect("again"), 0);
     }
 
-    fn held(reason: tenko_core::clock::Reason, jump_ms: i64) -> tenko_core::clock::Held {
-        tenko_core::clock::Held {
-            reason,
-            jump_ms,
-            since: Timestamp::UNIX_EPOCH,
-            release: tenko_core::clock::Release::Wait,
-            until: None,
-        }
-    }
-
     /// Held after a forward jump: neither destruction nor issuing is trusted.
     fn forward() -> tenko_core::clock::testing::Override {
-        tenko_core::clock::testing::hold(held(tenko_core::clock::Reason::Jump, 3_600_000))
+        tenko_core::clock::testing::hold_jump(3_600_000, Timestamp::UNIX_EPOCH)
     }
 
     /// Set back and waited out, not confirmed: destruction is trusted, issuing is not.
     fn set_back() -> tenko_core::clock::testing::Override {
-        tenko_core::clock::testing::hold_issuing(held(tenko_core::clock::Reason::Jump, -3_600_000))
+        tenko_core::clock::testing::hold_issuing(tenko_core::clock::Held {
+            reason: tenko_core::clock::Reason::Jump,
+            jump_ms: -3_600_000,
+            since: Timestamp::UNIX_EPOCH,
+            release: tenko_core::clock::Release::Person,
+            until: None,
+        })
     }
 
     #[tokio::test]

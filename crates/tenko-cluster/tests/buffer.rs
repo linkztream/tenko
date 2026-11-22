@@ -923,25 +923,6 @@ fn old_temporary_files_are_deleted_and_young_ones_are_left() {
     assert_eq!(file_names(&incoming), ["young.tmp"]);
 }
 
-#[test]
-fn a_held_clock_keeps_a_stale_incoming_file() {
-    let dir = tempfile::tempdir().unwrap();
-    let buffer = open(dir.path());
-    let incoming = dir.path().join("incoming");
-    fs::create_dir(&incoming).unwrap();
-    fs::write(incoming.join("old.tmp"), b"abandoned").unwrap();
-    let old = fs::OpenOptions::new()
-        .write(true)
-        .open(incoming.join("old.tmp"))
-        .unwrap();
-    old.set_modified(SystemTime::now() - Duration::from_secs(2 * 60 * 60))
-        .unwrap();
-    drop(old);
-
-    assert_eq!(buffer.adopt_incoming(false).unwrap(), 0);
-    assert_eq!(file_names(&incoming), ["old.tmp"]);
-}
-
 #[tokio::test]
 async fn changed_resolves_after_a_push_before_the_call() {
     let dir = tempfile::tempdir().unwrap();
