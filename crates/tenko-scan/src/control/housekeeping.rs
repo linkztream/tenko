@@ -47,12 +47,17 @@ impl Housekeeping {
 /// Rows to delete, each as its table and key.
 type Deletes = Vec<(tenko_core::TableName, Vec<u8>)>;
 
-/// What one pass removes, as writes of at most [`PAGE`] deletes each.
+/// What one pass removes, as writes of at most [`PAGE`] deletes each; nothing while the
+/// clock guard holds destruction.
 pub(crate) fn plan(
     view: &dyn ReadView,
     local: Option<NodeId>,
     now: Timestamp,
 ) -> Result<Vec<Deletes>, tenko_store::StoreError> {
+    if let Err(held) = tenko_core::clock::trusted_now() {
+        tracing::debug!(?held, "scan housekeeping waits for a trusted clock");
+        return Ok(Vec::new());
+    }
     let mut deletes: Deletes = Vec::new();
     let known = |node: NodeId| -> Result<bool, tenko_store::StoreError> {
         Ok(Some(node) == local || view.get_typed(&NODES, &node.0)?.is_some())

@@ -384,6 +384,55 @@ async fn the_deadline_ends_the_run_with_the_silent_probe_timed_out() {
     assert_eq!(job.state, JobState::Succeeded);
 }
 
+fn hold_the_clock() -> tenko_core::clock::testing::Override {
+    tenko_core::clock::testing::hold(tenko_core::clock::Held {
+        reason: tenko_core::clock::Reason::Jump,
+        jump_ms: 7_200_000,
+        since: hours_ago(1),
+        release: tenko_core::clock::Release::Wait,
+        until: None,
+    })
+}
+
+#[tokio::test]
+async fn a_held_clock_expires_no_command_past_the_run_deadline() {
+    let mut rig = Rig::new();
+    rig.probe(1001, &["192.0.2.0/24"], &[]).await;
+    rig.run_jobs();
+    let _held = hold_the_clock();
+    let mut asked = request("192.0.2.0/24", &[ScanKind::PortScan]);
+    asked.deadline_secs = Some(30);
+    let cx = rig.t.ctx().at(hours_ago(1));
+    let view = rig.control.submit(&cx, asked).await.expect("submitted");
+    rig.dispatched(view.id).await;
+    // The deadline passed an hour ago; the command stays open until the probe reports.
+    let command = rig.commands(1001).await[0].id;
+    rig.report(1001, command, CommandState::Done, 100, Some(0))
+        .await;
+    let done = rig
+        .wait_run(view.id, |view| view.finished_at.is_some())
+        .await;
+    assert_eq!(done.probes[0].state, "done", "{done:?}");
+}
+
+#[tokio::test]
+async fn a_held_clock_deletes_nothing() {
+    let rig = Rig::new();
+    // The scope of a node that left the registry, reported now and judged two days later.
+    rig.report_scope(1009, &["192.0.2.0/24"], &[], false).await;
+    let later = hours_ago(0)
+        .checked_add(std::time::Duration::from_secs(48 * 3600))
+        .expect("time");
+    let held = hold_the_clock();
+    let pages =
+        super::super::housekeeping::plan(rig.view().await.as_ref(), None, later).expect("plan");
+    assert_eq!(pages.len(), 0);
+    drop(held);
+    let pages =
+        super::super::housekeeping::plan(rig.view().await.as_ref(), None, later).expect("plan");
+    assert_eq!(pages.concat().len(), 2, "the scope and its configuration");
+}
+
 /// Three probes with a scan dispatched to them: one running, one pending, one done.
 struct Canceled {
     rig: Rig,

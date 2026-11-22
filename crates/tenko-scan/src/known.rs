@@ -60,19 +60,28 @@ impl KnownAddresses {
         self.addresses.retain(|_, methods| !methods.is_empty());
     }
 
-    /// Drops what expired before `now`.
+    /// Drops what expired before `now`; nothing while the clock guard holds destruction.
     pub fn prune(&mut self, now: Timestamp) {
+        if let Err(held) = tenko_core::clock::trusted_now() {
+            tracing::debug!(
+                ?held,
+                "the known addresses are kept until the clock is trusted"
+            );
+            return;
+        }
         for methods in self.addresses.values_mut() {
             methods.retain(|_, until| *until > now);
         }
         self.addresses.retain(|_, methods| !methods.is_empty());
     }
 
-    /// The addresses that count at `now`, sorted.
+    /// The addresses that count at `now`, sorted; every kept one while the clock guard holds
+    /// destruction, as [`prune`](Self::prune) keeps them.
     pub fn current(&self, now: Timestamp) -> Vec<IpAddr> {
+        let held = tenko_core::clock::trusted_now().is_err();
         self.addresses
             .iter()
-            .filter(|(_, methods)| methods.values().any(|until| *until > now))
+            .filter(|(_, methods)| held || methods.values().any(|until| *until > now))
             .map(|(ip, _)| *ip)
             .collect()
     }
@@ -172,5 +181,32 @@ mod tests {
         known.save(&path).expect("save");
         assert_eq!(KnownAddresses::load(&path), known);
         assert!(KnownAddresses::load(&dir.path().join("missing.json")).is_empty());
+    }
+
+    #[test]
+    fn a_held_clock_prunes_and_hides_no_known_address() {
+        use tenko_core::clock::{Held, Reason, Release, testing};
+        let mut known = KnownAddresses::default();
+        known.record(
+            MethodKind::Arp,
+            &[address("192.0.2.1")],
+            true,
+            at("2026-10-10T12:00:00Z"),
+        );
+        let later = at("2026-10-11T12:00:00Z");
+        let held = testing::hold(Held {
+            reason: Reason::Jump,
+            jump_ms: 86_400_000,
+            since: later,
+            release: Release::Wait,
+            until: None,
+        });
+        known.prune(later);
+        assert_eq!(known.len(), 1);
+        assert_eq!(known.current(later).len(), 1, "kept and used");
+        drop(held);
+        assert_eq!(known.current(later).len(), 0);
+        known.prune(later);
+        assert!(known.is_empty());
     }
 }

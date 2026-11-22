@@ -487,6 +487,12 @@ impl StepHandler for AwaitStep {
                 return Ok(StepOutcome::Done { output: None });
             }
             let now = Timestamp::now();
+            // A held clock lets no run deadline pass; the guard is asked again every poll.
+            let trusted = tenko_core::clock::trusted_now()
+                .inspect_err(|held| {
+                    tracing::debug!(?held, "the scan deadline waits for a trusted clock");
+                })
+                .is_ok();
             let mut open = Vec::new();
             for part in &run.parts {
                 if let Some((command, revision)) =
@@ -499,7 +505,7 @@ impl StepHandler for AwaitStep {
             if open.is_empty() || run.finished_at.is_some() {
                 return Ok(StepOutcome::Done { output: None });
             }
-            if now >= run.deadline {
+            if trusted && now >= run.deadline {
                 let mut batch = WriteBatch::for_request(&cx.request);
                 for (command, revision) in &open {
                     // A command that finished but whose results did not all arrive stays
@@ -523,11 +529,14 @@ impl StepHandler for AwaitStep {
             if changes.is_none() {
                 changes = cx.store.watch(Some(revision), filter.clone()).ok();
             }
-            let wait = run
-                .deadline
-                .saturating_since(now)
-                .min(AWAIT_POLL)
-                .max(Duration::from_millis(50));
+            let wait = if trusted {
+                run.deadline
+                    .saturating_since(now)
+                    .min(AWAIT_POLL)
+                    .max(Duration::from_millis(50))
+            } else {
+                AWAIT_POLL
+            };
             let next = async {
                 if let Some(stream) = changes.as_mut() {
                     stream.next().await.is_some_and(|item| item.is_ok())
