@@ -1735,3 +1735,70 @@ async fn the_renewal_directive_is_paced() {
     }
     assert_eq!(asked, 1);
 }
+
+/// A store whose reads fail and whose change streams end at once: the revocation follower
+/// reads, fails and watches again in a loop.
+struct Unreadable {
+    inner: Arc<MemStore>,
+    reads: AtomicUsize,
+}
+
+#[async_trait]
+impl Store for Unreadable {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        self.inner.propose(batch).await
+    }
+
+    async fn read(&self, _consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        self.reads.fetch_add(1, Ordering::SeqCst);
+        Err(StoreError::NoQuorum)
+    }
+
+    fn watch(
+        &self,
+        _from: Option<Revision>,
+        _filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        Ok(Box::pin(futures::stream::empty()))
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<tenko_store::Leadership>> {
+        self.inner.leadership()
+    }
+}
+
+/// After a failed read of the revocations, the follower waits a second before it reads
+/// again, as it does after a failed watch: a store that cannot answer is not asked in a
+/// tight loop.
+#[tokio::test]
+async fn the_revocation_follower_pauses_after_a_failed_read() {
+    let mem = Arc::new(MemStore::default());
+    let vault = MemVault::with_store(mem.clone());
+    let ca = InternalCa::load_or_init(&*mem, &vault, &system(), CaPolicy::default())
+        .await
+        .expect("CA");
+    let store = Arc::new(Unreadable {
+        inner: mem,
+        reads: AtomicUsize::new(0),
+    });
+    let store_dyn: Arc<dyn Store> = store.clone();
+    let registry = NodeRegistry::new(store_dyn, Arc::new(ca), RegistryConfig::new(NodeId(1)));
+    let (stop, stopped) = watch::channel(false);
+    let follow = registry.follow_revocations(stopped);
+    // test-lint: allow sleep the subject is how often the follower reads over a span of time
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    let reads = store.reads.load(Ordering::SeqCst);
+    let _ = stop.send(true);
+    follow.await.expect("follow");
+    // The read at the start, then one a second; without the pause it reads thousands of
+    // times.
+    assert!((2..=4).contains(&reads), "{reads} reads in 1.5 s");
+}

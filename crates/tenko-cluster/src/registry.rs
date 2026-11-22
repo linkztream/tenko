@@ -1822,6 +1822,12 @@ impl NodeRegistry {
                             let following = matches!(change, Some(Ok(_)));
                             if let Err(error) = registry.apply_revocations(&mut known).await {
                                 tracing::warn!(code = %error.code(), "revocations could not be read: {}", error.detail());
+                                // A store that cannot be read now is asked again in a second,
+                                // as after a failed watch, not at once.
+                                tokio::select! {
+                                    () = async { let _ = stop.wait_for(|stopped| *stopped).await; } => return,
+                                    () = tokio::time::sleep(Duration::from_secs(1)) => {}
+                                }
                             }
                             // Lagged or compacted: everything was read again; a new stream
                             // follows from here.
