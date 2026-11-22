@@ -368,6 +368,7 @@ pub async fn start_peers(
         .map_err(|error| cluster_failed(&error))?;
     let bound = listener.local_addrs();
     let revocations = Arc::new(RevocationSet::new());
+    let generation = revocations.generation();
     let view = store
         .read(ReadConsistency::Local)
         .await
@@ -381,7 +382,7 @@ pub async fn start_peers(
         )
         .map_err(|error| StartError::coded("cluster", &error))?;
     drop(view);
-    revocations.replace(revoked.into_iter().map(|(serial, _, _)| serial));
+    revocations.replace(generation, revoked.into_iter().map(|(serial, _, _)| serial));
     let sessions = Sessions::new();
     let nodes = NodeServices::new();
     let certificate = Arc::new(TlsResolver::default());

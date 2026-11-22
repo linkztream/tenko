@@ -431,7 +431,7 @@ pub struct NodeRegistry {
     config: RegistryConfig,
     jobs: OnceLock<JobEngine>,
     revoked: Arc<RevocationSet>,
-    revoked_nodes: ArcSwap<HashSet<NodeId>>,
+    revoked_nodes: RevocationSet<NodeId>,
     sessions: Arc<Sessions>,
     listening: ArcSwap<Vec<SocketAddr>>,
     listener_wanted: Notify,
@@ -480,7 +480,7 @@ impl NodeRegistry {
             config,
             jobs: OnceLock::new(),
             revoked,
-            revoked_nodes: ArcSwap::from_pointee(HashSet::new()),
+            revoked_nodes: RevocationSet::default(),
             sessions,
             listening: ArcSwap::from_pointee(Vec::new()),
             listener_wanted: Notify::new(),
@@ -616,13 +616,14 @@ impl NodeRegistry {
     ///
     /// A store error.
     pub async fn load_revocations(&self) -> Result<usize, ClusterError> {
+        let (serials, nodes) = (self.revoked.generation(), self.revoked_nodes.generation());
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
         let count = rows.len();
         self.revoked_nodes
-            .store(Arc::new(revoked_nodes(view.as_ref())?));
+            .replace(nodes, revoked_nodes(view.as_ref())?);
         self.revoked
-            .replace(rows.into_iter().map(|(serial, _, _)| serial));
+            .replace(serials, rows.into_iter().map(|(serial, _, _)| serial));
         Ok(count)
     }
 
@@ -1829,6 +1830,7 @@ impl NodeRegistry {
     /// session or a connection here loses it: the revocations that were in the table
     /// before, and the first one ever made, are no exception.
     async fn apply_revocations(&self, known: &mut HashSet<String>) -> Result<(), ClusterError> {
+        let generations = (self.revoked.generation(), self.revoked_nodes.generation());
         let view = self.store.read(ReadConsistency::Local).await?;
         let rows = view.scan_typed(&tables::REVOCATIONS, KeyRange::all(), usize::MAX, false)?;
         let nodes = revoked_nodes(view.as_ref())?;
@@ -1846,8 +1848,8 @@ impl NodeRegistry {
         // handshake completed before it and that is not tracked yet when the loop below
         // looks finds the node record gone at its first call (the record and the rows
         // commit together).
-        self.revoked.replace(serials.iter().cloned());
-        self.revoked_nodes.store(Arc::new(nodes));
+        self.revoked.replace(generations.0, serials.iter().cloned());
+        self.revoked_nodes.replace(generations.1, nodes);
         *known = serials;
         let now = Timestamp::now();
         for node in fresh {
@@ -1870,7 +1872,7 @@ impl NodeRegistry {
     /// that is not enrolled through a token has no node record, so the Raft service checks
     /// this instead of the record for a caller without one.
     pub fn is_revoked_node(&self, node: NodeId) -> bool {
-        self.revoked_nodes.load().contains(&node)
+        self.revoked_nodes.is_revoked(&node)
     }
 
     /// The record of `node` for an edit: as this node has applied it on the first attempt,
@@ -1980,9 +1982,7 @@ impl NodeRegistry {
             }
         };
         self.revoked.insert(serial_list.iter().cloned());
-        let mut nodes = HashSet::clone(&self.revoked_nodes.load());
-        nodes.insert(node);
-        self.revoked_nodes.store(Arc::new(nodes));
+        self.revoked_nodes.insert([node]);
         self.sessions.revoke(node, cx.now);
         self.lock_touched().remove(&node);
         tracing::warn!(node = %node, name = %record.name, "node revoked");

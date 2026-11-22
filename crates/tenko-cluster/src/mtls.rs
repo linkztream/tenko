@@ -104,10 +104,21 @@ impl PeerIdentity {
     }
 }
 
-/// The serials of revoked certificates, checked at every handshake on the cluster port.
-#[derive(Debug, Default)]
-pub struct RevocationSet {
-    serials: ArcSwap<HashSet<String>>,
+/// The serials of revoked certificates, checked at every handshake on the cluster port (and
+/// the revoked nodes, `RevocationSet<NodeId>`). A view of the store replaces it while local
+/// revocations add to it: [`RevocationSet::generation`] counts the additions, so that a
+/// replacement from a view read before an addition keeps that addition.
+#[derive(Debug)]
+pub struct RevocationSet<T = String> {
+    state: ArcSwap<(u64, HashSet<T>)>,
+}
+
+impl<T> Default for RevocationSet<T> {
+    fn default() -> Self {
+        Self {
+            state: ArcSwap::from_pointee((0, HashSet::new())),
+        }
+    }
 }
 
 impl RevocationSet {
@@ -115,27 +126,52 @@ impl RevocationSet {
     pub fn new() -> Self {
         Self::default()
     }
+}
 
-    /// Whether the serial (lower-case hex) is revoked.
-    pub fn is_revoked(&self, serial: &str) -> bool {
-        self.serials.load().contains(serial)
+impl<T: Eq + std::hash::Hash + Clone> RevocationSet<T> {
+    /// Whether the entry (a serial in lower-case hex) is revoked.
+    pub fn is_revoked<Q>(&self, entry: &Q) -> bool
+    where
+        T: std::borrow::Borrow<Q>,
+        Q: Eq + std::hash::Hash + ?Sized,
+    {
+        self.state.load().1.contains(entry)
     }
 
-    /// Replaces the set (loaded from the store).
-    pub fn replace(&self, serials: impl IntoIterator<Item = String>) {
-        self.serials.store(Arc::new(serials.into_iter().collect()));
+    /// The additions so far: read it before the view that [`RevocationSet::replace`] takes.
+    pub fn generation(&self) -> u64 {
+        self.state.load().0
     }
 
-    /// Adds serials.
-    pub fn insert(&self, serials: impl IntoIterator<Item = String>) {
-        let mut next = HashSet::clone(&self.serials.load());
-        next.extend(serials);
-        self.serials.store(Arc::new(next));
+    /// Replaces the set with what a view of the store holds, read when the set was at
+    /// `generation`. After an addition since then, the view's entries join the set instead,
+    /// until a replacement from a newer view: an entry kept a little longer stays refused.
+    pub fn replace(&self, generation: u64, entries: impl IntoIterator<Item = T>) {
+        let entries: HashSet<T> = entries.into_iter().collect();
+        self.state.rcu(|state| {
+            let (now, current) = &**state;
+            if *now == generation {
+                (*now, entries.clone())
+            } else {
+                (*now, entries.union(current).cloned().collect())
+            }
+        });
     }
 
-    /// How many serials are revoked.
+    /// Adds entries, by compare and swap: a replacement that lands meanwhile keeps them.
+    pub fn insert(&self, entries: impl IntoIterator<Item = T>) {
+        let entries: Vec<T> = entries.into_iter().collect();
+        self.state.rcu(|state| {
+            let (now, current) = &**state;
+            let mut next = HashSet::clone(current);
+            next.extend(entries.iter().cloned());
+            (now + 1, next)
+        });
+    }
+
+    /// How many entries are revoked.
     pub fn len(&self) -> usize {
-        self.serials.load().len()
+        self.state.load().1.len()
     }
 
     /// Whether nothing is revoked.
@@ -532,5 +568,41 @@ impl<S: Send + 'static> tonic::transport::server::Connected for NodeStream<S> {
 
     fn connect_info(&self) -> Self::ConnectInfo {
         self.peer.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A replacement by the revocation watcher that lands while a local revocation adds to
+    /// the set stays beside the addition. The replacement runs while the addition reads its
+    /// entries, between the load and the store of a plain load, clone and store; it shows
+    /// that the set is read after the entries, not the compare and swap itself.
+    #[test]
+    fn an_addition_keeps_a_replacement_made_meanwhile() {
+        let set = RevocationSet::new();
+        set.replace(set.generation(), ["old".to_owned()]);
+        set.insert(std::iter::once_with(|| {
+            set.replace(set.generation(), ["old".to_owned(), "watched".to_owned()]);
+            "local".to_owned()
+        }));
+        for serial in ["old", "watched", "local"] {
+            assert!(set.is_revoked(serial), "{serial}");
+        }
+    }
+
+    /// A replacement from a view read before a local revocation (the hourly reload, or the
+    /// watcher) keeps that revocation beside the view's entries; one from a view read after
+    /// it replaces the set.
+    #[test]
+    fn a_view_read_before_an_addition_keeps_it() {
+        let set = RevocationSet::<NodeId>::default();
+        let before = set.generation();
+        set.insert([NodeId(7)]);
+        set.replace(before, [NodeId(8)]);
+        assert!(set.is_revoked(&NodeId(7)) && set.is_revoked(&NodeId(8)));
+        set.replace(set.generation(), [NodeId(8)]);
+        assert!(!set.is_revoked(&NodeId(7)) && set.is_revoked(&NodeId(8)));
     }
 }
