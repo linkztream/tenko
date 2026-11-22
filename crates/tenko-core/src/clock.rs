@@ -253,15 +253,8 @@ impl Guard {
                     let issue = held.issue || gap < 0;
                     (Reason::StartGap, wall, gap, true, issue, forward_ms)
                 } else {
-                    let destroy = held.destroy;
-                    (
-                        held.reason,
-                        held.since,
-                        jump,
-                        destroy,
-                        held.issue,
-                        forward_ms,
-                    )
+                    let (destroy, issue) = (held.destroy, held.issue);
+                    (held.reason, held.since, jump, destroy, issue, forward_ms)
                 }
             }
             None if far => (Reason::StartGap, wall, gap, true, gap < 0, 0),
@@ -522,7 +515,8 @@ pub fn restore(saved: Option<Saved>) {
 pub mod testing {
     use std::{cell::RefCell, marker::PhantomData};
 
-    use super::Held;
+    use super::{Held, Reason, Release};
+    use crate::Timestamp;
 
     thread_local! {
         static HELD: RefCell<Option<(Held, bool)>> = const { RefCell::new(None) };
@@ -533,6 +527,19 @@ pub mod testing {
     #[must_use = "the hold ends when the value is dropped"]
     pub fn hold(held: Held) -> Override {
         set(held, true)
+    }
+
+    /// Holds destruction and issuing on this thread as a forward jump of `jump_ms` made
+    /// while running does, with its `forward_hold`, until the value is dropped.
+    #[must_use = "the hold ends when the value is dropped"]
+    pub fn hold_jump(jump_ms: i64) -> Override {
+        hold(Held {
+            reason: Reason::Jump,
+            jump_ms,
+            since: Timestamp::UNIX_EPOCH,
+            release: Release::Wait,
+            until: None,
+        })
     }
 
     /// Holds issuing alone on this thread, as after a wait that ended, until the value is
