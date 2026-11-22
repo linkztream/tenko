@@ -285,6 +285,47 @@ async fn a_backup_before_an_update_is_recorded_with_its_version() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_backup_has_no_age_for_an_update_while_the_clock_may_not_issue() {
+    use crate::upgrade::updates::Backups as _;
+    use tenko_core::clock::{Held, Reason, Release, testing};
+
+    let fixture = fixture().await;
+    let key = BackupKey::generate().expect("key");
+    fixture
+        .service
+        .store_settings(
+            &ctx(),
+            update(false, Some(key.recipient().to_string())),
+            None,
+        )
+        .await
+        .expect("settings");
+    let version: ReleaseVersion = "0.8.0".parse().expect("version");
+    fixture
+        .service
+        .run_before_update(&ctx(), &version)
+        .await
+        .expect("backup");
+    let back = || Held {
+        reason: Reason::Jump,
+        jump_ms: -43_200_000,
+        since: Timestamp::UNIX_EPOCH,
+        release: Release::Person,
+        until: None,
+    };
+    // Held, and after a step back whose wait ended but whose issuing is still held.
+    let holds: [fn(Held) -> testing::Override; 2] = [testing::hold, testing::hold_issuing];
+    for start in holds {
+        let held = start(back());
+        let readiness = fixture.service.readiness().await.expect("readiness");
+        assert_eq!(readiness.age_seconds, None);
+        drop(held);
+    }
+    let readiness = fixture.service.readiness().await.expect("readiness");
+    assert!(readiness.age_seconds.is_some());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_failed_backup_is_recorded_and_warned_about() {
     let fixture = fixture().await;
     // The target directory is a file.
@@ -376,13 +417,15 @@ async fn the_schedule_writes_when_due_and_keeps_the_newest_files() {
 
     // The keep count (1) removes the older file after the next scheduled backup.
     std::thread::sleep(std::time::Duration::from_millis(1_100));
-    fixture
+    let written = fixture
         .service
         .run(&ctx(), RunReason::Manual, None, None, None)
         .await
-        .expect("manual");
+        .expect("manual")
+        .file
+        .expect("file");
     let dir = fixture.data_dir.join("backups");
-    let removed = BackupService::prune(&dir, 1);
+    let removed = BackupService::prune(&dir, 1, &written);
     assert_eq!(removed.len(), 1);
     assert!(create::is_backup_name(&removed[0]), "{removed:?}");
     fixture.service.record_prune(&dir, 1, &removed, 0).await;
@@ -588,6 +631,123 @@ fn a_failed_scheduled_backup_is_retried_after_an_hour() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn after_a_step_back_one_scheduled_backup_runs_and_the_schedule_follows_it() {
+    use crate::upgrade::updates::Backups as _;
+    use tenko_store::Store as _;
+
+    let fixture = fixture().await;
+    let key = BackupKey::generate().expect("key");
+    fixture
+        .service
+        .store_settings(
+            &ctx(),
+            update(true, Some(key.recipient().to_string())),
+            None,
+        )
+        .await
+        .expect("settings");
+    // A good scheduled backup recorded a day ahead: before the clock stepped back a day.
+    let ahead = add_hours(Timestamp::now(), 24);
+    let before_the_step = BackupRun {
+        reason: RunReason::Scheduled,
+        before_update: None,
+        node: 1,
+        target_dir: "/srv/backup".to_owned(),
+        file: Some("tenko-backup-20261013T080000Z-n1.tkbk".to_owned()),
+        bytes: None,
+        revision: None,
+        slots: Vec::new(),
+        started_at: ahead,
+        finished_at: ahead,
+        by: "system".to_owned(),
+        job: None,
+        error: None,
+    };
+    let mut batch = WriteBatch::for_request(&ctx());
+    batch
+        .put_typed(&tables::RUNS, &Uuid::now_v7(), &before_the_step)
+        .expect("put");
+    fixture.store.propose(batch).await.expect("write");
+    let readiness = fixture.service.readiness().await.expect("readiness");
+    assert_eq!(readiness.age_seconds, None, "no age from before the step");
+
+    let epoch = fixture
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view")
+        .counter(&LEADER_EPOCH)
+        .expect("epoch");
+    fixture.service.tick(epoch).await.expect("tick");
+    let first = fixture.service.status_view().await.expect("status");
+    assert_eq!(first.recent.len(), 2, "one backup ran at once");
+    fixture.service.tick(epoch).await.expect("tick");
+    let second = fixture.service.status_view().await.expect("status");
+    assert_eq!(second.recent.len(), 2, "and the next one is not due");
+    assert_eq!(
+        first.next_due_at, second.next_due_at,
+        "stable between looks"
+    );
+}
+
+#[tokio::test]
+async fn run_records_are_read_and_pruned_in_the_order_written_whatever_their_ids() {
+    use tenko_store::{ReadViewExt as _, Store as _};
+    let store = tenko_store::MemStore::default();
+    let run = BackupRun {
+        reason: RunReason::Scheduled,
+        before_update: None,
+        node: 1,
+        target_dir: "/srv/backup".to_owned(),
+        file: Some("tenko-backup-20261013T080000Z-n1.tkbk".to_owned()),
+        bytes: None,
+        revision: None,
+        slots: Vec::new(),
+        started_at: Timestamp::UNIX_EPOCH,
+        finished_at: Timestamp::UNIX_EPOCH,
+        by: "system".to_owned(),
+        job: None,
+        error: None,
+    };
+    // Written across steps of the clock: the first and the last written sort neither first
+    // nor last by id.
+    let count = u128::try_from(crate::backup::model::KEEP_RUNS).expect("count");
+    let ids: Vec<Uuid> = [500, 1_000]
+        .into_iter()
+        .chain(1..count - 1)
+        .map(Uuid::from_u128)
+        .collect();
+    for id in &ids {
+        let mut batch = WriteBatch::for_request(&ctx());
+        batch.put_typed(&tables::RUNS, id, &run).expect("put");
+        store.propose(batch).await.expect("write");
+    }
+    let recent = recent_runs(
+        store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .as_ref(),
+    )
+    .expect("recent");
+    assert_eq!(recent.first().map(|(id, _)| *id), ids.last().copied());
+    let mut batch = WriteBatch::for_request(&ctx());
+    purge_runs(
+        store
+            .read(ReadConsistency::Local)
+            .await
+            .expect("view")
+            .as_ref(),
+        &mut batch,
+    );
+    store.propose(batch).await.expect("purge");
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let kept = |id: &Uuid| view.get_typed(&tables::RUNS, id).expect("read").is_some();
+    assert!(!kept(&ids[0]), "the first written goes");
+    assert!(ids[1..].iter().all(kept), "the later ones stay");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_missing_notice_file_is_recorded_from_the_store() {
     let fixture = fixture().await;
     let notice = notice();
@@ -701,7 +861,7 @@ async fn pruned_files_are_audited() {
         std::fs::write(dir.join(name), b"x").expect("file");
     }
     std::fs::write(dir.join("notes.txt"), b"kept").expect("file");
-    let removed = BackupService::prune(&dir, 1);
+    let removed = BackupService::prune(&dir, 1, names[2]);
     assert_eq!(removed, names[..2]);
     fixture.service.record_prune(&dir, 1, &removed, 0).await;
     let context = last_audit(&fixture.store, "sys.backup.prune")
@@ -715,4 +875,21 @@ async fn pruned_files_are_audited() {
     );
     assert!(dir.join(names[2]).exists());
     assert!(dir.join("notes.txt").exists());
+}
+
+#[test]
+fn a_new_backup_that_sorts_first_prunes_only_older_names() {
+    // Written after the clock went back: its name sorts before the newest one there.
+    let dir = tempfile::tempdir().expect("dir");
+    let names = [
+        "tenko-backup-20261011T080000Z-n1.tkbk",
+        "tenko-backup-20261012T080000Z-n1.tkbk",
+        "tenko-backup-20261013T080000Z-n1.tkbk",
+    ];
+    for name in names {
+        std::fs::write(dir.path().join(name), b"x").expect("file");
+    }
+    assert_eq!(BackupService::prune(dir.path(), 1, names[1]), names[..1]);
+    assert!(dir.path().join(names[1]).exists());
+    assert!(dir.path().join(names[2]).exists());
 }

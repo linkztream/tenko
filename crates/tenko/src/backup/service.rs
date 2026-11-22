@@ -409,7 +409,7 @@ impl BackupService {
             .cloned();
         let age_seconds = last_good
             .as_ref()
-            .map(|(_, run)| seconds_between(run.finished_at, now));
+            .and_then(|(_, run)| seconds_between(run.finished_at, now));
         let next_due_at = settings
             .enabled
             .then(|| next_due(&recent, settings.interval_hours, now));
@@ -596,21 +596,20 @@ impl BackupService {
     }
 
     /// Deletes the oldest backup files of `dir` beyond `keep`; only names this module
-    /// writes. Returns the names deleted.
-    fn prune(dir: &Path, keep: u32) -> Vec<String> {
+    /// writes, by [`create::prunable`]: never `written`, the file this run wrote, nor a name
+    /// that sorts after it. Returns the names deleted.
+    fn prune(dir: &Path, keep: u32, written: &str) -> Vec<String> {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return Vec::new();
         };
-        let mut names: Vec<String> = entries
+        let names = entries
             .filter_map(Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
             .filter(|name| create::is_backup_name(name))
             .collect();
-        names.sort();
         let keep = usize::try_from(keep).unwrap_or(usize::MAX);
-        let excess = names.len().saturating_sub(keep);
         let mut removed = Vec::new();
-        for name in names.into_iter().take(excess) {
+        for name in create::prunable(names, keep, written) {
             match std::fs::remove_file(dir.join(&name)) {
                 Ok(()) => removed.push(name),
                 Err(error) => {
@@ -664,8 +663,10 @@ impl BackupService {
             .await
         {
             Ok(run) => {
-                let dir = Path::new(&run.target_dir);
-                let removed = Self::prune(dir, settings.keep);
+                let (dir, Some(written)) = (Path::new(&run.target_dir), run.file.as_deref()) else {
+                    return Ok(());
+                };
+                let removed = Self::prune(dir, settings.keep, written);
                 if !removed.is_empty() {
                     tracing::info!(
                         removed = removed.len(),
@@ -741,12 +742,15 @@ impl crate::upgrade::updates::Backups for BackupService {
                 .unwrap_or_default();
             let recent = recent_runs(view.as_ref()).map_err(|error| error.to_coded_error())?;
             drop(view);
-            let now = Timestamp::now();
+            // A clock that may not issue gives no backup an age to believe, also after a step
+            // back that ended by itself: the update then asks for a backup.
+            let now = tenko_core::clock::plausible_now().ok();
             Ok(BackupReadiness {
                 age_seconds: recent
                     .iter()
                     .find(|(_, run)| run.is_good())
-                    .map(|(_, run)| seconds_between(run.finished_at, now)),
+                    .zip(now)
+                    .and_then(|((_, run), now)| seconds_between(run.finished_at, now)),
                 recipient: settings.recipient.is_some(),
             })
         })
@@ -800,23 +804,29 @@ fn read_settings(view: &dyn ReadView) -> Result<Option<(BackupSettings, Revision
     view.get_typed(&tables::SETTINGS, &())
 }
 
-/// The newest records, newest first.
+/// The newest records by store revision, newest first: an id carries the wall clock of its
+/// creation, which a step back of the clock reorders. The table holds at most
+/// [`super::model::KEEP_RUNS`] records, so all are read.
 fn recent_runs(view: &dyn ReadView) -> Result<Vec<(Uuid, BackupRun)>, StoreError> {
-    Ok(view
-        .scan_typed(&tables::RUNS, KeyRange::all(), RECENT, true)?
+    let mut rows = view.scan_typed(&tables::RUNS, KeyRange::all(), usize::MAX, false)?;
+    rows.sort_by_key(|(_, _, revision)| std::cmp::Reverse(*revision));
+    Ok(rows
         .into_iter()
+        .take(RECENT)
         .map(|(id, run, _)| (id, run))
         .collect())
 }
 
 /// When the next scheduled backup is due: the interval after the last good scheduled one
 /// (at once without one), but no sooner than an hour after a scheduled backup that failed.
+/// A run that ended after `now` was recorded before the clock stepped back and counts as
+/// none, so the schedule writes a backup at once and follows its interval from that one.
 fn next_due(recent: &[(Uuid, BackupRun)], interval_hours: u32, now: Timestamp) -> Timestamp {
     let scheduled = || {
         recent
             .iter()
             .map(|(_, run)| run)
-            .filter(|run| run.reason == RunReason::Scheduled)
+            .filter(|run| run.reason == RunReason::Scheduled && run.finished_at <= now)
     };
     let base = scheduled()
         .filter(|run| run.is_good())
@@ -834,8 +844,10 @@ fn add_hours(at: Timestamp, hours: u32) -> Timestamp {
     Timestamp(at.0 + time::Duration::hours(i64::from(hours)))
 }
 
-fn seconds_between(from: Timestamp, to: Timestamp) -> u64 {
-    u64::try_from((to.0 - from.0).whole_seconds()).unwrap_or(0)
+/// The seconds from `from` to `to`; none when `from` is later, which only a record from
+/// before a step back of the clock can be.
+fn seconds_between(from: Timestamp, to: Timestamp) -> Option<u64> {
+    u64::try_from((to.0 - from.0).whole_seconds()).ok()
 }
 
 fn warnings(
@@ -850,7 +862,10 @@ fn warnings(
     let strict = matches!(profile, Some(Profile::Standard | Profile::Hardened));
     let since = last_good.map(|run| run.finished_at).or(setup);
     let stale_secs = STALE_AFTER.as_secs();
-    if strict && since.is_some_and(|since| seconds_between(since, now) > stale_secs) {
+    if strict
+        && since
+            .is_some_and(|since| seconds_between(since, now).is_some_and(|age| age > stale_secs))
+    {
         let mut params = BTreeMap::from([("days".to_owned(), "7".to_owned())]);
         if let Some(run) = last_good {
             params.insert("last_good_at".to_owned(), run.finished_at.to_string());
@@ -1074,16 +1089,13 @@ fn record_batch(
     batch
 }
 
-/// Deletes the records beyond [`super::model::KEEP_RUNS`].
+/// Deletes the records beyond [`super::model::KEEP_RUNS`], oldest by store revision: an id
+/// carries the wall clock of its creation, which a step back of the clock reorders.
 fn purge_runs(view: &dyn ReadView, batch: &mut WriteBatch) {
-    let Ok(rows) = view.scan_typed(
-        &tables::RUNS,
-        KeyRange::all(),
-        super::model::KEEP_RUNS + 50,
-        true,
-    ) else {
+    let Ok(mut rows) = view.scan_typed(&tables::RUNS, KeyRange::all(), usize::MAX, false) else {
         return;
     };
+    rows.sort_by_key(|(_, _, revision)| std::cmp::Reverse(*revision));
     for (id, _, _) in rows.into_iter().skip(super::model::KEEP_RUNS - 1) {
         batch.delete_typed(&tables::RUNS, &id);
     }

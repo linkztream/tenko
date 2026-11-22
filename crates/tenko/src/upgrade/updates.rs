@@ -573,6 +573,9 @@ impl Updates {
                 if skip_refused {
                     "this security profile requires a backup before every update: answer with backup \"run\""
                         .to_owned()
+                } else if tenko_core::clock::plausible_now().is_err() {
+                    "the clock is held, so no backup has an age to trust: answer with backup \"run\" or \"skip\""
+                        .to_owned()
                 } else {
                     format!(
                         "no good backup is younger than {} minutes: answer with backup \"run\" or \"skip\"",
@@ -2497,6 +2500,28 @@ mod tests {
         );
         assert_eq!(context.get("from").map(String::as_str), Some("source"));
         assert_eq!(by, ctx.principal.subject());
+    }
+
+    #[tokio::test]
+    async fn the_refusal_for_a_missing_backup_names_a_held_clock() {
+        let (_, updates, _) = ready(UpdateInstall::Ui, aged(None)).await;
+        let _held = tenko_core::clock::testing::hold(tenko_core::clock::Held {
+            reason: tenko_core::clock::Reason::Jump,
+            jump_ms: -3_600_000,
+            since: tenko_core::Timestamp::UNIX_EPOCH,
+            release: tenko_core::clock::Release::Person,
+            until: None,
+        });
+        let error = updates
+            .install(&admin(), request("0.2.0", None))
+            .await
+            .expect_err("a backup is due");
+        assert_eq!(error.code, "update.backup_required");
+        assert!(
+            error.detail.contains("the clock is held"),
+            "{}",
+            error.detail
+        );
     }
 
     #[tokio::test]

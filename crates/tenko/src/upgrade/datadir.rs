@@ -282,7 +282,7 @@ pub fn backup(
     let root = data_dir.join(BACKUPS_DIR);
     check_space(&root, store_dir)?;
     let name = format!("{}-format-{from}-to-{to}", compact_utc(Timestamp::now()));
-    let target = root.join(name);
+    let target = root.join(&name);
     let report = format::copy_closed_store(store_dir, &target.join("store"))?;
     tracing::info!(
         backup = %target.display(),
@@ -290,7 +290,7 @@ pub fn backup(
         bytes = report.bytes,
         "copied the closed store before migrating from format {from} to {to}"
     );
-    prune_backups(&root, KEEP_BACKUPS);
+    prune_backups(&root, KEEP_BACKUPS, &name);
     Ok(target)
 }
 
@@ -383,20 +383,20 @@ fn compact_utc(at: Timestamp) -> String {
     )
 }
 
-/// Removes all but the newest `keep` copies (names sort by time).
-fn prune_backups(root: &Path, keep: usize) {
+/// Removes all but the newest `keep` copies (names sort by time), by
+/// [`crate::backup::create::prunable`]: never `written`, the copy just made, nor a copy whose
+/// name sorts after it.
+fn prune_backups(root: &Path, keep: usize, written: &str) {
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
-    let mut names: Vec<String> = entries
+    let names = entries
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .filter(|name| name.contains("-format-"))
         .collect();
-    names.sort();
-    let excess = names.len().saturating_sub(keep);
-    for name in names.into_iter().take(excess) {
+    for name in crate::backup::create::prunable(names, keep, written) {
         if let Err(error) = std::fs::remove_dir_all(root.join(&name)) {
             tracing::warn!(%error, backup = %name, "cannot remove an old pre-migration copy");
         }
@@ -1081,5 +1081,38 @@ mod tests {
                 .is_some_and(|name| name.ends_with("-format-1-to-2"))
         );
         std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+
+    const COPIES: [&str; 4] = [
+        "20200101T000000Z-format-1-to-2",
+        "20210101T000000Z-format-1-to-2",
+        "20220101T000000Z-format-1-to-2",
+        "20230101T000000Z-format-1-to-2",
+    ];
+
+    /// A directory with the copies of [`COPIES`]; the names left after `prune`.
+    fn pruned(what: &str, prune: impl FnOnce(&Path)) -> Vec<String> {
+        let root = temp_dir(what);
+        for copy in COPIES {
+            std::fs::create_dir_all(root.join(copy)).expect("copy");
+        }
+        prune(&root);
+        let mut left: Vec<String> = std::fs::read_dir(&root)
+            .expect("list")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        std::fs::remove_dir_all(&root).expect("clean up");
+        left
+    }
+
+    #[test]
+    fn a_copy_named_before_others_prunes_only_older_copies() {
+        // Made after the clock went back: later names stay, the copy just made too.
+        assert_eq!(
+            pruned("went-back", |root| prune_backups(root, 1, COPIES[1])),
+            COPIES[1..]
+        );
     }
 }

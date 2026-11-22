@@ -164,6 +164,18 @@ pub fn is_backup_name(name: &str) -> bool {
             .is_some_and(|extension| extension == EXTENSION)
 }
 
+/// Of `names`, which carry the time they were made, the oldest beyond `keep` (at least one)
+/// among those that sort no later than `written`, the name just written. A name after it
+/// (the clock went back since, a renamed file, a clock ahead elsewhere) is never pruned and
+/// stops nothing: the next prune counts again.
+pub fn prunable(mut names: Vec<String>, keep: usize, written: &str) -> Vec<String> {
+    names.retain(|name| name.as_str() <= written);
+    names.sort();
+    let excess = names.len().saturating_sub(keep.max(1));
+    names.truncate(excess);
+    names
+}
+
 /// Removes a directory tree when dropped.
 struct WorkDir(PathBuf);
 
@@ -662,5 +674,33 @@ mod tests {
             free_name(dir.path(), &name),
             dir.path().join("tenko-backup-20261011T080509Z-n1-2.tkbk")
         );
+    }
+
+    #[test]
+    fn a_name_after_the_new_backup_is_kept_and_stops_no_prune() {
+        let name = |stamp: &str| format!("tenko-backup-{stamp}Z-n1.tkbk");
+        let old = vec![name("20261011T080000"), name("20261012T080000")];
+        let written = name("20261013T080000");
+        let with = |extra: &[&str]| {
+            let mut names = old.clone();
+            names.push(written.clone());
+            names.extend(extra.iter().map(|name| (*name).to_owned()));
+            names
+        };
+        for later in [
+            // Renamed by hand.
+            "tenko-backup-before-cutover.tkbk",
+            // Taken while the clock was a year ahead.
+            "tenko-backup-20271013T080000Z-n1.tkbk",
+            // Another controller ahead, writing into the same directory.
+            "tenko-backup-20261013T090000Z-n2.tkbk",
+        ] {
+            assert_eq!(prunable(with(&[later]), 1, &written), old, "{later}");
+        }
+        // The second backup of one second sorts before the first.
+        let second = "tenko-backup-20261013T080000Z-n1-2.tkbk";
+        assert_eq!(prunable(with(&[second]), 1, second), old);
+        // The file just written stays whatever the count.
+        assert_eq!(prunable(with(&[]), 0, &written), old);
     }
 }
