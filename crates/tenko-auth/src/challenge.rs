@@ -33,7 +33,9 @@
 //! the ceremony (the session, the credential, the enrollment). The ceremony is consumed
 //! exactly when that batch commits; a replay on another controller is refused by the row, or
 //! by the version precondition of the batch when both race. [`purge_used`] removes the rows
-//! a day after their ceremonies expired; the leader runs it hourly as a leader-only service.
+//! a day after their ceremonies expired and keeps the latest end it removed, which refuses
+//! every ceremony that ended by then whatever the clock says; the leader runs it hourly as a
+//! leader-only service.
 //! On a trusted clock a row stays at most a day and one ceremony lifetime, so the rows number
 //! at most the ceremonies finished in that time, one small row each.
 //!
@@ -520,11 +522,15 @@ mod secret_bytes {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UsedChallenge {
     /// When the row may be purged: [`SELF_RELEASE_MAX`](tenko_core::clock::SELF_RELEASE_MAX)
-    /// after the ceremony expires, so the id cannot be used again whether or not the row is
-    /// there, also after a step back of the clock of up to that long (a longer one waits for
-    /// a person before anything is purged).
+    /// after the ceremony expires. In the row [`PURGED_THROUGH`], the latest such time that
+    /// [`purge_used`] removed.
     pub expires_at: Timestamp,
 }
+
+/// The key of the row in [`USED_CHALLENGES`] that holds the latest end the purge removed (no
+/// ceremony key is empty): a ceremony whose row would end at or before it is refused whatever
+/// the clock says, so a row that went cannot open a replay, also after a step back.
+const PURGED_THROUGH: &str = "";
 
 /// The use of one ceremony, to be staged into the write batch that completes it; see
 /// [`Ceremonies::take_staged`].
@@ -559,13 +565,17 @@ impl StagedUse {
             &USED_CHALLENGES,
             &self.ceremony,
             &UsedChallenge {
-                expires_at: self
-                    .expires_at
-                    .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
-                    .unwrap_or(self.expires_at),
+                expires_at: self.row_end(),
             },
         )?;
         Ok(())
+    }
+
+    /// When the row of the use may be purged.
+    fn row_end(&self) -> Timestamp {
+        self.expires_at
+            .checked_add(tenko_core::clock::SELF_RELEASE_MAX)
+            .unwrap_or(self.expires_at)
     }
 }
 
@@ -759,9 +769,11 @@ impl Ceremonies {
             ceremony: sealed.ceremony.clone(),
             expires_at: sealed.expires_at,
         };
+        let purged = view.get_typed(&USED_CHALLENGES, &PURGED_THROUGH.to_owned())?;
         if view
             .get_typed(&USED_CHALLENGES, &staged.ceremony)?
             .is_some()
+            || purged.is_some_and(|(mark, _)| staged.row_end() <= mark.expires_at)
         {
             return Err(AuthError::ChallengeInvalid);
         }
@@ -827,13 +839,13 @@ impl Ceremonies {
     }
 }
 
-/// Deletes the rows of [`USED_CHALLENGES`] that are due (`expires_at <= now`, a day after their
-/// ceremony ended), at most [`PURGE_PAGE`] rows per batch so a backlog stays far below the batch size
-/// limit; returns how many. The leader runs it hourly as a leader-only service,
-/// with the leader epoch of its term as `fence` (`tenko_store::fence`), so a deposed
-/// leader's purge fails instead of racing the new leader's. Nothing is proposed when no row
-/// is due, or while the clock guard holds the clock: a row removed while its ceremony can still
-/// open would let it be replayed on another controller.
+/// Deletes the rows of [`USED_CHALLENGES`] that are due (`expires_at <= now`, a day after
+/// their ceremony ended), at most [`PURGE_PAGE`] rows per batch so a backlog stays far below
+/// the batch size limit, and moves [`PURGED_THROUGH`] to the latest end it removed; returns
+/// how many rows went. The leader runs it hourly as a leader-only service, with the leader
+/// epoch of its term as `fence` (`tenko_store::fence`), so a deposed leader's purge fails
+/// instead of racing the new leader's. Nothing is proposed when no row is due, or while the
+/// clock guard holds the clock.
 ///
 /// # Errors
 ///
@@ -858,20 +870,33 @@ pub async fn purge_used(
         };
         expired.extend(
             page.into_iter()
-                .filter(|(_, row, _)| row.expires_at <= now)
-                .map(|(key, _, revision)| (key, revision)),
+                .filter(|(key, row, _)| key != PURGED_THROUGH && row.expires_at <= now)
+                .map(|(key, row, revision)| (key, row.expires_at, revision)),
         );
         match last {
             Some(last) => range = KeyRange::all().after(last),
             None => break,
         }
     }
-    for chunk in expired.chunks(PURGE_PAGE) {
+    let mark = view.get_typed(&USED_CHALLENGES, &PURGED_THROUGH.to_owned())?;
+    let through = expired
+        .iter()
+        .map(|(_, end, _)| *end)
+        .chain(mark.map(|(mark, _)| mark.expires_at))
+        .max();
+    for (index, chunk) in expired.chunks(PURGE_PAGE).enumerate() {
         let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
         if let Some(epoch) = fence {
             batch.preconditions.push(tenko_store::fence(epoch));
         }
-        for (key, revision) in chunk {
+        if let Some(expires_at) = through.filter(|_| index == 0) {
+            batch.put_typed(
+                &USED_CHALLENGES,
+                &PURGED_THROUGH.to_owned(),
+                &UsedChallenge { expires_at },
+            )?;
+        }
+        for (key, _, revision) in chunk {
             batch
                 .expect_typed(&USED_CHALLENGES, key, Some(*revision))
                 .delete_typed(&USED_CHALLENGES, key);
@@ -1563,6 +1588,7 @@ mod tests {
             .expect("scan")
             .into_iter()
             .map(|(name, _, _)| name)
+            .filter(|name| name != PURGED_THROUGH)
             .collect()
     }
 
@@ -1702,6 +1728,16 @@ mod tests {
         let view = store.read(ReadConsistency::Local).await.expect("view");
         assert!(matches!(
             b.take_staged(&id, clock.now(), view.as_ref()),
+            Err(AuthError::ChallengeInvalid)
+        ));
+        // A clock then set back more than a day, into the ceremony's life: the purge's mark
+        // refuses it on a controller that never saw it.
+        let opened = clock
+            .now()
+            .checked_sub(CEREMONY_TTL + tenko_core::clock::SELF_RELEASE_MAX)
+            .expect("in range");
+        assert!(matches!(
+            controller(7).take_staged(&id, opened, view.as_ref()),
             Err(AuthError::ChallengeInvalid)
         ));
     }
