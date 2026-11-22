@@ -9,9 +9,9 @@
 //!   to the CA root, has client authentication in its extended key usage, names a node,
 //!   and whose serial is not in the [`RevocationSet`]. A revoked certificate fails the
 //!   handshake with the alert `certificate_revoked`, except a controller's: it passes,
-//!   and its connection is marked ([`PeerInfo::revoked`]) and gets nothing but the exchange
-//!   of generation records, so that two histories always learn of each other whatever
-//!   either side revoked.
+//!   and its connection is marked ([`KillSwitch::is_marked_revoked`]) and gets nothing
+//!   but the exchange of generation records, so that two histories always learn of each
+//!   other whatever either side revoked.
 //! - **Node (client).** [`client_config`] presents the node certificate and accepts a
 //!   server certificate only when it chains to the CA root the node received at enrollment
 //!   (a controller of another installation is refused) and carries the role `controller`.
@@ -366,7 +366,7 @@ fn config_error(error: &impl fmt::Display) -> ClusterError {
 /// The TLS configuration of the controller's cluster port: TLS 1.3, ALPN `h2`, the
 /// controller certificate from `resolver`, and mandatory node certificates of the CA
 /// `ca_root` that are not in `revoked` (a controller's revoked certificate passes, marked:
-/// [`PeerInfo::revoked`]).
+/// [`KillSwitch::is_marked_revoked`]).
 ///
 /// # Errors
 ///
@@ -459,6 +459,7 @@ pub fn server_name(host: &str) -> ServerName<'static> {
 #[derive(Debug, Default)]
 pub struct KillSwitch {
     killed: AtomicBool,
+    marked: std::sync::OnceLock<std::time::Instant>,
     waker: AtomicWaker,
 }
 
@@ -478,6 +479,27 @@ impl KillSwitch {
     pub fn is_killed(&self) -> bool {
         self.killed.load(Ordering::SeqCst)
     }
+
+    /// Marks a connection accepted with a revoked certificate (a controller's, which the
+    /// handshake lets through): it gets nothing but the exchange of generation records, and
+    /// every other call is refused with its code.
+    pub fn mark_revoked(&self) {
+        self.mark_revoked_at(std::time::Instant::now());
+    }
+
+    pub(crate) fn mark_revoked_at(&self, at: std::time::Instant) {
+        let _ = self.marked.set(at);
+    }
+
+    /// Whether the connection was accepted with a revoked certificate.
+    pub fn is_marked_revoked(&self) -> bool {
+        self.marked.get().is_some()
+    }
+
+    /// When the connection was marked revoked, if it was.
+    pub(crate) fn marked_at(&self) -> Option<std::time::Instant> {
+        self.marked.get().copied()
+    }
 }
 
 /// What the gRPC services learn about the connection a call arrived on (the
@@ -491,11 +513,9 @@ pub struct PeerInfo {
     /// The local address the connection arrived on (the cluster port as the peer reached
     /// it).
     pub local: Option<SocketAddr>,
-    /// The connection's kill switch.
+    /// The connection's kill switch, marked when the certificate is revoked
+    /// ([`KillSwitch::is_marked_revoked`]).
     pub kill: Arc<KillSwitch>,
-    /// The certificate is revoked (a controller's, which the handshake lets through): the
-    /// connection gets nothing but the exchange of generation records.
-    pub revoked: bool,
 }
 
 /// A TLS connection of a node on the cluster port that a revocation can close.

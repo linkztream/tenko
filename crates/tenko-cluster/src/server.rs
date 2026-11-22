@@ -198,7 +198,7 @@ where
         if request
             .extensions()
             .get::<PeerInfo>()
-            .is_some_and(|peer| peer.revoked)
+            .is_some_and(|peer| peer.kill.is_marked_revoked())
         {
             return Box::pin(async { Ok(revoked_status().into_http()) });
         }
@@ -292,7 +292,7 @@ where
             if let Err(status) = peers.exchange(&peer, &metadata).await {
                 return Ok(peers.with_records(status).into_http());
             }
-            if peer.revoked {
+            if peer.kill.is_marked_revoked() {
                 return Ok(peers.with_records(revoked_status()).into_http());
             }
             // Then a certificate the caller's node record holds, on every call of both
@@ -736,8 +736,10 @@ async fn accept_loop(
             };
             let kill = KillSwitch::new();
             sessions.track(identity.node, &kill);
+            if revocations.is_revoked(&identity.serial) {
+                kill.mark_revoked();
+            }
             let peer = PeerInfo {
-                revoked: revocations.is_revoked(&identity.serial),
                 identity,
                 remote: Some(remote),
                 local,

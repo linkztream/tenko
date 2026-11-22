@@ -2458,7 +2458,6 @@ mod tests {
             remote: None,
             local: None,
             kill: crate::mtls::KillSwitch::new(),
-            revoked: false,
         };
         peers
             .authenticate(&caller, Access::Raft)

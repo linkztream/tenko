@@ -166,39 +166,64 @@ impl Sessions {
     }
 
     /// Tells every session of a revoked node, then closes the connections it has now after
-    /// [`REVOKE_GRACE`].
+    /// [`REVOKE_GRACE`], all but those marked revoked since the grace before this call.
     pub fn revoke(self: &Arc<Self>, node: NodeId, now: Timestamp) {
         let pushes: Vec<_> = self
             .lock_sessions()
             .get(&node)
             .map(|list| list.iter().map(|session| session.push.clone()).collect())
             .unwrap_or_default();
-        for push in pushes {
-            let _ = push.try_send(Ok(v1::Directive {
-                sequence: 0,
-                server_time: Some(timestamp_to_proto(now)),
-                renew: false,
-                revoked: true,
-                detail: "this node was revoked; enroll it again to reconnect".to_owned(),
-            }));
-        }
+        let directive = v1::Directive {
+            sequence: 0,
+            server_time: Some(timestamp_to_proto(now)),
+            renew: false,
+            revoked: true,
+            detail: "this node was revoked; enroll it again to reconnect".to_owned(),
+        };
+        // A session whose queue is full gets the grace to take the directive.
+        let full: Vec<_> = pushes
+            .into_iter()
+            .filter_map(|push| match push.try_send(Ok(directive.clone())) {
+                Err(mpsc::error::TrySendError::Full(directive)) => Some((push, directive)),
+                _ => None,
+            })
+            .collect();
         // The callers update the revocation set first, and a connection reads its revoked
-        // mark from the set after it is tracked: one tracked after this point is marked and
-        // gets every refusal answered, so the grace's end leaves it open.
+        // mark from the set after it is tracked: one marked since this revocation began (or
+        // within the grace before it, when the same revocation is applied a second time)
+        // gets its refusals answered, so the grace's end leaves it open and tracked again.
+        // One marked before that belongs to an earlier revocation and closes now.
+        let fresh = std::time::Instant::now().checked_sub(REVOKE_GRACE);
         let switches = self.lock_connections().remove(&node).unwrap_or_default();
+        let sessions = Arc::clone(self);
         let kill = move || {
             for switch in switches.iter().filter_map(Weak::upgrade) {
-                switch.kill();
+                if switch
+                    .marked_at()
+                    .is_some_and(|at| fresh.is_none_or(|fresh| at >= fresh))
+                {
+                    sessions.track(node, &switch);
+                } else {
+                    switch.kill();
+                }
             }
         };
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                handle.spawn(async move {
-                    tokio::time::sleep(REVOKE_GRACE).await;
-                    kill();
-                });
-            }
-            Err(_) => kill(),
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                let end = tokio::time::Instant::now() + REVOKE_GRACE;
+                for (push, directive) in full {
+                    if tokio::time::timeout_at(end, push.send(directive))
+                        .await
+                        .is_err()
+                    {
+                        tracing::info!(node = %node, "a session of the revoked node did not take the revocation directive before its connections closed");
+                    }
+                }
+                tokio::time::sleep_until(end).await;
+                kill();
+            });
+        } else {
+            kill();
         }
     }
 }
@@ -259,5 +284,69 @@ mod tests {
         assert!(kill.is_killed());
         assert!(!late.is_killed());
         assert_eq!(sessions.connection_count(NodeId(1002)), 1);
+    }
+
+    /// A second revocation of the node (the revocation watcher after the local one) leaves
+    /// a connection accepted marked in between open, and a session whose queue is full
+    /// still gets the directive once it makes room within the grace.
+    #[tokio::test]
+    async fn a_second_revocation_spares_a_marked_connection_and_waits_for_a_full_queue() {
+        let sessions = Sessions::new();
+        let (push, mut rx) = mpsc::channel(1);
+        let _guard = sessions.open(NodeId(1003), view(), push.clone());
+        let filler = v1::Directive {
+            detail: "filler".to_owned(),
+            ..v1::Directive::default()
+        };
+        push.try_send(Ok(filler.clone()))
+            .expect("the queue is full now");
+        sessions.revoke(NodeId(1003), Timestamp::now());
+        let marked = KillSwitch::new();
+        sessions.track(NodeId(1003), &marked);
+        marked.mark_revoked();
+        // Tracked after the marked one: the end of the grace reaches it last.
+        let unmarked = KillSwitch::new();
+        sessions.track(NodeId(1003), &unmarked);
+        sessions.revoke(NodeId(1003), Timestamp::now());
+        assert_eq!(rx.recv().await.expect("the filler").expect("ok"), filler);
+        // A guard against a hang only: a dropped directive never comes.
+        let directive = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+            .await
+            .expect("the directive was queued")
+            .expect("directive")
+            .expect("ok");
+        assert!(directive.revoked);
+        tenko_core::testing::wait_until_async(
+            "the grace of the second revocation ends",
+            || async { unmarked.is_killed() },
+        )
+        .await;
+        assert!(!marked.is_killed());
+        // Still tracked: the server's stop closes it.
+        assert_eq!(sessions.connection_count(NodeId(1003)), 1);
+    }
+
+    /// A later revocation closes a connection marked revoked during an earlier one: it is
+    /// spared once, for the refusals of its first calls, never for good.
+    #[tokio::test]
+    async fn a_later_revocation_closes_a_connection_marked_by_an_earlier_one() {
+        let sessions = Sessions::new();
+        let earlier = KillSwitch::new();
+        sessions.track(NodeId(1004), &earlier);
+        earlier.mark_revoked_at(
+            std::time::Instant::now()
+                .checked_sub(REVOKE_GRACE * 4)
+                .expect("an earlier instant"),
+        );
+        let fresh = KillSwitch::new();
+        sessions.track(NodeId(1004), &fresh);
+        fresh.mark_revoked();
+        sessions.revoke(NodeId(1004), Timestamp::now());
+        tenko_core::testing::wait_until_async("the grace of the later revocation ends", || async {
+            earlier.is_killed()
+        })
+        .await;
+        assert!(!fresh.is_killed());
+        assert_eq!(sessions.connection_count(NodeId(1004)), 1);
     }
 }
