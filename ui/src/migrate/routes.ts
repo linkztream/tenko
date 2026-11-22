@@ -7,9 +7,11 @@ import { withPacks } from "../i18n";
 // the diff of the Scopes tab, WP14.2 the scope actions), and the two zone actions under the DNS
 // area (WP14.2). The static segments `flip` and `release` outrank the zone page's `:tab?`.
 const PACKS = ["migrate"] as const;
+// The zone actions link back to the zone page and its title.
+const ZONE_PACKS = ["migrate", "dns"] as const;
 
 export const routes: AppRoute[] = [
   { path: "/connectors/mirrors/:id/:tab?", component: lazy(withPacks(PACKS, () => import("./MirrorPage"))), title: "migrate.mirror.title" },
-  { path: "/dns/zones/:id/flip", component: lazy(withPacks(PACKS, () => import("./ZoneFlipPage"))), title: "migrate.flip.title" },
-  { path: "/dns/zones/:id/release", component: lazy(withPacks(PACKS, () => import("./ZoneReleasePage"))), title: "migrate.release.title" },
+  { path: "/dns/zones/:id/flip", component: lazy(withPacks(ZONE_PACKS, () => import("./ZoneFlipPage"))), title: "migrate.flip.title" },
+  { path: "/dns/zones/:id/release", component: lazy(withPacks(ZONE_PACKS, () => import("./ZoneReleasePage"))), title: "migrate.release.title" },
 ];

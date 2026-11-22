@@ -1,0 +1,5 @@
+{
+  "components": ["ipam"],
+  "grid": ["grid", "ipam"],
+  "i18n": ["languages"]
+}

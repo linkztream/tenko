@@ -52,8 +52,8 @@ import { useUtilization } from "./utilization";
 import "./dashboard.css";
 
 // The notices of the updates area: a newer release, and a module change that waits for a restart.
-const UpdateCard = lazy(() => trackLazyPart(import("../updates/UpdateCard")));
-const ModulesNotice = lazy(() => trackLazyPart(import("../updates/ModulesNotice")));
+const UpdateCard = lazy(() => trackLazyPart(import("./UpdateCard")));
+const ModulesNotice = lazy(() => trackLazyPart(import("./ModulesNotice")));
 // Every metric as a tile, behind "Show all metrics", with its own chunk and message pack.
 const MetricsTiles = lazy(withPacks(["metrics"], () => trackLazyPart(import("./MetricsTiles"))));
 

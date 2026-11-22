@@ -88,8 +88,8 @@ export const routes: AppRoute[] = [
   ...PAGE_ROUTES,
   {
     path: "/settings/:section?/:id?",
-    // The user page shows the grants and tokens of an account, with the words of the access pack.
-    component: lazy(withPacks(["settings", "access"], () => import("./Settings"))),
+    // The user page shows the grants and tokens of an account, with the words of the access pack; the security page names the prerelease switch with a text of the updates pack.
+    component: lazy(withPacks(["settings", "access", "updates"], () => import("./Settings"))),
     access: "admin",
     title: "settings.title",
   },

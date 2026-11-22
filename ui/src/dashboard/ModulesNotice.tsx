@@ -7,7 +7,7 @@ import type { SystemStatus } from "../api/types";
 import { isAdmin } from "../auth/session";
 import { Notice } from "../components/Notice";
 import { formatList, t } from "../i18n";
-import { parseModuleList, RESTART_WARNING, type ModuleName } from "./modules";
+import { parseModuleList, RESTART_WARNING, type ModuleName } from "../updates/modules";
 
 const NAME = {
   ipam: "dashboard.modules.name.ipam",

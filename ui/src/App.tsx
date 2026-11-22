@@ -5,7 +5,7 @@ import { paths, safeNext } from "./app/paths";
 import { authState, isAdmin, onSessionExpired } from "./auth/session";
 import { IconSprite } from "./components/Icon";
 import { Toasts } from "./components/toast";
-import { t } from "./i18n";
+import { hasMessage, t } from "./i18n";
 import { AREAS } from "./shell/areas";
 import Forbidden from "./shell/pages/Forbidden";
 import Splash from "./shell/pages/Splash";
@@ -91,7 +91,8 @@ function decorate(route: AppRoute): Component<RouteSectionProps> {
   const Inner = route.component;
   const titled: Component<RouteSectionProps> = (props) => {
     createEffect(() => {
-      document.title = route.title ? `${t(route.title)} - ${PRODUCT}` : PRODUCT;
+      // A title whose pack is still on its way waits, so the tab never shows the key.
+      document.title = route.title && hasMessage(route.title) ? `${t(route.title)} - ${PRODUCT}` : PRODUCT;
     });
     return route.access === "admin" && !isAdmin() ? <Forbidden /> : <Inner {...props} />;
   };

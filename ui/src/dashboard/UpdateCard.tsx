@@ -3,9 +3,9 @@
 import { A } from "@solidjs/router";
 import { Show } from "solid-js";
 import { t } from "../i18n";
-import { Marks } from "./Marks";
-import { UPDATES_PATH } from "./paths";
-import { useUpdateStatus } from "./status";
+import { Marks } from "../updates/Marks";
+import { UPDATES_PATH } from "../updates/paths";
+import { useUpdateStatus } from "../updates/status";
 
 export default function UpdateCard() {
   const status = useUpdateStatus();
