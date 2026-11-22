@@ -70,6 +70,40 @@ fn all(index: &FindingsIndex) -> Vec<Finding> {
         .items
 }
 
+/// The findings of the view are computed from what was read, after the read view is gone:
+/// an open view keeps the store from reusing the pages written meanwhile.
+#[tokio::test]
+async fn the_view_findings_are_computed_after_the_read_view_is_dropped() {
+    let world = lab().await;
+    let vrf = world.default_vrf().await;
+    world
+        .probe(
+            vrf,
+            &[("192.0.2.0", Some("00:00:5e:00:53:02"))],
+            at("08:00"),
+        )
+        .await;
+    let index = FindingsIndex::new(FindingsConfig::default());
+    let view = world
+        .store
+        .read(ReadConsistency::Linearizable)
+        .await
+        .expect("view");
+    let read = index.read_view(view.as_ref(), at("08:01")).expect("read");
+    assert_eq!(
+        std::sync::Arc::strong_count(&view),
+        1,
+        "what was read holds no view"
+    );
+    drop(view);
+    assert!(index.refresh_view(&read), "the findings changed");
+    let artifacts = all(&index)
+        .into_iter()
+        .filter(|finding| finding.kind == FindingKind::ScanArtifact)
+        .count();
+    assert_eq!(artifacts, 1);
+}
+
 #[tokio::test]
 async fn a_scan_hit_on_an_ipv4_network_or_broadcast_address_is_an_artifact_not_a_conflict() {
     let world = lab().await;

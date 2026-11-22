@@ -267,7 +267,11 @@ impl FindingsService {
         }
         let service = Arc::clone(self);
         let refreshed = tokio::task::spawn_blocking(move || {
-            service.index.refresh_view(view.as_ref(), Timestamp::now())
+            let read = service.index.read_view(view.as_ref(), Timestamp::now());
+            // An open view keeps the store from reusing the pages written meanwhile: it goes
+            // before the findings are computed.
+            drop(view);
+            read.map(|read| service.index.refresh_view(&read))
         })
         .await;
         match refreshed {

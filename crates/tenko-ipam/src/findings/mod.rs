@@ -49,7 +49,9 @@
 //!
 //! [`FindingsIndex::apply`] applies a store change set: each changed proposal, alarm and job
 //! is read once and its finding replaced or removed. The findings of the reconciliation view
-//! are replaced as a whole by [`FindingsIndex::refresh_view`] when a table the view reads
+//! are replaced as a whole by [`FindingsIndex::refresh_view`] from what
+//! [`FindingsIndex::read_view`] read (the caller drops its read view before the findings are
+//! computed, since an open view keeps the store from reusing pages) when a table the view reads
 //! changed, at most once per `reconcile_refresh_secs`, and once a minute for what ages with
 //! time (ghosts). Health conditions are set with [`FindingsIndex::set_health`] by the status.
 //! The counts are cached until the next change.
@@ -59,7 +61,8 @@ pub mod map;
 pub mod model;
 
 pub use index::{
-    Applied, DEFAULT_LIMIT, FindingPage, FindingQuery, FindingsIndex, MAX_LIMIT, view_input,
+    Applied, DEFAULT_LIMIT, FindingPage, FindingQuery, FindingsIndex, MAX_LIMIT, ViewRead,
+    view_input,
 };
 pub use map::{HealthItem, finding_id, of_alarm, of_health, of_job, of_proposal};
 pub use model::{

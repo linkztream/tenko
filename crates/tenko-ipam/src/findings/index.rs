@@ -244,6 +244,22 @@ impl FindingQuery {
     }
 }
 
+/// What the findings of the reconciliation view are derived from, read from one view at one
+/// time ([`FindingsIndex::read_view`]); it holds no view.
+pub struct ViewRead {
+    read: view::ViewRead,
+    revision: Revision,
+    now: Timestamp,
+}
+
+impl std::fmt::Debug for ViewRead {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ViewRead")
+            .field("revision", &self.revision)
+            .finish_non_exhaustive()
+    }
+}
+
 /// The findings index (the findings model of `docs/reconciliation.md`): proposals, alarms
 /// and jobs are applied record by record from the change sets ([`FindingsIndex::apply`]);
 /// the findings of the reconciliation view, which derives them from intent and observation
@@ -358,7 +374,7 @@ impl FindingsIndex {
             }
         }
         let derived = if with_view {
-            Some(self.view_findings(view, now)?)
+            Some(self.view_findings(&self.read_view(view, now)?))
         } else {
             None
         };
@@ -456,8 +472,9 @@ impl FindingsIndex {
         Ok(applied)
     }
 
-    fn view_findings(&self, view: &dyn ReadView, now: Timestamp) -> IpamResult<Vec<ViewFinding>> {
-        let derived = view::findings_view(view, self.leases.get().map(AsRef::as_ref), now)?;
+    fn view_findings(&self, read: &ViewRead) -> Vec<ViewFinding> {
+        let now = read.now;
+        let derived = view::findings_view(&read.read);
         let mut out: Vec<ViewFinding> = derived
             .rows
             .iter()
@@ -474,7 +491,7 @@ impl FindingsIndex {
             finding: map::of_artifact(artifact),
             covered_by_conflict: None,
         }));
-        Ok(out)
+        out
     }
 
     fn replace_view(state: &mut State, derived: Vec<ViewFinding>) -> bool {
@@ -498,18 +515,29 @@ impl FindingsIndex {
         before != after
     }
 
-    /// Replaces the findings of the reconciliation view with what it derives from `view` at
-    /// `now`. Answers whether they changed.
+    /// Reads from `view` what the findings of the reconciliation view at `now` are derived
+    /// from ([`FindingsIndex::refresh_view`]). It owns what it read: the caller drops the view
+    /// before the findings are computed.
     ///
     /// # Errors
     ///
-    /// Store and decoding errors; the index is left as it was.
-    pub fn refresh_view(&self, view: &dyn ReadView, now: Timestamp) -> IpamResult<bool> {
-        let derived = self.view_findings(view, now)?;
+    /// Store and decoding errors.
+    pub fn read_view(&self, view: &dyn ReadView, now: Timestamp) -> IpamResult<ViewRead> {
+        Ok(ViewRead {
+            read: view::ViewRead::load(view, self.leases.get().map(AsRef::as_ref), now)?,
+            revision: view.revision(),
+            now,
+        })
+    }
+
+    /// Replaces the findings of the reconciliation view with what they derive from `read`.
+    /// Answers whether they changed.
+    pub fn refresh_view(&self, read: &ViewRead) -> bool {
+        let derived = self.view_findings(read);
         let mut state = self.write();
         let changed = Self::replace_view(&mut state, derived);
-        state.revision = state.revision.max(view.revision());
-        Ok(changed)
+        state.revision = state.revision.max(read.revision);
+        changed
     }
 
     /// Replaces the health findings with `items` as of `now`; a condition keeps the time it

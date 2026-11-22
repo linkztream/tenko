@@ -465,7 +465,8 @@ pub fn reconcile_where(
                 })
         })
         .transpose()?;
-    let snapshot = Snapshot::load(view, leases, now)?;
+    let read = ViewRead::load(view, leases, now)?;
+    let snapshot = &read.snapshot;
     let prefix = match query.prefix {
         Some(id) => Some(
             snapshot
@@ -478,10 +479,10 @@ pub fn reconcile_where(
         None => None,
     };
     let host = match query.host {
-        Some(id) => Some(host_scope(&snapshot, id)?),
+        Some(id) => Some(host_scope(snapshot, id)?),
         None => None,
     };
-    let all = build(view, &snapshot)?;
+    let all = build(&read);
     let mut rows: Vec<ReconcileRow> = all
         .into_iter()
         .filter(|row| query.kind.is_none_or(|kind| row.kind == kind))
@@ -507,7 +508,7 @@ pub fn reconcile_where(
         items: rows,
         next_cursor,
         revision: view.revision(),
-        host: host.map(|host| host.truths(&snapshot)),
+        host: host.map(|host| host.truths(snapshot)),
     })
 }
 
@@ -521,8 +522,7 @@ pub fn lease_conflicts(
     leases: Option<&LeaseFacts>,
     now: Timestamp,
 ) -> IpamResult<Vec<ReconcileRow>> {
-    let snapshot = Snapshot::load(view, leases, now)?;
-    let mut rows: Vec<ReconcileRow> = build(view, &snapshot)?
+    let mut rows: Vec<ReconcileRow> = build(&ViewRead::load(view, leases, now)?)
         .into_iter()
         .filter(|row| row.kind == ReconcileKind::Conflict)
         .collect();
@@ -563,18 +563,10 @@ pub(crate) struct ViewFindings {
     pub unseen_since: BTreeMap<String, Timestamp>,
 }
 
-/// The rows, the artifacts and the ghosts' unseen times of the view at `now`.
-///
-/// # Errors
-///
-/// Store and decoding errors.
-pub(crate) fn findings_view(
-    view: &dyn ReadView,
-    leases: Option<&LeaseFacts>,
-    now: Timestamp,
-) -> IpamResult<ViewFindings> {
-    let snapshot = Snapshot::load(view, leases, now)?;
-    let mut rows = build(view, &snapshot)?;
+/// The rows, the artifacts and the ghosts' unseen times of what was read.
+pub(crate) fn findings_view(read: &ViewRead) -> ViewFindings {
+    let snapshot = &read.snapshot;
+    let mut rows = build(read);
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     let unseen_since = rows
         .iter()
@@ -627,11 +619,11 @@ pub(crate) fn findings_view(
             artifact
         })
         .collect();
-    Ok(ViewFindings {
+    ViewFindings {
         rows,
         artifacts,
         unseen_since,
-    })
+    }
 }
 
 /// A name as the view compares it: lowercase, without the trailing dot.
@@ -717,23 +709,81 @@ impl Picture {
 
 /// The DHCP lease time that makes an unseen address of a network a ghost: the default
 /// lease time of its enabled Tenko scope (the server's when the scope sets none).
-fn scope_lease(
-    view: &dyn ReadView,
-    prefix: PrefixId,
-    server: &DhcpSettings,
-) -> IpamResult<Option<Duration>> {
-    Ok(view
-        .get_typed(&dhcp_tables::SCOPES, &prefix)?
-        .map(|(scope, _)| scope)
-        .filter(|scope| scope.enabled)
-        .map(|scope| {
-            Duration::from_secs(u64::from(scope.lease.unwrap_or(server.lease).default_secs))
-        }))
+/// What the rows read of the DHCP role's tables: the abandoned leases, the lease time of
+/// each enabled scope, and the reconciler's orphan age.
+pub(crate) struct DhcpPart {
+    abandoned: Vec<Lease>,
+    scope_leases: BTreeMap<PrefixId, Duration>,
+    orphan_after: Duration,
 }
 
-/// The rows of the snapshot, unsorted.
+impl DhcpPart {
+    fn load(view: &dyn ReadView, now: Timestamp) -> IpamResult<Self> {
+        let mut abandoned = Vec::new();
+        for (_, lease, _) in
+            view.scan_typed(&dhcp_tables::LEASES, KeyRange::all(), usize::MAX, false)?
+        {
+            let lease: Lease = lease;
+            if lease.state == BindingState::Abandoned && lease.ends > now {
+                abandoned.push(lease);
+            }
+        }
+        let server: DhcpSettings = view
+            .get_typed(&dhcp_tables::SETTINGS, &())?
+            .map(|(settings, _)| settings)
+            .unwrap_or_default();
+        let mut scope_leases = BTreeMap::new();
+        for (prefix, scope, _) in
+            view.scan_typed(&dhcp_tables::SCOPES, KeyRange::all(), usize::MAX, false)?
+        {
+            let (prefix, scope): (PrefixId, tenko_core::dhcp::Scope) = (prefix, scope);
+            if scope.enabled {
+                let secs = scope.lease.unwrap_or(server.lease).default_secs;
+                scope_leases.insert(prefix, Duration::from_secs(u64::from(secs)));
+            }
+        }
+        let orphan_after = settings::stored(view)?
+            .map_or(Duration::from_secs(7 * 86_400), |(s, _)| {
+                Duration::from_secs(s.orphan_after_secs)
+            });
+        Ok(Self {
+            abandoned,
+            scope_leases,
+            orphan_after,
+        })
+    }
+}
+
+/// Everything the rows are built from, read from one view; the rows are built after it is
+/// dropped, so no read view stays open while they are computed (a view pins the store's
+/// pages until it closes).
+pub(crate) struct ViewRead {
+    pub(crate) snapshot: Snapshot,
+    dhcp: DhcpPart,
+}
+
+impl ViewRead {
+    /// Reads what the rows of `view` at `now` need.
+    ///
+    /// # Errors
+    ///
+    /// Store and decoding errors.
+    pub(crate) fn load(
+        view: &dyn ReadView,
+        leases: Option<&LeaseFacts>,
+        now: Timestamp,
+    ) -> IpamResult<Self> {
+        Ok(Self {
+            snapshot: Snapshot::load(view, leases, now)?,
+            dhcp: DhcpPart::load(view, now)?,
+        })
+    }
+}
+
+/// The rows of what was read, unsorted.
 #[allow(clippy::too_many_lines)] // One pass per list, in the order of the table above.
-fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRow>> {
+fn build(read: &ViewRead) -> Vec<ReconcileRow> {
+    let snapshot = &read.snapshot;
     let now = snapshot.now;
     let intent = &snapshot.intent;
     let mut pictures: BTreeMap<(VrfId, IpAddr), Picture> = BTreeMap::new();
@@ -782,13 +832,7 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
         picture.zones.insert(zone);
     }
     // The addresses the DHCP role abandoned on a conflict (WP8.5).
-    for (_, lease, _) in
-        view.scan_typed(&dhcp_tables::LEASES, KeyRange::all(), usize::MAX, false)?
-    {
-        let lease: Lease = lease;
-        if lease.state != BindingState::Abandoned || lease.ends <= now {
-            continue;
-        }
+    for lease in &read.dhcp.abandoned {
         let ip = IpAddr::V4(lease.addr);
         let picture = pictures.entry((lease.vrf, ip)).or_default();
         picture.prefix = picture
@@ -951,13 +995,7 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
     }
 
     // Ghosts: intent nothing shows.
-    let server: DhcpSettings = view
-        .get_typed(&dhcp_tables::SETTINGS, &())?
-        .map(|(settings, _)| settings)
-        .unwrap_or_default();
-    let orphan_after = settings::stored(view)?.map_or(Duration::from_secs(7 * 86_400), |(s, _)| {
-        Duration::from_secs(s.orphan_after_secs)
-    });
+    let orphan_after = read.dhcp.orphan_after;
     for address in intent.addresses.values() {
         if address.status != Status::Active || !trackable(address.ip) {
             continue;
@@ -981,10 +1019,7 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
         let network = intent
             .network_of(address.vrf, address.ip)
             .map(|prefix| prefix.id);
-        let lease = match network {
-            Some(prefix) => scope_lease(view, prefix, &server)?,
-            None => None,
-        };
+        let lease = network.and_then(|prefix| read.dhcp.scope_leases.get(&prefix).copied());
         if lease.is_none() && !snapshot.scanned(address.vrf, address.ip) {
             continue;
         }
@@ -1023,7 +1058,7 @@ fn build(view: &dyn ReadView, snapshot: &Snapshot) -> IpamResult<Vec<ReconcileRo
             last,
         ));
     }
-    Ok(rows)
+    rows
 }
 
 /// The latest sighting of an address or its interface's MAC address by any fact within
