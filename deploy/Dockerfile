@@ -109,7 +109,7 @@
 ARG TENKO_BINARY_SOURCE=source
 
 # Stage: web UI bundle (local development only).
-FROM node:22-bookworm-slim@sha256:2f0e17f8955e766e776ae16d3ac47519ca3edf47c07e5c1423527926fdd5d568 AS ui
+FROM node:22-bookworm-slim@sha256:e9f565d32859f0cbfb52125eafe8be39390f24dac302dc3cdf566e8ba3ab21ee AS ui
 WORKDIR /src/ui
 # Copy the manifests first so the dependency layer is cached. No install scripts: the UI's
 # dependencies need none, and the release's UI job installs them the same way.
@@ -120,7 +120,7 @@ RUN npm run build
 
 # Stage: the tenko binary (local development only), static for musl as in
 # .github/workflows/release.yml.
-FROM rust:1-slim-bookworm@sha256:ed2c95ca377d6571b124b05e75e01207973ded639dce7d5542eb7bcd797e32aa AS builder
+FROM rust:1-slim-bookworm@sha256:7c7d4eb4d05b7781187a327809466cfddf29753f6defdc3d19a0e291951b7a37 AS builder
 # musl-tools provides musl-gcc, which the C code of aws-lc-sys, ring and jemalloc (the
 # allocator of the musl binary) is built with for the musl target; jemalloc's build runs
 # make. Nothing else is needed (no cmake, perl or clang).
