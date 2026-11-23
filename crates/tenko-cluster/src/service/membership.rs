@@ -56,7 +56,7 @@ impl v1::cluster_server::Cluster for PeerService {
             authenticated(&request)?;
             let body = request.into_inner();
             wire::check(&body.wire, BATCH_WIRE).map_err(|error| status_of(&error))?;
-            let sign_in = wire::sign_in_from(body.sign_in);
+            let sign_in = wire::sign_in_from(body.sign_in, &body.account);
             match self
                 .peers
                 .store()

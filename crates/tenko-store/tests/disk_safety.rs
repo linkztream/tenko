@@ -12,12 +12,13 @@ use std::{fs, path::PathBuf, time::Duration};
 
 use bytes::Bytes;
 use tenko_core::{
-    Coded, IdempotencyKey, Principal, SystemComponent, TableName, Timestamp,
-    codec::encode_key,
+    Coded, IdempotencyKey, Principal, SystemComponent, TableName, Timestamp, UserId,
+    codec::{encode_key, to_cbor},
     testing::{wait_until_async, wait_until_async_within},
 };
 use tenko_store::{
     Pressure, SignIn, Store, StoreError, WriteBatch,
+    api::SIGN_IN_ACCOUNT_BYTES_PER_MINUTE,
     raft::{RaftStore, RaftStoreConfig, fixture::InProcessCluster, network::ForwardError},
     test_hooks::{FAIL_CHECKPOINT, FAIL_LOG, FAIL_STATE, FREE_BYTES},
     testing::ConformanceConfig,
@@ -346,26 +347,37 @@ async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
     store.shutdown().await.expect("shutdown");
 }
 
-/// A sign-in's batch of about 1 KiB, marked as `kind`.
+/// A completed sign-in's batch of about 1 KiB for `user`.
 #[allow(
     clippy::disallowed_methods,
     reason = "the store's own test of the marked batches"
 )]
-fn sign_in(kind: SignIn, n: u64) -> WriteBatch {
+fn completed(user: UserId, n: u64) -> WriteBatch {
+    with_row(WriteBatch::completed_sign_in(user, batch().proposed_at), n)
+}
+
+/// A failed sign-in's batch of about 1 KiB that tried `account`.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the store's own test of the marked batches"
+)]
+fn failed(account: Option<UserId>, n: u64) -> WriteBatch {
     let principal = Principal::system(SystemComponent::Auth);
-    let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
-    let mut batch = match kind {
-        SignIn::Completed => WriteBatch::completed_sign_in(principal, at),
-        SignIn::Failed => WriteBatch::failed_sign_in(principal, at),
-    };
+    with_row(
+        WriteBatch::failed_sign_in(principal, account, batch().proposed_at),
+        n,
+    )
+}
+
+fn with_row(mut batch: WriteBatch, n: u64) -> WriteBatch {
     batch.put(ROWS, encode_key(&n), Bytes::from(vec![0_u8; 1024]));
     batch
 }
 
-/// A follower's sign-in reaches its leader with its mark, beside the batch: below the
-/// leader's margin the leader takes it within its own budgets, which its local sign-ins
-/// spend too, and refuses an unmarked batch that grows the store, as it refuses a sign-in
-/// from an older peer that sends no mark.
+/// A follower's sign-in reaches its leader with its mark and the account a failure tried,
+/// beside the batch: below the leader's margin the leader takes it within its own budgets
+/// and each account's share, which its local sign-ins spend too, and refuses an unmarked
+/// batch that grows the store, as it refuses a sign-in from an older peer that sends no mark.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
     let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), |config| {
@@ -375,18 +387,16 @@ async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
     let leader = cluster.wait_for_leader().await;
     let follower = cluster.a_follower().await;
     free_space(&leader, inside_the_margin(&leader), Pressure::Margin).await;
+    let (a, b) = (UserId::generate(), UserId::generate());
 
     follower
-        .propose(sign_in(SignIn::Completed, 1))
+        .propose(completed(b, 1))
         .await
         .expect("a completed sign-in forwarded below the leader's margin");
     let refused = follower.propose(put(2)).await.expect_err("unmarked growth");
     assert_eq!(refused.code(), StoreError::DISK_RESERVE);
     let older = leader
-        .accept_forwarded(
-            tenko_core::codec::to_cbor(&sign_in(SignIn::Completed, 3)).expect("encoded"),
-            None,
-        )
+        .accept_forwarded(to_cbor(&completed(b, 3)).expect("encoded"), None)
         .await
         .expect_err("a sign-in from a peer that sends no mark");
     assert!(
@@ -395,24 +405,61 @@ async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
     );
     assert!(older.to_string().contains("12.12"), "{older}");
 
+    // A's share, forwarded, then refused on the leader too; B passes from both.
+    let size = u64::try_from(completed(a, 0).payload_size()).expect("fits");
+    let mut passed = 0_u64;
+    while follower.propose(completed(a, 10 + passed)).await.is_ok() {
+        passed += 1;
+        assert!(passed <= 33, "the share never ended");
+    }
+    assert_eq!(passed, SIGN_IN_ACCOUNT_BYTES_PER_MINUTE.div_ceil(size));
+    let own = leader
+        .propose(completed(a, 50))
+        .await
+        .expect_err("the leader's own sign-in of A");
+    assert_eq!(own.code(), StoreError::DISK_RESERVE);
+    leader
+        .propose(completed(b, 51))
+        .await
+        .expect("B on the leader");
+    follower
+        .propose(completed(b, 52))
+        .await
+        .expect("B forwarded");
+    let mut nobody = completed(b, 53);
+    nobody.principal = Principal::system(SystemComponent::Auth);
+    let nobody = leader
+        .accept_forwarded(to_cbor(&nobody).expect("encoded"), Some(SignIn::Completed))
+        .await
+        .expect_err("a forwarded completed sign-in with no user");
+    assert!(
+        matches!(nobody, ForwardError::Store(StoreError::DiskReserve { .. })),
+        "{nobody:?}"
+    );
+    let spent = follower
+        .propose(failed(Some(a), 54))
+        .await
+        .expect_err("a failure that tried A, whose share is spent");
+    assert_eq!(spent.code(), StoreError::DISK_RESERVE);
+    follower
+        .propose(failed(None, 55))
+        .await
+        .expect("a failure that tried no account");
+
     // Failures forwarded spend the leader's budget of failures, the one its own spend.
     let mut passed = 0_u64;
-    while follower
-        .propose(sign_in(SignIn::Failed, 100 + passed))
-        .await
-        .is_ok()
-    {
+    while follower.propose(failed(None, 100 + passed)).await.is_ok() {
         passed += 1;
         assert!(passed < 1_000, "the budget of failures never ended");
     }
     assert!(passed > 10, "{passed} failures passed");
     let spent = leader
-        .propose(sign_in(SignIn::Failed, 5_000))
+        .propose(failed(None, 5_000))
         .await
         .expect_err("the leader's own failure, past the shared budget");
     assert_eq!(spent.code(), StoreError::DISK_RESERVE);
     leader
-        .propose(sign_in(SignIn::Completed, 5_001))
+        .propose(completed(UserId::generate(), 5_001))
         .await
         .expect("completed sign-ins keep their own budget");
     cluster.shutdown().await;

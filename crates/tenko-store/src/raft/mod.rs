@@ -1236,10 +1236,11 @@ impl RaftStore {
         }
         let mut decoded: WriteBatch =
             from_cbor_exact(&batch).map_err(|error| ForwardError::Store(error.into()))?;
-        // The leader takes the peer's word for the mark. A controller that marks batches
-        // wrongly gains at most the sign-in budgets below this leader's margin, which are the
-        // leader's own and shared with its local sign-ins, never a write below its reserve,
-        // and nothing a controller could not already do to its own disk.
+        // The leader takes the peer's word for the mark and the account a failure tried. A
+        // controller that marks batches wrongly gains at most the sign-in budgets below this
+        // leader's margin, which are the leader's own and shared with its local sign-ins,
+        // never a write below its reserve, and nothing a controller could not already do to
+        // its own disk.
         decoded.sign_in = sign_in;
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)

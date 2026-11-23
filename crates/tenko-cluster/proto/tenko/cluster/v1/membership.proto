@@ -109,6 +109,9 @@ message ProposeRequest {
   // The batch's sign-in mark for the leader's disk guard, which the batch's encoding and
   // the Raft log never hold. A peer that does not know the field sends none.
   SignIn sign_in = 3;
+  // The account a failed sign-in tried, the 16 bytes of its id; empty for none, and any
+  // other length reads as none.
+  bytes account = 4;
 }
 
 enum SignIn {

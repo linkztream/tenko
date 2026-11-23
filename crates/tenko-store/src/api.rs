@@ -48,7 +48,7 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
     Anchors, AuditSeq, Coded, CounterKey, IdempotencyKey, NodeId, ObjectRef, Principal, RequestCtx,
-    RequestId, Revision, TableName, Timestamp,
+    RequestId, Revision, SystemComponent, TableName, Timestamp, UserId,
     audit::{AuditDraft, Digest},
     codec::{CodecError, KeyCodec, KeyError, canonical_sha256, prefix_successor},
     secret::VaultEnvelope,
@@ -131,8 +131,9 @@ pub enum SignIn {
     /// The writes of a completed sign-in (or of its password step): only valid credentials
     /// reach them.
     Completed,
-    /// The writes of a failed sign-in: its record, a lock, an alarm.
-    Failed,
+    /// The writes of a failed sign-in: its record, a lock, an alarm; with the existing account
+    /// it tried, which is never its principal (the audit chain records who wrote).
+    Failed(Option<UserId>),
 }
 
 /// A set of mutations that applies atomically with one revision.
@@ -179,20 +180,30 @@ impl WriteBatch {
         }
     }
 
-    /// An empty batch for the writes of a completed sign-in: below the store's margin it
-    /// passes within the budget only valid credentials reach.
-    pub fn completed_sign_in(principal: Principal, proposed_at: Timestamp) -> Self {
+    /// An empty batch for the writes of `user`'s completed sign-in, written by the sign-in
+    /// on the account's behalf: below the store's margin it passes within the budget only
+    /// valid credentials reach, and within the account's share of it.
+    pub fn completed_sign_in(user: UserId, proposed_at: Timestamp) -> Self {
+        let principal = Principal::System {
+            component: SystemComponent::Auth,
+            on_behalf_of: Some(user),
+        };
         Self {
             sign_in: Some(SignIn::Completed),
             ..Self::new(principal, proposed_at)
         }
     }
 
-    /// An empty batch for the writes of a failed sign-in: below the store's margin it
-    /// passes within the small budget of failures.
-    pub fn failed_sign_in(principal: Principal, proposed_at: Timestamp) -> Self {
+    /// An empty batch for the writes of a failed sign-in that tried `account`, if it exists:
+    /// below the store's margin it passes within the small budget of failures, and only
+    /// while the account's share of the completed budget has room.
+    pub fn failed_sign_in(
+        principal: Principal,
+        account: Option<UserId>,
+        proposed_at: Timestamp,
+    ) -> Self {
         Self {
-            sign_in: Some(SignIn::Failed),
+            sign_in: Some(SignIn::Failed(account)),
             ..Self::new(principal, proposed_at)
         }
     }
@@ -1128,6 +1139,10 @@ pub const DISK_FLOOR_BYTES: u64 = 128 * 1024 * 1024;
 /// The bytes of completed sign-ins ([`WriteBatch::completed_sign_in`]) the store takes a
 /// minute below its margin (`docs/cluster.md` section 12.12).
 pub const SIGN_IN_BYTES_PER_MINUTE: u64 = 1024 * 1024;
+
+/// The share of [`SIGN_IN_BYTES_PER_MINUTE`] one account's completed sign-ins may take a
+/// minute below the margin (`docs/cluster.md` section 12.12).
+pub const SIGN_IN_ACCOUNT_BYTES_PER_MINUTE: u64 = 32 * 1024;
 
 /// The bytes of failed sign-ins ([`WriteBatch::failed_sign_in`]) the store takes a minute
 /// below its margin; anybody can spend them, so they are few.

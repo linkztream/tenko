@@ -57,7 +57,7 @@ use tenko_store::{
     ApplyStopped, Pressure, ReadConsistency, StoreError, StoreRole, StoreSafety, WriteBatch,
     api::{
         APPLY_STOPPED, DISK_FLOOR_BYTES, DISK_UNKNOWN, FAILED_SIGN_IN_BYTES_PER_MINUTE,
-        SIGN_IN_BYTES_PER_MINUTE, SNAPSHOT_FAILED,
+        SIGN_IN_ACCOUNT_BYTES_PER_MINUTE, SIGN_IN_BYTES_PER_MINUTE, SNAPSHOT_FAILED,
     },
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -706,11 +706,13 @@ fn store_safety_warnings(safety: &StoreSafety, follower: bool) -> Vec<StatusWarn
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} it keeps: only writes that \
-                 free space and sign-ins are taken, {} MiB of sign-ins and {} KiB of failed \
-                 ones a minute; failed sign-ins beyond that are counted, not recorded, and \
-                 one summary record follows once the disk has room.{follows}",
+                 free space and sign-ins are taken, {} MiB of sign-ins (at most {} KiB of them \
+                 per account) and {} KiB of failed ones a minute; failed sign-ins beyond that \
+                 are counted, not recorded, and one summary record follows once the disk has \
+                 room.{follows}",
                 gib(safety.margin_bytes),
                 SIGN_IN_BYTES_PER_MINUTE / (1024 * 1024),
+                SIGN_IN_ACCOUNT_BYTES_PER_MINUTE / 1024,
                 FAILED_SIGN_IN_BYTES_PER_MINUTE / 1024,
             ),
             safety.margin_bytes,
@@ -1747,7 +1749,10 @@ mod tests {
         );
         let margin = &store_safety_warnings(&safety, false)[0].detail;
         assert!(
-            margin.contains("1 MiB of sign-ins and 64 KiB of failed ones a minute"),
+            margin.contains(
+                "1 MiB of sign-ins (at most 32 KiB of them per account) and 64 KiB of failed \
+                 ones a minute"
+            ),
             "{margin}"
         );
         safety.pressure = Pressure::Reserve;

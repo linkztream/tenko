@@ -778,6 +778,7 @@ impl LeaderLink for PeerNetwork {
             .cluster_client_at(&endpoint)
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
+        let (sign_in, account) = wire::sign_in_to(sign_in);
         let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "Propose", async {
             let mut request = self.prepared(
                 NodeId(target),
@@ -785,7 +786,8 @@ impl LeaderLink for PeerNetwork {
                 v1::ProposeRequest {
                     wire: BATCH_WIRE.to_owned(),
                     batch: batch.to_vec(),
-                    sign_in: wire::sign_in_to(sign_in),
+                    sign_in,
+                    account,
                 },
             );
             trace::inject(&mut request);

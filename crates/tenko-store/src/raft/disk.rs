@@ -21,9 +21,11 @@
 //!   ([`WriteBatch::completed_sign_in`], [`WriteBatch::failed_sign_in`]), whatever it writes,
 //!   within a budget of bytes (its payload) a minute: [`COMPLETED_BYTES_PER_MINUTE`] for
 //!   completed sign-ins, which only valid credentials reach, and [`FAILED_BYTES_PER_MINUTE`]
-//!   for failed ones, which anybody can spend. A failure passes only while a completed
-//!   sign-in would too, so a right and a wrong password are refused alike. The mark is not
-//!   encoded: a forwarded batch arrives without it.
+//!   for failed ones, which anybody can spend. A completed sign-in is charged at least
+//!   [`MIN_SIGN_IN_CHARGE`], and each account (its principal's user; none is refused) may
+//!   take at most [`ACCOUNT_BYTES_PER_MINUTE`] of its budget. A failure passes only while a
+//!   completed sign-in of the same account would too, so a right and a wrong password are
+//!   refused alike. The mark is not encoded: a forwarded batch carries it beside.
 //! - Nothing else passes: a refused batch gets [`StoreError::DiskReserve`].
 //!
 //! A state is left only 10 percent above its line, so free space that hovers at a line does
@@ -31,6 +33,7 @@
 //! that frees space. Batches admitted before the pressure rose still commit.
 
 use std::{
+    collections::HashMap,
     io,
     path::Path,
     sync::{
@@ -41,7 +44,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use tenko_core::{TableName, codec::to_cbor};
+use tenko_core::{TableName, UserId, codec::to_cbor};
 use tokio::sync::watch;
 
 use crate::api::{Mutation, Pressure, SignIn, StoreError, WriteBatch};
@@ -66,8 +69,13 @@ pub(crate) const MAX_DRAFT_BYTES: usize = 1024;
 /// How many batches that free space and carry an audit draft pass a minute below the margin.
 pub(crate) const DRAFTS_PER_MINUTE: u64 = 600;
 /// The bytes of completed sign-ins that pass a minute below the margin (a password sign-in
-/// is about 2 KiB).
+/// is about 1 KiB, one with a second factor about 3.4 KiB).
 pub(crate) const COMPLETED_BYTES_PER_MINUTE: u64 = crate::api::SIGN_IN_BYTES_PER_MINUTE;
+/// The bytes of [`COMPLETED_BYTES_PER_MINUTE`] one account's completed sign-ins may take.
+pub(crate) const ACCOUNT_BYTES_PER_MINUTE: u64 = crate::api::SIGN_IN_ACCOUNT_BYTES_PER_MINUTE;
+/// The least a completed sign-in is charged, on the budget and the account's share alike: it
+/// bounds the accounts a minute holds to 2,048.
+pub(crate) const MIN_SIGN_IN_CHARGE: u64 = 512;
 /// The bytes of failed sign-ins (their record, a lock, an alarm) that pass a minute below
 /// the margin; beyond them the failures are only counted, for one summary record later.
 pub(crate) const FAILED_BYTES_PER_MINUTE: u64 = crate::api::FAILED_SIGN_IN_BYTES_PER_MINUTE;
@@ -173,29 +181,55 @@ fn removed_bytes(
 /// Units (batches or bytes) that pass a minute.
 struct Budget {
     per_minute: u64,
-    /// The start of the current minute and the units passed in it.
-    window: Mutex<(Instant, u64)>,
+    /// The start of the current minute, the units passed in it, and the units of each
+    /// account in it.
+    window: Mutex<(Instant, u64, HashMap<UserId, u64>)>,
 }
 
 impl Budget {
     fn new(per_minute: u64) -> Self {
         Self {
             per_minute,
-            window: Mutex::new((Instant::now(), 0)),
+            // Ended, so that the first spend opens the minute.
+            window: Mutex::new((
+                Instant::now()
+                    .checked_sub(Duration::from_secs(60))
+                    .unwrap_or_else(Instant::now),
+                0,
+                HashMap::new(),
+            )),
         }
     }
 
-    /// Takes `units` of the minute's at `now` (0 only asks): `false` once the minute's are
-    /// used (the last one taken may go past them).
-    fn spend(&self, now: Instant, units: u64) -> bool {
+    /// Takes `units` of the minute's at `now` (0 only asks), and as many of `account`'s
+    /// [`ACCOUNT_BYTES_PER_MINUTE`]: `false`, taking nothing, once either is used (the last
+    /// one taken may go past them).
+    fn spend(&self, now: Instant, units: u64, account: Option<UserId>) -> bool {
         let mut window = self.window.lock().unwrap_or_else(PoisonError::into_inner);
-        if now.saturating_duration_since(window.0) >= Duration::from_secs(60) {
-            *window = (now, 0);
+        let (start, used, accounts) = &mut *window;
+        if now.saturating_duration_since(*start) >= Duration::from_secs(60) {
+            (*start, *used) = (now, 0);
+            accounts.clear();
         }
-        if window.1 >= self.per_minute {
+        let taken = account
+            .and_then(|id| accounts.get(&id).copied())
+            .unwrap_or(0);
+        if *used >= self.per_minute || taken >= ACCOUNT_BYTES_PER_MINUTE {
             return false;
         }
-        window.1 = window.1.saturating_add(units);
+        *used = used.saturating_add(units);
+        if let Some(id) = account.filter(|_| units > 0) {
+            let after = taken.saturating_add(units);
+            accounts.insert(id, after);
+            if after >= ACCOUNT_BYTES_PER_MINUTE {
+                tracing::warn!(
+                    user = %id,
+                    bytes = after,
+                    share = ACCOUNT_BYTES_PER_MINUTE,
+                    "an account's sign-ins took its share of the minute below the disk margin"
+                );
+            }
+        }
         true
     }
 }
@@ -300,8 +334,13 @@ impl Guard {
             let size = u64::try_from(batch.payload_size()).unwrap_or(u64::MAX);
             let passes = pressure == Pressure::Margin
                 && match kind {
-                    SignIn::Completed => self.completed.spend(now, size),
-                    SignIn::Failed => self.completed.spend(now, 0) && self.failed.spend(now, size),
+                    SignIn::Completed => batch.principal.user().is_some_and(|user| {
+                        self.completed
+                            .spend(now, size.max(MIN_SIGN_IN_CHARGE), Some(user))
+                    }),
+                    SignIn::Failed(account) => {
+                        self.completed.spend(now, 0, account) && self.failed.spend(now, size, None)
+                    }
                 };
             return if passes { Ok(()) } else { refused(line) };
         }
@@ -336,7 +375,7 @@ impl Guard {
                     return refused(line);
                 }
             }
-            if draft.is_some() && !self.drafts.spend(now, 1) {
+            if draft.is_some() && !self.drafts.spend(now, 1, None) {
                 return refused(line);
             }
             *self
@@ -633,21 +672,34 @@ mod tests {
         assert!(
             guard
                 .drafts
-                .spend(Instant::now() + Duration::from_secs(60), 1)
+                .spend(Instant::now() + Duration::from_secs(60), 1, None)
         );
     }
 
-    /// A batch of 2 KiB marked as a sign-in's writes, whatever it holds.
+    /// A batch of 2 KiB marked as a completed sign-in of `user`, whatever it holds.
     #[allow(
         clippy::disallowed_methods,
         reason = "the store's own test of the marked batches"
     )]
-    fn sign_in(kind: SignIn) -> WriteBatch {
+    fn completed(user: UserId) -> WriteBatch {
+        with_payload(WriteBatch::completed_sign_in(user, Timestamp::now()))
+    }
+
+    /// A batch of 2 KiB marked as a failed sign-in that tried `account`.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the store's own test of the marked batches"
+    )]
+    fn failed(account: Option<UserId>) -> WriteBatch {
         let principal = Principal::system(SystemComponent::Auth);
-        let mut batch = match kind {
-            SignIn::Completed => WriteBatch::completed_sign_in(principal, Timestamp::now()),
-            SignIn::Failed => WriteBatch::failed_sign_in(principal, Timestamp::now()),
-        };
+        with_payload(WriteBatch::failed_sign_in(
+            principal,
+            account,
+            Timestamp::now(),
+        ))
+    }
+
+    fn with_payload(mut batch: WriteBatch) -> WriteBatch {
         batch.put(
             ROWS,
             Bytes::from_static(b"s"),
@@ -657,29 +709,32 @@ mod tests {
         batch
     }
 
+    /// The units a budget took this minute, and its accounts.
+    fn used(budget: &Budget) -> (u64, usize) {
+        let window = budget.window.lock().expect("lock");
+        (window.1, window.2.len())
+    }
+
     #[test]
     fn a_marked_sign_in_passes_below_the_margin_within_its_budget_of_bytes() {
         let guard = at(Pressure::Margin);
-        let size = u64::try_from(sign_in(SignIn::Failed).payload_size()).expect("fits");
+        let size = u64::try_from(failed(None).payload_size()).expect("fits");
         // The failures' budget, then only counted; a completed sign-in still passes.
         for _ in 0..FAILED_BYTES_PER_MINUTE.div_ceil(size) {
             guard
-                .admit(&sign_in(SignIn::Failed), nothing)
+                .admit(&failed(None), nothing)
                 .expect("within the failures' budget");
         }
-        assert!(refused(&guard.admit(&sign_in(SignIn::Failed), nothing)));
+        assert!(refused(&guard.admit(&failed(None), nothing)));
         guard
-            .admit(&sign_in(SignIn::Completed), nothing)
+            .admit(&completed(UserId::generate()), nothing)
             .expect("the completed sign-ins' own budget");
         // Once the completed sign-ins' budget is spent a failure is refused too, so a right
         // and a wrong password answer alike.
         let guard = at(Pressure::Margin);
-        let mut spent = 0;
-        while guard.admit(&sign_in(SignIn::Completed), nothing).is_ok() {
-            spent += size;
-        }
-        assert!(spent >= COMPLETED_BYTES_PER_MINUTE);
-        assert!(refused(&guard.admit(&sign_in(SignIn::Failed), nothing)));
+        while guard.admit(&completed(UserId::generate()), nothing).is_ok() {}
+        assert!(used(&guard.completed).0 >= COMPLETED_BYTES_PER_MINUTE);
+        assert!(refused(&guard.admit(&failed(None), nothing)));
         // The same batch unmarked is refused, and below the reserve no sign-in passes.
         let mut unmarked = batch();
         unmarked.put(
@@ -688,16 +743,94 @@ mod tests {
             Bytes::from(vec![0_u8; 2048]),
         );
         assert!(refused(&at(Pressure::Margin).admit(&unmarked, nothing)));
-        for kind in [SignIn::Completed, SignIn::Failed] {
-            assert!(refused(
-                &at(Pressure::Reserve).admit(&sign_in(kind), nothing)
-            ));
+        for marked in [completed(UserId::generate()), failed(None)] {
+            assert!(refused(&at(Pressure::Reserve).admit(&marked, nothing)));
         }
         // The mark is not encoded.
-        let decoded: WriteBatch =
-            tenko_core::codec::from_cbor(&to_cbor(&sign_in(SignIn::Completed)).expect("encoded"))
-                .expect("decoded");
+        let decoded: WriteBatch = tenko_core::codec::from_cbor(
+            &to_cbor(&completed(UserId::generate())).expect("encoded"),
+        )
+        .expect("decoded");
         assert_eq!(decoded.sign_in(), None);
+    }
+
+    #[test]
+    fn an_account_takes_at_most_its_share_and_a_completed_sign_in_needs_one() {
+        let guard = at(Pressure::Margin);
+        let (a, b) = (UserId::generate(), UserId::generate());
+        let size = u64::try_from(completed(a).payload_size()).expect("fits");
+        let mut passed = 0;
+        while guard.admit(&completed(a), nothing).is_ok() {
+            passed += 1;
+        }
+        assert_eq!(passed, ACCOUNT_BYTES_PER_MINUTE.div_ceil(size), "the share");
+        assert_eq!(used(&guard.completed), (passed * size, 1));
+        guard
+            .admit(&completed(b), nothing)
+            .expect("another account");
+        // A completed batch with no user, as a peer could forward it, is refused.
+        let mut nobody = completed(b);
+        nobody.principal = Principal::system(SystemComponent::Auth);
+        assert!(refused(&guard.admit(&nobody, nothing)));
+    }
+
+    #[test]
+    fn a_completed_sign_in_is_charged_the_floor_on_the_budget_and_the_share() {
+        let guard = at(Pressure::Margin);
+        let mut small = completed(UserId::generate());
+        (small.mutations, small.audit) = (Vec::new(), Vec::new());
+        assert!(u64::try_from(small.payload_size()).expect("fits") < MIN_SIGN_IN_CHARGE);
+        let mut passed = 0;
+        while guard.admit(&small, nothing).is_ok() {
+            passed += 1;
+        }
+        assert_eq!(passed, ACCOUNT_BYTES_PER_MINUTE / MIN_SIGN_IN_CHARGE);
+        assert_eq!(used(&guard.completed).0, passed * MIN_SIGN_IN_CHARGE);
+    }
+
+    #[test]
+    fn a_refusal_by_either_budget_takes_nothing_from_the_other() {
+        let budget = Budget::new(COMPLETED_BYTES_PER_MINUTE);
+        let now = Instant::now();
+        let (a, b) = (UserId::generate(), UserId::generate());
+        // The share refuses: the budget is not charged.
+        assert!(budget.spend(now, ACCOUNT_BYTES_PER_MINUTE, Some(a)));
+        assert!(!budget.spend(now, 1024, Some(a)));
+        assert_eq!(used(&budget), (ACCOUNT_BYTES_PER_MINUTE, 1));
+        // The budget refuses: no entry, no share.
+        assert!(budget.spend(now, COMPLETED_BYTES_PER_MINUTE, None));
+        assert!(!budget.spend(now, 1024, Some(b)));
+        assert_eq!(used(&budget).1, 1, "no entry for the refused account");
+        // A new minute clears both.
+        assert!(budget.spend(now + Duration::from_secs(60), 1024, Some(a)));
+        assert_eq!(used(&budget), (1024, 1));
+    }
+
+    #[test]
+    fn a_failure_naming_a_spent_account_is_refused_and_takes_nothing() {
+        let guard = at(Pressure::Margin);
+        let spent = UserId::generate();
+        while guard.admit(&completed(spent), nothing).is_ok() {}
+        let before = (used(&guard.completed), used(&guard.failed));
+        assert!(refused(&guard.admit(&failed(Some(spent)), nothing)));
+        assert_eq!((used(&guard.completed), used(&guard.failed)), before);
+        guard
+            .admit(&failed(Some(UserId::generate())), nothing)
+            .expect("an account with room");
+        guard.admit(&failed(None), nothing).expect("no account");
+        assert_eq!(used(&guard.completed), before.0, "a failure takes no share");
+    }
+
+    #[test]
+    fn the_accounts_of_a_minute_stop_at_two_thousand_and_forty_eight() {
+        let budget = Budget::new(COMPLETED_BYTES_PER_MINUTE);
+        let now = Instant::now();
+        let mut passed = 0;
+        while budget.spend(now, MIN_SIGN_IN_CHARGE, Some(UserId::generate())) {
+            passed += 1;
+        }
+        assert_eq!(passed, 2048);
+        assert_eq!(used(&budget).1, 2048);
     }
 
     #[test]

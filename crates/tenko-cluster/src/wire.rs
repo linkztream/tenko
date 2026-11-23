@@ -18,7 +18,7 @@ use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tenko_core::{
-    NodeId, Principal, RequestCtx, RequestId, TableName, Timestamp,
+    NodeId, Principal, RequestCtx, RequestId, TableName, Timestamp, UserId,
     codec::{from_cbor, to_cbor},
 };
 use tenko_store::{
@@ -222,23 +222,27 @@ impl From<WireStoreError> for StoreError {
     }
 }
 
-/// The sign-in mark of a forwarded batch on the wire (`ProposeRequest.sign_in`).
-pub fn sign_in_to(sign_in: Option<SignIn>) -> i32 {
-    let mark = match sign_in {
-        None => crate::proto::v1::SignIn::None,
-        Some(SignIn::Completed) => crate::proto::v1::SignIn::Completed,
-        Some(SignIn::Failed) => crate::proto::v1::SignIn::Failed,
+/// The sign-in mark of a forwarded batch on the wire, and the account a failure tried
+/// (`ProposeRequest.sign_in` and `.account`).
+pub fn sign_in_to(sign_in: Option<SignIn>) -> (i32, Vec<u8>) {
+    let (mark, account) = match sign_in {
+        None => (crate::proto::v1::SignIn::None, None),
+        Some(SignIn::Completed) => (crate::proto::v1::SignIn::Completed, None),
+        Some(SignIn::Failed(account)) => (crate::proto::v1::SignIn::Failed, account),
     };
-    mark.into()
+    let account = account.map(|id| id.uuid().as_bytes().to_vec());
+    (mark.into(), account.unwrap_or_default())
 }
 
 /// The sign-in mark a forward carries; none for an unknown value or from a peer that sends
-/// none.
-pub fn sign_in_from(mark: i32) -> Option<SignIn> {
+/// none. An account of any length but 16 bytes reads as none.
+pub fn sign_in_from(mark: i32, account: &[u8]) -> Option<SignIn> {
     match crate::proto::v1::SignIn::try_from(mark).ok()? {
         crate::proto::v1::SignIn::None => None,
         crate::proto::v1::SignIn::Completed => Some(SignIn::Completed),
-        crate::proto::v1::SignIn::Failed => Some(SignIn::Failed),
+        crate::proto::v1::SignIn::Failed => Some(SignIn::Failed(
+            uuid::Uuid::from_slice(account).ok().map(UserId::from_uuid),
+        )),
     }
 }
 
@@ -792,17 +796,31 @@ mod tests {
     #[test]
     fn a_forwards_sign_in_mark_round_trips_and_is_absent_from_an_older_peer() {
         use prost::Message as _;
-        for mark in [None, Some(SignIn::Completed), Some(SignIn::Failed)] {
+        let tried = Some(UserId::generate());
+        for mark in [
+            None,
+            Some(SignIn::Completed),
+            Some(SignIn::Failed(None)),
+            Some(SignIn::Failed(tried)),
+        ] {
+            let (sign_in, account) = sign_in_to(mark);
             let request = crate::proto::v1::ProposeRequest {
                 wire: BATCH_WIRE.to_owned(),
                 batch: cbor(&seed_batch()),
-                sign_in: sign_in_to(mark),
+                sign_in,
+                account,
             };
             let decoded =
                 crate::proto::v1::ProposeRequest::decode(request.encode_to_vec().as_slice())
                     .expect("decoded");
-            assert_eq!(sign_in_from(decoded.sign_in), mark);
+            assert_eq!(sign_in_from(decoded.sign_in, &decoded.account), mark);
         }
+        let failed = sign_in_to(Some(SignIn::Failed(None))).0;
+        assert_eq!(
+            sign_in_from(failed, &[7; 15]),
+            Some(SignIn::Failed(None)),
+            "a wrong length reads as none"
+        );
         // An older peer's request: fields 1 and 2 only.
         let older = crate::proto::v1::ProposeRequest {
             wire: BATCH_WIRE.to_owned(),
@@ -811,8 +829,8 @@ mod tests {
         }
         .encode_to_vec();
         let decoded = crate::proto::v1::ProposeRequest::decode(older.as_slice()).expect("decoded");
-        assert_eq!(sign_in_from(decoded.sign_in), None);
-        assert_eq!(sign_in_from(99), None, "an unknown mark is none");
+        assert_eq!(sign_in_from(decoded.sign_in, &decoded.account), None);
+        assert_eq!(sign_in_from(99, &[]), None, "an unknown mark is none");
     }
 
     /// A payload as CBOR.

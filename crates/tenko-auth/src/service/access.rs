@@ -459,7 +459,7 @@ impl AuthService {
         subject: UserId,
         scope: &ScopeRule,
     ) {
-        let mut batch = WriteBatch::failed_sign_in(ctx.principal.clone(), ctx.now);
+        let mut batch = WriteBatch::failed_sign_in(ctx.principal.clone(), None, ctx.now);
         batch.request = Some(ctx.request);
         batch.audit(
             AuditDraft::failed(

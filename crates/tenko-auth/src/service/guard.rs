@@ -653,8 +653,11 @@ impl AuthService {
                 ctx.now,
             );
         }
-        let mut batch =
-            WriteBatch::failed_sign_in(Principal::system(SystemComponent::Auth), ctx.now);
+        let mut batch = WriteBatch::failed_sign_in(
+            Principal::system(SystemComponent::Auth),
+            user.map(|(user, _)| user.id),
+            ctx.now,
+        );
         batch.request = Some(ctx.request);
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])
@@ -718,7 +721,7 @@ impl AuthService {
         batch: WriteBatch,
         tried: (&str, Option<tenko_core::UserId>),
     ) -> Option<StoreError> {
-        let failed = batch.sign_in() == Some(SignIn::Failed);
+        let failed = matches!(batch.sign_in(), Some(SignIn::Failed(_)));
         let (action, source) = batch
             .audit
             .first()

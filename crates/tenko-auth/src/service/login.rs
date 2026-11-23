@@ -78,13 +78,6 @@ fn assertion_strength(user_verified: bool, hardware_key: bool) -> AuthStrength {
     }
 }
 
-fn on_behalf_of(user: UserId) -> Principal {
-    Principal::System {
-        component: SystemComponent::Auth,
-        on_behalf_of: Some(user),
-    }
-}
-
 /// The second factors a password login must continue with: TOTP when enrolled, a passkey
 /// when TOTP is enrolled or the password alone is below the required strength, and
 /// recovery codes as a fallback for either.
@@ -346,7 +339,7 @@ impl AuthService {
         let credentials = Self::user_credentials(view.as_ref(), user.id)?.len();
         let methods = second_factor_methods(&user, credentials, first, self.required_for(&user));
 
-        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(user.id, ctx.now);
         batch.request = Some(ctx.request);
         // Only a changed record is written, so concurrent logins of one account do not
         // conflict over the user row.
@@ -651,7 +644,7 @@ impl AuthService {
         action: AuditAction,
         context: Option<(&str, String)>,
     ) -> Result<LoginOutcome, AuthError> {
-        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(user.id, ctx.now);
         batch.request = Some(ctx.request);
         staged.stage(&mut batch)?;
         // The used TOTP step or recovery code: a concurrent second login with the same code
@@ -709,7 +702,7 @@ impl AuthService {
             };
             // The second-factor challenge is spent here, in the store, so it cannot also
             // finish a code login or start another passkey step on any controller.
-            let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user), ctx.now);
+            let mut batch = WriteBatch::completed_sign_in(user, ctx.now);
             batch.request = Some(ctx.request);
             staged.stage(&mut batch)?;
             self.commit(batch).await.map_err(|error| match error {
@@ -863,7 +856,7 @@ impl AuthService {
         updated_credential.sign_count = verified.sign_count;
         updated_credential.backup_state = verified.backup_state;
         updated_credential.last_used_at = Some(ctx.now);
-        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(user.id, ctx.now);
         batch.request = Some(ctx.request);
         staged.stage(&mut batch)?;
         batch.expect_typed(
@@ -974,8 +967,11 @@ impl AuthService {
         ctx: &RequestCtx,
         user: Option<(&UserRecord, Revision)>,
     ) -> AuthError {
-        let mut batch =
-            WriteBatch::failed_sign_in(Principal::system(SystemComponent::Auth), ctx.now);
+        let mut batch = WriteBatch::failed_sign_in(
+            Principal::system(SystemComponent::Auth),
+            user.map(|(user, _)| user.id),
+            ctx.now,
+        );
         batch.request = Some(ctx.request);
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])

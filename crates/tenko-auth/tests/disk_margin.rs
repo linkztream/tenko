@@ -1,8 +1,9 @@
 //! Sign-ins on a Raft store whose disk is short of room (`docs/cluster.md` section 12.12):
 //! the real `AuthService` on a `RaftStore` held below its margin, and below its reserve, by
-//! the free space its test hook stands in for.
+//! the free space its test hook stands in for. Each account may take a share of the
+//! completed sign-ins' budget a minute; every test runs inside one minute.
 
-use std::{fs, net::IpAddr, sync::Arc, time::Duration};
+use std::{fs, net::IpAddr, ops::RangeInclusive, sync::Arc, time::Duration};
 
 use argon2::{Algorithm, Argon2, Params, PasswordHasher, Version};
 use tenko_auth::{
@@ -20,10 +21,12 @@ use tenko_auth::{
     },
     totp::{self, TotpParams},
 };
-use tenko_core::{Coded, Principal, RequestCtx, SystemComponent, testing::wait_until_async};
+use tenko_core::{
+    Coded, Principal, RequestCtx, SystemComponent, TableName, UserId, testing::wait_until_async,
+};
 use tenko_store::{
     KeyRange, Pressure, ReadConsistency, ReadViewExt, Store, StoreError, WriteBatch,
-    api::DISK_FLOOR_BYTES,
+    api::{DISK_FLOOR_BYTES, SIGN_IN_ACCOUNT_BYTES_PER_MINUTE, SIGN_IN_BYTES_PER_MINUTE},
     raft::{RaftStore, RaftStoreConfig},
     tables,
     test_hooks::FREE_BYTES,
@@ -84,12 +87,21 @@ fn ctx_from(env: &Env, source: &str) -> RequestCtx {
 }
 
 async fn login(env: &Env, source: &str, password: &str) -> Result<LoginOutcome, AuthError> {
+    login_as(env, source, ADMIN, password).await
+}
+
+async fn login_as(
+    env: &Env,
+    source: &str,
+    name: &str,
+    password: &str,
+) -> Result<LoginOutcome, AuthError> {
     env.service
         .login_password(
             &ctx_from(env, source),
             Some("test-agent"),
             &PasswordLogin {
-                user_name: ADMIN.to_owned(),
+                user_name: name.to_owned(),
                 password: SecretString::new(password),
                 provider: None,
             },
@@ -99,8 +111,12 @@ async fn login(env: &Env, source: &str, password: &str) -> Result<LoginOutcome, 
 
 /// A wrong sign-in that waits out any wait first.
 async fn fail(env: &Env, source: &str) -> Result<(), AuthError> {
+    fail_as(env, source, ADMIN).await
+}
+
+async fn fail_as(env: &Env, source: &str, name: &str) -> Result<(), AuthError> {
     loop {
-        match login(env, source, WRONG).await {
+        match login_as(env, source, name, WRONG).await {
             Err(AuthError::InvalidCredentials) => return Ok(()),
             Err(AuthError::Throttled {
                 retry_after: Some(secs),
@@ -137,6 +153,171 @@ fn signed_in(outcome: &Result<LoginOutcome, AuthError>) {
         matches!(outcome, Ok(LoginOutcome::Session(_))),
         "{outcome:?}"
     );
+}
+
+fn refused_for_room<T: std::fmt::Debug>(outcome: &Result<T, AuthError>) {
+    assert!(
+        matches!(
+            outcome,
+            Err(AuthError::Store(StoreError::DiskReserve { .. }))
+        ),
+        "{outcome:?}"
+    );
+}
+
+/// Signs in through `sign_in` until the store refuses it for room, after a number of
+/// sign-ins in `range`: the count measured from the size of the path's writes, give or take
+/// two.
+async fn until_refused<T>(
+    range: RangeInclusive<u32>,
+    mut sign_in: impl AsyncFnMut() -> Result<T, AuthError>,
+) {
+    let mut passed = 0;
+    loop {
+        match sign_in().await {
+            Ok(_) => passed += 1,
+            Err(refusal) => {
+                assert!(
+                    matches!(refusal, AuthError::Store(StoreError::DiskReserve { .. })),
+                    "{refusal:?}"
+                );
+                break;
+            }
+        }
+        assert!(passed <= *range.end(), "{passed} sign-ins passed");
+    }
+    assert!(range.contains(&passed), "{passed} sign-ins passed");
+}
+
+/// The password step of a second-factor account: its challenge.
+async fn challenge(env: &Env) -> Result<String, AuthError> {
+    match login(env, "192.0.2.10", ADMIN_PASSWORD).await? {
+        LoginOutcome::SecondFactor { challenge_id, .. } => Ok(challenge_id),
+        LoginOutcome::Session(_) => panic!("a second factor is asked for"),
+    }
+}
+
+/// Enrolls TOTP for the session's account; answers the seed.
+async fn enroll_totp(env: &Env, session: &NewSession) -> Vec<u8> {
+    let ctx = env.session_ctx(session).await.expect("ctx");
+    let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
+    let seed = tenko_auth::encoding::base32_decode(enrollment.secret.expose()).expect("seed");
+    env.service
+        .totp_enroll_finish(
+            &ctx,
+            &TotpEnrollFinish {
+                enrollment_id: enrollment.enrollment_id,
+                code: code(env, &seed),
+            },
+        )
+        .await
+        .expect("enrolled");
+    seed
+}
+
+fn code(env: &Env, seed: &[u8]) -> SecretString {
+    let now = u64::try_from(env.now().0.unix_timestamp()).expect("time");
+    SecretString::new(totp::code_at(seed, &TotpParams::default(), now).as_str())
+}
+
+async fn login_totp(
+    env: &Env,
+    challenge_id: String,
+    code: SecretString,
+) -> Result<NewSession, AuthError> {
+    let outcome = env
+        .service
+        .login_totp(
+            &ctx_from(env, "192.0.2.10"),
+            Some("test-agent"),
+            &CodeLogin { challenge_id, code },
+        )
+        .await?;
+    let LoginOutcome::Session(session) = outcome else {
+        panic!("a session");
+    };
+    Ok(session)
+}
+
+/// Registers a key for the session's account.
+async fn register_key(env: &Env, session: &NewSession, security_key: bool) -> SoftAuthenticator {
+    let ctx = env.session_ctx(session).await.expect("ctx");
+    let options = env
+        .service
+        .webauthn_register_start(
+            &ctx,
+            &WebAuthnRegisterStart {
+                label: Some("Test key".to_owned()),
+                security_key,
+            },
+        )
+        .await
+        .expect("start");
+    let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::PackedCertificate);
+    let credential = key.register(&options.public_key, ORIGIN);
+    env.service
+        .webauthn_register_finish(
+            &ctx,
+            &WebAuthnRegisterFinish {
+                ceremony_id: options.ceremony_id,
+                credential,
+            },
+        )
+        .await
+        .expect("registered");
+    key
+}
+
+/// A passkey sign-in, or with `challenge_id` the passkey step of a password sign-in.
+async fn passkey(
+    env: &Env,
+    key: &mut SoftAuthenticator,
+    challenge_id: Option<String>,
+) -> Result<NewSession, AuthError> {
+    let options = env
+        .service
+        .webauthn_login_start(
+            &env.public_ctx(),
+            &WebAuthnLoginStart {
+                user_name: None,
+                challenge_id,
+            },
+        )
+        .await?;
+    let credential = key.assert(&options.public_key, ORIGIN);
+    env.service
+        .webauthn_login_finish(
+            &env.public_ctx(),
+            None,
+            &WebAuthnLoginFinish {
+                ceremony_id: options.ceremony_id,
+                credential,
+            },
+        )
+        .await
+}
+
+/// The second account signs in, its share untouched.
+async fn second_signs_in(env: &Env) {
+    signed_in(&login_as(env, "192.0.2.20", SECOND, SECOND_PASSWORD).await);
+}
+
+/// The failed password sign-ins on record that tried `name`.
+async fn failures_of(env: &Env, name: &str) -> usize {
+    rows(env, &tables::AUDIT)
+        .await
+        .into_iter()
+        .filter(|record| {
+            record.draft.action.as_str() == "auth.login.password"
+                && record
+                    .draft
+                    .details
+                    .context
+                    .get("user_name")
+                    .map(String::as_str)
+                    == Some(name)
+        })
+        .count()
 }
 
 /// A password sign-in from a new browser (a new known-device row), and one whose stored
@@ -179,55 +360,92 @@ async fn below_the_margin_a_password_sign_in_passes_with_its_new_browser_and_its
     env.store.shutdown().await.expect("shutdown");
 }
 
-/// The password step and the second factor pass below the margin.
+/// Password sign-ins of one account pass below the margin until its share is spent; then
+/// its right and its wrong password both answer 507, while a wrong password for another
+/// account or an unknown name answers 401 and is recorded, and the other account signs in.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn below_the_margin_a_sign_in_with_a_second_factor_passes() {
-    let (env, session) = installed().await;
-    let ctx = env.session_ctx(&session).await.expect("ctx");
-    let enrollment = env.service.totp_enroll_start(&ctx).await.expect("start");
-    let seed = tenko_auth::encoding::base32_decode(enrollment.secret.expose()).expect("seed");
-    let code = || {
-        let now = u64::try_from(env.now().0.unix_timestamp()).expect("time");
-        SecretString::new(totp::code_at(&seed, &TotpParams::default(), now).as_str())
-    };
-    env.service
-        .totp_enroll_finish(
-            &ctx,
-            &TotpEnrollFinish {
-                enrollment_id: enrollment.enrollment_id,
-                code: code(),
-            },
-        )
-        .await
-        .expect("enrolled");
-    // The enrollment's code is used: the sign-in takes the next step's.
-    env.clock.advance(Duration::from_secs(30));
-
+async fn below_the_margin_an_accounts_password_sign_ins_stop_at_its_share_alike_right_or_wrong() {
+    let (env, _) = installed().await;
     below_the_margin(&env).await;
-    let Ok(LoginOutcome::SecondFactor { challenge_id, .. }) =
+    // About 1.1 KiB each: 30 measured.
+    until_refused(28..=32, async || {
         login(&env, "192.0.2.10", ADMIN_PASSWORD).await
-    else {
-        panic!("a second factor is asked for");
-    };
-    signed_in(
-        &env.service
-            .login_totp(
-                &ctx_from(&env, "192.0.2.10"),
-                Some("test-agent"),
-                &CodeLogin {
-                    challenge_id,
-                    code: code(),
-                },
-            )
-            .await,
+    })
+    .await;
+    refused_for_room(&fail(&env, ATTACKER).await);
+    fail_as(&env, "192.0.2.67", "nobody")
+        .await
+        .expect("an unknown name answers 401");
+    let before = failures_of(&env, SECOND).await;
+    fail_as(&env, "192.0.2.68", SECOND)
+        .await
+        .expect("another account answers 401");
+    assert_eq!(
+        failures_of(&env, SECOND).await,
+        before + 1,
+        "and is recorded"
     );
+    second_signs_in(&env).await;
+    env.store.shutdown().await.expect("shutdown");
+}
+
+/// The password step and the second-factor code pass below the margin until the account's
+/// share is spent; then a wrong code answers 507 too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn below_the_margin_sign_ins_with_a_code_stop_at_the_accounts_share() {
+    let (env, session) = installed().await;
+    let seed = enroll_totp(&env, &session).await;
+    below_the_margin(&env).await;
+    // Each code takes the challenge of the step before, so one challenge is left unused
+    // whichever step is refused. The floor and about 2.9 KiB each: 10 measured.
+    let mut held = challenge(&env).await.expect("the first password step");
+    until_refused(8..=12, async || {
+        // The code of the step before is used.
+        env.clock.advance(Duration::from_secs(30));
+        let next = challenge(&env).await?;
+        login_totp(&env, std::mem::replace(&mut held, next), code(&env, &seed)).await
+    })
+    .await;
+    refused_for_room(&login_totp(&env, held, SecretString::new("000000")).await);
+    second_signs_in(&env).await;
+    env.store.shutdown().await.expect("shutdown");
+}
+
+/// The passkey step of a password sign-in passes below the margin until the account's share
+/// is spent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn below_the_margin_sign_ins_with_a_passkey_step_stop_at_the_accounts_share() {
+    let (env, session) = installed().await;
+    enroll_totp(&env, &session).await;
+    let mut key = register_key(&env, &session, false).await;
+    below_the_margin(&env).await;
+    // The floor twice and about 1.9 KiB each: 11 measured.
+    until_refused(9..=13, async || {
+        let challenge_id = challenge(&env).await?;
+        passkey(&env, &mut key, Some(challenge_id)).await
+    })
+    .await;
+    second_signs_in(&env).await;
+    env.store.shutdown().await.expect("shutdown");
+}
+
+/// Passkey sign-ins pass below the margin until the account's share is spent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn below_the_margin_passkey_sign_ins_stop_at_the_accounts_share() {
+    let (env, session) = installed().await;
+    let mut key = register_key(&env, &session, false).await;
+    below_the_margin(&env).await;
+    // About 1.9 KiB each: 17 measured.
+    until_refused(15..=19, async || passkey(&env, &mut key, None).await).await;
+    second_signs_in(&env).await;
     env.store.shutdown().await.expect("shutdown");
 }
 
 /// The break-glass account signs in with its hardware key below the margin: the alarm that
-/// goes with it rides in the same completed sign-in's budget.
+/// goes with it rides in the same completed sign-in's budget, until the account's share is
+/// spent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn below_the_margin_a_break_glass_sign_in_passes_with_its_alarm() {
+async fn below_the_margin_break_glass_sign_ins_pass_with_their_alarm_up_to_the_share() {
     let (env, _) = installed().await;
     let id = env.add_admin("emergency", ADMIN_PASSWORD).await;
     let Ok(LoginOutcome::Session(session)) = env
@@ -245,30 +463,7 @@ async fn below_the_margin_a_break_glass_sign_in_passes_with_its_alarm() {
     else {
         panic!("a password sign-in before the designation");
     };
-    let ctx = env.session_ctx(&session).await.expect("ctx");
-    let options = env
-        .service
-        .webauthn_register_start(
-            &ctx,
-            &WebAuthnRegisterStart {
-                label: Some("Test key".to_owned()),
-                security_key: true,
-            },
-        )
-        .await
-        .expect("start");
-    let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::PackedCertificate);
-    let credential = key.register(&options.public_key, ORIGIN);
-    env.service
-        .webauthn_register_finish(
-            &ctx,
-            &WebAuthnRegisterFinish {
-                ceremony_id: options.ceremony_id,
-                credential,
-            },
-        )
-        .await
-        .expect("hardware key");
+    let mut key = register_key(&env, &session, true).await;
     // The designation itself needs a strong session of another administrator; the row is
     // what the sign-in reads.
     let mut user = rows(&env, &USERS)
@@ -282,32 +477,14 @@ async fn below_the_margin_a_break_glass_sign_in_passes_with_its_alarm() {
     env.store.propose(batch).await.expect("designated");
 
     below_the_margin(&env).await;
-    let options = env
-        .service
-        .webauthn_login_start(
-            &env.public_ctx(),
-            &WebAuthnLoginStart {
-                user_name: None,
-                challenge_id: None,
-            },
-        )
-        .await
-        .expect("start");
-    let credential = key.assert(&options.public_key, ORIGIN);
-    let glass = env
-        .service
-        .webauthn_login_finish(
-            &env.public_ctx(),
-            None,
-            &WebAuthnLoginFinish {
-                ceremony_id: options.ceremony_id,
-                credential,
-            },
-        )
+    let glass = passkey(&env, &mut key, None)
         .await
         .expect("a break-glass sign-in within the completed budget");
     assert!(glass.info.flags.break_glass);
     assert!(!rows(&env, &ALARMS).await.is_empty(), "the alarm");
+    // About 1.7 KiB each: 18 measured after the first.
+    until_refused(16..=20, async || passkey(&env, &mut key, None).await).await;
+    second_signs_in(&env).await;
     env.store.shutdown().await.expect("shutdown");
 }
 
@@ -381,5 +558,42 @@ async fn below_the_reserve_a_right_and_a_wrong_password_answer_alike_and_are_sum
     assert_eq!(context["attempts"], "1");
     assert_eq!(context["accounts"], ADMIN);
     assert!(context["networks"].starts_with("192.0.2."), "{context:?}");
+    env.store.shutdown().await.expect("shutdown");
+}
+
+/// A batch of `bytes` marked as `user`'s completed sign-in, as a peer could forward it.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "a synthetic sign-in that fills the budget to a byte"
+)]
+async fn marked(env: &Env, user: UserId, bytes: u64) {
+    const ROWS: TableName = TableName::from_static("auth.disk_margin_rows");
+    let key = user.uuid().as_bytes().to_vec();
+    let mut batch = WriteBatch::completed_sign_in(user, env.now());
+    let value = usize::try_from(bytes).expect("fits")
+        - batch.payload_size()
+        - ROWS.as_str().len()
+        - key.len();
+    batch.put(ROWS, key, vec![0_u8; value]);
+    assert_eq!(batch.payload_size(), usize::try_from(bytes).expect("fits"));
+    env.store.propose(batch).await.expect("a marked batch");
+}
+
+/// A refusal by an account's share takes nothing of the shared budget: with the budget one
+/// byte short of its line, the account is refused and another still signs in.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refusal_by_an_accounts_share_takes_nothing_from_the_shared_budget() {
+    let (env, _) = installed().await;
+    let admin = admin(&env).await.id;
+    below_the_margin(&env).await;
+    marked(&env, admin, SIGN_IN_ACCOUNT_BYTES_PER_MINUTE).await;
+    marked(
+        &env,
+        UserId::generate(),
+        SIGN_IN_BYTES_PER_MINUTE - SIGN_IN_ACCOUNT_BYTES_PER_MINUTE - 1,
+    )
+    .await;
+    refused_for_room(&login(&env, "192.0.2.10", ADMIN_PASSWORD).await);
+    second_signs_in(&env).await;
     env.store.shutdown().await.expect("shutdown");
 }
