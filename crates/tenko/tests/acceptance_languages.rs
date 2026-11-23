@@ -194,6 +194,9 @@ fn start_node(node: &mut Node, ui: &Path) -> Proc {
 struct World {
     server: Proc,
     api: Api,
+    /// Kept so that the data directory outlives the server: fields drop in order, the server
+    /// first.
+    _node: Node,
 }
 
 impl World {
@@ -205,7 +208,11 @@ impl World {
         let server = start_node(&mut node, &ui);
         let mut api = Api::new(&node);
         api.setup(&wait_for_setup_token(&server));
-        Self { server, api }
+        Self {
+            server,
+            api,
+            _node: node,
+        }
     }
 
     #[track_caller]
