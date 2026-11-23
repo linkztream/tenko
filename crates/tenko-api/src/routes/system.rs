@@ -55,7 +55,10 @@ use tenko_core::{
 };
 use tenko_store::{
     ApplyStopped, Pressure, ReadConsistency, StoreError, StoreRole, StoreSafety, WriteBatch,
-    api::{APPLY_STOPPED, DISK_FLOOR_BYTES, DISK_UNKNOWN, SNAPSHOT_FAILED},
+    api::{
+        APPLY_STOPPED, DISK_FLOOR_BYTES, DISK_UNKNOWN, FAILED_SIGN_IN_BYTES_PER_MINUTE,
+        SIGN_IN_BYTES_PER_MINUTE, SNAPSHOT_FAILED,
+    },
 };
 use utoipa_axum::{router::OpenApiRouter, routes};
 use uuid::Uuid;
@@ -703,9 +706,12 @@ fn store_safety_warnings(safety: &StoreSafety, follower: bool) -> Vec<StatusWarn
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} it keeps: only writes that \
-                 free space and sign-ins are taken; failed sign-ins are counted and not \
-                 recorded, and one summary record follows once the disk has room.{follows}",
-                gib(safety.margin_bytes)
+                 free space and sign-ins are taken, {} MiB of sign-ins and {} KiB of failed \
+                 ones a minute; failed sign-ins beyond that are counted, not recorded, and \
+                 one summary record follows once the disk has room.{follows}",
+                gib(safety.margin_bytes),
+                SIGN_IN_BYTES_PER_MINUTE / (1024 * 1024),
+                FAILED_SIGN_IN_BYTES_PER_MINUTE / 1024,
             ),
             safety.margin_bytes,
         )),
@@ -723,7 +729,7 @@ fn store_safety_warnings(safety: &StoreSafety, follower: bool) -> Vec<StatusWarn
             StoreError::DISK_RESERVE,
             format!(
                 "the store's disk has {free} free, below the {} a snapshot and a compaction \
-                 need: only writes that free space are taken.{follows}",
+                 need: only writes that free space are taken, and nobody can sign in.{follows}",
                 gib(safety.reserve_bytes)
             ),
             safety.reserve_bytes,
@@ -1738,6 +1744,11 @@ mod tests {
         assert_eq!(
             codes(&safety),
             [(StoreError::DISK_RESERVE.to_owned(), "200".to_owned())]
+        );
+        let margin = &store_safety_warnings(&safety, false)[0].detail;
+        assert!(
+            margin.contains("1 MiB of sign-ins and 64 KiB of failed ones a minute"),
+            "{margin}"
         );
         safety.pressure = Pressure::Reserve;
         safety.free_bytes = DISK_FLOOR_BYTES;

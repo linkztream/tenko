@@ -346,7 +346,7 @@ impl AuthService {
         let credentials = Self::user_credentials(view.as_ref(), user.id)?.len();
         let methods = second_factor_methods(&user, credentials, first, self.required_for(&user));
 
-        let mut batch = WriteBatch::new(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
         batch.request = Some(ctx.request);
         // Only a changed record is written, so concurrent logins of one account do not
         // conflict over the user row.
@@ -651,7 +651,7 @@ impl AuthService {
         action: AuditAction,
         context: Option<(&str, String)>,
     ) -> Result<LoginOutcome, AuthError> {
-        let mut batch = WriteBatch::new(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
         batch.request = Some(ctx.request);
         staged.stage(&mut batch)?;
         // The used TOTP step or recovery code: a concurrent second login with the same code
@@ -709,7 +709,7 @@ impl AuthService {
             };
             // The second-factor challenge is spent here, in the store, so it cannot also
             // finish a code login or start another passkey step on any controller.
-            let mut batch = WriteBatch::new(on_behalf_of(user), ctx.now);
+            let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user), ctx.now);
             batch.request = Some(ctx.request);
             staged.stage(&mut batch)?;
             self.commit(batch).await.map_err(|error| match error {
@@ -863,7 +863,7 @@ impl AuthService {
         updated_credential.sign_count = verified.sign_count;
         updated_credential.backup_state = verified.backup_state;
         updated_credential.last_used_at = Some(ctx.now);
-        let mut batch = WriteBatch::new(on_behalf_of(user.id), ctx.now);
+        let mut batch = WriteBatch::completed_sign_in(on_behalf_of(user.id), ctx.now);
         batch.request = Some(ctx.request);
         staged.stage(&mut batch)?;
         batch.expect_typed(
@@ -974,7 +974,8 @@ impl AuthService {
         ctx: &RequestCtx,
         user: Option<(&UserRecord, Revision)>,
     ) -> AuthError {
-        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), ctx.now);
+        let mut batch =
+            WriteBatch::failed_sign_in(Principal::system(SystemComponent::Auth), ctx.now);
         batch.request = Some(ctx.request);
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])
@@ -998,10 +999,10 @@ impl AuthService {
                 tracing::error!(%error, "could not stage an alarm");
             }
         }
-        if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "could not record a failed WebAuthn login");
-        }
-        AuthError::InvalidCredentials
+        let tried = user.map_or(("", None), |(user, _)| (user.name.as_str(), Some(user.id)));
+        self.record_failure(batch, tried)
+            .await
+            .map_or(AuthError::InvalidCredentials, AuthError::from)
     }
 
     /// `POST /auth/logout`: ends the session of the request.

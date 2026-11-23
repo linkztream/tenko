@@ -35,7 +35,7 @@
 use std::{
     net::IpAddr,
     sync::{
-        Arc, PoisonError,
+        Arc,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -45,14 +45,16 @@ use tenko_core::{
     ObjectRef, Principal, RequestCtx, Revision, SystemComponent,
     audit::{AuditAction, AuditDraft},
 };
-use tenko_store::{KeyRange, Pressure, ReadView, ReadViewExt, WriteBatch};
+use tenko_store::{
+    KeyRange, Mutation, Pressure, ReadView, ReadViewExt, SignIn, StoreError, WriteBatch,
+};
 use tokio::sync::Semaphore;
 
 use super::{AuthService, actions};
 use crate::{
     error::AuthError,
     lockout::{LockPolicy, LockoutMode, LockoutPolicy, Retry, ThrottleKey, UNKNOWN_SOURCE},
-    model::{AccountLock, AlarmKind, LOCKS, UserRecord},
+    model::{ALARMS, AccountLock, AlarmKind, LOCKS, UserRecord},
     password::hash::{HashCost, HashStrength},
     settings::SecuritySettings,
 };
@@ -618,7 +620,8 @@ impl AuthService {
     }
 
     /// Records a failed attempt: in memory first, then one audit record, the stored lock
-    /// when one is reached, and the alarms. Always answers [`AuthError::InvalidCredentials`].
+    /// when one is reached, and the alarms. Answers [`AuthError::InvalidCredentials`], or the
+    /// store's refusal for room (`record_failure`).
     pub(super) async fn login_failed(
         &self,
         ctx: &RequestCtx,
@@ -650,13 +653,9 @@ impl AuthService {
                 ctx.now,
             );
         }
-        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), ctx.now);
+        let mut batch =
+            WriteBatch::failed_sign_in(Principal::system(SystemComponent::Auth), ctx.now);
         batch.request = Some(ctx.request);
-        if *self.store.pressure().borrow() != Pressure::Normal {
-            self.failed_short_of_room(ctx, attempt, user, action, outcome.locked_until, batch)
-                .await;
-            return AuthError::InvalidCredentials;
-        }
         let objects = user
             .map(|(user, _)| vec![ObjectRef::from(user.id)])
             .unwrap_or_default();
@@ -703,46 +702,58 @@ impl AuthService {
         {
             tracing::error!(%error, "could not stage an alarm");
         }
-        if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "could not record a failed login");
-        }
-        AuthError::InvalidCredentials
+        self.record_failure(batch, (&attempt.name, user.map(|(user, _)| user.id)))
+            .await
+            .map_or(AuthError::InvalidCredentials, AuthError::from)
     }
 
-    /// A failed attempt while the store's disk is short of room: the store takes no record
-    /// alone then, so the failure is counted for one summary record (`unrecorded`). The
-    /// waits and locks in memory hold as always, and a lock that starts is stored: a lock row
-    /// passes the store's guard below its margin, as a sign-in's rows do.
-    async fn failed_short_of_room(
+    /// Proposes the writes of a failed sign-in (`WriteBatch::failed_sign_in`). When the store
+    /// refuses them for room (its own margin, or a leader's for a forwarded write), the
+    /// failure is counted with its alarm rows for the summary (`unrecorded`) and the refusal
+    /// is returned, to be the answer where a right credential is refused alike. After a
+    /// failure the store took at normal pressure, a pending summary is written. A batch of
+    /// another kind is only proposed.
+    pub(super) async fn record_failure(
         &self,
-        ctx: &RequestCtx,
-        attempt: &Attempt,
-        user: Option<(&UserRecord, Revision)>,
-        action: AuditAction,
-        locked_until: Option<tenko_core::Timestamp>,
-        mut batch: WriteBatch,
-    ) {
-        self.unrecorded
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .note(
-                action,
-                &attempt.name,
-                user.map(|(user, _)| user.id),
-                network_text(attempt.source),
-            );
-        if attempt.mode != LockoutMode::Off {
-            let _ = self.count_mark_failure(attempt, ctx.now).await;
-        }
-        let Some(until) = locked_until else {
-            return;
-        };
-        if let Err(error) = self.stage_lock(&mut batch, ctx, attempt, until).await {
-            tracing::error!(%error, "could not stage a sign-in lock");
-            return;
-        }
-        if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "could not store a sign-in lock");
+        batch: WriteBatch,
+        tried: (&str, Option<tenko_core::UserId>),
+    ) -> Option<StoreError> {
+        let failed = batch.sign_in() == Some(SignIn::Failed);
+        let (action, source) = batch
+            .audit
+            .first()
+            .map(|draft| (draft.action.clone(), draft.source_ip))
+            .unzip();
+        let alarms: Vec<Mutation> = batch
+            .mutations
+            .iter()
+            .filter(|mutation| {
+                matches!(mutation, Mutation::Put { table, .. } if table == ALARMS.name())
+            })
+            .cloned()
+            .collect();
+        match self.store.propose(batch).await {
+            Ok(_) => {
+                if *self.store.pressure().borrow() == Pressure::Normal {
+                    self.write_unrecorded().await;
+                }
+                None
+            }
+            Err(error @ StoreError::DiskReserve { .. }) if failed => {
+                if let Some(action) = action {
+                    self.unrecorded.lock().await.note(
+                        action,
+                        tried,
+                        network_text(source.flatten()),
+                        alarms,
+                    );
+                }
+                Some(error)
+            }
+            Err(error) => {
+                tracing::warn!(%error, "could not record a failed sign-in");
+                None
+            }
         }
     }
 

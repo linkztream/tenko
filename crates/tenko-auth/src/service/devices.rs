@@ -341,7 +341,8 @@ impl AuthService {
                 return Some(MarkFailure::Ended);
             };
             let failures = record.failures.saturating_add(1).max(seen);
-            let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), now);
+            let mut batch =
+                WriteBatch::failed_sign_in(Principal::system(SystemComponent::Auth), now);
             batch.expect_typed(&KNOWN_DEVICES, &device.digest, Some(revision));
             let outcome = if failures >= budget {
                 batch.delete_typed(&KNOWN_DEVICES, &device.digest);

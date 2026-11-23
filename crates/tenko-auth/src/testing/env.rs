@@ -1,5 +1,6 @@
 //! A ready-made test environment: a [`MemStore`], a [`MemVault`] on the same store, a
 //! [`MockClock`] and an [`AuthService`], optionally already set up with an administrator.
+//! [`TestEnv::over`] builds one over another store and vault (a Raft store).
 
 use std::{net::IpAddr, sync::Arc};
 
@@ -31,18 +32,18 @@ pub const ADMIN_PIN: &str = "481273";
 pub const CLIENT: &str = "192.0.2.10";
 
 /// A test environment.
-pub struct TestEnv {
+pub struct TestEnv<S = MemStore, V = MemVault> {
     /// The store.
-    pub store: Arc<MemStore>,
+    pub store: Arc<S>,
     /// The vault over the same store.
-    pub vault: Arc<MemVault>,
+    pub vault: Arc<V>,
     /// The clock that drives request times.
     pub clock: Arc<MockClock>,
     /// The service.
     pub service: Arc<AuthService>,
 }
 
-impl std::fmt::Debug for TestEnv {
+impl<S, V> std::fmt::Debug for TestEnv<S, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TestEnv").finish_non_exhaustive()
     }
@@ -89,6 +90,26 @@ impl TestEnv {
         let env = Self::new().await;
         let session = env.setup(profile).await.expect("setup succeeds");
         (env, session)
+    }
+}
+
+impl<S: Store + 'static, V: Vault + 'static> TestEnv<S, V> {
+    /// An installation before setup over `store` and `vault`, which lies over it.
+    ///
+    /// # Panics
+    ///
+    /// If the service cannot start.
+    pub async fn over(store: Arc<S>, vault: Arc<V>) -> Self {
+        let dyn_vault: Arc<dyn Vault> = vault.clone();
+        let service = AuthService::new(store.clone(), dyn_vault, AuthConfig::default())
+            .await
+            .expect("the service starts");
+        Self {
+            store,
+            vault,
+            clock: Arc::new(MockClock::fixed()),
+            service,
+        }
     }
 
     /// Runs first-run setup.

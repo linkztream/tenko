@@ -37,7 +37,7 @@ use prost::bytes::Bytes;
 use rustls::ClientConfig;
 use tenko_core::NodeId;
 use tenko_store::{
-    Committed, ReadConsistency, ReadViewExt as _, Store as _, StoreError,
+    Committed, ReadConsistency, ReadViewExt as _, SignIn, Store as _, StoreError,
     raft::{
         RaftStore, RaftStoreConfig, WeakRaftStore,
         network::{
@@ -768,6 +768,7 @@ impl LeaderLink for PeerNetwork {
         _from: RaftNodeId,
         target: RaftNodeId,
         batch: Bytes,
+        sign_in: Option<SignIn>,
     ) -> Result<Committed, ForwardError> {
         let endpoint = self
             .endpoint(NodeId(target), None)
@@ -784,6 +785,7 @@ impl LeaderLink for PeerNetwork {
                 v1::ProposeRequest {
                     wire: BATCH_WIRE.to_owned(),
                     batch: batch.to_vec(),
+                    sign_in: wire::sign_in_to(sign_in),
                 },
             );
             trace::inject(&mut request);

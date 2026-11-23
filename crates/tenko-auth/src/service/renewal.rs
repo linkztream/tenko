@@ -431,8 +431,8 @@ impl AuthService {
             return Err(AuthError::Unauthenticated);
         };
         let failed = || {
-            let mut batch = WriteBatch::for_request(ctx);
-            batch.idempotency = None;
+            let mut batch = WriteBatch::failed_sign_in(ctx.principal.clone(), ctx.now);
+            batch.request = Some(ctx.request);
             batch.audit(
                 AuditDraft::failed(
                     actions::TOKEN_RENEW,
@@ -535,9 +535,7 @@ impl AuthService {
                 }
             }
         }
-        if let Err(error) = self.store.propose(fallback).await {
-            tracing::warn!(%error, "could not record a token decision");
-        }
+        self.record_failure(fallback, ("", None)).await;
         decided.ok_or_else(|| AuthError::internal("no token decision was made"))
     }
 

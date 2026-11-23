@@ -461,6 +461,12 @@ impl StateMachine {
             return Ok(());
         }
         let result = (|| {
+            #[cfg(feature = "test-hooks")]
+            if fs::remove_file(self.shared.dir.join(crate::test_hooks::FAIL_CHECKPOINT)).is_ok() {
+                return Err(StoreError::Storage(
+                    crate::test_hooks::full_disk().to_string(),
+                ));
+            }
             // An empty durable commit persists every earlier non-durable one.
             let txn = self.db().begin_write().map_err(storage)?;
             txn.commit().map_err(storage)
@@ -530,9 +536,7 @@ impl StateMachine {
                             #[cfg(feature = "test-hooks")]
                             let outcome = if shared.dir.join(crate::test_hooks::FAIL_STATE).exists()
                             {
-                                Err(StoreError::Storage(
-                                    "the test hook fails the state write".to_owned(),
-                                ))
+                                Err(StoreError::Storage(redb::Error::PreviousIo.to_string()))
                             } else {
                                 outcome
                             };

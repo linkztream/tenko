@@ -219,17 +219,14 @@ impl IpamPlan {
 
     /// The write batch of the plan.
     pub fn to_batch(&self) -> WriteBatch {
-        WriteBatch {
-            principal: self.principal.clone(),
-            proposed_at: self.at,
-            request: Some(self.request),
-            // Idempotency of IPAM requests is handled by `ipam.receipts`, because a
-            // replayed request plans new identifiers and so a different batch.
-            idempotency: None,
-            preconditions: self.preconditions.clone(),
-            mutations: self.mutations.clone(),
-            audit: self.audit.clone(),
-        }
+        // Idempotency of IPAM requests is handled by `ipam.receipts`, because a replayed
+        // request plans new identifiers and so a different batch.
+        let mut batch = WriteBatch::new(self.principal.clone(), self.at);
+        batch.request = Some(self.request);
+        batch.preconditions.clone_from(&self.preconditions);
+        batch.mutations.clone_from(&self.mutations);
+        batch.audit.clone_from(&self.audit);
+        batch
     }
 
     /// Counts per kind and action, warnings and English summary lines.

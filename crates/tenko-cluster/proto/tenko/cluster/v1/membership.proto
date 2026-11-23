@@ -106,6 +106,18 @@ message ProposeRequest {
   string wire = 1;
   // The store write batch, CBOR.
   bytes batch = 2;
+  // The batch's sign-in mark for the leader's disk guard, which the batch's encoding and
+  // the Raft log never hold. A peer that does not know the field sends none.
+  SignIn sign_in = 3;
+}
+
+enum SignIn {
+  // No sign-in: the default, and what an older peer sends.
+  SIGN_IN_NONE = 0;
+  // The writes of a completed sign-in.
+  SIGN_IN_COMPLETED = 1;
+  // The writes of a failed sign-in.
+  SIGN_IN_FAILED = 2;
 }
 
 message ProposeResponse {

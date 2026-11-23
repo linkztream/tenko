@@ -124,6 +124,17 @@ pub enum Mutation {
     },
 }
 
+/// What a sign-in's batch holds, for the disk guard below its margin
+/// (`docs/cluster.md` section 12.12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignIn {
+    /// The writes of a completed sign-in (or of its password step): only valid credentials
+    /// reach them.
+    Completed,
+    /// The writes of a failed sign-in: its record, a lock, an alarm.
+    Failed,
+}
+
 /// A set of mutations that applies atomically with one revision.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WriteBatch {
@@ -146,6 +157,11 @@ pub struct WriteBatch {
     /// Sealed into the audit chain at apply (IAM-18).
     #[serde(default)]
     pub audit: Vec<AuditDraft>,
+    /// Set by [`WriteBatch::completed_sign_in`] and [`WriteBatch::failed_sign_in`], and on
+    /// the leader from a follower's forward. Never encoded, so never in the Raft log: a batch
+    /// read back from the log has none, and a forward carries it beside the batch.
+    #[serde(skip)]
+    pub(crate) sign_in: Option<SignIn>,
 }
 
 impl WriteBatch {
@@ -159,7 +175,31 @@ impl WriteBatch {
             preconditions: Vec::new(),
             mutations: Vec::new(),
             audit: Vec::new(),
+            sign_in: None,
         }
+    }
+
+    /// An empty batch for the writes of a completed sign-in: below the store's margin it
+    /// passes within the budget only valid credentials reach.
+    pub fn completed_sign_in(principal: Principal, proposed_at: Timestamp) -> Self {
+        Self {
+            sign_in: Some(SignIn::Completed),
+            ..Self::new(principal, proposed_at)
+        }
+    }
+
+    /// An empty batch for the writes of a failed sign-in: below the store's margin it
+    /// passes within the small budget of failures.
+    pub fn failed_sign_in(principal: Principal, proposed_at: Timestamp) -> Self {
+        Self {
+            sign_in: Some(SignIn::Failed),
+            ..Self::new(principal, proposed_at)
+        }
+    }
+
+    /// The sign-in the batch was made for, if any.
+    pub fn sign_in(&self) -> Option<SignIn> {
+        self.sign_in
     }
 
     /// An empty batch carrying the principal, time, request id and idempotency key of a
@@ -1085,6 +1125,14 @@ pub const SNAPSHOT_FAILED: &str = "sys.store.snapshot_failed";
 /// it (`docs/cluster.md` section 12.12).
 pub const DISK_FLOOR_BYTES: u64 = 128 * 1024 * 1024;
 
+/// The bytes of completed sign-ins ([`WriteBatch::completed_sign_in`]) the store takes a
+/// minute below its margin (`docs/cluster.md` section 12.12).
+pub const SIGN_IN_BYTES_PER_MINUTE: u64 = 1024 * 1024;
+
+/// The bytes of failed sign-ins ([`WriteBatch::failed_sign_in`]) the store takes a minute
+/// below its margin; anybody can spend them, so they are few.
+pub const FAILED_SIGN_IN_BYTES_PER_MINUTE: u64 = 64 * 1024;
+
 /// The code of a free space of the data directory that cannot be read: the store takes
 /// only writes that free space until it can ([`StoreSafety::free_unknown`]).
 pub const DISK_UNKNOWN: &str = "sys.store.disk_unknown";
@@ -1193,7 +1241,10 @@ pub enum StoreError {
     Stopped,
     /// The data directory's free space is below a line the store keeps for its snapshot and
     /// compaction, and the batch does not free space (`docs/cluster.md` section 12.12).
-    #[error("{free} bytes free on the store's disk, below the {needed} it keeps free")]
+    #[error(
+        "{free} bytes free on the store's disk, below the {needed} it keeps free \
+         (docs/cluster.md section 12.12 gives the steps on a full disk)"
+    )]
     DiskReserve {
         /// The free bytes.
         free: u64,

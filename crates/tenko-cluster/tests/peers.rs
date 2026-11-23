@@ -2000,6 +2000,7 @@ async fn cluster_calls(
             .propose(v1::ProposeRequest {
                 wire: tenko_cluster::wire::BATCH_WIRE.to_owned(),
                 batch: Vec::new(),
+                ..Default::default()
             })
             .await
             .map(drop),
@@ -2649,6 +2650,7 @@ async fn every_call(
                     .propose(request!(v1::ProposeRequest {
                         wire: tenko_cluster::wire::BATCH_WIRE.to_owned(),
                         batch: Vec::new(),
+                        ..Default::default()
                     }))
                     .await
                     .map(drop),

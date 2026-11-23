@@ -17,9 +17,10 @@ use tenko_core::{
     testing::{wait_until_async, wait_until_async_within},
 };
 use tenko_store::{
-    Pressure, Store, StoreError, WriteBatch,
-    raft::{RaftStore, RaftStoreConfig},
-    test_hooks::{FAIL_LOG, FAIL_STATE, FREE_BYTES},
+    Pressure, SignIn, Store, StoreError, WriteBatch,
+    raft::{RaftStore, RaftStoreConfig, fixture::InProcessCluster, network::ForwardError},
+    test_hooks::{FAIL_CHECKPOINT, FAIL_LOG, FAIL_STATE, FREE_BYTES},
+    testing::ConformanceConfig,
 };
 
 const ROWS: TableName = TableName::from_static("ipam.disk_safety_rows");
@@ -139,7 +140,7 @@ async fn a_failed_write_inside_an_apply_is_noted_as_a_stop() {
         safety
             .stopped
             .as_deref()
-            .is_some_and(|cause| cause.contains("the test hook fails the state write")),
+            .is_some_and(|cause| cause.contains("Previous I/O error")),
         "{safety:?}"
     );
     assert!(
@@ -149,6 +150,34 @@ async fn a_failed_write_inside_an_apply_is_noted_as_a_stop() {
     assert!(!safety.restartable, "no full disk named: {safety:?}");
     free_space(&store, u64::MAX, Pressure::Normal).await;
     assert!(!store.safety().expect("safety").restart_due());
+    fs::remove_file(data_file(&store, FAIL_STATE)).expect("heal");
+    let _ = store.shutdown().await;
+}
+
+/// A full disk the periodic checkpoint met first: redb then answers "Previous I/O error" to
+/// every write, which names no code, and the stop is taken as the full disk it is.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stop_after_a_checkpoint_on_a_full_disk_is_a_full_disk() {
+    let store = single().await;
+    store
+        .propose(put(1))
+        .await
+        .expect("a write for the checkpoint");
+    let hook = data_file(&store, FAIL_CHECKPOINT);
+    fs::write(&hook, b"").expect("fail the next checkpoint");
+    wait_until_async("the checkpoint failed", async || !hook.exists()).await;
+    fs::write(data_file(&store, FAIL_STATE), b"").expect("fail the applies");
+    let failed = store.propose(put(2)).await;
+    assert!(matches!(failed, Err(StoreError::Stopped)), "{failed:?}");
+    let safety = store.safety().expect("safety");
+    assert!(safety.restartable, "{safety:?}");
+    assert!(
+        safety
+            .stopped
+            .as_deref()
+            .is_some_and(|cause| cause.contains("after a checkpoint failed")),
+        "{safety:?}"
+    );
     fs::remove_file(data_file(&store, FAIL_STATE)).expect("heal");
     let _ = store.shutdown().await;
 }
@@ -292,13 +321,13 @@ async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
     keyed.idempotency = Some(IdempotencyKey::new("disk-safety-forwarded").expect("a key"));
     let encoded = tenko_core::codec::to_cbor(&keyed).expect("encoded");
     let first = store
-        .accept_forwarded(encoded.clone())
+        .accept_forwarded(encoded.clone(), None)
         .await
         .expect("the forwarded write");
     free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
     let last = store.raft().metrics().borrow().last_log_index;
     let replayed = store
-        .accept_forwarded(encoded)
+        .accept_forwarded(encoded, None)
         .await
         .expect("its forwarded retry");
     assert!(replayed.replayed, "answered from the idempotency record");
@@ -309,4 +338,72 @@ async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
         "nothing was appended"
     );
     store.shutdown().await.expect("shutdown");
+}
+
+/// A sign-in's batch of about 1 KiB, marked as `kind`.
+fn sign_in(kind: SignIn, n: u64) -> WriteBatch {
+    let principal = Principal::system(SystemComponent::Auth);
+    let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");
+    let mut batch = match kind {
+        SignIn::Completed => WriteBatch::completed_sign_in(principal, at),
+        SignIn::Failed => WriteBatch::failed_sign_in(principal, at),
+    };
+    batch.put(ROWS, encode_key(&n), Bytes::from(vec![0_u8; 1024]));
+    batch
+}
+
+/// A follower's sign-in reaches its leader with its mark, beside the batch: below the
+/// leader's margin the leader takes it within its own budgets, which its local sign-ins
+/// spend too, and refuses an unmarked batch that grows the store, as it refuses a sign-in
+/// from an older peer that sends no mark.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
+    let cluster = InProcessCluster::start_with(3, &ConformanceConfig::default(), |config| {
+        config.fsync_probe_samples = 0;
+    })
+    .await;
+    let leader = cluster.wait_for_leader().await;
+    let follower = cluster.a_follower().await;
+    free_space(&leader, inside_the_margin(&leader), Pressure::Margin).await;
+
+    follower
+        .propose(sign_in(SignIn::Completed, 1))
+        .await
+        .expect("a completed sign-in forwarded below the leader's margin");
+    let refused = follower.propose(put(2)).await.expect_err("unmarked growth");
+    assert_eq!(refused.code(), StoreError::DISK_RESERVE);
+    let older = leader
+        .accept_forwarded(
+            tenko_core::codec::to_cbor(&sign_in(SignIn::Completed, 3)).expect("encoded"),
+            None,
+        )
+        .await
+        .expect_err("a sign-in from a peer that sends no mark");
+    assert!(
+        matches!(older, ForwardError::Store(StoreError::DiskReserve { .. })),
+        "{older:?}"
+    );
+    assert!(older.to_string().contains("12.12"), "{older}");
+
+    // Failures forwarded spend the leader's budget of failures, the one its own spend.
+    let mut passed = 0_u64;
+    while follower
+        .propose(sign_in(SignIn::Failed, 100 + passed))
+        .await
+        .is_ok()
+    {
+        passed += 1;
+        assert!(passed < 1_000, "the budget of failures never ended");
+    }
+    assert!(passed > 10, "{passed} failures passed");
+    let spent = leader
+        .propose(sign_in(SignIn::Failed, 5_000))
+        .await
+        .expect_err("the leader's own failure, past the shared budget");
+    assert_eq!(spent.code(), StoreError::DISK_RESERVE);
+    leader
+        .propose(sign_in(SignIn::Completed, 5_001))
+        .await
+        .expect("completed sign-ins keep their own budget");
+    cluster.shutdown().await;
 }

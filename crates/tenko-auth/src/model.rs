@@ -85,30 +85,6 @@ pub const SESSIONS: TableDef<Vec<u8>, SessionRecord> = TableDef::new("auth.sessi
 pub const USER_SESSIONS: TableDef<(UserId, SessionId), Vec<u8>> =
     TableDef::new("auth.user_sessions");
 
-/// The tables a sign-in writes (the session, its index row and the account's record): the
-/// store takes them below its disk margin, small and capped (`docs/cluster.md` section
-/// 12.12), so that an administrator can still sign in to see why.
-pub fn signin_tables() -> Vec<tenko_core::TableName> {
-    [
-        SESSIONS.name(),
-        USER_SESSIONS.name(),
-        USERS.name(),
-        LOCKS.name(),
-    ]
-    .into_iter()
-    .cloned()
-    .collect()
-}
-
-/// The tables one of whose rows makes a batch a sign-in for the store's disk guard: a
-/// session, or an account's lock (a failed sign-in that starts one). A batch of an audit
-/// record alone is none.
-pub fn signin_anchors() -> Vec<tenko_core::TableName> {
-    [SESSIONS.name(), LOCKS.name()]
-        .into_iter()
-        .cloned()
-        .collect()
-}
 /// Personal tokens by the hash of the token.
 pub const TOKENS: TableDef<Vec<u8>, TokenRecord> = TableDef::new("auth.tokens");
 /// Token hashes by owner.

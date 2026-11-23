@@ -63,7 +63,7 @@ use super::{
     stored::Message,
     types::{RaftNodeId, Snapshot, TypeConfig, Vote},
 };
-use crate::api::{Committed, StoreError};
+use crate::api::{Committed, SignIn, StoreError};
 
 /// The result of a forwarded `append_entries`.
 pub type AppendResult = Result<
@@ -129,11 +129,14 @@ pub trait LeaderLink: Send + Sync + 'static {
     /// Sends an encoded write batch (`tenko_core::codec::to_cbor` of a
     /// [`WriteBatch`](crate::api::WriteBatch)) from `from` to the leader `target`, which
     /// validates and proposes it and answers once it is committed and applied there.
+    /// `sign_in` is the batch's mark ([`WriteBatch::sign_in`](crate::api::WriteBatch::sign_in)),
+    /// which the encoding leaves out: it travels beside the batch, for the leader's disk guard.
     async fn forward_propose(
         &self,
         from: RaftNodeId,
         target: RaftNodeId,
         batch: Bytes,
+        sign_in: Option<SignIn>,
     ) -> Result<Committed, ForwardError>;
 
     /// Asks the leader `target` for a read index on behalf of `from`, after the leader
@@ -240,6 +243,7 @@ impl LeaderLink for NoPeers {
         _from: RaftNodeId,
         _target: RaftNodeId,
         _batch: Bytes,
+        _sign_in: Option<SignIn>,
     ) -> Result<Committed, ForwardError> {
         Err(ForwardError::Unreachable(
             "this store has no peers".to_owned(),
@@ -286,8 +290,11 @@ impl LeaderLink for SwitchTransport {
         from: RaftNodeId,
         target: RaftNodeId,
         batch: Bytes,
+        sign_in: Option<SignIn>,
     ) -> Result<Committed, ForwardError> {
-        self.current().forward_propose(from, target, batch).await
+        self.current()
+            .forward_propose(from, target, batch, sign_in)
+            .await
     }
 
     async fn forward_read_index(
@@ -658,11 +665,12 @@ impl LeaderLink for InProcessNetwork {
         from: RaftNodeId,
         target: RaftNodeId,
         batch: Bytes,
+        sign_in: Option<SignIn>,
     ) -> Result<Committed, ForwardError> {
         let store = self
             .target(from, target)
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        store.accept_forwarded(batch).await
+        store.accept_forwarded(batch, sign_in).await
     }
 
     async fn forward_read_index(

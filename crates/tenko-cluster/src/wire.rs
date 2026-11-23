@@ -22,7 +22,7 @@ use tenko_core::{
     codec::{from_cbor, to_cbor},
 };
 use tenko_store::{
-    Committed, FailedPrecondition, StoreError, WriteBatch,
+    Committed, FailedPrecondition, SignIn, StoreError, WriteBatch,
     raft::{
         openraft::raft::{
             AppendEntriesRequest, AppendEntriesResponse, SnapshotResponse, VoteRequest,
@@ -219,6 +219,26 @@ impl From<WireStoreError> for StoreError {
             WireStoreError::Stopped => Self::Stopped,
             WireStoreError::DiskReserve { free, needed } => Self::DiskReserve { free, needed },
         }
+    }
+}
+
+/// The sign-in mark of a forwarded batch on the wire (`ProposeRequest.sign_in`).
+pub fn sign_in_to(sign_in: Option<SignIn>) -> i32 {
+    let mark = match sign_in {
+        None => crate::proto::v1::SignIn::None,
+        Some(SignIn::Completed) => crate::proto::v1::SignIn::Completed,
+        Some(SignIn::Failed) => crate::proto::v1::SignIn::Failed,
+    };
+    mark.into()
+}
+
+/// The sign-in mark a forward carries; none for an unknown value or from a peer that sends
+/// none.
+pub fn sign_in_from(mark: i32) -> Option<SignIn> {
+    match crate::proto::v1::SignIn::try_from(mark).ok()? {
+        crate::proto::v1::SignIn::None => None,
+        crate::proto::v1::SignIn::Completed => Some(SignIn::Completed),
+        crate::proto::v1::SignIn::Failed => Some(SignIn::Failed),
     }
 }
 
@@ -732,6 +752,7 @@ mod tests {
                 v1::ProposeRequest {
                     wire: BATCH_WIRE.to_owned(),
                     batch: cbor(&seed_batch()),
+                    ..Default::default()
                 }
                 .encode_to_vec(),
             ),
@@ -764,6 +785,34 @@ mod tests {
                 .encode_to_vec(),
             ),
         ]
+    }
+
+    /// The sign-in mark travels beside a forwarded batch; a peer that sends none, an older
+    /// one, sends no field at all, which reads as no mark.
+    #[test]
+    fn a_forwards_sign_in_mark_round_trips_and_is_absent_from_an_older_peer() {
+        use prost::Message as _;
+        for mark in [None, Some(SignIn::Completed), Some(SignIn::Failed)] {
+            let request = crate::proto::v1::ProposeRequest {
+                wire: BATCH_WIRE.to_owned(),
+                batch: cbor(&seed_batch()),
+                sign_in: sign_in_to(mark),
+            };
+            let decoded =
+                crate::proto::v1::ProposeRequest::decode(request.encode_to_vec().as_slice())
+                    .expect("decoded");
+            assert_eq!(sign_in_from(decoded.sign_in), mark);
+        }
+        // An older peer's request: fields 1 and 2 only.
+        let older = crate::proto::v1::ProposeRequest {
+            wire: BATCH_WIRE.to_owned(),
+            batch: cbor(&seed_batch()),
+            ..Default::default()
+        }
+        .encode_to_vec();
+        let decoded = crate::proto::v1::ProposeRequest::decode(older.as_slice()).expect("decoded");
+        assert_eq!(sign_in_from(decoded.sign_in), None);
+        assert_eq!(sign_in_from(99), None, "an unknown mark is none");
     }
 
     /// A payload as CBOR.

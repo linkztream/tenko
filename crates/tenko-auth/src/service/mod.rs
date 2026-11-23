@@ -256,9 +256,9 @@ pub struct AuthService {
     hash_gate: guard::HashGate,
     dummy_timing: guard::DummyTiming,
     known_networks: Arc<guard::KnownNetworks>,
-    /// Failed sign-ins counted while the store's disk is short of room, for one summary
-    /// record once it has room again (`unrecorded`).
-    unrecorded: Mutex<unrecorded::Unrecorded>,
+    /// Failed sign-ins the store refused for room, for one summary record once it has room
+    /// again (`unrecorded`).
+    unrecorded: tokio::sync::Mutex<unrecorded::Unrecorded>,
     devices_in_flight: devices::DevicesInFlight,
     misses: misses::Misses,
     /// The token warnings the last sweep computed (IAM-20).
@@ -420,7 +420,7 @@ impl AuthService {
             hash_gate: guard::HashGate::new(config.password_hash_memory_mib),
             dummy_timing: guard::DummyTiming::default(),
             known_networks: Arc::new(guard::KnownNetworks::default()),
-            unrecorded: Mutex::new(unrecorded::Unrecorded::default()),
+            unrecorded: tokio::sync::Mutex::new(unrecorded::Unrecorded::default()),
             devices_in_flight: devices::DevicesInFlight::default(),
             misses: misses::Misses::default(),
             token_warnings: Mutex::new(Vec::new()),
@@ -1177,24 +1177,19 @@ impl AuthService {
         });
     }
 
-    /// Writes the summary of the failed sign-ins counted so far, if any.
+    /// Writes the summary of the failed sign-ins counted so far, if any; the counts are
+    /// reset only once the store took it.
     async fn write_unrecorded(&self) {
-        let counted = std::mem::take(
-            &mut *self
-                .unrecorded
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner),
-        );
-        let Some(draft) = counted.draft() else {
+        let mut counted = self.unrecorded.lock().await;
+        let Some(batch) = counted.batch(tenko_core::Timestamp::now()) else {
             return;
         };
-        let mut batch = WriteBatch::new(
-            Principal::system(tenko_core::SystemComponent::Auth),
-            tenko_core::Timestamp::now(),
-        );
-        batch.audit(draft);
-        if let Err(error) = self.store.propose(batch).await {
-            tracing::warn!(%error, "could not record the failed sign-ins counted while the disk was short of room");
+        match self.store.propose(batch).await {
+            Ok(_) => *counted = unrecorded::Unrecorded::default(),
+            Err(error) => tracing::warn!(
+                %error,
+                "could not record the failed sign-ins the store refused for room; kept for later"
+            ),
         }
     }
 

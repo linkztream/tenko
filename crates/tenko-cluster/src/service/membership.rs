@@ -56,7 +56,13 @@ impl v1::cluster_server::Cluster for PeerService {
             authenticated(&request)?;
             let body = request.into_inner();
             wire::check(&body.wire, BATCH_WIRE).map_err(|error| status_of(&error))?;
-            match self.peers.store().accept_forwarded(body.batch.into()).await {
+            let sign_in = wire::sign_in_from(body.sign_in);
+            match self
+                .peers
+                .store()
+                .accept_forwarded(body.batch.into(), sign_in)
+                .await
+            {
                 Ok(committed) => Ok(Response::new(v1::ProposeResponse {
                     wire: BATCH_WIRE.to_owned(),
                     committed: wire::encode(&committed).map_err(|error| status_of(&error))?,

@@ -130,7 +130,7 @@ use std::{
 use bytes::Bytes;
 use openraft::{BasicNode, ServerState, error::Fatal, storage::RaftLogStorage as _};
 use tenko_core::{
-    NodeId, Revision, TableName,
+    NodeId, Revision,
     audit::Digest,
     codec::{from_cbor_exact, to_cbor},
 };
@@ -156,8 +156,8 @@ use self::{
 };
 use crate::api::{
     ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, Pressure,
-    QuorumState, ReadConsistency, ReadView, Store, StoreError, StoreRole, StoreSafety, StoreStatus,
-    WatchFilter, WriteBatch,
+    QuorumState, ReadConsistency, ReadView, SignIn, Store, StoreError, StoreRole, StoreSafety,
+    StoreStatus, WatchFilter, WriteBatch,
 };
 
 /// openraft 0.9 as the store uses it: a peer transport (`tenko-cluster`) takes the wire
@@ -392,12 +392,6 @@ pub struct RaftStoreConfig {
     pub fsync_probe_samples: usize,
     /// Verify every audit record at start-up instead of the chain head.
     pub verify_full_audit_chain: bool,
-    /// The tables a sign-in writes: below the disk guard's margin a sign-in still passes,
-    /// small and capped (`docs/cluster.md` section 12.12). Empty: none passes.
-    pub signin_tables: Vec<TableName>,
-    /// The tables one of whose rows marks a batch as a sign-in (a session, an account's
-    /// lock); a sign-in writes at least one of them.
-    pub signin_anchors: Vec<TableName>,
 }
 
 impl RaftStoreConfig {
@@ -427,8 +421,6 @@ impl RaftStoreConfig {
             status_refresh: Duration::from_secs(5),
             fsync_probe_samples: fsync::DEFAULT_PROBE_SAMPLES,
             verify_full_audit_chain: false,
-            signin_tables: Vec::new(),
-            signin_anchors: Vec::new(),
         }
     }
 
@@ -581,6 +573,9 @@ struct Inner {
     disk: disk::Guard,
     /// Why the Raft core stopped, once it did on a failure ([`StoreError::Stopped`]).
     stopped: OnceLock<(String, bool)>,
+    /// A full disk the store met outside the Raft core (its own checkpoint), for the cause
+    /// of a stop that follows: redb then answers only "Previous I/O error".
+    full_disk: Mutex<Option<String>>,
     /// The state file is being compacted.
     compacting: AtomicBool,
     /// When the store opened.
@@ -887,7 +882,7 @@ impl RaftStore {
             config.read_wait,
             Duration::from_millis(config.timings.heartbeat_ms),
         ));
-        let disk = disk::Guard::new(config.signin_tables.clone(), config.signin_anchors.clone());
+        let disk = disk::Guard::new();
         let inner = Arc::new(Inner {
             config,
             raft,
@@ -912,6 +907,7 @@ impl RaftStore {
             temp_dir,
             disk,
             stopped: OnceLock::new(),
+            full_disk: Mutex::new(None),
             compacting: AtomicBool::new(false),
             opened: Instant::now(),
         });
@@ -1191,16 +1187,24 @@ impl RaftStore {
 
     /// Serves a write a follower forwarded (the leader side of
     /// [`network::LeaderLink::forward_propose`]): checks that this node leads, decodes and
-    /// validates the batch, and proposes it like a local write.
+    /// validates the batch, and proposes it like a local write. `sign_in` is the mark the
+    /// follower sent beside it (`None` from a peer that sends none).
     ///
     /// # Errors
     ///
     /// [`ForwardError::NotLeader`] when another node leads (nothing was queued),
     /// [`ForwardError::NoAnswer`] when the entry did not apply in time, or the store's error
     /// for the batch.
-    pub async fn accept_forwarded(&self, batch: Bytes) -> Result<Committed, ForwardError> {
+    pub async fn accept_forwarded(
+        &self,
+        batch: Bytes,
+        sign_in: Option<SignIn>,
+    ) -> Result<Committed, ForwardError> {
         let span = propose_span(batch.len());
-        let result = self.accept_queued(batch).instrument(span.clone()).await;
+        let result = self
+            .accept_queued(batch, sign_in)
+            .instrument(span.clone())
+            .await;
         if !matches!(result, Err(ForwardError::NotLeader { .. })) {
             span.record("tenko.store.forwarded", false);
             span.record("tenko.store.leader", self.inner.me());
@@ -1219,15 +1223,24 @@ impl RaftStore {
     }
 
     /// [`RaftStore::accept_forwarded`] inside its span.
-    async fn accept_queued(&self, batch: Bytes) -> Result<Committed, ForwardError> {
+    async fn accept_queued(
+        &self,
+        batch: Bytes,
+        sign_in: Option<SignIn>,
+    ) -> Result<Committed, ForwardError> {
         let inner = &self.inner;
         inner.check_running().map_err(ForwardError::Store)?;
         let leader = inner.leader();
         if leader != Some(inner.me()) {
             return Err(ForwardError::NotLeader { leader });
         }
-        let decoded: WriteBatch =
+        let mut decoded: WriteBatch =
             from_cbor_exact(&batch).map_err(|error| ForwardError::Store(error.into()))?;
+        // The leader takes the peer's word for the mark. A controller that marks batches
+        // wrongly gains at most the sign-in budgets below this leader's margin, which are the
+        // leader's own and shared with its local sign-ins, never a write below its reserve,
+        // and nothing a controller could not already do to its own disk.
+        decoded.sign_in = sign_in;
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)
             .map_err(ForwardError::Store)?;
@@ -1915,13 +1928,21 @@ impl Inner {
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
+        sign_in: Option<SignIn>,
         background: bool,
         logged: Option<oneshot::Sender<()>>,
     ) -> Result<Committed, StoreError> {
         let span = propose_span(encoded.len());
         let mut route = Route::default();
         let result = self
-            .propose_routed(encoded, fingerprint, background, logged, &mut route)
+            .propose_routed(
+                encoded,
+                fingerprint,
+                sign_in,
+                background,
+                logged,
+                &mut route,
+            )
             .instrument(span.clone())
             .await;
         if let Some(leader) = route.leader {
@@ -1945,6 +1966,7 @@ impl Inner {
         &self,
         encoded: Bytes,
         fingerprint: Option<Digest>,
+        sign_in: Option<SignIn>,
         background: bool,
         mut logged: Option<oneshot::Sender<()>>,
         route: &mut Route,
@@ -1978,7 +2000,7 @@ impl Inner {
                 }
                 Some(id) => match self
                     .transport
-                    .forward_propose(self.me(), id, encoded.clone())
+                    .forward_propose(self.me(), id, encoded.clone(), sign_in)
                     .await
                 {
                     Ok(committed) => {
@@ -2101,7 +2123,13 @@ impl Inner {
         if let Err(fatal) = &self.raft.metrics().borrow().running_state
             && !matches!(fatal, Fatal::Stopped)
         {
-            let cause = fatal.to_string();
+            let mut cause = fatal.to_string();
+            // redb latches the full disk its checkpoint met and names no code after it.
+            if cause.contains(PREVIOUS_IO)
+                && let Some(full) = lock(&self.full_disk).as_ref()
+            {
+                cause = format!("{cause}, after a checkpoint failed: {full}");
+            }
             let restartable = disk::names_a_full_disk(&cause);
             tracing::error!(
                 code = StoreError::STOPPED,
@@ -2155,10 +2183,14 @@ impl Inner {
     /// free space (prunes) go first, then one compaction on a task of its own returns the
     /// freed pages to the file system. It runs only when the state file holds at least half
     /// the live data again in free pages, no snapshot is being built and a fresh copy fits.
-    fn relieve(self: &Arc<Self>, pressure: Pressure, episode: &mut Option<(Instant, bool)>) {
+    fn relieve(
+        self: &Arc<Self>,
+        pressure: Pressure,
+        episode: &mut Option<(Instant, bool)>,
+    ) -> bool {
         if pressure == Pressure::Normal {
             *episode = None;
-            return;
+            return false;
         }
         let (since, compacted) = episode.get_or_insert_with(|| (Instant::now(), false));
         let data = self.sm.meta().data_bytes;
@@ -2175,7 +2207,9 @@ impl Inner {
             *compacted = true;
             let inner = Arc::clone(self);
             tokio::spawn(async move { inner.compact().await });
+            return true;
         }
+        false
     }
 
     /// Whether a fresh copy of the live data fits on the disk, with the reserve's base beside
@@ -2345,7 +2379,7 @@ impl RaftStore {
         inner.admit(&batch)?;
         let encoded = to_cbor(&batch)?;
         let committed = inner
-            .propose_encoded(encoded, fingerprint, background, logged)
+            .propose_encoded(encoded, fingerprint, batch.sign_in(), background, logged)
             .await
             .map_err(|error| match error {
                 StoreError::ShuttingDown => inner.closed(),
@@ -2380,7 +2414,8 @@ async fn maintain(inner: Weak<Inner>) {
         if inner.stopped.get().is_some() {
             continue;
         }
-        inner.relieve(pressure, &mut short_of_room);
+        // The compaction's task sets `compacting` once it runs: no snapshot in this tick.
+        let compaction_started = inner.relieve(pressure, &mut short_of_room);
         if last_sizes.elapsed() >= inner.config.status_refresh {
             last_sizes = Instant::now();
             inner.refresh_sizes();
@@ -2394,6 +2429,10 @@ async fn maintain(inner: Weak<Inner>) {
             let sm = inner.sm.clone();
             if let Ok(Err(error)) = tokio::task::spawn_blocking(move || sm.checkpoint()).await {
                 tracing::error!(%error, "store checkpoint failed");
+                let error = error.to_string();
+                if disk::names_a_full_disk(&error) {
+                    *lock(&inner.full_disk) = Some(error);
+                }
             }
         }
         // Snapshot-and-purge.
@@ -2412,6 +2451,7 @@ async fn maintain(inner: Weak<Inner>) {
         // After a snapshot file that could not be written: again once one fits, not at once.
         // Never beside a compaction: both may need the room that is left.
         let settled = settled
+            && !compaction_started
             && !inner.compacting.load(Ordering::Relaxed)
             && (!inner.sm.stats().snapshot_failed.load(Ordering::Relaxed)
                 || (last_trigger.is_none_or(|at| at.elapsed() >= SNAPSHOT_RETRY)
@@ -2453,6 +2493,9 @@ async fn maintain(inner: Weak<Inner>) {
 
 /// The shortest time between two snapshot builds after one could not write its file.
 pub const SNAPSHOT_RETRY: Duration = Duration::from_secs(30);
+
+/// What redb answers for every write after one that failed on the disk (`redb::Error::PreviousIo`).
+const PREVIOUS_IO: &str = "Previous I/O error";
 
 // WP9.6 (ADR 0030): the snapshot policy.
 /// The longest time a due snapshot waits for the commit queue to drain.
