@@ -18,8 +18,8 @@
 //! Health conditions are the warnings of `GET /system/status`: the status sets them on every
 //! read, and the findings routes assemble them again when they are older than
 //! [`HEALTH_TTL`]. The lease-conflict warning (`ipam.lease_conflict`) is left out, because
-//! the conflict rows of the view are findings of their own. A condition of
-//! [`ACT_NOW_HEALTH`] is to act on whatever its diagnostics severity (U3: low disk).
+//! the conflict rows of the view are findings of their own. Low disk space names its own
+//! severity ([`health_level`]).
 
 use std::{
     collections::BTreeMap,
@@ -44,6 +44,7 @@ use crate::{
         events::{EventData, Topic},
         system::{FindingSeverity, StatusWarning},
     },
+    host::disk_watch::Severity,
     routes::system::{DISK_LOW, IPAM_LEASE_CONFLICT, diagnostics::severity_of},
     sse::EventHub,
 };
@@ -51,17 +52,15 @@ use crate::{
 /// How old the health conditions may be before a findings request assembles them again.
 pub const HEALTH_TTL: Duration = Duration::from_secs(15);
 
-/// U3: the health conditions that are to act on although their diagnostics severity is a
-/// warning: a data directory running out of room stops the store long before anything else
-/// fails (`docs/plans/ui-plan.md` section 2.2, "Low disk ... Act now").
-pub const ACT_NOW_HEALTH: &[&str] = &[DISK_LOW];
-
-/// The severity of the finding of a health condition: [`ACT_NOW_HEALTH`] is to act on, an
-/// error of the diagnostics is to act on, a warning to review, an informational state is
-/// information.
-pub fn health_level(code: &str) -> FindingLevel {
-    if ACT_NOW_HEALTH.contains(&code) {
-        return FindingLevel::Act;
+/// The severity of the finding of a health condition: an error of the diagnostics is to act
+/// on, a warning to review, an informational state is information. Low disk space names its
+/// own: `review` is to review, `act` and `error` are to act on.
+pub fn health_level(code: &str, params: &BTreeMap<String, String>) -> FindingLevel {
+    if code == DISK_LOW {
+        return match Severity::from_param(params) {
+            Some(Severity::Review) => FindingLevel::Review,
+            _ => FindingLevel::Act,
+        };
     }
     match severity_of(code) {
         FindingSeverity::Error => FindingLevel::Act,
@@ -197,7 +196,7 @@ impl FindingsService {
                 code: warning.code.clone(),
                 detail: warning.detail.clone(),
                 params: warning.params.clone(),
-                level: health_level(&warning.code),
+                level: health_level(&warning.code, &warning.params),
             })
             .collect();
         *self

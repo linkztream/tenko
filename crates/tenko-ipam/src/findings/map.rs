@@ -583,6 +583,14 @@ impl HealthItem {
     }
 }
 
+/// The health conditions of a data directory short of room: low disk space and the store's
+/// own disk guard. They name no page to open.
+const DISK_CODES: &[&str] = &[
+    "node.disk.low",
+    tenko_store::StoreError::DISK_RESERVE,
+    tenko_store::api::DISK_UNKNOWN,
+];
+
 /// The finding of a health condition first seen at `since`.
 pub fn of_health(item: &HealthItem, since: Timestamp) -> Finding {
     Finding {
@@ -600,6 +608,9 @@ pub fn of_health(item: &HealthItem, since: Timestamp) -> Finding {
         },
         action: if [clock::HELD, clock::JUMPED].contains(&item.code.as_str()) {
             FindingAction::ConfirmClock
+        } else if DISK_CODES.contains(&item.code.as_str()) {
+            // No page frees disk space: the finding's text says what to free on the host.
+            FindingAction::None
         } else {
             FindingAction::OpenStatus
         },

@@ -454,6 +454,16 @@ fn health_conditions_keep_their_identity_and_their_area() {
             "{code}"
         );
     }
+    // A disk short of room is freed on the host: no page to open.
+    for code in [
+        "node.disk.low",
+        "sys.store.disk_reserve",
+        "sys.store.disk_unknown",
+    ] {
+        let finding = of_health(&item(code, FindingLevel::Act), now);
+        assert_eq!(finding.action, FindingAction::None, "{code}");
+        assert_eq!(finding.area, FindingArea::Nodes, "{code}");
+    }
 
     let index = FindingsIndex::new(FindingsConfig::default());
     let first = [item("dns.role.lagging", FindingLevel::Review)];
@@ -539,6 +549,17 @@ fn a_health_condition_keeps_its_id_while_its_figures_change() {
         assert_eq!(listed.since, now, "{}", first.code);
         assert_eq!(listed.params, second.params, "the newest figures");
     }
+    // A condition that names when it was raised is dated so, not by when it was first read.
+    let index = FindingsIndex::new(FindingsConfig::default());
+    let raised = item(
+        "node.disk.low",
+        &[("raised_at", "2026-10-26T09:30:00Z"), ("path", "/d")],
+    );
+    index.set_health(std::slice::from_ref(&raised), now);
+    assert_eq!(
+        index.get(&raised.id()).expect("listed").since,
+        at("2026-10-26T09:30:00Z")
+    );
     // A parameter that names the condition still tells two conditions apart.
     assert_ne!(
         item("node.disk.low", &[("path", "/a")]).id(),

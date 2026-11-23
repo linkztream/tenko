@@ -8,7 +8,7 @@ import { paths } from "../app/paths";
 import type { IconName } from "../components/Icon";
 import { formatDateTime, formatDuration, formatNumber, t, tDynamic } from "../i18n";
 import { jobTitle } from "../jobs/words";
-import { formatBytes } from "../nodes/format";
+import { DISK_CODES, diskText } from "../nodes/format";
 
 export type Finding = components["schemas"]["Finding"];
 export type FindingKind = components["schemas"]["FindingKind"];
@@ -59,7 +59,7 @@ function percent(text: string | undefined): string {
 
 /**
  * One line of evidence: the MACs of a conflict (in the data font), the share and threshold of an
- * alarm, the step a job waits at, the room left on a low disk; for anything else the server's
+ * alarm, the step a job waits at, a disk short of room and what to free; for anything else the server's
  * summary of the finding.
  */
 export function findingEvidence(finding: Finding): { text: string; mono: boolean } {
@@ -80,9 +80,7 @@ export function findingEvidence(finding: Finding): { text: string; mono: boolean
       return { text: t("dashboard.finding.evidence.job_step", { step: Number.isFinite(step) ? step + 1 : 1 }), mono: false };
     }
     case "health":
-      if (finding.code === "node.disk.low" && params.available && params.total) {
-        return { text: t("dashboard.finding.evidence.disk_low", { free: formatBytes(Number(params.available)), total: formatBytes(Number(params.total)) }), mono: false };
-      }
+      if (DISK_CODES.includes(finding.code)) return { text: diskText(finding), mono: false };
       return { text: tDynamic(`dashboard.finding.health.${finding.code}`, clockWords(params)) ?? finding.summary, mono: false };
     default:
       return { text: finding.summary, mono: false };

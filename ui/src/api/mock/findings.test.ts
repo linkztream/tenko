@@ -159,7 +159,8 @@ describe("GET /findings", () => {
   it("lists a health finding a test adds, and counts it", async () => {
     setMockHealthFindings([{ code: "node.disk.low", severity: "act", area: "nodes", summary: "low", params: { available: "1", total: "2" } }]);
     const health = await list("?source=health");
-    expect(health.map((f) => [f.code, f.severity, f.area, f.action])).toEqual([["node.disk.low", "act", "nodes", "open_status"]]);
+    // As the server: no page frees disk space, so the finding names no action.
+    expect(health.map((f) => [f.code, f.severity, f.area, f.action])).toEqual([["node.disk.low", "act", "nodes", "none"]]);
     expect((await counts()).areas.nodes.act).toBe(1);
   });
 });

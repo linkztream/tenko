@@ -114,6 +114,7 @@ pub(crate) fn register(registry: &Registry) {
     registry.register(&HOST_CPU);
     registry.register(&HOST_MEMORY);
     registry.register(&HOST_DISK);
+    registry.register(&crate::host::disk_watch::DISK_LOW_GAUGE);
 }
 
 /// Sets the gauges of this crate from the state: the event hub, the store status and the

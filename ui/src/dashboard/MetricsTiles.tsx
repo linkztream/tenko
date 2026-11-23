@@ -36,7 +36,7 @@
 // of the CPU since the last reading), `-host-memory` (the share in use, the GiB
 // in the hint) and `-host-disk` (the GiB available on the data directory's file system, the total in
 // the hint). A figure the node did not read shows no number. While the status warns `node.disk.low`
-// the disk tile has `data-state="low"` and the line `metrics-host-disk-low`.
+// at `act` or `error` the disk tile has `data-state="low"` and the line `metrics-host-disk-low`.
 //
 // WP8.7: while the cluster's sample has `dhcp` (a controller runs the `dhcp` role) the six DHCP
 // tiles follow under `metrics-group-dhcp`: `metrics-tile-dhcp-leases` (leases granted per second),
@@ -153,7 +153,7 @@ function gib(bytes: number | null | undefined): string {
 }
 
 /**
- * `diskLow` is the status warning `node.disk.low` of this node: the disk tile turns to the warning
+ * `diskLow` is the status warning `node.disk.low` of this node at `act` or `error`: the disk tile turns to the warning
  * style. U3: `live` is the stream of the page that shows the tiles (the start page shares its own);
  * without it the tiles open one of their own. `only="controller"` draws the controller's tiles
  * alone (the cluster page).

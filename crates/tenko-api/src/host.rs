@@ -19,6 +19,7 @@
 //! CPU and memory are read on Linux only. Another platform adds a module that provides
 //! `read_cpu` and `read_memory` beside the Linux ones below; nothing else changes.
 
+pub mod disk_watch;
 #[cfg(any(target_os = "linux", test))]
 mod procfs;
 pub mod route;
@@ -79,19 +80,10 @@ impl HostSample {
             && self.disk_total.is_none()
             && self.disk_available.is_none()
     }
-
-    /// Whether the data directory's file system is low on space (`node.disk.low`): less than
-    /// [`LOW_DISK_SHARE`] percent of it or less than [`LOW_DISK_BYTES`] is available,
-    /// whichever is more.
-    pub fn disk_is_low(&self) -> bool {
-        match (self.disk_total, self.disk_available) {
-            (Some(total), Some(available)) => available < low_disk_limit(total),
-            _ => false,
-        }
-    }
 }
 
-/// The available space under which a file system of `total` bytes is low.
+/// The available space under which a file system of `total` bytes is low (`node.disk.low`,
+/// [`disk_watch`]): [`LOW_DISK_SHARE`] percent of it or [`LOW_DISK_BYTES`], whichever is more.
 pub fn low_disk_limit(total: u64) -> u64 {
     (total / 100)
         .saturating_mul(LOW_DISK_SHARE)
@@ -340,21 +332,9 @@ mod tests {
     #[test]
     fn a_disk_is_low_below_the_larger_of_a_tenth_and_one_gibibyte() {
         let gib = 1_u64 << 30;
-        let sample = |total, available| HostSample {
-            disk_total: Some(total),
-            disk_available: Some(available),
-            ..HostSample::blank(Timestamp::now())
-        };
-        // 100 GiB: the limit is 10 GiB.
-        assert!(sample(100 * gib, 10 * gib - 1).disk_is_low());
-        assert!(!sample(100 * gib, 10 * gib).disk_is_low());
-        // 4 GiB: a tenth is 0.4 GiB, so the floor of 1 GiB counts.
-        assert!(sample(4 * gib, gib - 1).disk_is_low());
-        assert!(!sample(4 * gib, gib).disk_is_low());
+        // 100 GiB: a tenth; 4 GiB: a tenth is 0.4 GiB, so the floor of 1 GiB counts.
         assert_eq!(low_disk_limit(100 * gib), 10 * gib);
         assert_eq!(low_disk_limit(4 * gib), gib);
-        // Nothing read, nothing to warn about.
-        assert!(!HostSample::blank(Timestamp::now()).disk_is_low());
     }
 
     #[test]

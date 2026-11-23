@@ -105,10 +105,6 @@
       <unit id="dashboard.finding.evidence.job_step">
         <segment><source>Step {step} waits for a person</source></segment>
       </unit>
-      <unit id="dashboard.finding.evidence.disk_low">
-        <notes><note category="description">Evidence of a low disk: the free space of the data directory's file system and its size, with units.</note></notes>
-        <segment><source>The data directory has {free} of {total} free</source></segment>
-      </unit>
       <unit id="dashboard.finding.health.sys.update.installer_repair">
         <notes><note category="description">A node set up by an older installer: the version the server runs and the one root command that brings the node to one version (docs/upgrades.md section 9.5).</note></notes>
         <segment><source>The server runs {version}, but the installer's files on this node are older than the server. Run {command} once as root.</source></segment>

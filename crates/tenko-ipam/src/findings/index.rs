@@ -565,7 +565,13 @@ impl FindingsIndex {
         }
         for item in items {
             let id = item.id();
-            let since = *state.health_since.entry(id.clone()).or_insert(now);
+            let first = *state.health_since.entry(id.clone()).or_insert(now);
+            // A condition that knows when it was raised (the disk warning) says so itself.
+            let since = item
+                .params
+                .get("raised_at")
+                .and_then(|at| at.parse().ok())
+                .unwrap_or(first);
             changed |= state.put(&id, Some(map::of_health(item, since)), false);
         }
         changed

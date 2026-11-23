@@ -361,41 +361,50 @@ async fn without_the_service_the_routes_answer_unavailable() {
     assert_eq!(response.status().as_u16(), 503);
 }
 
-/// U3: low disk is a finding to act on (the plan's "Low disk ... Act now"), while another
-/// warning of the status stays one to review and the counts say so.
+/// Low disk space is a finding at the severity it names: `act` and `error` to act on,
+/// `review` to review, with no page to open; another warning of the status stays one to
+/// review, and the counts say so.
 #[tokio::test]
-async fn low_disk_is_a_health_finding_to_act_on() {
+async fn low_disk_is_a_health_finding_at_the_severity_it_names() {
     let lab = Lab::new().await;
-    let warning = |code: &str| crate::dto::system::StatusWarning {
+    let warning = |code: &str, severity: &str| crate::dto::system::StatusWarning {
         code: code.to_owned(),
         detail: format!("{code} for the test"),
-        params: std::collections::BTreeMap::new(),
+        params: [
+            ("severity".to_owned(), severity.to_owned()),
+            ("path".to_owned(), format!("/{severity}")),
+        ]
+        .into(),
     };
-    lab.findings.set_health(
-        &[
-            warning(crate::routes::system::DISK_LOW),
-            warning("sys.tls.certificate_expiring"),
-        ],
-        Timestamp::now(),
-    );
-    let (status, page) = lab.get("/findings?source=health").await;
-    assert_eq!(status, 200);
-    let items = page["items"].as_array().expect("items");
-    let level = |code: &str| {
-        items
-            .iter()
-            .find(|item| item["code"] == code)
-            .map(|item| item["severity"].clone())
+    let level = async |severity: &str| {
+        lab.findings.set_health(
+            &[
+                warning(crate::routes::system::DISK_LOW, severity),
+                warning("sys.tls.certificate_expiring", "act"),
+            ],
+            Timestamp::now(),
+        );
+        let (status, page) = lab.get("/findings?source=health").await;
+        assert_eq!(status, 200);
+        let items = page["items"].as_array().expect("items").clone();
+        let of = |code: &str| {
+            items
+                .iter()
+                .find(|item| item["code"] == code)
+                .map(|item| (item["severity"].clone(), item["action"].clone()))
+        };
+        assert_eq!(
+            of("sys.tls.certificate_expiring"),
+            Some((Value::from("review"), Value::from("open_status")))
+        );
+        of("node.disk.low").map(|(level, action)| {
+            assert_eq!(action, Value::from("none"), "no page frees disk space");
+            level
+        })
     };
-    assert_eq!(level("node.disk.low"), Some(Value::from("act")));
-    assert_eq!(
-        level("sys.tls.certificate_expiring"),
-        Some(Value::from("review"))
-    );
-    assert_eq!(
-        crate::findings::health_level(crate::routes::system::DISK_LOW),
-        tenko_ipam::findings::FindingLevel::Act
-    );
+    assert_eq!(level("act").await, Some(Value::from("act")));
     let (_, counts) = lab.get("/findings/counts").await;
     assert_eq!(counts["areas"]["nodes"]["act"], 1);
+    assert_eq!(level("error").await, Some(Value::from("act")));
+    assert_eq!(level("review").await, Some(Value::from("review")));
 }

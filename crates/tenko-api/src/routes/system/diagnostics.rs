@@ -35,8 +35,11 @@ use tenko_store::{KeyRange, ReadConsistency, ReadViewExt as _, WriteBatch};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use crate::{
-    dto::system::{DiagnosticFinding, FindingSeverity, SystemDiagnostics, SystemStatus},
+    dto::system::{
+        DiagnosticFinding, FindingSeverity, StatusWarning, SystemDiagnostics, SystemStatus,
+    },
     extract::Ctx,
+    host::disk_watch::Severity,
     problem::{ApiError, ProblemDetails},
     redact::Redactor,
     state::AppState,
@@ -117,6 +120,17 @@ pub fn severity_of(code: &str) -> FindingSeverity {
     } else {
         FindingSeverity::Warning
     }
+}
+
+/// The severity of a warning of the status: low disk space names its own (`severity`
+/// `error` is an error), every other code has the one of its code.
+pub fn warning_severity(warning: &StatusWarning) -> FindingSeverity {
+    if warning.code == super::DISK_LOW
+        && Severity::from_param(&warning.params) == Some(Severity::Error)
+    {
+        return FindingSeverity::Error;
+    }
+    severity_of(&warning.code)
 }
 
 /// The last lines of the node's log at warn level or above, as the server's subscriber
@@ -304,7 +318,7 @@ pub(crate) fn document(
         .iter()
         .map(|warning| DiagnosticFinding {
             code: warning.code.clone(),
-            severity: severity_of(&warning.code),
+            severity: warning_severity(warning),
         })
         .collect();
     let mut document = SystemDiagnostics {
@@ -447,6 +461,15 @@ mod tests {
         assert_eq!(severity_of("sys.ui.stub"), FindingSeverity::Info);
         assert_eq!(severity_of("dns.role.not_serving"), FindingSeverity::Error);
         assert_eq!(severity_of("dns.role.lagging"), FindingSeverity::Warning);
+        // Low disk space names its own severity.
+        let disk = |severity: &str| StatusWarning {
+            code: super::super::DISK_LOW.to_owned(),
+            detail: String::new(),
+            params: [("severity".to_owned(), severity.to_owned())].into(),
+        };
+        assert_eq!(warning_severity(&disk("error")), FindingSeverity::Error);
+        assert_eq!(warning_severity(&disk("act")), FindingSeverity::Warning);
+        assert_eq!(warning_severity(&disk("review")), FindingSeverity::Warning);
     }
 
     #[tokio::test]

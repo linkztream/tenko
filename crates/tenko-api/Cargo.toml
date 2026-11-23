@@ -112,7 +112,8 @@ rcgen = { version = "0.14.10", default-features = false, features = ["aws_lc_rs"
 tenko-api = { path = ".", features = ["client"] }
 tenko-auth = { workspace = true, features = ["testing"] }
 tenko-core = { workspace = true, features = ["testing"] }
-tenko-store = { workspace = true }
+# The real store and its free-space hook under the disk warning's tests.
+tenko-store = { workspace = true, features = ["raft", "testing", "test-hooks"] }
 # The counting allocator of tests/metrics_history_alloc.rs (the history's fold allocates nothing).
 stats_alloc = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

@@ -1871,6 +1871,8 @@ async fn start(
             state.authorizer = Some(auth.authorizer());
             // The file system whose free space the start page, the status and the metrics show.
             state.host().set_data_dir(resolved.data_dir.clone());
+            // Its warning, from the store's headroom and the file system's level.
+            let disk_task = tenko_api::host::disk_watch::spawn(state.clone(), metrics_stop.clone());
             // A Linux node that an older installer set up names the one root command.
             if let Some(notice) = crate::upgrade::installer_notice(&resolved.data_dir) {
                 state.set_notice(notice);
@@ -2122,6 +2124,7 @@ async fn start(
             .await
             .map_err(|error| StartError::new("api", "start.metrics.bind", error.to_string()))?;
             metrics_tasks.push(findings_task);
+            metrics_tasks.push(disk_task);
             metrics_tasks.push(tenko_api::routes::integrations::spawn_expiry_alarm(
                 Arc::clone(&client_certs),
                 state.clone(),

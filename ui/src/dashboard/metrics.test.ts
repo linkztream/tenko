@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mockMetricsSnapshot } from "../api/mock/metrics-model";
 import {
+  diskLow,
   emptyHistory,
   GIB,
   HISTORY,
@@ -345,5 +346,17 @@ describe("U3: niceCeiling", () => {
       [30000, 50000],
     ];
     for (const [max, top] of cases) expect(niceCeiling(max)).toBe(top);
+  });
+});
+
+describe("the disk tile's warning style", () => {
+  it("comes with low disk space from act up and with the store's own disk warning, not with a week ahead", () => {
+    const warning = (severity: string) => ({ code: "node.disk.low", params: { severity } });
+    expect(diskLow([warning("act")])).toBe(true);
+    expect(diskLow([warning("error")])).toBe(true);
+    expect(diskLow([warning("review")])).toBe(false);
+    expect(diskLow([{ code: "sys.store.disk_reserve", params: {} }])).toBe(true);
+    expect(diskLow([{ code: "sys.store.disk_unknown", params: {} }])).toBe(true);
+    expect(diskLow([{ code: "sys.tls.certificate_expiry", params: {} }])).toBe(false);
   });
 });

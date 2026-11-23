@@ -26,6 +26,7 @@
 // `setMockHealthFindings` (U3), or counts of any area and severity with `setMockFindingsExtra`,
 // each then one placeholder finding of the source `health`. Simplification: a job that rolls back
 // and waits for an undo task is not counted.
+import { DISK_CODES } from "../../nodes/format";
 import type { components } from "../generated/schema";
 import { db, onMockReset } from "./db";
 import { findPrefix, ipamState } from "./ipam/api";
@@ -305,7 +306,8 @@ export function mockFindings(): MockFinding[] {
       code: item.code,
       params: item.params ?? {},
       evidence: { id: item.code, path: "/system/status" },
-      action: "open_status",
+      // As the server: a disk short of room is freed on the host, no page to open.
+      action: [...DISK_CODES, "sys.store.disk_unknown"].includes(item.code) ? "none" : "open_status",
       since: item.since ?? new Date().toISOString(),
       source: "health",
     });

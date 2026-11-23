@@ -42,7 +42,7 @@ import { Attention } from "./Attention";
 import { Changes } from "./Changes";
 import { HealthRow } from "./HealthRow";
 import { createLiveMetrics, type LiveMetrics } from "./liveMetrics";
-import { DISK_LOW_WARNING, GIB, LONG_HISTORY } from "./metrics";
+import { GIB, LONG_HISTORY, diskLow } from "./metrics";
 import { dashboardSet, hiddenKeys, profileOf, type HiddenKey } from "./model";
 import { Prefixes } from "./Prefixes";
 import { SecurityPanel } from "./SecurityPanel";
@@ -158,7 +158,7 @@ export default function Dashboard() {
     parts.push(status.version);
     return parts.join(" · ");
   };
-  const diskLow = () => s()?.warnings.some((w) => w.code === DISK_LOW_WARNING) ?? false;
+  const diskWarned = () => diskLow(s()?.warnings ?? []);
 
   const [action, setAction] = createSignal<"claim" | "claim_in" | "prefix" | null>(null);
   const [claimIn, setClaimIn] = createSignal<TreeNode | null>(null);
@@ -186,7 +186,7 @@ export default function Dashboard() {
     <div class="page dashboard" data-testid="page-dashboard">
       <PageHeader
         title={t("shell.nav.dashboard")}
-        sub={<span data-testid="dashboard-facts" data-disk-low={diskLow() ? "true" : undefined}>{facts()}</span>}
+        sub={<span data-testid="dashboard-facts" data-disk-low={diskWarned() ? "true" : undefined}>{facts()}</span>}
         actions={
           <Show when={moduleRunning("ipam")}>
             <A class="btn" href={paths.imports()} data-testid="dashboard-import">
@@ -247,7 +247,7 @@ export default function Dashboard() {
         />
 
         <Show when={showAll() && live()}>
-          {(l) => <MetricsTiles live={l()} diskLow={diskLow()} />}
+          {(l) => <MetricsTiles live={l()} diskLow={diskWarned()} />}
         </Show>
       </div>
 

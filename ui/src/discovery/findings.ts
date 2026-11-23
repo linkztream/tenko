@@ -10,6 +10,7 @@ import type { IconName } from "../components/Icon";
 import { formatDateTime, formatNumber, t } from "../i18n";
 import { RULE_TEXT, type WinRule } from "../ipam/reconcile/model";
 import { jobTitle } from "../jobs/words";
+import { DISK_CODES, diskText } from "../nodes/format";
 import { ruleText } from "./model";
 
 type S = components["schemas"];
@@ -143,12 +144,14 @@ function dateOf(text: string | undefined): string {
 /**
  * One line of evidence: the MACs of a conflict (in the data font), the proposal's rule in words,
  * the share of a network over its alarm, the step a job waits at, when a ghost was last seen, the
- * PTR record that disagrees; for anything else the server's summary.
+ * PTR record that disagrees, a disk short of room and what to free; for anything else the server's
+ * summary.
  */
 export function evidenceOf(finding: Finding): { text: string; mono: boolean } {
   const params = finding.params ?? {};
   if (finding.kind === "conflict" && macsOf(finding).length > 1) return { text: macsOf(finding).join(" · "), mono: true };
   if (finding.source === "proposal") return { text: ruleText({ rule: finding.code, params, summary: finding.summary }), mono: false };
+  if (finding.kind === "health" && DISK_CODES.includes(finding.code)) return { text: diskText(finding), mono: false };
   switch (finding.kind) {
     case "utilization":
       return {

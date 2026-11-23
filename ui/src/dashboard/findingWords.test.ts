@@ -122,14 +122,30 @@ describe("findingEvidence", () => {
     expect(findingEvidence(finding({ kind: "job_waiting", source: "job" })).text).toBe("Step 1 waits for a person");
   });
 
-  it("says how much room a low disk has, from the byte parameters", () => {
-    const disk = finding({ kind: "health", source: "health", code: "node.disk.low", params: { available: "8000000000", total: "120000000000" } });
-    expect(findingEvidence(disk)).toEqual({ text: "The data directory has 8 GB of 120 GB free", mono: false });
-  });
-
-  it("falls back to the summary for a low disk without the byte parameters", () => {
-    const disk = finding({ kind: "health", source: "health", code: "node.disk.low", params: {} });
-    expect(findingEvidence(disk).text).toBe("the server's one-line summary");
+  it("says when a disk fills, or how much room it has, and then what to free", () => {
+    const next =
+      "Free space outside Tenko's store: the system journal, backups (move them to another disk), and copies under upgrade-backups/ of versions you will not go back to. Never delete anything under store/.";
+    const disk = (params: Record<string, string>, code = "node.disk.low") => findingEvidence(finding({ kind: "health", source: "health", code, params })).text;
+    expect(disk({ cause: "hour", seconds_left: "6000", bytes: "3000000000", free: "9100000000" })).toBe(
+      `At the last hour's rate, 3 GB an hour, changes are refused in about 100 min. 9.1 GB free. ${next}`,
+    );
+    expect(disk({ cause: "day", seconds_left: String(6 * 86_400 + 3_000), bytes: "1400000000", free: "9800000000" })).toBe(
+      `At the last day's rate, 1.4 GB a day, changes are refused in about 6 days. 9.8 GB free. ${next}`,
+    );
+    const line = `Only 4.4 GB free, just above the 4.1 GB the store keeps free: below that line, changes are refused. ${next}`;
+    expect(disk({ cause: "line", free: "4400000000", margin: "4100000000" })).toBe(line);
+    // A rate that eased while its severity clears: the line near the margin, else the level.
+    expect(disk({ cause: "hour", free: "4400000000", margin: "4100000000" })).toBe(line);
+    expect(disk({ cause: "hour", free: "40000000000", margin: "2000000000", available: "40000000000", total: "120000000000" })).toBe(
+      `The data directory has 40 GB of 120 GB free. ${next}`,
+    );
+    expect(disk({ cause: "line", free: "2600000000", margin: "2000000000", available: "2600000000", total: "120000000000" })).toBe(
+      `The data directory has 2.6 GB of 120 GB free. ${next}`,
+    );
+    expect(disk({ cause: "level", available: "8000000000", total: "120000000000" })).toBe(`The data directory has 8 GB of 120 GB free. ${next}`);
+    // Without its parameters, and for the store's own disk warning, the server's summary.
+    expect(disk({})).toBe(`the server's one-line summary ${next}`);
+    expect(disk({ free: "1" }, "sys.store.disk_reserve")).toBe(`the server's one-line summary ${next}`);
   });
 
   it("says in words that the forwarders of the configuration get no query", () => {

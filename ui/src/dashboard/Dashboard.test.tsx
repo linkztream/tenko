@@ -194,14 +194,14 @@ describe("the needs-attention strip", () => {
     expect(within(strip).queryByTestId("dashboard-proposals")).toBeNull();
   });
 
-  it("shows low disk as a finding to act on with the room left and Open Nodes", async () => {
+  it("shows low disk as a finding to act on with the time left and what to free, and no page to open", async () => {
     setMockHealthFindings([
       {
         code: "node.disk.low",
         severity: "act",
         area: "nodes",
-        summary: "the file system of the data directory has 0.5 GiB of 20 GiB available",
-        params: { available: String(500_000_000), total: String(20_000_000_000) },
+        summary: "the store's disk: about 5 h left",
+        params: { severity: "act", cause: "hour", seconds_left: "18000", bytes: "2100000000", free: "14600000000" },
       },
     ]);
     renderRoute(Dashboard, { url: "/" });
@@ -211,9 +211,9 @@ describe("the needs-attention strip", () => {
       expect(found).toBeTruthy();
       return found!;
     });
-    expect(row.textContent).toContain("The data directory has 500 MB of 20 GB free");
-    expect(within(row).getByTestId("dashboard-finding-action").getAttribute("href")).toBe(paths.nodes());
-    expect(within(row).getByTestId("dashboard-finding-action").textContent).toBe("Open Nodes");
+    expect(row.textContent).toContain("At the last hour's rate, 2.1 GB an hour, changes are refused in about 5 hr. 14.6 GB free.");
+    expect(row.textContent).toContain("Never delete anything under store/.");
+    expect(within(row).queryByTestId("dashboard-finding-action")).toBeNull();
   });
 
   it("lists a network that crosses its critical threshold as soon as the alarm event arrives", async () => {

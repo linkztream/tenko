@@ -69,7 +69,6 @@ use crate::{
         NodeStatus, Readiness, StatusWarning, StoreDiskView, StoreSummary, SystemStatus, UiStatus,
     },
     extract::Ctx,
-    host::{HostSample, low_disk_limit},
     problem::{ApiError, ProblemDetails, codes},
     state::AppState,
 };
@@ -602,39 +601,9 @@ pub struct ClockConfirm {
     pub node_id: String,
 }
 
-/// Warning code of a data directory whose file system is running out of room.
+/// Warning code of a data directory whose file system is running out of room
+/// ([`crate::host::disk_watch`]).
 pub const DISK_LOW: &str = "node.disk.low";
-
-/// `node.disk.low`: the file system of the data directory has less than
-/// [`LOW_DISK_SHARE`](crate::host::LOW_DISK_SHARE) percent or less than one GiB available,
-/// whichever is more. `None` while it has room, or when the size could not be read; the warning
-/// is computed from the latest reading on every status request, so it clears when space is back.
-pub fn disk_low_warning(
-    host: &HostSample,
-    path: Option<&std::path::Path>,
-) -> Option<StatusWarning> {
-    let (total, available) = (host.disk_total?, host.disk_available?);
-    if !host.disk_is_low() {
-        return None;
-    }
-    let path = path
-        .map(|path| path.display().to_string())
-        .unwrap_or_default();
-    let mut params = std::collections::BTreeMap::new();
-    params.insert("available".to_owned(), available.to_string());
-    params.insert("total".to_owned(), total.to_string());
-    params.insert("limit".to_owned(), low_disk_limit(total).to_string());
-    params.insert("path".to_owned(), path.clone());
-    Some(StatusWarning {
-        code: DISK_LOW.to_owned(),
-        detail: format!(
-            "the file system of the data directory {path} has {} of {} available",
-            gib(available),
-            gib(total)
-        ),
-        params,
-    })
-}
 
 /// The warning of a node whose store stopped applying the replicated log at an entry it
 /// cannot apply: it serves no newer state until it can (the reason says what to do).
@@ -1267,9 +1236,6 @@ pub(crate) fn status_of(state: &AppState, now: Timestamp) -> SystemStatus {
         .map_or_else(|| (None, Vec::new()), |kek| super::kek::summary_of(&kek));
     warnings.extend(kek_warnings);
     let host = platform.host.current();
-    if let Some(host) = &host {
-        warnings.extend(disk_low_warning(host, platform.host.data_dir().as_deref()));
-    }
     if ui.stub {
         warnings.push(crate::dto::system::StatusWarning {
             code: "sys.ui.stub".to_owned(),
@@ -1695,32 +1661,6 @@ mod tests {
     }
 
     #[test]
-    fn a_data_directory_short_of_room_is_a_warning_that_clears_with_the_space() {
-        let gib = 1_u64 << 30;
-        let host = |available| HostSample {
-            cpu_percent: None,
-            memory_total: None,
-            memory_available: None,
-            disk_total: Some(50 * gib),
-            disk_available: Some(available),
-            sampled_at: Timestamp::now(),
-        };
-        let path = std::path::Path::new("/srv/tenko-data");
-        let low = disk_low_warning(&host(4 * gib), Some(path)).expect("4 of 50 GiB is low");
-        assert_eq!(low.code, DISK_LOW);
-        assert_eq!(low.params["available"], (4 * gib).to_string());
-        assert_eq!(low.params["total"], (50 * gib).to_string());
-        assert_eq!(low.params["limit"], (5 * gib).to_string());
-        assert_eq!(low.params["path"], path.display().to_string());
-        assert!(low.detail.contains("4.0 GiB of 50.0 GiB"), "{}", low.detail);
-        assert_eq!(disk_low_warning(&host(5 * gib), Some(path)), None);
-        assert_eq!(
-            disk_low_warning(&HostSample::blank(Timestamp::now()), None),
-            None
-        );
-    }
-
-    #[test]
     fn the_store_safety_warnings_follow_the_pressure_and_a_stopped_core() {
         let mut safety = StoreSafety {
             free_bytes: 10,
@@ -1783,7 +1723,7 @@ mod tests {
                 .contains("nothing is taken")
         );
         assert_eq!(
-            crate::findings::health_level(StoreError::STOPPED),
+            crate::findings::health_level(StoreError::STOPPED, &std::collections::BTreeMap::new()),
             tenko_ipam::findings::FindingLevel::Act
         );
     }
@@ -1808,7 +1748,7 @@ mod tests {
     }
 
     #[test]
-    fn the_status_carries_the_host_and_its_disk_finding() {
+    fn the_status_carries_the_host() {
         let state = AppState::default();
         state.host().set_data_dir(std::env::temp_dir());
         let status = status_of(&state, Timestamp::now());
@@ -1824,18 +1764,6 @@ mod tests {
         assert!(
             json["host"].get("cpu_percent").is_none(),
             "no earlier reading"
-        );
-        // Whether this machine's temp directory is short of room decides the finding.
-        let low = status
-            .warnings
-            .iter()
-            .any(|warning| warning.code == DISK_LOW);
-        assert_eq!(
-            low,
-            state
-                .host()
-                .current()
-                .is_some_and(|host| host.disk_is_low())
         );
     }
 

@@ -1586,7 +1586,6 @@ export type MessageKey =
   | "dashboard.finding.action.open_topology"
   | "dashboard.finding.action.resolve"
   | "dashboard.finding.action.review"
-  | "dashboard.finding.evidence.disk_low"
   | "dashboard.finding.evidence.job_step"
   | "dashboard.finding.evidence.utilization"
   | "dashboard.finding.evidence.utilization_bare"
@@ -4803,6 +4802,11 @@ export type MessageKey =
   | "errors.vault.secret.not_revealable"
   | "errors.vault.secret.not_text"
   | "errors.vault.secret.too_large"
+  | "finding.disk.level"
+  | "finding.disk.line"
+  | "finding.disk.next"
+  | "finding.disk.rate_day"
+  | "finding.disk.rate_hour"
   | "grid.actionbar.label"
   | "grid.actionbar.selected"
   | "grid.actions"
@@ -8882,7 +8886,6 @@ export interface MessageArgs {
   "dashboard.duration.hours": { hours: string | number; minutes: string | number };
   "dashboard.duration.minutes": { minutes: string | number };
   "dashboard.duration.seconds": { seconds: string | number };
-  "dashboard.finding.evidence.disk_low": { free: string | number; total: string | number };
   "dashboard.finding.evidence.job_step": { step: string | number };
   "dashboard.finding.evidence.utilization": { percent: string | number; threshold: string | number };
   "dashboard.finding.evidence.utilization_bare": { percent: string | number };
@@ -9515,6 +9518,10 @@ export interface MessageArgs {
   "errors.vault.reveal.rate_limited": { retry_after: string | number };
   "errors.vault.secret.in_use": { connectors: number; hosts: number };
   "errors.vault.secret.invalid": { field: string | number };
+  "finding.disk.level": { free: string | number; total: string | number };
+  "finding.disk.line": { free: string | number; margin: string | number };
+  "finding.disk.rate_day": { free: string | number; left: string | number; rate: string | number };
+  "finding.disk.rate_hour": { free: string | number; left: string | number; rate: string | number };
   "grid.actionbar.selected": { count: number };
   "grid.columns.move_down": { column: string | number };
   "grid.columns.move_up": { column: string | number };
@@ -11926,7 +11933,6 @@ export const messageKeys: readonly MessageKey[] = [
   "dashboard.finding.action.open_topology",
   "dashboard.finding.action.resolve",
   "dashboard.finding.action.review",
-  "dashboard.finding.evidence.disk_low",
   "dashboard.finding.evidence.job_step",
   "dashboard.finding.evidence.utilization",
   "dashboard.finding.evidence.utilization_bare",
@@ -15143,6 +15149,11 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.vault.secret.not_revealable",
   "errors.vault.secret.not_text",
   "errors.vault.secret.too_large",
+  "finding.disk.level",
+  "finding.disk.line",
+  "finding.disk.next",
+  "finding.disk.rate_day",
+  "finding.disk.rate_hour",
   "grid.actionbar.label",
   "grid.actionbar.selected",
   "grid.actions",

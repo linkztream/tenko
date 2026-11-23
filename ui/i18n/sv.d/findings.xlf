@@ -11,5 +11,27 @@
         <segment><source>The findings are not available on this server.</source><target>Fynden är inte tillgängliga på den här servern.</target></segment>
       </unit>
     </group>
+    <group id="disk-warning">
+      <unit id="finding.disk.rate_hour">
+        <notes><note category="description">Low disk space at the hour's rate: the time until the store takes no new data, the headroom lost an hour, and the free space of the store's file system, each with its unit.</note></notes>
+        <segment><source>At the last hour's rate, {rate} an hour, changes are refused in about {left}. {free} free.</source><target>Med den senaste timmens takt, {rate} i timmen, avvisas ändringar om cirka {left}. {free} ledigt.</target></segment>
+      </unit>
+      <unit id="finding.disk.rate_day">
+        <notes><note category="description">Low disk space at the day's rate: the time until the store takes no new data, the headroom lost a day, and the free space of the store's file system, each with its unit.</note></notes>
+        <segment><source>At the last day's rate, {rate} a day, changes are refused in about {left}. {free} free.</source><target>Med det senaste dygnets takt, {rate} per dygn, avvisas ändringar om cirka {left}. {free} ledigt.</target></segment>
+      </unit>
+      <unit id="finding.disk.line">
+        <notes><note category="description">Low disk space just above the store's margin: the free space and the margin the store keeps, with units.</note></notes>
+        <segment><source>Only {free} free, just above the {margin} the store keeps free: below that line, changes are refused.</source><target>Bara {free} ledigt, strax över de {margin} som lagret håller fritt: under den gränsen avvisas ändringar.</target></segment>
+      </unit>
+      <unit id="finding.disk.level">
+        <notes><note category="description">Low disk space by the level of the file system: the free space of the data directory's file system and its size, with units.</note></notes>
+        <segment><source>The data directory has {free} of {total} free.</source><target>Datakatalogen har {free} av {total} ledigt.</target></segment>
+      </unit>
+      <unit id="finding.disk.next">
+        <notes><note category="description">What to do about a disk short of room, after its sentence: no page frees disk space.</note></notes>
+        <segment><source>Free space outside Tenko's store: the system journal, backups (move them to another disk), and copies under upgrade-backups/ of versions you will not go back to. Never delete anything under store/.</source><target>Frigör utrymme utanför Tenkos lager: systemjournalen, säkerhetskopior (flytta dem till en annan disk) och kopior under upgrade-backups/ av versioner du inte tänker gå tillbaka till. Ta aldrig bort något under store/.</target></segment>
+      </unit>
+    </group>
   </file>
 </xliff>

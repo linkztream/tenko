@@ -20,6 +20,7 @@ import { reconcilePath } from "../ipam/reconcile/links";
 import type { ReconcileRow } from "../ipam/reconcile/model";
 import { TruthList } from "../ipam/reconcile/truths";
 import { useWriteToast } from "../ipam/plan/PlanDialog";
+import { DISK_CODES, diskText } from "../nodes/format";
 import { isDecider } from "./access";
 import { rejectProposal, type ApproveRequest, type Proposal } from "./api";
 import { ApproveDialog, RejectDialog } from "./dialogs";
@@ -95,7 +96,9 @@ export function FindingPanel(props: { finding: Finding; row?: ReconcileRow | nul
         <section class="section" aria-labelledby="finding-evidence">
           <h3 id="finding-evidence">{t("discovery.panel.evidence")}</h3>
           <Show when={findingRule(f())}>{(rule) => <p class="muted" data-testid="finding-rule">{rule()}</p>}</Show>
-          <Show when={props.row} fallback={<p class="muted">{f().summary}</p>}>{(row) => <TruthList row={row()} />}</Show>
+          <Show when={props.row} fallback={<p class="muted">{DISK_CODES.includes(f().code) ? diskText(f()) : f().summary}</p>}>
+            {(row) => <TruthList row={row()} />}
+          </Show>
         </section>
         <section class="section finding-decide" aria-labelledby="finding-decide">
           <h3 id="finding-decide">{t("discovery.findings.panel.decide")}</h3>

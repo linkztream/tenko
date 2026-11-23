@@ -127,8 +127,10 @@ function recursionValue(name: RecursionTileName, dns: MetricsDns): number | null
 export const HOST_TILES = ["host-cpu", "host-memory", "host-disk"] as const;
 export type HostTileName = (typeof HOST_TILES)[number];
 
-/** The code of the status warning that the disk tile turns to the warning style for. */
-export const DISK_LOW_WARNING = "node.disk.low";
+/** Whether the status warns of low disk space from `act` up, or the store's own disk warning stands (it then refuses writes), which turns the disk tile to the warning style: `review` is a week ahead. */
+export function diskLow(warnings: readonly { code: string; params?: Record<string, string> | null }[]): boolean {
+  return warnings.some((w) => (w.code === "node.disk.low" && w.params?.severity !== "review") || w.code === "sys.store.disk_reserve" || w.code === "sys.store.disk_unknown");
+}
 
 /** Bytes in a GiB, the unit of the memory and disk tiles. */
 export const GIB = 1024 ** 3;
