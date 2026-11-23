@@ -419,7 +419,11 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DhcpRole, String), StartE
         resolved.node_id,
         ExpirySettings::default(),
     )
-    .with_table(node.leases6().clone());
+    .with_table(node.leases6().clone())
+    .with_ceiling({
+        let node = Arc::clone(&node);
+        Arc::new(move || node.bindings_per_scope())
+    });
     if let Some(offers) = node.offers6() {
         expiry6 = expiry6.with_offers(offers);
     }

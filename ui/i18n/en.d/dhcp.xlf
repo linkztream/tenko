@@ -1370,7 +1370,7 @@
         <segment><source>Limits follow the security profile</source></segment>
       </unit>
       <unit id="dhcp.settings.limits_effective">
-        <segment><source>In force now: bindings per MAC address {mac}; addresses per DUID {addresses}, prefixes per DUID {prefixes}; new clients a second per scope {offers}; renewal cache {cache}.</source></segment>
+        <segment><source>In force now: bindings per MAC address {mac}; addresses per DUID {addresses}, prefixes per DUID {prefixes}, DHCPv6 bindings per scope {bindings}; new clients a second per scope {offers}; renewal cache {cache}.</source></segment>
       </unit>
       <unit id="dhcp.settings.limit_leases_per_mac">
         <segment><source>Bindings per MAC address</source></segment>
@@ -1380,6 +1380,9 @@
       </unit>
       <unit id="dhcp.settings.limit_prefixes_per_duid">
         <segment><source>Prefixes per DUID</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limit_bindings_per_scope">
+        <segment><source>DHCPv6 bindings per scope</source></segment>
       </unit>
       <unit id="dhcp.settings.limit_offers_per_second">
         <segment><source>New clients per second</source></segment>
@@ -1402,6 +1405,9 @@
       <unit id="dhcp.settings.limit_prefixes_per_duid_help">
         <segment><source>DHCPv6 delegated prefixes one DUID holds in a scope. 0 to {max}.</source></segment>
       </unit>
+      <unit id="dhcp.settings.limit_bindings_per_scope_help">
+        <segment><source>DHCPv6 addresses and delegated prefixes one scope holds, until an ended lease is deleted. It protects the node's memory and disk: an IPv6 network sets no bound of its own, and a host that makes up a new client identity for every request would otherwise fill both. Past it a new client gets no address; clients that hold one keep renewing. Raise it only for a network with more devices than that. Changes still committing can pass it, by at most 32,768 bindings on a node. 0 turns the protection off; at most {max}.</source></segment>
+      </unit>
       <unit id="dhcp.settings.limit_offers_per_second_help">
         <segment><source>New clients a scope offers an address to each second, with a burst of ten seconds' worth. A client that holds a lease is not counted. 0 to {max}.</source></segment>
       </unit>
@@ -1422,6 +1428,9 @@
       </unit>
       <unit id="dhcp.settings.limits_col_network">
         <segment><source>Network</source></segment>
+      </unit>
+      <unit id="dhcp.settings.limits_col_relay">
+        <segment><source>Relay</source></segment>
       </unit>
       <unit id="dhcp.settings.limits_col_held">
         <segment><source>Held</source></segment>

@@ -333,7 +333,7 @@ describe("the limits per client and per scope", () => {
     await loaded();
     expect(field("field-limits-follow").checked).toBe(true);
     expect(screen.getByTestId("settings-effective-limits").textContent).toBe(
-      "In force now: bindings per MAC address 16; addresses per DUID 16, prefixes per DUID 8; new clients a second per scope 100; renewal cache 25 %.",
+      "In force now: bindings per MAC address 16; addresses per DUID 16, prefixes per DUID 8, DHCPv6 bindings per scope 4096; new clients a second per scope 100; renewal cache 25 %.",
     );
     expect(screen.queryByTestId("field-limits_leases_per_mac")).toBeNull();
   });
@@ -345,17 +345,17 @@ describe("the limits per client and per scope", () => {
     expect(screen.getByTestId("settings-effective-limits").textContent).toContain("bindings per MAC address off");
   });
 
-  it("sends all five numbers once the settings stop following the profile", async () => {
+  it("sends all six numbers once the settings stop following the profile", async () => {
     const writes = recordIfMatch();
     open();
     await loaded();
     fireEvent.click(field("field-limits-follow"));
-    expect(["leases_per_mac", "addresses_per_duid", "prefixes_per_duid", "offers_per_second", "renew_cache_percent"].map((n) => field(`field-limits_${n}`).value)).toEqual(["16", "16", "8", "100", "25"]);
+    expect(["leases_per_mac", "addresses_per_duid", "prefixes_per_duid", "bindings_per_scope", "offers_per_second", "renew_cache_percent"].map((n) => field(`field-limits_${n}`).value)).toEqual(["16", "16", "8", "4096", "100", "25"]);
     fireEvent.input(field("field-limits_leases_per_mac"), { target: { value: "64" } });
     fireEvent.input(field("field-limits_offers_per_second"), { target: { value: "0" } });
     fireEvent.click(screen.getByTestId("dhcp-settings-save"));
     await waitFor(() => expect(dhcpState().settings.limits).toBeDefined());
-    const limits = { leases_per_mac: 64, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 0, renew_cache_percent: 25 };
+    const limits = { leases_per_mac: 64, addresses_per_duid: 16, prefixes_per_duid: 8, bindings_per_scope: 4096, offers_per_second: 0, renew_cache_percent: 25 };
     expect(put(writes)?.body?.limits).toEqual(limits);
     expect(dhcpState().settings.limits).toEqual(limits);
   });
@@ -414,10 +414,12 @@ describe("the limits per client and per scope", () => {
     await loaded();
     const panel = await screen.findByTestId("settings-limits-refused");
     const rows = within(panel).getAllByTestId("limit-refused");
-    expect(rows.map((r) => r.dataset.limit)).toEqual(["leases_per_mac", "offers_per_second"]);
+    expect(rows.map((r) => r.dataset.limit)).toEqual(["leases_per_mac", "offers_per_second", "bindings_per_scope"]);
     const cells = (row: HTMLElement) => within(row).getAllByRole("cell").map((c) => c.textContent);
-    expect(cells(rows[0] as HTMLElement).slice(0, 5)).toEqual(["Bindings per MAC address", "00:00:5e:00:53:40", "192.0.2.0/24", "holds 16 of 16", "3"]);
-    expect(cells(rows[1] as HTMLElement).slice(0, 5)).toEqual(["New clients per second", "\u2014", "198.51.100.0/24", "holds 100 of 100", "41"]);
+    expect(cells(rows[0] as HTMLElement).slice(0, 6)).toEqual(["Bindings per MAC address", "00:00:5e:00:53:40", "192.0.2.0/24", "\u2014", "holds 16 of 16", "3"]);
+    expect(cells(rows[1] as HTMLElement).slice(0, 6)).toEqual(["New clients per second", "\u2014", "198.51.100.0/24", "\u2014", "holds 100 of 100", "41"]);
+    // A full DHCPv6 scope names the refused DUID and the relay port it came through.
+    expect(cells(rows[2] as HTMLElement).slice(0, 6)).toEqual(["DHCPv6 bindings per scope", "0003000100005e005341", "2001:db8:1::/64", "2001:db8:1::1 Gi0/7", "holds 4096 of 4096", "2"]);
     expect(within(panel).getByTestId("settings-limits-offer-note").textContent).toContain("New clients wait for the scope's offer rate");
     expect(within(panel).queryByTestId("settings-limits-unlogged")).toBeNull();
   });

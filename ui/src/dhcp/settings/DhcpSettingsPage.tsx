@@ -177,6 +177,7 @@ function limitsSummary(l: EffectiveLimits): string {
     mac: limitValue(l.leases_per_mac),
     addresses: limitValue(l.addresses_per_duid),
     prefixes: limitValue(l.prefixes_per_duid),
+    bindings: limitValue(l.bindings_per_scope),
     offers: limitValue(l.offers_per_second),
     cache: limitValue(l.renew_cache_percent, " %"),
   });
@@ -195,6 +196,8 @@ function limitLabel(name: LimitName): string {
       return t("dhcp.settings.limit_addresses_per_duid");
     case "prefixes_per_duid":
       return t("dhcp.settings.limit_prefixes_per_duid");
+    case "bindings_per_scope":
+      return t("dhcp.settings.limit_bindings_per_scope");
     case "offers_per_second":
       return t("dhcp.settings.limit_offers_per_second");
     case "renew_cache_percent":
@@ -210,6 +213,8 @@ function limitHelp(name: LimitName, max: number): string {
       return t("dhcp.settings.limit_addresses_per_duid_help", { max });
     case "prefixes_per_duid":
       return t("dhcp.settings.limit_prefixes_per_duid_help", { max });
+    case "bindings_per_scope":
+      return t("dhcp.settings.limit_bindings_per_scope_help", { max });
     case "offers_per_second":
       return t("dhcp.settings.limit_offers_per_second_help", { max });
     case "renew_cache_percent":
@@ -226,6 +231,8 @@ function refusedName(limit: string): string {
       return t("dhcp.settings.limit_addresses_per_duid");
     case "prefixes_per_duid":
       return t("dhcp.settings.limit_prefixes_per_duid");
+    case "bindings_per_scope":
+      return t("dhcp.settings.limit_bindings_per_scope");
     case "offers_per_second":
       return t("dhcp.settings.limit_offers_per_second");
     case "conflicts_per_mac":
@@ -254,6 +261,7 @@ function LimitsRefused(props: { settings: Settings }) {
                 <th scope="col">{t("dhcp.settings.limits_col_limit")}</th>
                 <th scope="col">{t("dhcp.settings.limits_col_client")}</th>
                 <th scope="col">{t("dhcp.settings.limits_col_network")}</th>
+                <th scope="col">{t("dhcp.settings.limits_col_relay")}</th>
                 <th scope="col">{t("dhcp.settings.limits_col_held")}</th>
                 <th scope="col">{t("dhcp.settings.limits_col_count")}</th>
                 <th scope="col">{t("dhcp.settings.limits_col_last")}</th>
@@ -266,6 +274,7 @@ function LimitsRefused(props: { settings: Settings }) {
                     <td>{refusedName(r.limit)}</td>
                     <td class="mono">{r.client ?? "\u2014"}</td>
                     <td class="mono">{r.network ?? r.scope}</td>
+                    <td class="mono">{r.relay ?? "\u2014"}</td>
                     <td>{t("dhcp.settings.limits_held", { held: r.held, cap: r.cap })}</td>
                     <td>{r.count}</td>
                     <td>{formatDateTime(r.last)}</td>

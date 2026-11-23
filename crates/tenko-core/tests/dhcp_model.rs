@@ -1181,6 +1181,7 @@ fn settings() -> impl Strategy<Value = DhcpSettings> {
             maybe(any::<u32>()),
             maybe(any::<u32>()),
             maybe(any::<u32>()),
+            maybe(any::<u32>()),
             maybe(any::<u8>()),
         )
             .prop_map(
@@ -1188,12 +1189,14 @@ fn settings() -> impl Strategy<Value = DhcpSettings> {
                     leases_per_mac,
                     addresses_per_duid,
                     prefixes_per_duid,
+                    bindings_per_scope,
                     offers_per_second,
                     renew_cache_percent,
                 )| tenko_core::dhcp::DhcpLimits {
                     leases_per_mac,
                     addresses_per_duid,
                     prefixes_per_duid,
+                    bindings_per_scope,
                     offers_per_second,
                     renew_cache_percent,
                 },

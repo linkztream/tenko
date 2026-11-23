@@ -10,7 +10,11 @@
 //!   client with a reservation is never limited.
 //! - **Per scope.** A scope offers an address to at most `offers_per_second` new clients a
 //!   second (a client without a lease there), with a burst of [`BURST_SECS`] seconds' worth,
-//!   in a token bucket per scope ([`OfferRate`], fixed at start, one atomic word each).
+//!   in a token bucket per scope ([`OfferRate`], fixed at start, one atomic word each). A
+//!   DHCPv6 scope holds at most `bindings_per_scope` rows of `dhcp.leases6`, addresses and
+//!   delegated prefixes together, whatever their state: nothing in an IPv6 network bounds
+//!   them, since a client may invent a DUID per request. A new binding that would add a row
+//!   past it gets `NoAddrsAvail` or `NoPrefixAvail`, as from a full pool.
 //! - **Conflict marks** (no setting). An address a conflict probe found in use is abandoned
 //!   for the decline hold time only while one answering MAC address has marked fewer than
 //!   [`CONFLICTS_PER_MAC`] addresses in the last hour and the scope's addresses abandoned by
@@ -41,7 +45,9 @@ use tenko_core::{
     metrics::{Counter, CounterVec},
 };
 
-use crate::{conflict::DeclineLimit, guard::DhcpProfile, metrics as families};
+use crate::{
+    conflict::DeclineLimit, guard::DhcpProfile, metrics as families, v6::lease::MAX_INTERFACE_ID,
+};
 
 /// The health row while a limit refuses clients.
 pub const REFUSED: &str = "dhcp.limit.refused";
@@ -71,6 +77,8 @@ pub struct Limits {
     pub addresses_per_duid: u32,
     /// DHCPv6 `IA_PD` bindings per DUID and scope.
     pub prefixes_per_duid: u32,
+    /// Rows of `dhcp.leases6` per scope.
+    pub bindings_per_scope: u32,
     /// New clients offered an address per scope and second.
     pub offers_per_second: u32,
     /// The renewal cache, percent of the lease time.
@@ -84,13 +92,17 @@ impl Limits {
     /// offer rate is higher for larger links. The per-client limits stay above what a
     /// legitimate client holds: a network boot chain takes up to four DHCPv4 bindings of one
     /// MAC address (firmware, loader, installer, installed system), a dual-boot machine one
-    /// more, and a wireless bridge one per client behind it.
+    /// more, and a wireless bridge one per client behind it. The rows per DHCPv6 scope are a
+    /// number per profile, not a property of the network: a home has a few hundred devices,
+    /// 65,536 is the largest IPv4 network (a /16) anyone runs on one link, and Hardened keeps
+    /// a quarter of that.
     pub const fn of_profile(profile: DhcpProfile) -> Self {
         match profile {
             DhcpProfile::Lab => Self {
                 leases_per_mac: 0,
                 addresses_per_duid: 0,
                 prefixes_per_duid: 0,
+                bindings_per_scope: 0,
                 offers_per_second: 0,
                 renew_cache_percent: RENEW_CACHE_PERCENT,
             },
@@ -98,6 +110,7 @@ impl Limits {
                 leases_per_mac: 16,
                 addresses_per_duid: 16,
                 prefixes_per_duid: 8,
+                bindings_per_scope: 4_096,
                 offers_per_second: 100,
                 renew_cache_percent: RENEW_CACHE_PERCENT,
             },
@@ -105,6 +118,7 @@ impl Limits {
                 leases_per_mac: 16,
                 addresses_per_duid: 16,
                 prefixes_per_duid: 8,
+                bindings_per_scope: 65_536,
                 offers_per_second: 200,
                 renew_cache_percent: RENEW_CACHE_PERCENT,
             },
@@ -112,6 +126,7 @@ impl Limits {
                 leases_per_mac: 8,
                 addresses_per_duid: 8,
                 prefixes_per_duid: 4,
+                bindings_per_scope: 16_384,
                 offers_per_second: 100,
                 renew_cache_percent: RENEW_CACHE_PERCENT,
             },
@@ -125,6 +140,7 @@ impl Limits {
             leases_per_mac: stored.leases_per_mac.unwrap_or(base.leases_per_mac),
             addresses_per_duid: stored.addresses_per_duid.unwrap_or(base.addresses_per_duid),
             prefixes_per_duid: stored.prefixes_per_duid.unwrap_or(base.prefixes_per_duid),
+            bindings_per_scope: stored.bindings_per_scope.unwrap_or(base.bindings_per_scope),
             offers_per_second: stored.offers_per_second.unwrap_or(base.offers_per_second),
             renew_cache_percent: stored
                 .renew_cache_percent
@@ -148,16 +164,19 @@ pub enum Limit {
     ConflictsPerMac = 4,
     /// [`CONFLICT_SHARE`].
     ConflictShare = 5,
+    /// `bindings_per_scope`.
+    BindingsPerScope = 6,
 }
 
 /// The `limit` label of each [`Limit`], in its order.
-pub const LIMIT_LABELS: [&str; 6] = [
+pub const LIMIT_LABELS: [&str; 7] = [
     "leases_per_mac",
     "addresses_per_duid",
     "prefixes_per_duid",
     "offers_per_second",
     "conflicts_per_mac",
     "conflict_share",
+    "bindings_per_scope",
 ];
 
 impl Limit {
@@ -177,6 +196,7 @@ pub static LIMITED: CounterVec = CounterVec::fixed(
         &["offers_per_second"],
         &["conflicts_per_mac"],
         &["conflict_share"],
+        &["bindings_per_scope"],
     ],
 );
 
@@ -196,6 +216,10 @@ pub struct Refusal {
     pub cap: u32,
     /// What the client (or the scope) held at the last refusal.
     pub held: u32,
+    /// The relay the last refused DHCPv6 request came through: the link address of the
+    /// relay closest to the client and its Interface-Id, the port to look at; none for a
+    /// client on the listener's link and for DHCPv4.
+    pub relay: Option<String>,
     /// Refusals.
     pub count: u64,
     /// The first refusal.
@@ -217,6 +241,21 @@ impl Refusal {
         } else {
             hex.concat()
         }
+    }
+}
+
+/// A relay as [`Refusal::relay`] names it: the link address, then the Interface-Id, which a
+/// relay copies from the wire, cut to the 64 octets a lease row keeps of it
+/// ([`MAX_INTERFACE_ID`]) and shown as text only when every octet is printable ASCII, else
+/// in hexadecimal: at most 39 + 1 + 2 + 128 characters.
+pub fn relay_text(link: std::net::Ipv6Addr, interface_id: Option<&[u8]>) -> String {
+    let interface_id = interface_id.map(|id| &id[..id.len().min(MAX_INTERFACE_ID)]);
+    match interface_id {
+        Some(id) if !id.is_empty() && id.iter().all(u8::is_ascii_graphic) => {
+            format!("{link} {}", String::from_utf8_lossy(id))
+        }
+        Some(id) if !id.is_empty() => format!("{link} 0x{}", tenko_core::serde_util::to_hex(id)),
+        _ => link.to_string(),
     }
 }
 
@@ -258,6 +297,19 @@ impl LimitReport {
                         "conflict marks in {scope} past an eighth of its pool ({} of {}, {} \
                          refused): the addresses were skipped for one offer, not abandoned",
                         refusal.held, refusal.cap, refusal.count
+                    ),
+                    Limit::BindingsPerScope => format!(
+                        "{} in {scope} by bindings_per_scope{} (the scope holds {} of {} \
+                         DHCPv6 bindings, refused {} time(s)): its clients that hold a binding \
+                         keep renewing, new ones get no address",
+                        refusal.client_text(),
+                        refusal
+                            .relay
+                            .as_ref()
+                            .map_or_else(String::new, |relay| format!(" through {relay}")),
+                        refusal.held,
+                        refusal.cap,
+                        refusal.count
                     ),
                     _ => format!(
                         "{} in {scope} by {} (holds {} of {}, refused {} time(s))",
@@ -328,13 +380,14 @@ pub struct LimitLog {
 
 impl LimitLog {
     /// Notes a refusal by `limit` of `client` (empty for a limit of the scope) in `scope`,
-    /// which held `held` of `cap`, and counts it.
+    /// which held `held` of `cap`, through `relay` ([`relay_text`]), and counts it.
     pub fn refuse(
         &self,
         limit: Limit,
         client: &[u8],
         scope: PrefixId,
         (cap, held): (u32, u32),
+        relay: Option<String>,
         now: Timestamp,
     ) {
         LIMITED.inc(limit as u16);
@@ -349,6 +402,7 @@ impl LimitLog {
             entry.count = entry.count.saturating_add(1);
             entry.cap = cap;
             entry.held = held;
+            entry.relay = relay;
             entry.last = now;
             return;
         }
@@ -358,6 +412,7 @@ impl LimitLog {
             scope,
             cap,
             held,
+            relay: relay.clone(),
             count: 1,
             first: now,
             last: now,
@@ -597,6 +652,27 @@ mod tests {
         assert_eq!(limits.leases_per_mac, 0);
         assert_eq!(limits.offers_per_second, 5);
         assert_eq!(limits.addresses_per_duid, 8);
+        // The rows per DHCPv6 scope: off on Lab, a number per profile elsewhere.
+        let ceiling = |profile| Limits::of_profile(profile).bindings_per_scope;
+        assert_eq!(
+            [
+                DhcpProfile::Lab,
+                DhcpProfile::Home,
+                DhcpProfile::Standard,
+                DhcpProfile::Hardened,
+            ]
+            .map(ceiling),
+            [0, 4_096, 65_536, 16_384]
+        );
+        assert_eq!(limits.bindings_per_scope, 16_384);
+        let stored = DhcpLimits {
+            bindings_per_scope: Some(0),
+            ..DhcpLimits::default()
+        };
+        assert_eq!(
+            Limits::resolve(&stored, DhcpProfile::Standard).bindings_per_scope,
+            0
+        );
     }
 
     #[test]
@@ -649,12 +725,20 @@ mod tests {
         let log = LimitLog::default();
         let scope = PrefixId::generate();
         let mac = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
-        log.refuse(Limit::LeasesPerMac, &mac, scope, (16, 16), Timestamp::now());
+        log.refuse(
+            Limit::LeasesPerMac,
+            &mac,
+            scope,
+            (16, 16),
+            None,
+            Timestamp::now(),
+        );
         log.refuse(
             Limit::OffersPerSecond,
             &[],
             scope,
             (100, 100),
+            None,
             Timestamp::now(),
         );
         let (entries, unlogged) = log.report();
@@ -682,12 +766,75 @@ mod tests {
     }
 
     #[test]
+    fn a_full_dhcpv6_scope_names_the_refused_client_and_the_relay_it_came_through() {
+        let log = LimitLog::default();
+        let scope = PrefixId::generate();
+        let link: std::net::Ipv6Addr = "2001:db8:1::1".parse().expect("link");
+        assert_eq!(relay_text(link, None), "2001:db8:1::1");
+        assert_eq!(relay_text(link, Some(&[1, 2][..])), "2001:db8:1::1 0x0102");
+        // A long or unprintable Interface-Id from the wire: cut, and shown in hexadecimal.
+        let cut = relay_text(link, Some(&[b'<'; 300][..]));
+        assert_eq!(
+            cut,
+            format!("2001:db8:1::1 {}", "<".repeat(MAX_INTERFACE_ID))
+        );
+        let mut raw = vec![b'a'; 299];
+        raw.push(0x1b);
+        assert_eq!(
+            relay_text(link, Some(&raw[..])),
+            format!("2001:db8:1::1 {}", "a".repeat(MAX_INTERFACE_ID)),
+            "the octets past the cut do not count"
+        );
+        assert_eq!(
+            relay_text(link, Some(&[0x1b; 300][..])).len(),
+            "2001:db8:1::1 0x".len() + 2 * MAX_INTERFACE_ID
+        );
+        let relay = relay_text(link, Some(&b"Gi0/7"[..]));
+        log.refuse(
+            Limit::BindingsPerScope,
+            &[0, 3, 0, 1, 0x00, 0x00, 0x5e, 0x00, 0x53, 0x09],
+            scope,
+            (4_096, 4_096),
+            Some(relay),
+            Timestamp::now(),
+        );
+        let (entries, unlogged) = log.report();
+        let network: ipnet::IpNet = "2001:db8:1::/64".parse().expect("net");
+        let rows = LimitReport {
+            limits: None,
+            refusals: entries
+                .into_iter()
+                .map(|entry| (entry, Some(network)))
+                .collect(),
+            unlogged,
+        }
+        .warnings();
+        assert_eq!(rows[0].code, REFUSED);
+        assert!(
+            rows[0].detail.contains(
+                "0003000100005e005309 in 2001:db8:1::/64 by bindings_per_scope through \
+                 2001:db8:1::1 Gi0/7 (the scope holds 4096 of 4096 DHCPv6 bindings"
+            ),
+            "{rows:?}"
+        );
+        assert_eq!(rows[0].params["limits"], "bindings_per_scope");
+        assert_eq!(rows[0].params["clients"], "0003000100005e005309");
+    }
+
+    #[test]
     fn the_log_names_the_client_and_counts() {
         let log = LimitLog::default();
         let scope = PrefixId::generate();
         let mac = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x01];
         for _ in 0..3 {
-            log.refuse(Limit::LeasesPerMac, &mac, scope, (16, 16), Timestamp::now());
+            log.refuse(
+                Limit::LeasesPerMac,
+                &mac,
+                scope,
+                (16, 16),
+                None,
+                Timestamp::now(),
+            );
         }
         let (entries, unlogged) = log.report();
         assert_eq!(unlogged, 0);

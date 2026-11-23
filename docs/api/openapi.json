@@ -49333,6 +49333,7 @@
           "leases_per_mac",
           "addresses_per_duid",
           "prefixes_per_duid",
+          "bindings_per_scope",
           "offers_per_second",
           "renew_cache_percent"
         ],
@@ -49341,6 +49342,12 @@
             "type": "integer",
             "format": "int32",
             "description": "DHCPv6 address bindings per DUID and scope.",
+            "minimum": 0
+          },
+          "bindings_per_scope": {
+            "type": "integer",
+            "format": "int32",
+            "description": "DHCPv6 rows (addresses and delegated prefixes) per scope.",
             "minimum": 0
           },
           "leases_per_mac": {
@@ -50157,7 +50164,7 @@
           },
           "limit": {
             "type": "string",
-            "description": "The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,\n`offers_per_second`, `conflicts_per_mac` or `conflict_share`.",
+            "description": "The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,\n`bindings_per_scope`, `offers_per_second`, `conflicts_per_mac` or `conflict_share`.",
             "example": "leases_per_mac"
           },
           "network": {
@@ -50167,6 +50174,14 @@
             ],
             "description": "The scope's network, when the node serves it.",
             "example": "192.0.2.0/24"
+          },
+          "relay": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The relay the last refused DHCPv6 request came through: the link address of the\nrelay closest to the client and its Interface-Id, the port to look at. The\nInterface-Id is cut to 64 octets and given as text only when every octet is printable\nASCII, else in hexadecimal after `0x`.",
+            "example": "2001:db8:1::1 Gi0/7"
           },
           "scope": {
             "$ref": "#/components/schemas/PrefixId",
@@ -50215,6 +50230,15 @@
             ],
             "format": "int32",
             "description": "DHCPv6 address bindings (`IA_NA`) one DUID holds in a scope across its IAIDs and\nmessages.",
+            "minimum": 0
+          },
+          "bindings_per_scope": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "DHCPv6 rows one scope holds, addresses and delegated prefixes together, in any state\nuntil an ended row is deleted: a new binding past it gets no address, as from a full\npool. It protects the node's memory and disk; 0 turns it off. At most\n[`DhcpLimits::MAX_BINDINGS_PER_SCOPE`].",
             "minimum": 0
           },
           "leases_per_mac": {

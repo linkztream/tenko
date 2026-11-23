@@ -675,6 +675,12 @@ pub struct DhcpLimits {
     /// DHCPv6 delegated prefixes (`IA_PD`) one DUID holds in a scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefixes_per_duid: Option<u32>,
+    /// DHCPv6 rows one scope holds, addresses and delegated prefixes together, in any state
+    /// until an ended row is deleted: a new binding past it gets no address, as from a full
+    /// pool. It protects the node's memory and disk; 0 turns it off. At most
+    /// [`DhcpLimits::MAX_BINDINGS_PER_SCOPE`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bindings_per_scope: Option<u32>,
     /// New clients a scope offers an address to per second, with a burst of ten seconds'
     /// worth; a client that holds a lease of the scope is not counted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -687,6 +693,10 @@ pub struct DhcpLimits {
 }
 
 impl DhcpLimits {
+    /// The largest `bindings_per_scope`: sixteen times the Standard profile's 65,536, so that
+    /// a mistyped digit is refused rather than taken as a protection that no longer protects.
+    pub const MAX_BINDINGS_PER_SCOPE: u32 = 1_048_576;
+
     /// Whether every field is unset.
     pub fn is_unset(&self) -> bool {
         *self == Self::default()
@@ -698,7 +708,7 @@ impl DhcpLimits {
     ///
     /// `dhcp.settings.invalid` naming the field.
     pub fn validate(&self) -> Result<(), DhcpError> {
-        let checks: [(&str, Option<u32>, u32, &str); 5] = [
+        let checks: [(&str, Option<u32>, u32, &str); 6] = [
             (
                 "limits.leases_per_mac",
                 self.leases_per_mac,
@@ -716,6 +726,12 @@ impl DhcpLimits {
                 self.prefixes_per_duid,
                 65_535,
                 "0 (off) to 65535",
+            ),
+            (
+                "limits.bindings_per_scope",
+                self.bindings_per_scope,
+                Self::MAX_BINDINGS_PER_SCOPE,
+                "0 (off) to 1048576",
             ),
             (
                 "limits.offers_per_second",

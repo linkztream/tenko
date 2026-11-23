@@ -9011,6 +9011,11 @@ export interface components {
             addresses_per_duid: number;
             /**
              * Format: int32
+             * @description DHCPv6 rows (addresses and delegated prefixes) per scope.
+             */
+            bindings_per_scope: number;
+            /**
+             * Format: int32
              * @description DHCPv4 active bindings per MAC address and scope.
              */
             leases_per_mac: number;
@@ -9306,7 +9311,7 @@ export interface components {
             last: components["schemas"]["Timestamp"];
             /**
              * @description The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,
-             *     `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
+             *     `bindings_per_scope`, `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
              * @example leases_per_mac
              */
             limit: string;
@@ -9315,6 +9320,14 @@ export interface components {
              * @example 192.0.2.0/24
              */
             network?: string | null;
+            /**
+             * @description The relay the last refused DHCPv6 request came through: the link address of the
+             *     relay closest to the client and its Interface-Id, the port to look at. The
+             *     Interface-Id is cut to 64 octets and given as text only when every octet is printable
+             *     ASCII, else in hexadecimal after `0x`.
+             * @example 2001:db8:1::1 Gi0/7
+             */
+            relay?: string | null;
             /** @description The scope. */
             scope: components["schemas"]["PrefixId"];
         };
@@ -9341,6 +9354,14 @@ export interface components {
              *     messages.
              */
             addresses_per_duid?: number | null;
+            /**
+             * Format: int32
+             * @description DHCPv6 rows one scope holds, addresses and delegated prefixes together, in any state
+             *     until an ended row is deleted: a new binding past it gets no address, as from a full
+             *     pool. It protects the node's memory and disk; 0 turns it off. At most
+             *     [`DhcpLimits::MAX_BINDINGS_PER_SCOPE`].
+             */
+            bindings_per_scope?: number | null;
             /**
              * Format: int32
              * @description DHCPv4 bindings one MAC address holds in a scope across its client identifiers

@@ -784,6 +784,13 @@ fn commit_then(action: Action6) -> Action6 {
     }
 }
 
+/// Why an IA got nothing: no address or prefix was free, or a limit refused a new binding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoPick {
+    Free,
+    Limited,
+}
+
 /// One IA's address for a SOLICIT, REQUEST, RENEW or REBIND, held in the offers for the
 /// client (a claim fails when another worker holds it for another client; the next pick
 /// skips it).
@@ -794,7 +801,7 @@ fn claim<'a>(
     ia: &IaNa<'_>,
     taken: &[Ipv6Addr],
     hold: bool,
-) -> Option<alloc::Pick<'a>> {
+) -> Result<alloc::Pick<'a>, NoPick> {
     let (hinted, count) = hints(ia);
     let mut identity = [0u8; MAX_IDENTITY6];
     let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
@@ -809,7 +816,8 @@ fn claim<'a>(
             ia.iaid,
             &hinted[..count],
             &skip[..skipped],
-        )?;
+        )
+        .ok_or(NoPick::Free)?;
         if matches!(pick.source, Source::Hint | Source::Pool)
             && !new_binding_allowed(
                 ctx,
@@ -820,10 +828,10 @@ fn claim<'a>(
                 taken,
             )
         {
-            return None;
+            return Err(NoPick::Limited);
         }
         if !hold {
-            return Some(pick);
+            return Ok(pick);
         }
         let until = later(ctx.now, ctx.settings.offer_secs);
         if ctx.offers.hold(
@@ -833,22 +841,25 @@ fn claim<'a>(
             until,
             ctx.now,
         ) {
-            return Some(pick);
+            return Ok(pick);
         }
         if skipped < skip.len() {
             skip[skipped] = pick.addr;
             skipped += 1;
         }
     }
-    None
+    Err(NoPick::Free)
 }
 
 /// Whether a new binding of `kind` (an address or prefix the client does not hold) may be
 /// given: the client's DUID stays within its limit in the scope and its shared network
 /// (`addresses_per_duid`, `prefixes_per_duid`; the bindings it holds plus the new ones of
 /// this message in `taken`), and one without an offer of its own (a SOLICIT, a REQUEST
-/// that skipped it, Rapid Commit) counts in the scope's offer rate. A refusal goes to the
-/// limit log and the IA gets `NoAddrsAvail` or `NoPrefixAvail`.
+/// that skipped it, Rapid Commit) counts in the scope's offer rate. One that adds a row
+/// (no row holds its address) stays within the rows of its home scope
+/// (`bindings_per_scope`, with the new rows of this message in `taken`), so that a returning
+/// client whose old row is still there is not refused. A refusal goes to the limit log and
+/// the IA gets `NoAddrsAvail` or `NoPrefixAvail`.
 fn new_binding_allowed(
     ctx: &Context6<'_>,
     inbound: &Inbound<'_>,
@@ -858,6 +869,33 @@ fn new_binding_allowed(
     taken: &[Ipv6Addr],
 ) -> bool {
     let limits = ctx.guard.limits(ctx.image);
+    let image = ctx.image.v6();
+    let has_row = |addr: &Ipv6Addr| {
+        image
+            .siblings(scope)
+            .any(|sibling| ctx.leases.get(sibling.vrf, *addr).is_some())
+    };
+    let relay = || {
+        inbound
+            .chain
+            .link_address()
+            .map(|link| crate::limits::relay_text(link, inbound.chain.interface_id()))
+    };
+    let ceiling = limits.bindings_per_scope;
+    if ceiling > 0 && !has_row(&addr) {
+        let held = ctx.leases.scope_rows(home) + taken.iter().filter(|addr| !has_row(addr)).count();
+        if held >= ceiling as usize {
+            ctx.guard.refuse_limit(
+                crate::limits::Limit::BindingsPerScope,
+                inbound.duid,
+                home,
+                (ceiling, u32::try_from(held).unwrap_or(u32::MAX)),
+                relay(),
+                ctx.now,
+            );
+            return false;
+        }
+    }
     let (cap, limit) = match kind {
         Lease6Kind::Na => (
             limits.addresses_per_duid,
@@ -869,7 +907,6 @@ fn new_binding_allowed(
         ),
     };
     if cap > 0 && !inbound.duid.is_empty() {
-        let image = ctx.image.v6();
         let bound = |taken: &Ipv6Addr| {
             image.siblings(scope).any(|sibling| {
                 ctx.leases.get(sibling.vrf, *taken).is_some_and(|lease| {
@@ -891,6 +928,7 @@ fn new_binding_allowed(
                 inbound.duid,
                 scope.prefix,
                 (cap, u32::try_from(held).unwrap_or(u32::MAX)),
+                relay(),
                 ctx.now,
             );
             return false;
@@ -910,7 +948,7 @@ fn claim_pd<'a>(
     ia: &IaPd<'_>,
     taken: &[Ipv6Addr],
     hold: bool,
-) -> Option<alloc::PickPd<'a>> {
+) -> Result<alloc::PickPd<'a>, NoPick> {
     let (hinted, count) = prefix_hints(ia);
     let mut identity = [0u8; MAX_IDENTITY6];
     let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
@@ -925,7 +963,8 @@ fn claim_pd<'a>(
             ia.iaid,
             &hinted[..count],
             &skip[..skipped],
-        )?;
+        )
+        .ok_or(NoPick::Free)?;
         if matches!(pick.source, Source::Hint | Source::Pool)
             && !new_binding_allowed(
                 ctx,
@@ -936,10 +975,10 @@ fn claim_pd<'a>(
                 taken,
             )
         {
-            return None;
+            return Err(NoPick::Limited);
         }
         if !hold {
-            return Some(pick);
+            return Ok(pick);
         }
         let until = later(ctx.now, ctx.settings.offer_secs);
         if ctx.offers.hold(
@@ -949,14 +988,14 @@ fn claim_pd<'a>(
             until,
             ctx.now,
         ) {
-            return Some(pick);
+            return Ok(pick);
         }
         if skipped < skip.len() {
             skip[skipped] = pick.prefix;
             skipped += 1;
         }
     }
-    None
+    Err(NoPick::Free)
 }
 
 /// The bound prefix of an `IA_PD` while the store refuses writes (P3-Q14): answered for
@@ -1015,7 +1054,7 @@ fn solicit(
     for (index, ia) in list[..count].iter().flatten().enumerate() {
         let mut out = IaReply::new(ia.iaid);
         match claim(ctx, inbound, scope, ia, &taken[..granted], true) {
-            Some(pick) if ctx.accepting || pick.source == Source::Lease => {
+            Ok(pick) if ctx.accepting || pick.source == Source::Lease => {
                 let times = alloc::lifetimes(pick.home, pick.home.pool_of(pick.addr));
                 out.t1 = times.t1;
                 out.t2 = times.t2;
@@ -1057,7 +1096,7 @@ fn solicit(
     for (index, ia) in pds[..pd_count].iter().flatten().enumerate() {
         let mut out = IaReply::new_pd(ia.iaid);
         match claim_pd(ctx, inbound, scope, ia, &taken_pd[..delegated], true) {
-            Some(pick) if ctx.accepting || pick.source == Source::Lease => {
+            Ok(pick) if ctx.accepting || pick.source == Source::Lease => {
                 let times = alloc::pd_lifetimes(pick.home, pick.pool);
                 out.t1 = times.t1;
                 out.t2 = times.t2;
@@ -1203,20 +1242,23 @@ fn stateful(
             // left, and nothing is written.
             let mut identity = [0u8; MAX_IDENTITY6];
             let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
-            image.siblings(scope).find_map(|sibling| {
-                ctx.leases
-                    .by_client(sibling.prefix, Lease6Kind::Na, &identity[..len])
-                    .filter(|lease| lease.is_bound(ctx.now))
-                    .map(|lease| alloc::Pick {
-                        home: sibling,
-                        addr: lease.addr6(),
-                        source: Source::Lease,
-                        host_options: None,
-                    })
-            })
+            image
+                .siblings(scope)
+                .find_map(|sibling| {
+                    ctx.leases
+                        .by_client(sibling.prefix, Lease6Kind::Na, &identity[..len])
+                        .filter(|lease| lease.is_bound(ctx.now))
+                        .map(|lease| alloc::Pick {
+                            home: sibling,
+                            addr: lease.addr6(),
+                            source: Source::Lease,
+                            host_options: None,
+                        })
+                })
+                .ok_or(NoPick::Free)
         };
         match pick {
-            Some(pick) => {
+            Ok(pick) => {
                 let times = alloc::lifetimes(pick.home, pick.home.pool_of(pick.addr));
                 let (preferred, valid) = if ctx.accepting {
                     (times.preferred, times.valid)
@@ -1271,7 +1313,32 @@ fn stateful(
                     }
                 }
             }
-            None => {
+            // RFC 8415 sections 18.3.4 and 18.3.5: a binding a RENEW or REBIND asks for that
+            // the server will not create is NoAddrsAvail, and the client keeps the addresses
+            // it may still use until their own lifetimes end; the others get lifetimes of
+            // zero.
+            Err(NoPick::Limited) if kind != MessageType::Request => {
+                let mut identity = [0u8; MAX_IDENTITY6];
+                let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
+                for hint in hinted {
+                    let usable = image.siblings(scope).any(|sibling| {
+                        let who = (ia.iaid, &identity[..len]);
+                        alloc::is_free(
+                            ctx,
+                            sibling,
+                            *hint,
+                            inbound.client(),
+                            who,
+                            &taken[..granted],
+                        )
+                    });
+                    if !usable {
+                        out.zero(*hint);
+                    }
+                }
+                out.status = Some(status::NO_ADDRS_AVAIL);
+            }
+            Err(_) => {
                 for hint in hinted {
                     out.zero(*hint);
                 }
@@ -1354,10 +1421,10 @@ fn stateful_pd<'a>(
         let pick = if ctx.accepting {
             claim_pd(ctx, inbound, scope, ia, &taken[..delegated], true)
         } else {
-            bound_pd(ctx, inbound, scope, ia.iaid)
+            bound_pd(ctx, inbound, scope, ia.iaid).ok_or(NoPick::Free)
         };
         match pick {
-            Some(pick) => {
+            Ok(pick) => {
                 let times = alloc::pd_lifetimes(pick.home, pick.pool);
                 let held = ctx.leases.get(pick.home.vrf, pick.prefix);
                 let (preferred, valid) = if ctx.accepting {
@@ -1411,7 +1478,23 @@ fn stateful_pd<'a>(
                     }
                 }
             }
-            None => {
+            Err(NoPick::Limited) if kind != MessageType::Request => {
+                let mut identity = [0u8; MAX_IDENTITY6];
+                let len = alloc::identity(ia.iaid, inbound.duid, &mut identity);
+                let taken = &taken[..delegated.min(taken.len())];
+                for (prefix, prefix_len) in given() {
+                    let usable = ctx.image.v6().siblings(scope).any(|sibling| {
+                        let who = (ia.iaid, &identity[..len]);
+                        let at = (*prefix, *prefix_len);
+                        alloc::is_free_prefix(ctx, sibling, at, inbound.client(), who, taken)
+                    });
+                    if !usable {
+                        answer.zero_prefix(*prefix, *prefix_len);
+                    }
+                }
+                answer.status = Some(status::NO_PREFIX_AVAIL);
+            }
+            Err(_) => {
                 let mut any = false;
                 for (prefix, len) in given() {
                     any = true;

@@ -200,7 +200,7 @@ describe("settings", () => {
   });
 
   it("replaces the limits whole, keeps them when left out, and clears them with an empty object", () => {
-    const home = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 };
+    const home = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, bindings_per_scope: 4096, offers_per_second: 100, renew_cache_percent: 25 };
     expect(putSettings(state, ctx, { lease: LEASE }, "*").effective_limits).toEqual(home);
     const set = putSettings(state, ctx, { lease: LEASE, limits: { leases_per_mac: 0, offers_per_second: 500 } }, "*");
     expect(set.limits).toEqual({ leases_per_mac: 0, offers_per_second: 500 });
@@ -213,7 +213,7 @@ describe("settings", () => {
   });
 
   it("refuses a limit out of its bounds and names it", () => {
-    for (const [name, value] of [["leases_per_mac", 65_536], ["offers_per_second", 100_001], ["renew_cache_percent", 51], ["prefixes_per_duid", -1], ["addresses_per_duid", 1.5]] as const) {
+    for (const [name, value] of [["leases_per_mac", 65_536], ["offers_per_second", 100_001], ["renew_cache_percent", 51], ["prefixes_per_duid", -1], ["addresses_per_duid", 1.5], ["bindings_per_scope", 1_048_577]] as const) {
       const bad = failure(() => putSettings(state, ctx, { lease: LEASE, limits: { [name]: value } }, "*"));
       expect([bad.code, bad.params.field]).toEqual(["dhcp.settings.invalid", `limits.${name}`]);
     }

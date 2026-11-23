@@ -69,6 +69,7 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
             "leases_per_mac": 16,
             "addresses_per_duid": 16,
             "prefixes_per_duid": 8,
+            "bindings_per_scope": 4096,
             "offers_per_second": 100,
             "renew_cache_percent": 25,
         })
@@ -127,6 +128,7 @@ async fn the_trusted_relays_and_the_limits_follow_the_profile_until_set() {
         ] }),
         json!({ "trusted_relays": [], "clear_trusted_relays": true }),
         json!({ "limits": {"renew_cache_percent": 60} }),
+        json!({ "limits": {"bindings_per_scope": 1_048_577} }),
     ] {
         app.send("PUT", "/dhcp/settings", Some(body))
             .await

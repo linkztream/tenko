@@ -1067,6 +1067,7 @@ fn new_binding_allowed(
         &mac,
         scope.prefix,
         (cap, u32::try_from(held).unwrap_or(u32::MAX)),
+        None,
         ctx.now,
     );
     false

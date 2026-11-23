@@ -224,20 +224,23 @@ impl Guard {
             return true;
         }
         self.limits
-            .refuse(Limit::OffersPerSecond, &[], scope, (rate, rate), now);
+            .refuse(Limit::OffersPerSecond, &[], scope, (rate, rate), None, now);
         false
     }
 
-    /// Notes a refusal by a limit of a client.
+    /// Notes a refusal by a limit of a client that came through `relay`
+    /// ([`crate::limits::relay_text`]).
     pub fn refuse_limit(
         &self,
         limit: Limit,
         client: &[u8],
         scope: tenko_core::PrefixId,
         (cap, held): (u32, u32),
+        relay: Option<String>,
         now: Timestamp,
     ) {
-        self.limits.refuse(limit, client, scope, (cap, held), now);
+        self.limits
+            .refuse(limit, client, scope, (cap, held), relay, now);
     }
 
     /// The conflict budget.

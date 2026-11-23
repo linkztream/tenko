@@ -594,6 +594,11 @@ impl<'a> Worker<'a> {
                     let Some(memo) = self.memory.get(key) else {
                         continue;
                     };
+                    // A deleted row whose names are gone leaves nothing to remember.
+                    if is_empty(&memo.written) {
+                        self.memory.remove(key);
+                        continue;
+                    }
                     DdnsRequest {
                         action: DdnsAction::Remove,
                         vrf: key.0,
@@ -1021,6 +1026,9 @@ impl tenko_core::cluster::LeaderService for DdnsService {
         Worker::new(self, epoch).run(stop).await
     }
 }
+
+#[cfg(test)]
+mod memo_tests;
 
 #[cfg(test)]
 mod tests {

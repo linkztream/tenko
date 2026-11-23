@@ -50,6 +50,9 @@ pub const MAX_BINDINGS: usize = 8;
 /// The longest link-layer address kept (RFC 6939 allows any; Ethernet has six octets).
 pub const MAX_LINK_LAYER: usize = 20;
 
+/// The octets of a relay's Interface-Id kept (a relay copies it from the wire).
+pub const MAX_INTERFACE_ID: usize = 64;
+
 /// The role's in-memory DHCPv6 leases. Lookups never allocate.
 pub trait Lease6Table {
     /// The lease of an address.
@@ -76,6 +79,14 @@ pub trait Lease6Table {
         let _ = (scope, kind, duid);
         0
     }
+
+    /// The rows of `scope`, addresses and delegated prefixes in any state: what the limit
+    /// `bindings_per_scope` counts. A table without the count answers 0, which turns the
+    /// limit off.
+    fn scope_rows(&self, scope: PrefixId) -> usize {
+        let _ = scope;
+        0
+    }
 }
 
 /// A held row and the revision that wrote it.
@@ -98,6 +109,8 @@ pub struct Lease6Index {
     /// The keyed hash of a scope, a kind and a DUID, to the active rows of that DUID there
     /// (the limits per DUID): one entry per client, not per binding.
     duids: HashMap<u64, u32>,
+    /// The rows of each scope (the limit per scope).
+    scopes: HashMap<PrefixId, u32>,
     hasher: std::hash::RandomState,
     revision: Revision,
     /// The revision up to which the table holds every change of the rows, as
@@ -195,22 +208,25 @@ impl Lease6Index {
         counts
     }
 
-    /// The rows expiry moves on at `now`: active bindings past their end, abandoned
-    /// addresses past their hold.
-    pub fn due(&self, now: Timestamp) -> Vec<(VrfId, Ipv6Addr)> {
-        let mut due: Vec<_> = self
+    /// The keys of the rows `keep` selects, ordered: what expiry moves on or deletes.
+    pub fn select(&self, keep: impl Fn(&Lease6) -> bool) -> Vec<(VrfId, Ipv6Addr)> {
+        let mut keys: Vec<_> = self
             .rows
             .iter()
-            .filter(|(_, held)| {
-                matches!(
-                    held.lease.state,
-                    BindingState::Active | BindingState::Abandoned
-                ) && held.lease.ends <= now
-            })
+            .filter(|(_, held)| keep(&held.lease))
             .map(|(key, _)| *key)
             .collect();
-        due.sort_unstable();
-        due
+        keys.sort_unstable();
+        keys
+    }
+
+    /// The scopes that hold at least `ceiling` rows; none when `ceiling` is 0 (off).
+    pub fn full_scopes(&self, ceiling: u32) -> Vec<PrefixId> {
+        self.scopes
+            .iter()
+            .filter(|(_, rows)| ceiling > 0 && **rows >= ceiling)
+            .map(|(scope, _)| *scope)
+            .collect()
     }
 
     /// Takes a committed row written at `revision` (`Revision::ZERO` when unknown);
@@ -232,11 +248,13 @@ impl Lease6Index {
         if lease.state == BindingState::Active {
             self.count_duid(&lease, true);
         }
+        count(&mut self.scopes, lease.scope, true);
         let previous = self.rows.insert(key, Held { lease, revision });
         if revision > self.revision {
             self.revision = revision;
         }
         if let Some(previous) = previous {
+            count(&mut self.scopes, previous.lease.scope, false);
             if previous.lease.state == BindingState::Active {
                 self.count_duid(&previous.lease, false);
             }
@@ -261,6 +279,7 @@ impl Lease6Index {
     /// Removes the row of an address; returns it.
     pub fn take(&mut self, vrf: VrfId, addr: Ipv6Addr) -> Option<Lease6> {
         let held = self.rows.remove(&(vrf, addr))?;
+        count(&mut self.scopes, held.lease.scope, false);
         if held.lease.state == BindingState::Active {
             self.count_duid(&held.lease, false);
         }
@@ -280,14 +299,7 @@ impl Lease6Index {
     /// Counts an active row in or out of its DUID's count.
     fn count_duid(&mut self, lease: &Lease6, add: bool) {
         let hash = self.duid_hash(lease.scope, lease.kind, lease.duid.as_bytes());
-        if add {
-            *self.duids.entry(hash).or_default() += 1;
-        } else if let Some(count) = self.duids.get_mut(&hash) {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                self.duids.remove(&hash);
-            }
-        }
+        count(&mut self.duids, hash, add);
     }
 
     fn detach(&mut self, scope: (PrefixId, Lease6Kind), identity: &[u8], key: (VrfId, Ipv6Addr)) {
@@ -328,6 +340,22 @@ impl Lease6Table for Lease6Index {
         self.duids
             .get(&self.duid_hash(scope, kind, duid))
             .map_or(0, |count| *count as usize)
+    }
+
+    fn scope_rows(&self, scope: PrefixId) -> usize {
+        self.scopes.get(&scope).map_or(0, |count| *count as usize)
+    }
+}
+
+/// Counts one in or out of `key`'s count; a count of zero leaves the map.
+fn count<K: std::hash::Hash + Eq>(counts: &mut HashMap<K, u32>, key: K, add: bool) {
+    if add {
+        *counts.entry(key).or_default() += 1;
+    } else if let Some(held) = counts.get_mut(&key) {
+        *held = held.saturating_sub(1);
+        if *held == 0 {
+            counts.remove(&key);
+        }
     }
 }
 
@@ -429,7 +457,7 @@ pub struct PendingRelay6 {
     /// The relays the request passed.
     pub hops: u8,
     /// The Interface-Id of the closest relay that sent one.
-    pub interface_id: InlineBytes<64>,
+    pub interface_id: InlineBytes<MAX_INTERFACE_ID>,
     /// The Remote-Id of the closest relay that sent one.
     pub remote_id: InlineBytes<64>,
 }

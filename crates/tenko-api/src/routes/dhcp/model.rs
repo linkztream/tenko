@@ -89,6 +89,8 @@ pub struct DhcpEffectiveLimits {
     pub addresses_per_duid: u32,
     /// DHCPv6 delegated prefixes per DUID and scope.
     pub prefixes_per_duid: u32,
+    /// DHCPv6 rows (addresses and delegated prefixes) per scope.
+    pub bindings_per_scope: u32,
     /// New clients a scope offers an address to per second.
     pub offers_per_second: u32,
     /// The renewal cache, percent of the lease time.
@@ -101,6 +103,7 @@ impl From<tenko_dhcp::limits::Limits> for DhcpEffectiveLimits {
             leases_per_mac: limits.leases_per_mac,
             addresses_per_duid: limits.addresses_per_duid,
             prefixes_per_duid: limits.prefixes_per_duid,
+            bindings_per_scope: limits.bindings_per_scope,
             offers_per_second: limits.offers_per_second,
             renew_cache_percent: limits.renew_cache_percent,
         }
@@ -1185,7 +1188,7 @@ pub struct DhcpLimitReport {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DhcpLimitRefusal {
     /// The limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`,
-    /// `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
+    /// `bindings_per_scope`, `offers_per_second`, `conflicts_per_mac` or `conflict_share`.
     #[schema(example = "leases_per_mac")]
     pub limit: String,
     /// The client: a MAC address, a DUID in hexadecimal; absent for a limit of the scope.
@@ -1202,6 +1205,13 @@ pub struct DhcpLimitRefusal {
     pub cap: u32,
     /// What the client (or the scope) held at the last refusal.
     pub held: u32,
+    /// The relay the last refused DHCPv6 request came through: the link address of the
+    /// relay closest to the client and its Interface-Id, the port to look at. The
+    /// Interface-Id is cut to 64 octets and given as text only when every octet is printable
+    /// ASCII, else in hexadecimal after `0x`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(example = "2001:db8:1::1 Gi0/7")]
+    pub relay: Option<String>,
     /// Refusals.
     pub count: u64,
     /// The first refusal.

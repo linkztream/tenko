@@ -1,17 +1,18 @@
-// The limits per client and per scope of the DHCP server settings: the five numbers of the form
+// The limits per client and per scope of the DHCP server settings: the six numbers of the form
 // (text) to the object the server takes, with the bounds the server enforces, and the other way.
 import type { components } from "../../api/generated/schema";
 
 export type Limits = components["schemas"]["DhcpLimits"];
 export type EffectiveLimits = components["schemas"]["DhcpEffectiveLimits"];
 
-export type LimitName = "leases_per_mac" | "addresses_per_duid" | "prefixes_per_duid" | "offers_per_second" | "renew_cache_percent";
+export type LimitName = "leases_per_mac" | "addresses_per_duid" | "prefixes_per_duid" | "bindings_per_scope" | "offers_per_second" | "renew_cache_percent";
 
 /** The limits in the order of the form, each with the largest value the server takes (0 turns it off). */
 export const LIMITS: readonly { name: LimitName; max: number }[] = [
   { name: "leases_per_mac", max: 65_535 },
   { name: "addresses_per_duid", max: 65_535 },
   { name: "prefixes_per_duid", max: 65_535 },
+  { name: "bindings_per_scope", max: 1_048_576 },
   { name: "offers_per_second", max: 100_000 },
   { name: "renew_cache_percent", max: 50 },
 ];
@@ -38,7 +39,7 @@ export function limitsOfDraft(draft: LimitDraft): LimitCheck {
   const problems: Partial<Record<LimitName, number>> = {};
   for (const { name, max } of LIMITS) {
     const text = draft[name].trim();
-    if (!/^\d{1,6}$/.test(text) || Number(text) > max) problems[name] = max;
+    if (!/^\d{1,7}$/.test(text) || Number(text) > max) problems[name] = max;
     else limits[name] = Number(text);
   }
   return Object.keys(problems).length > 0 ? { ok: false, problems } : { ok: true, limits };

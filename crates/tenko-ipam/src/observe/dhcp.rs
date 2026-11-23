@@ -41,8 +41,10 @@
 //! - **Retention.** A row whose facts ended longer ago than the observation retention
 //!   ([`ObserveConfig::retention`], 30 days; the reconciler hands over the setting in force
 //!   with [`LeaseFacts::set_retention`]) is not presented at all, as a stored fact whose last
-//!   sighting is older is purged; the build at start leaves such rows out too. Lease rows
-//!   are never deleted, so without the cut a released address would show for ever.
+//!   sighting is older is purged; the build at start leaves such rows out too. DHCPv4 lease
+//!   rows are never deleted, so without the cut a released address would show for ever. An
+//!   ended DHCPv6 row is deleted once its names are removed (`dhcp.expiry6`), and its entry
+//!   leaves the view with it, as every deleted row's does.
 //! - **Time.** A reader passes the time it reads at, and that time alone decides what it
 //!   sees (the retention cut, whether a binding has ended, the facts presented): no build,
 //!   fact or helper of the view reads the clock. Only the follower, which serves the

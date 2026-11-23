@@ -1022,6 +1022,7 @@ fn limits_dto(report: &tenko_dhcp::limits::LimitReport) -> super::model::DhcpLim
                 network: *network,
                 cap: refusal.cap,
                 held: refusal.held,
+                relay: refusal.relay.clone(),
                 count: refusal.count,
                 first: refusal.first,
                 last: refusal.last,

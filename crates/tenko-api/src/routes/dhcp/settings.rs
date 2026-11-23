@@ -73,6 +73,9 @@ fn effective_limits(stored: &tenko_core::dhcp::DhcpLimits, profile: Limits) -> L
         prefixes_per_duid: stored
             .prefixes_per_duid
             .unwrap_or(profile.prefixes_per_duid),
+        bindings_per_scope: stored
+            .bindings_per_scope
+            .unwrap_or(profile.bindings_per_scope),
         offers_per_second: stored
             .offers_per_second
             .unwrap_or(profile.offers_per_second),

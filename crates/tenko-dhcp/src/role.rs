@@ -248,6 +248,14 @@ impl LocalNode {
         &self.leases6
     }
 
+    /// The rows a DHCPv6 scope holds at most (`bindings_per_scope`) under the image and the
+    /// profile in force; 0 (off) while the role does not serve.
+    pub fn bindings_per_scope(&self) -> u32 {
+        self.server().map_or(0, |server| {
+            server.guard().limits(&server.image()).bindings_per_scope
+        })
+    }
+
     /// The DHCPv6 lease store.
     pub fn lease_store6(&self) -> &StoreLeases6 {
         &self.lease_store6

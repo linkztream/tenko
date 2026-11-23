@@ -360,12 +360,13 @@ describe("the node", () => {
 });
 
 describe("the limits of the node", () => {
-  it("reports one MAC address at its cap and one scope held back at its offer rate", async () => {
+  it("reports one MAC address at its cap, one scope held back at its offer rate and a full DHCPv6 scope", async () => {
     const { limits } = await api.get("/api/v1/nodes/{id}/dhcp", { path: { id: 1 } });
     expect([limits?.effective?.leases_per_mac, limits?.unlogged]).toEqual([16, 0]);
     expect(limits?.refused?.map((r) => [r.limit, r.client ?? null, r.network, r.held, r.cap, r.count])).toEqual([
       ["leases_per_mac", "00:00:5e:00:53:40", "192.0.2.0/24", 16, 16, 3],
       ["offers_per_second", null, "198.51.100.0/24", 100, 100, 41],
+      ["bindings_per_scope", "0003000100005e005341", "2001:db8:1::/64", 4096, 4096, 2],
     ]);
   });
 });

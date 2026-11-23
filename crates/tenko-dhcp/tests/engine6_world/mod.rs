@@ -8,7 +8,7 @@ use std::net::{Ipv6Addr, SocketAddrV6};
 
 use tenko_core::{
     HostId, InterfaceId, NodeId, PrefixId, RangeId, Timestamp, VrfId,
-    dhcp::{DdnsPolicy, LeaseTimes, OptionValue, Scope6Settings},
+    dhcp::{DdnsPolicy, DhcpLimits, LeaseTimes, OptionValue, Scope6Settings},
     serde_util::HexBytes,
 };
 use tenko_dhcp::guard::{DhcpProfile, Guard};
@@ -121,7 +121,8 @@ pub fn scope(prefix: PrefixId, network: &str, first: &str, last: &str) -> Scope6
 pub struct World6 {
     pub image: ConfigImage,
     pub table: Lease6Index,
-    pub offers: Offers6,
+    /// Shared, so that a test can hand it to the expiry service.
+    pub offers: std::sync::Arc<Offers6>,
     pub store: MemLease6Store,
     pub settings: Engine6Settings,
     pub scratch: Box<Scratch6>,
@@ -161,6 +162,9 @@ pub fn image(
             relays.borrow().as_deref(),
         ));
     });
+    LIMITS.with(|limits| {
+        builder.limits(limits.borrow().clone());
+    });
     builder.v6().add_scope(first);
     builder.v6().add_scope(second);
     for reservation in reservations {
@@ -173,6 +177,8 @@ std::thread_local! {
     /// The relay list the next [`image`] of this thread gets (`World6::trusting`).
     static RELAYS: std::cell::RefCell<Option<Vec<tenko_core::dhcp::TrustedRelay>>> =
         const { std::cell::RefCell::new(None) };
+    /// The stored limits the next [`image`] of this thread gets (`World6::limited`).
+    static LIMITS: std::cell::RefCell<DhcpLimits> = std::cell::RefCell::new(DhcpLimits::default());
 }
 
 /// A reservation of `address` for `key`.
@@ -201,7 +207,7 @@ impl World6 {
         Self {
             image: image(prefix1, prefix2, tune),
             table: Lease6Index::new(),
-            offers: Offers6::with_capacity(256),
+            offers: std::sync::Arc::new(Offers6::with_capacity(256)),
             store: MemLease6Store::with_capacity(NodeId(1), 64),
             settings: Engine6Settings::default(),
             scratch: Scratch6::new(),
@@ -226,6 +232,17 @@ impl World6 {
         });
         let world = Self::with(tune);
         RELAYS.with(|cell| *cell.borrow_mut() = None);
+        world
+    }
+
+    /// [`World6::with_trusted_relay`] with `limits` stored in `dhcp.settings.limits`.
+    pub fn limited(
+        limits: DhcpLimits,
+        tune: impl FnOnce(&mut Scope6Image, &mut Scope6Image, &mut Vec<Reservation6Image>),
+    ) -> Self {
+        LIMITS.with(|cell| *cell.borrow_mut() = limits);
+        let world = Self::with_trusted_relay(tune);
+        LIMITS.with(|cell| *cell.borrow_mut() = DhcpLimits::default());
         world
     }
 

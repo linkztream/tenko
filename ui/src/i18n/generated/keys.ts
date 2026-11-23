@@ -2488,6 +2488,8 @@ export type MessageKey =
   | "dhcp.settings.lede"
   | "dhcp.settings.limit_addresses_per_duid"
   | "dhcp.settings.limit_addresses_per_duid_help"
+  | "dhcp.settings.limit_bindings_per_scope"
+  | "dhcp.settings.limit_bindings_per_scope_help"
   | "dhcp.settings.limit_conflict_share"
   | "dhcp.settings.limit_conflicts_per_mac"
   | "dhcp.settings.limit_leases_per_mac"
@@ -2505,6 +2507,7 @@ export type MessageKey =
   | "dhcp.settings.limits_col_last"
   | "dhcp.settings.limits_col_limit"
   | "dhcp.settings.limits_col_network"
+  | "dhcp.settings.limits_col_relay"
   | "dhcp.settings.limits_effective"
   | "dhcp.settings.limits_follow"
   | "dhcp.settings.limits_held"
@@ -9083,11 +9086,12 @@ export interface MessageArgs {
   "dhcp.settings.effective": { value: string | number };
   "dhcp.settings.effective_days": { days: number };
   "dhcp.settings.limit_addresses_per_duid_help": { max: string | number };
+  "dhcp.settings.limit_bindings_per_scope_help": { max: string | number };
   "dhcp.settings.limit_leases_per_mac_help": { max: string | number };
   "dhcp.settings.limit_offers_per_second_help": { max: string | number };
   "dhcp.settings.limit_prefixes_per_duid_help": { max: string | number };
   "dhcp.settings.limit_renew_cache_help": { max: string | number };
-  "dhcp.settings.limits_effective": { addresses: string | number; cache: string | number; mac: string | number; offers: string | number; prefixes: string | number };
+  "dhcp.settings.limits_effective": { addresses: string | number; bindings: string | number; cache: string | number; mac: string | number; offers: string | number; prefixes: string | number };
   "dhcp.settings.limits_held": { cap: string | number; held: string | number };
   "dhcp.settings.limits_unlogged": { count: number };
   "dhcp.settings.relays_add_link_label": { link: string | number; source: string | number };
@@ -12824,6 +12828,8 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.lede",
   "dhcp.settings.limit_addresses_per_duid",
   "dhcp.settings.limit_addresses_per_duid_help",
+  "dhcp.settings.limit_bindings_per_scope",
+  "dhcp.settings.limit_bindings_per_scope_help",
   "dhcp.settings.limit_conflict_share",
   "dhcp.settings.limit_conflicts_per_mac",
   "dhcp.settings.limit_leases_per_mac",
@@ -12841,6 +12847,7 @@ export const messageKeys: readonly MessageKey[] = [
   "dhcp.settings.limits_col_last",
   "dhcp.settings.limits_col_limit",
   "dhcp.settings.limits_col_network",
+  "dhcp.settings.limits_col_relay",
   "dhcp.settings.limits_effective",
   "dhcp.settings.limits_follow",
   "dhcp.settings.limits_held",

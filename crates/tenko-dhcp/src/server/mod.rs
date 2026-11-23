@@ -1246,6 +1246,7 @@ impl<H: TableHandle> Hooks for ProbeHooks<H> {
                 mac.as_ref().map_or(&[][..], |mac| &mac[..]),
                 candidate.prefix,
                 (cap, held),
+                None,
                 now,
             );
             return;

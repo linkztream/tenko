@@ -245,11 +245,11 @@ function checkTrustedRelays(value: unknown): TrustedRelay[] {
   return [...out.values()].sort((x, y) => compareCidr(x.relay, y.relay)).map((e) => ({ relay: formatCidr(e.relay), links: e.links.map(formatCidr) }));
 }
 
-const LIMIT_BOUNDS = { leases_per_mac: 65_535, addresses_per_duid: 65_535, prefixes_per_duid: 65_535, offers_per_second: 100_000, renew_cache_percent: 50 } as const;
+const LIMIT_BOUNDS = { leases_per_mac: 65_535, addresses_per_duid: 65_535, prefixes_per_duid: 65_535, bindings_per_scope: 1_048_576, offers_per_second: 100_000, renew_cache_percent: 50 } as const;
 type LimitKey = keyof typeof LIMIT_BOUNDS;
 
 /** The limits of the Home profile, the profile the mock stands for. */
-const HOME_LIMITS: Record<LimitKey, number> = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 };
+const HOME_LIMITS: Record<LimitKey, number> = { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, bindings_per_scope: 4096, offers_per_second: 100, renew_cache_percent: 25 };
 
 /** The limits as the server stores them: every field a whole number inside its bounds; the whole object replaces the stored one. */
 function checkLimits(value: unknown): NonNullable<Settings["limits"]> {

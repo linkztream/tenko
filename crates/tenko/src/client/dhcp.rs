@@ -432,6 +432,9 @@ pub struct SettingsSetArgs {
     /// DHCPv6 delegated prefixes per DUID and scope (see `--leases-per-mac`).
     #[arg(long, value_name = "N")]
     pub prefixes_per_duid: Option<u32>,
+    /// DHCPv6 rows (addresses and delegated prefixes) per scope (see `--leases-per-mac`).
+    #[arg(long, value_name = "N")]
+    pub bindings_per_scope: Option<u32>,
     /// New clients a scope offers an address to per second (see `--leases-per-mac`).
     #[arg(long, value_name = "N")]
     pub offers_per_second: Option<u32>,
@@ -446,6 +449,7 @@ pub struct SettingsSetArgs {
             "leases_per_mac",
             "addresses_per_duid",
             "prefixes_per_duid",
+            "bindings_per_scope",
             "offers_per_second",
             "renew_cache_percent",
         ]
@@ -1372,6 +1376,7 @@ fn settings(action: &SettingsCommand) -> Result<Request, Failure> {
             insert(&mut limits, "leases_per_mac", args.leases_per_mac);
             insert(&mut limits, "addresses_per_duid", args.addresses_per_duid);
             insert(&mut limits, "prefixes_per_duid", args.prefixes_per_duid);
+            insert(&mut limits, "bindings_per_scope", args.bindings_per_scope);
             insert(&mut limits, "offers_per_second", args.offers_per_second);
             insert(&mut limits, "renew_cache_percent", args.renew_cache_percent);
             if args.profile_limits || !limits.is_empty() {
@@ -2547,12 +2552,18 @@ mod tests {
                 "set",
                 "--leases-per-mac",
                 "32",
+                "--bindings-per-scope",
+                "1024",
                 "--renew-cache-percent",
                 "0",
             ],
             Method::Put,
             "/dhcp/settings",
-            Some(json!({"limits": {"leases_per_mac": 32, "renew_cache_percent": 0}})),
+            Some(json!({"limits": {
+                "leases_per_mac": 32,
+                "bindings_per_scope": 1024,
+                "renew_cache_percent": 0,
+            }})),
         );
         check(
             &["settings", "set", "--profile-limits"],

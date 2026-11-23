@@ -945,6 +945,7 @@ fn settings_and_ddns_validate() {
             leases_per_mac: Some(0),
             renew_cache_percent: Some(50),
             offers_per_second: Some(100_000),
+            bindings_per_scope: Some(crate::dhcp::DhcpLimits::MAX_BINDINGS_PER_SCOPE),
             ..crate::dhcp::DhcpLimits::default()
         })
         .validate()
@@ -961,6 +962,10 @@ fn settings_and_ddns_validate() {
         },
         crate::dhcp::DhcpLimits {
             prefixes_per_duid: Some(70_000),
+            ..crate::dhcp::DhcpLimits::default()
+        },
+        crate::dhcp::DhcpLimits {
+            bindings_per_scope: Some(crate::dhcp::DhcpLimits::MAX_BINDINGS_PER_SCOPE + 1),
             ..crate::dhcp::DhcpLimits::default()
         },
     ] {

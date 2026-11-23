@@ -419,15 +419,16 @@ export function nodeStatusOf(state: LeaseState, revision: number): NodeStatus {
   };
 }
 
-/** The limits of the node: a MAC address at its cap of bindings, and a scope that held back new clients at its offer rate. */
+/** The limits of the node: a MAC address at its cap of bindings, a scope that held back new clients at its offer rate, and a full DHCPv6 scope. */
 function limitReport(): NonNullable<NodeStatus["limits"]> {
   const at = new Date().toISOString();
   const scope = "0190d1c2-0000-7000-8000-0000000a0001";
   return {
-    effective: { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, offers_per_second: 100, renew_cache_percent: 25 },
+    effective: { leases_per_mac: 16, addresses_per_duid: 16, prefixes_per_duid: 8, bindings_per_scope: 4096, offers_per_second: 100, renew_cache_percent: 25 },
     refused: [
       { limit: "leases_per_mac", client: "00:00:5e:00:53:40", scope, network: "192.0.2.0/24", cap: 16, held: 16, count: 3, first: at, last: at },
       { limit: "offers_per_second", scope, network: "198.51.100.0/24", cap: 100, held: 100, count: 41, first: at, last: at },
+      { limit: "bindings_per_scope", client: "0003000100005e005341", scope, network: "2001:db8:1::/64", relay: "2001:db8:1::1 Gi0/7", cap: 4096, held: 4096, count: 2, first: at, last: at },
     ],
     unlogged: 0,
   };
