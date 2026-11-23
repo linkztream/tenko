@@ -210,7 +210,7 @@ The `dhcp` role ([dhcp.md](dhcp.md)), registered when the role starts:
 | `tenko_dhcp_naks_total` | counter | | NAKs sent |
 | `tenko_dhcp_declines_total` | counter | | DECLINEs received |
 | `tenko_dhcp_dropped_total` | counter | `reason` | Requests dropped: `malformed`, `filtered`, `no_scope`, `pool_full`, `queue`, `store_refused`, `rate_limited`, `untrusted_relay`, `limited` |
-| `tenko_dhcp_limited_total` | counter | `limit` | Requests refused by a limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`, `conflicts_per_mac`, `conflict_share` |
+| `tenko_dhcp_limited_total` | counter | `limit` | Requests refused by a limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`, `conflicts_per_mac`, `conflict_share`, `bindings_per_scope` |
 | `tenko_dhcp_leases` | gauge | `state` | Leases in the role's table by binding state |
 | `tenko_dhcp_pool_utilization` | gauge | `scope` | The share of a scope's pool addresses that are leased, 0 to 1 |
 | `tenko_dhcp_ddns_total` | counter | `outcome` | DDNS change sets: `written`, `removed`, `refused`, `failed`, `skipped`, `dropped` |
