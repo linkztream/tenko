@@ -168,7 +168,7 @@ use crate::{
     respond::{Conn, ReplyPath},
     tsig::{self, MacKey, Signer as TsigSigner, Verified},
     wire::{self, CLASSIC_UDP_LEN, HEADER_LEN, MAX_MESSAGE_LEN, SERVER_UDP_PAYLOAD},
-    xfr::{Directory, TransferAudit, out::unix_now},
+    xfr::{Directory, Refused, TransferAudit, out::unix_now},
     zone::ZoneService,
 };
 
@@ -350,7 +350,7 @@ struct Pending {
     message: UpdateMessage,
     scope: ScopeName,
     signer: Signer,
-    client: IpAddr,
+    conn: Conn,
     done: oneshot::Sender<Answer>,
 }
 
@@ -748,7 +748,7 @@ impl Inner {
             {
                 self.refused(
                     &zone,
-                    client,
+                    conn,
                     &signer,
                     tenko_core::dns::codes::UPDATE_REFUSED,
                     reason,
@@ -777,7 +777,7 @@ impl Inner {
             message,
             scope,
             signer,
-            client,
+            conn: *conn,
             done,
         };
         if let Err(answer) = self.enqueue(zone.id, pending) {
@@ -788,13 +788,25 @@ impl Inner {
         })
     }
 
-    /// Audits a refusal with its code, at most once a minute per client; a refusal with a
-    /// code of its own (a rule an operator watches for) is logged too, as often.
-    fn refused(&self, zone: &Zone, client: IpAddr, signer: &Signer, code: &str, reason: &str) {
-        if !self.audit.refusal_due(client) {
-            return;
-        }
-        if code != tenko_core::dns::codes::UPDATE_REFUSED {
+    /// Audits a refusal with its code when it is recorded on its own (the client's first in
+    /// the hour, a bounded number a minute in all; the others go into the minute's
+    /// summary); a refusal with a code of its own (a rule an operator watches for) is logged
+    /// too, as often.
+    fn refused(&self, zone: &Zone, conn: &Conn, signer: &Signer, code: &str, reason: &str) {
+        let client = conn.client.ip();
+        let draft = || {
+            let draft = AuditDraft::denied(audit::UPDATE_REFUSE, vec![ObjectRef::from(zone.id)])
+                .with_source_ip(Some(client))
+                .with_context("zone", zone.name.as_str())
+                .with_context("client", client.to_string());
+            signer
+                .audit(draft)
+                .with_context("code", code)
+                .with_context("reason", reason)
+        };
+        if self.audit.refused(Refused::Update, conn, &draft)
+            && code != tenko_core::dns::codes::UPDATE_REFUSED
+        {
             tracing::warn!(
                 zone = %zone.name,
                 %client,
@@ -804,16 +816,6 @@ impl Inner {
                 "dynamic update refused: {reason}"
             );
         }
-        let draft = AuditDraft::denied(audit::UPDATE_REFUSE, vec![ObjectRef::from(zone.id)])
-            .with_source_ip(Some(client))
-            .with_context("zone", zone.name.as_str())
-            .with_context("client", client.to_string());
-        self.audit.record(
-            signer
-                .audit(draft)
-                .with_context("code", code)
-                .with_context("reason", reason),
-        );
     }
 
     /// Hands an update to the task of its zone, starting the task when there is none.
@@ -878,7 +880,7 @@ impl Inner {
                 message: &pending.message,
                 scope: pending.scope.clone(),
                 signer: pending.signer.clone(),
-                client: pending.client,
+                client: pending.conn.client.ip(),
             })
             .collect();
         let profile = self.profile.get();
@@ -919,8 +921,10 @@ impl Inner {
                 drop(directory);
                 outcomes
                     .into_iter()
-                    .zip(&items)
-                    .map(|(outcome, item)| self.answer_of(outcome, ready, row.as_deref(), item))
+                    .zip(items.iter().zip(&group))
+                    .map(|(outcome, (item, pending))| {
+                        self.answer_of(outcome, ready, row.as_deref(), item, &pending.conn)
+                    })
                     .collect()
             }
             Err(error) => {
@@ -943,6 +947,7 @@ impl Inner {
         ready: bool,
         zone: Option<&Zone>,
         item: &Item<'_>,
+        conn: &Conn,
     ) -> Answer {
         match outcome {
             Outcome::Applied { .. } if ready => Answer::ok(),
@@ -954,7 +959,7 @@ impl Inner {
             Outcome::Unmet(unmet) => Answer::with(unmet.rcode, ede::OTHER, unmet.text()),
             Outcome::Refused(code, reason) => {
                 if let Some(zone) = zone {
-                    self.refused(zone, item.client, &item.signer, code, &reason);
+                    self.refused(zone, conn, &item.signer, code, &reason);
                 }
                 Answer::with(rcode::REFUSED, ede::PROHIBITED, reason)
             }

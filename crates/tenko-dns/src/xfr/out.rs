@@ -22,12 +22,16 @@
 //!   after the same check as a transfer, from the scope of the client's view.
 //!
 //! Every transfer is audited as `dns.zone.transfer_out` with the client, the key and the
-//! serials; refusals are audited and logged with their reason, at most once a minute per
-//! client and a bounded number a minute in all ([`TransferAudit::refusal_due`]).
+//! serials; a refusal is audited and logged with its reason when it is the client's first
+//! in the hour, a bounded number a minute in all, and counted in the minute's summary
+//! otherwise ([`TransferAudit::refused`]).
 
 use std::{
-    sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use tenko_core::{
@@ -78,6 +82,9 @@ pub struct XfrOut {
     profile: Arc<ProfileCell>,
     site: Arc<access::Site>,
     message_limit: usize,
+    started: Instant,
+    /// The minute (from `started`, plus one) of the last refused NOTIFY logged at warn.
+    notify_logged: AtomicU64,
 }
 
 impl std::fmt::Debug for XfrOut {
@@ -175,6 +182,8 @@ impl XfrOut {
             profile: Arc::new(ProfileCell::new(UpdateProfile::default())),
             site: Arc::new(access::Site::default()),
             message_limit: MAX_TRANSFER_MESSAGE,
+            started: Instant::now(),
+            notify_logged: AtomicU64::new(0),
         }
     }
 
@@ -283,8 +292,8 @@ impl XfrOut {
         }))
     }
 
-    /// Audits and logs a refusal when one of `conn`'s is due (at most once a minute per
-    /// client and a bounded number a minute in all).
+    /// Audits and logs a refusal when it is recorded on its own (the client's first in the
+    /// hour, a bounded number a minute in all); the others go into the minute's summary.
     fn refused(
         &self,
         zone: &Zone,
@@ -294,27 +303,27 @@ impl XfrOut {
         refused: Refusal,
     ) {
         let client = conn.client.ip();
-        if !self.audit.refusal_due(client) {
-            return;
-        }
-        tracing::warn!(
-            zone = %zone.name,
-            %client,
-            kind = kind_name(kind),
-            key = key.map_or("none", KeyName::as_str),
-            code = refused.code,
-            "a zone transfer was refused: {}",
-            refused.reason
-        );
-        self.audit.record(
+        let key = key.map_or("none", KeyName::as_str);
+        let draft = || {
             AuditDraft::denied(audit::ZONE_TRANSFER_OUT, vec![ObjectRef::from(zone.id)])
                 .with_source_ip(Some(client))
                 .with_context("zone", zone.name.as_str())
                 .with_context("kind", kind_name(kind))
-                .with_context("key", key.map_or("none", KeyName::as_str))
+                .with_context("key", key)
                 .with_context("code", refused.code)
-                .with_context("reason", refused.reason),
-        );
+                .with_context("reason", refused.reason)
+        };
+        if self.audit.refused(super::Refused::Transfer, conn, &draft) {
+            tracing::warn!(
+                zone = %zone.name,
+                %client,
+                kind = kind_name(kind),
+                key,
+                code = refused.code,
+                "a zone transfer was refused: {}",
+                refused.reason
+            );
+        }
     }
 
     /// The NOTAUTH answer of a request whose TSIG did not verify.
@@ -357,13 +366,15 @@ impl XfrOut {
             Ok(accepted) => accepted,
             Err(refused) => {
                 count(MetricKind::NotifyIn, Outcome::Refused);
-                // From a primary's own address the refusal is worth an operator's look; from
+                // From a primary's own address the refusal is worth an operator's look, once
+                // a minute (a spoofed flood is counted in the transfer counters); from
                 // anywhere else it is noise, and spoofable, so it stays at debug.
                 let from_primary = !matches!(
                     refused.code,
                     access::codes::NOT_SECONDARY | access::codes::NOT_A_PRIMARY
                 );
-                if from_primary && self.audit.refusal_due(from) {
+                let minute = self.started.elapsed().as_secs() / 60 + 1;
+                if from_primary && self.notify_logged.swap(minute, Ordering::Relaxed) != minute {
                     tracing::warn!(zone = %zone.name, %from, code = refused.code, "a NOTIFY was refused: {}", refused.reason);
                 } else {
                     tracing::debug!(zone = %zone.name, %from, code = refused.code, "a NOTIFY was refused: {}", refused.reason);

@@ -572,17 +572,17 @@ impl Tkey {
                 .record(finding, source_of(client), self.now());
         }
         tracing::debug!(client = %conn.client, %reason, "a TKEY negotiation was refused");
-        if audit_to.refusal_due(client) {
-            let mut draft = AuditDraft::denied(audit::GSS_REFUSE, Vec::new())
+        audit_to.refused(crate::xfr::Refused::Gss, conn, &|| {
+            let draft = AuditDraft::denied(audit::GSS_REFUSE, Vec::new())
                 .with_source_ip(Some(client))
                 .with_context("client", client.to_string())
                 .with_context("code", codes::GSS_REFUSED)
                 .with_context("reason", reason);
-            if let Some(principal) = principal {
-                draft = draft.with_context("principal", principal.to_string());
+            match principal {
+                Some(principal) => draft.with_context("principal", principal.to_string()),
+                None => draft,
             }
-            audit_to.record(draft);
-        }
+        });
     }
 
     /// Answers one TKEY query from `conn`: the octets of the answer, or `None` for no

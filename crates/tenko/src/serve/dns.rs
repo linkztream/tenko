@@ -177,6 +177,7 @@ fn transfer_path(
     transfers: Option<&Transfers>,
     handle: &catalog::CatalogHandle,
     store: &Arc<dyn Store>,
+    audit: &Arc<tenko_dns::xfr::StoreAudit>,
     profile: &Arc<tenko_dns::update::policy::ProfileCell>,
     site: &Arc<tenko_dns::xfr::access::Site>,
     stop: CancellationToken,
@@ -194,7 +195,7 @@ fn transfer_path(
         handle.clone(),
         Arc::clone(&directory),
         Arc::new(xfr::StoreJournal::new(Arc::clone(store))),
-        Arc::new(xfr::StoreAudit::new(Arc::clone(store))),
+        Arc::clone(audit) as Arc<dyn xfr::TransferAudit>,
         Some(Arc::new(secondaries.clone()) as Arc<dyn xfr::NotifyHandler>),
     )
     // The profile's floor of TGL-10, from the cell the update path shares.
@@ -958,10 +959,14 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
         watchers = encrypted.watchers;
         encrypted_line = Some(encrypted.describe);
     }
+    // One audit for the refusals of transfers, updates and TKEY, so that they share one
+    // budget a minute.
+    let audit = Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(&store)));
     let transfer_path = transfer_path(
         transfers.as_ref(),
         &handle,
         &store,
+        &audit,
         &update_profile,
         &transfer_site,
         stop.child_token(),
@@ -990,7 +995,7 @@ pub(crate) async fn start(parts: Parts<'_>) -> Result<(DnsRole, String), StartEr
                     Arc::clone(directory),
                     Arc::clone(&transfers.zones),
                     Arc::clone(&update_profile),
-                    Arc::new(tenko_dns::xfr::StoreAudit::new(Arc::clone(&store))),
+                    Arc::clone(&audit) as Arc<dyn tenko_dns::xfr::TransferAudit>,
                     stop.child_token(),
                     tenko_dns::update::UpdateSettings {
                         in_flight: section.update.in_flight,

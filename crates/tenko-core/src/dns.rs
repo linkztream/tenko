@@ -2688,7 +2688,7 @@ pub mod audit {
     /// The account and its keys were deleted from Tenko.
     pub const KRB_ACCOUNT_DELETE: AuditAction = AuditAction::from_static("dns.krb.account.delete");
     /// A TKEY negotiation was refused (the client, the reason, the principal when known;
-    /// at most once a minute per client, like `dns.update.refuse`).
+    /// a client's first in the hour, the rest summarized, like `dns.update.refuse`).
     pub const GSS_REFUSE: AuditAction = AuditAction::from_static("dns.gss.refuse");
     // WP13.0: end.
 

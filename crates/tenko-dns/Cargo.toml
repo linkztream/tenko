@@ -77,6 +77,8 @@ tenko-dns = { path = ".", features = ["testing"] }
 # The TLS service of the process (imported files with hot reload) in tests/tls*.rs.
 tenko-cluster = { workspace = true }
 tenko-jobs = { workspace = true, features = ["testing"] }
+# A Raft store held below its disk margin by its free-space hook (src/xfr/mod.rs tests).
+tenko-store = { workspace = true, features = ["raft", "testing", "test-hooks"] }
 tenko-vault = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 time = { workspace = true }
