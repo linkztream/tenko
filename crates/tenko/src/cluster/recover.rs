@@ -293,7 +293,7 @@ pub fn check_offline_write(resolved: &Resolved) -> Result<(), (u8, String)> {
         Ok(Some(fence)) => Err((
             exit::USAGE,
             format!(
-                "this controller stopped writing ({}); nothing is written here until an operator acts on it (docs/cluster.md section 12.11)",
+                "this controller stopped writing ({}); nothing is written here until an operator acts on it (docs/cluster.md sections 12.3 and 12.11)",
                 fence.kind.code()
             ),
         )),
@@ -836,19 +836,12 @@ async fn force(
 
 /// The refusal of a forced step on a copy that stopped as older than its cluster.
 fn older_copy(node: NodeId) -> Failure {
+    let reverted = tenko_store::FenceReason::Reverted;
+    let way_out = reverted.way_out(node).unwrap_or_default();
     failure(
-        tenko_store::FenceReason::Reverted.code(),
+        reverted.code(),
         exit::USAGE,
-        format!(
-            "controller {node} stopped because its store is older than the cluster it \
-             belongs to (its data directory or virtual machine went back to an earlier \
-             copy). To bring it back, remove it from another controller (tenko cluster \
-             remove {node} --yes), empty its data directory including node/, and join it \
-             again (tenko cluster join). Only if this copy is all that is left of the \
-             cluster, force it with --despite-older-copy: every controller that still runs \
-             then stops writing for good when it meets this copy, and the writes made after \
-             this copy was taken are lost"
-        ),
+        format!("controller {node} stopped writing: {way_out}"),
     )
 }
 
@@ -1311,6 +1304,12 @@ fn stopped_text(facts: &Facts) -> Option<String> {
             signed.at().to_rfc3339(),
         )
     };
+    if let Some(way_out) = fence.way_out(facts.node) {
+        let found = facts.found.as_deref().unwrap_or("no detail kept");
+        return Some(format!(
+            "It stopped on what a leader sent ({found}): {way_out}."
+        ));
+    }
     let claim = match fence {
         tenko_store::FenceReason::Conflict => "that it competes with this controller's history",
         tenko_store::FenceReason::MajorityAlive => {
@@ -1319,14 +1318,6 @@ fn stopped_text(facts: &Facts) -> Option<String> {
                  majority."
                     .to_owned(),
             );
-        }
-        tenko_store::FenceReason::Reverted | tenko_store::FenceReason::Diverged => {
-            return Some(format!(
-                "It stopped on what a leader sent ({}). A forced step here makes this copy the \
-                 cluster: every controller still running stops writing for good when it meets \
-                 it, and what they wrote that this copy lacks does not come here.",
-                facts.found.as_deref().unwrap_or("no detail kept")
-            ));
         }
         _ => "that it supersedes this controller's history",
     };

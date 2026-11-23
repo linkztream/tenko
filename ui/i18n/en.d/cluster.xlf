@@ -200,11 +200,11 @@
       </unit>
       <unit id="errors.cluster.member.reverted">
         <notes><note category="description">Error: a write was refused because this controller was started from an older copy of its store.</note></notes>
-        <segment><source>This controller was started from an older copy of its store and refuses changes. Remove it from another controller, empty its data directory and join it to the cluster again.</source></segment>
+        <segment><source>This controller was started from a copy of its store older than its cluster and refuses changes. Remove it from another controller, empty its data directory and join it to the cluster again; if it is all that is left of the cluster, force it as its warning in the system status says.</source></segment>
       </unit>
       <unit id="errors.cluster.member.diverged">
         <notes><note category="description">Error: a write was refused because the leader sent entries that differ from what this controller holds as committed.</note></notes>
-        <segment><source>The leader sent changes that differ from what this controller holds as committed, so it refuses changes. When most controllers went back to an older copy, the ones that kept the newer data stop: compare the copies before you choose a side.</source></segment>
+        <segment><source>A leader sent changes that differ from what this controller holds as committed, so it refuses changes. Either this controller or the others may be on an older copy, and neither may stop when a leader's log no longer reaches back to this controller's commit point and it sends a newer snapshot, so never restore one controller alone: follow its warning in the system status before you choose which copy to keep.</source></segment>
       </unit>
       <unit id="cluster.no_quorum.title">
         <notes><note category="description">Title of the dialog of a change refused for want of a quorum.</note></notes>

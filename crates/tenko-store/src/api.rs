@@ -1055,6 +1055,43 @@ impl FenceReason {
             Self::Diverged => "cluster.member.diverged",
         }
     }
+
+    /// What the operator of controller `node` does about a fence the store raised on what
+    /// a leader sent (`docs/cluster.md` section 12.3): the one text of the status notice, the
+    /// refused write and the forced step. `None` for the fences of a forced step.
+    pub fn way_out(self, node: impl std::fmt::Display) -> Option<String> {
+        let rejoin = format!(
+            "remove this one there (tenko cluster remove {node} --yes), empty its data \
+             directory including node/ and join it again (tenko cluster join)"
+        );
+        match self {
+            Self::Reverted => Some(format!(
+                "its store was started from a copy older than its cluster, and what it wrote \
+                 since is lost when it rejoins (docs/cluster.md section 12.3). While another \
+                 controller of the cluster runs with a quorum, {rejoin}. Only if this copy is \
+                 all that is left of the cluster, stop it and run tenko cluster recover --force \
+                 --despite-older-copy on it: every controller that still runs then stops \
+                 writing for good when it meets this copy, and the writes made after the copy \
+                 was taken are lost"
+            )),
+            Self::Diverged => Some(format!(
+                "a leader sent entries that differ from what it holds as committed: the \
+                 controllers hold two histories, and either side may be the one that stopped; \
+                 neither may stop when the leader's log no longer reaches back to this \
+                 controller's commit point and it sends a newer snapshot: the newer rows on \
+                 the member are then replaced, so never restore one member alone \
+                 (docs/cluster.md section 12.3). If the controllers that still run have a \
+                 quorum and hold the rows to keep, {rejoin}; the rows of this controller that \
+                 the others do not have are lost. Otherwise stop every controller, run tenko \
+                 cluster recover --inspect on each, choose the copy to keep and run tenko \
+                 cluster recover --force on it, with --accept-older when --compare ranks \
+                 another copy first (that order does not show which copy holds the rows to \
+                 keep); the others must then be brought back with an empty data directory and \
+                 a new node id (section 12.11), and what they held beyond that copy is lost"
+            )),
+            _ => None,
+        }
+    }
 }
 
 impl QuorumState {

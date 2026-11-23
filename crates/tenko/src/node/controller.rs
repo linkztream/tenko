@@ -1097,7 +1097,9 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                     .map_or_else(String::new, |(at, found)| {
                         format!(". Found {}: {found}", at.to_rfc3339())
                     });
-                let detail = fence_detail(reason, other.tip(), generation.lineage.tip()) + &found;
+                let node = layer.store().node_id();
+                let detail =
+                    fence_detail(reason, other.tip(), generation.lineage.tip(), node) + &found;
                 state.set_notice(notice(reason.code(), detail, &forced));
             }
             _ => state.clear_notice(reason.code()),
@@ -1152,19 +1154,15 @@ fn fence_detail(
     reason: tenko_store::FenceReason,
     other: Option<&tenko_cluster::generation::Signed>,
     own: Option<&tenko_cluster::generation::Signed>,
+    node: NodeId,
 ) -> String {
+    if let Some(way_out) = reason.way_out(node) {
+        return format!(
+            "this controller stopped writing ({}): {way_out}",
+            reason.code()
+        );
+    }
     let claim = match (reason, other) {
-        (tenko_store::FenceReason::Reverted, _) => ". Its store is older than the cluster it \
-            belongs to: remove it from another controller (tenko cluster remove <id> --yes), \
-            empty its data directory including node/ and join it again (tenko cluster join)"
-            .to_owned(),
-        (tenko_store::FenceReason::Diverged, _) => ". A leader sent entries that differ from \
-            what it holds as committed. When most controllers went back to an older copy, the \
-            controllers that kept the newer rows are the ones that stop: compare the copies \
-            with tenko cluster recover --inspect, then force the newest with tenko cluster \
-            recover --force and join the others again empty, or remove this one and join it \
-            again empty"
-            .to_owned(),
         (tenko_store::FenceReason::MajorityAlive, _) | (_, None) => String::new(),
         (reason, Some(other)) => format!(
             ". A record claims generation {}, forced on controller {}, dated {}, and that it {} \
@@ -1448,7 +1446,7 @@ mod tests {
         use tenko_store::FenceReason;
         let other = crate::cluster::recover::tests::competing(2, 1);
         let own = crate::cluster::recover::tests::competing(1, 1);
-        let detail = fence_detail(FenceReason::Conflict, Some(&other), Some(&own));
+        let detail = fence_detail(FenceReason::Conflict, Some(&other), Some(&own), NodeId(1));
         assert!(
             detail.contains("A record claims generation 1, forced on controller 2"),
             "{detail}"
@@ -1461,7 +1459,7 @@ mod tests {
         for advice in ["suggest", "recommend", "--revoke", "winner"] {
             assert!(!detail.contains(advice), "{advice} in {detail}");
         }
-        let detail = fence_detail(FenceReason::MajorityAlive, Some(&other), None);
+        let detail = fence_detail(FenceReason::MajorityAlive, Some(&other), None, NodeId(1));
         assert!(!detail.contains("claims"), "{detail}");
     }
 

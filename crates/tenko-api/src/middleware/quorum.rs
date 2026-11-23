@@ -204,23 +204,18 @@ fn refusal(state: &QuorumState, staleness: Staleness, queueable: bool) -> Respon
 /// The refusal of a controller that stopped writing for good (the cluster recovery): no
 /// `Retry-After`, since only an operator ends the state.
 fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Response {
-    let why = match reason {
-        FenceReason::Conflict => {
-            "a competing forced history of the cluster was seen, and an operator chooses which one stays"
+    let why = reason.way_out("<id>").unwrap_or_else(|| {
+        match reason {
+            FenceReason::Conflict => {
+                "a competing forced history of the cluster was seen, and an operator chooses which one stays"
+            }
+            FenceReason::MajorityAlive => {
+                "the forced step found the old cluster alive at its first start and this controller did not take office"
+            }
+            _ => "a newer generation of the cluster superseded this controller's history",
         }
-        FenceReason::MajorityAlive => {
-            "the forced step found the old cluster alive at its first start and this controller did not take office"
-        }
-        FenceReason::Superseded | FenceReason::Unknown => {
-            "a newer generation of the cluster superseded this controller's history"
-        }
-        FenceReason::Reverted => {
-            "its store is older than the cluster it belongs to; remove it from another controller, empty its data directory including node/ and join it again"
-        }
-        FenceReason::Diverged => {
-            "a leader sent entries that differ from what it holds as committed; when most controllers went back to an older copy, the controllers that kept the newer rows are the ones that stop (docs/cluster.md section 12.3)"
-        }
-    };
+        .to_owned()
+    });
     ApiError::new(
         reason.code(),
         503,
