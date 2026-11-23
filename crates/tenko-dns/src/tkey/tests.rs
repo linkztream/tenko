@@ -169,6 +169,8 @@ fn dns_28_a_raw_kerberos_negotiation_establishes_a_signed_context() {
         .verify(&answer, u64::try_from(NOW).expect("now"))
         .expect("the TKEY answer verifies at the client");
     assert_eq!(node.tkey.counts(), (0, 1));
+    // The gauge as the table writes it (the test runs in a process of its own).
+    assert_eq!(crate::metrics::GSS_CONTEXT_GAUGE.get(1), Some(1.0));
     let held = node.tkey.context(NAME).expect("held");
     assert_eq!(
         held.identity().principal.to_string(),

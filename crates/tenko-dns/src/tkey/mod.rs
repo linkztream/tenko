@@ -188,8 +188,10 @@ struct Table {
 
 impl Table {
     fn gauges(&self) {
-        GSS_CONTEXT_GAUGE.set_total(0, self.negotiating.len() as u64);
-        GSS_CONTEXT_GAUGE.set_total(1, self.established.len() as u64);
+        // A gauge takes a float: `set_total` is for mirrored counters.
+        let count = |len: usize| f64::from(u32::try_from(len).unwrap_or(u32::MAX));
+        GSS_CONTEXT_GAUGE.set(0, count(self.negotiating.len()));
+        GSS_CONTEXT_GAUGE.set(1, count(self.established.len()));
     }
 
     fn release(&mut self, source: Source) {
