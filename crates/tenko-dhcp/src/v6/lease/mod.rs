@@ -593,7 +593,9 @@ impl PendingChange6 {
             relay: relay.or_else(|| kept.and_then(|held| held.relay.clone())),
             // ADR 0031: the lease row is the observation; nothing records a fact's write.
             observed_at: None,
-            ddns: kept.map(|held| held.ddns.clone()).unwrap_or_default(),
+            // The names the DDNS worker recorded stay with the address, also across a new
+            // client: they are removed under the last client's DHCID.
+            ddns: previous.map(|held| held.ddns.clone()).unwrap_or_default(),
             // ADR 0031: a binding that still held at the change keeps its grant time.
             granted: Some(match kept {
                 Some(held) if held.state == BindingState::Active && held.ends > self.cltt => {

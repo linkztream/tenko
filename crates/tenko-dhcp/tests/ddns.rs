@@ -319,13 +319,13 @@ impl Lab {
         }
     }
 
-    /// Writes a lease row as the committer does: the held row's DDNS outcome stays.
+    /// Writes a lease row as the committer does: the held row's DDNS outcome stays, also
+    /// for a new client at the address.
     async fn commit(&self, mut lease: Lease) {
         let view = self.store.read(ReadConsistency::Local).await.expect("view");
         if let Some((held, _)) = view
             .get_typed(&LEASES, &(lease.vrf, lease.addr))
             .expect("row")
-            && held.client == lease.client
         {
             lease.ddns = held.ddns;
         }
@@ -1877,4 +1877,26 @@ async fn a_name_below_a_child_zone_is_written_and_removed_in_the_forward_zone_on
     .await;
     nothing_at(&lab, [lab.forward, child], "h.dl.lan.example.test").await;
     assert!(lab.ptr(67).await.is_none());
+}
+
+/// A new client takes an address while no worker runs: the row it gets carries the names
+/// of the last client, so the worker that starts removes them under that client's DHCID and
+/// writes the new client's.
+#[tokio::test]
+async fn a_new_client_followed_by_a_restart_has_the_last_clients_names_removed() {
+    let mut lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    lab.stop.cancel();
+    lab.commit(lab.lease(50, 2, Some(("h2", ClientFqdn::FLAG_S)), None))
+        .await;
+    assert_eq!(
+        lab.ddns(50).await.forward,
+        Some(name("h1.lan.example.test"))
+    );
+    lab.restart();
+    wait_until_async("the new client's name only", async || {
+        lab.a("h1.lan.example.test").await.is_empty()
+            && lab.a("h2.lan.example.test").await == vec![a_of(50)]
+    })
+    .await;
 }

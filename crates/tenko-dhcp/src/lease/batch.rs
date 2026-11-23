@@ -247,6 +247,18 @@ mod tests {
         assert_eq!(reuse_now(now, Timestamp::UNIX_EPOCH), Timestamp::UNIX_EPOCH);
     }
 
+    /// A new client at the address carries the DDNS outcome recorded for the last one, so
+    /// the worker removes those names also after it starts again.
+    #[test]
+    fn a_new_client_keeps_the_names_recorded_for_the_last_one() {
+        let (scope, now) = (PrefixId::generate(), Timestamp::now());
+        let mut first = change(scope, 1, now, at(now, 3_600)).to_lease(NodeId(1), None);
+        first.ddns.forward = tenko_core::dns::DnsName::new("printer.example.test").ok();
+        let next = change(scope, 2, now, at(now, 3_600)).to_lease(NodeId(1), Some(&first));
+        assert_ne!(next.client, first.client);
+        assert_eq!(next.ddns, first.ddns);
+    }
+
     #[test]
     fn after_a_backward_step_the_stored_end_is_the_end_the_client_was_told() {
         let (scope, now) = (PrefixId::generate(), Timestamp::now());

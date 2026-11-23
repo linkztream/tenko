@@ -479,10 +479,9 @@ impl PendingChange {
                     .filter(|_| same_client)
                     .and_then(|held| held.ddns_policy.clone())
             },
-            ddns: previous
-                .filter(|_| same_client)
-                .map(|held| held.ddns.clone())
-                .unwrap_or_default(),
+            // The names the DDNS worker recorded stay with the address, also across a new
+            // client: they are removed under the last client's DHCID.
+            ddns: previous.map(|held| held.ddns.clone()).unwrap_or_default(),
             fingerprint: fingerprint.or_else(|| {
                 previous
                     .filter(|_| same_client)
