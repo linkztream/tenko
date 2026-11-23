@@ -129,6 +129,8 @@ pub struct GenerationState {
     pub lineage: Lineage,
     /// Why this controller stopped writing, and the records that stopped it.
     pub fence: Option<(FenceReason, Lineage)>,
+    /// When the store stopped on what a leader sent, and what it found.
+    pub found: Option<(Timestamp, String)>,
 }
 
 impl GenerationState {
@@ -164,14 +166,17 @@ impl GenerationHook for Hook {
         }
     }
 
-    fn keep_fence(&self, reason: FenceReason, _detail: String) -> Option<BoxFuture<'static, ()>> {
+    fn keep_fence(&self, reason: FenceReason, detail: String) -> Option<BoxFuture<'static, ()>> {
         let peers = Peers {
             inner: self.0.upgrade()?,
         };
         Some(Box::pin(async move {
             let _one_at_a_time = peers.generations().fencing.lock().await;
             if peers.generation().fence.is_none() {
-                peers.fence_now(reason, Lineage::default(), true).await;
+                let found = Some((Timestamp::now(), detail));
+                peers
+                    .fence_now(reason, Lineage::default(), true, found)
+                    .await;
             }
         }))
     }
@@ -268,8 +273,9 @@ impl Peers {
         };
         if let Some(kept) = kept {
             let records = Lineage::kept(&kept.records)?;
+            let found = kept.detail.map(|detail| (kept.at, detail));
             let _one_at_a_time = self.generations().fencing.lock().await;
-            self.fence_now(kept.kind, records, false).await;
+            self.fence_now(kept.kind, records, false, found).await;
         }
         Ok(self.generation())
     }
@@ -648,12 +654,18 @@ impl Peers {
     /// Fences this controller, one fence at a time ([`Peers::fence_now`]).
     async fn apply_fence(&self, reason: FenceReason, records: Lineage, persist: bool) {
         let _one_at_a_time = self.generations().fencing.lock().await;
-        self.fence_now(reason, records, persist).await;
+        self.fence_now(reason, records, persist, None).await;
     }
 
     /// Fences this controller: the fence file first, then the store. The caller holds
     /// `fencing`; the store keeps a fence by the same rule as this state.
-    async fn fence_now(&self, reason: FenceReason, records: Lineage, persist: bool) {
+    async fn fence_now(
+        &self,
+        reason: FenceReason,
+        records: Lineage,
+        persist: bool,
+        found: Option<(Timestamp, String)>,
+    ) {
         // A fence never weakens: a weaker reason after a stricter one changes nothing.
         if lock(&self.generations().state)
             .fence
@@ -662,17 +674,24 @@ impl Peers {
         {
             return;
         }
+        // What the store found stays with a later fence of the same rank.
+        let found = found.or_else(|| lock(&self.generations().state).found.take());
         if persist && let Some(dir) = &self.inner.config.data_dir {
             let kept = FenceFile {
                 kind: reason,
                 records: records_of(&records),
                 at: Timestamp::now(),
+                detail: found.as_ref().map(|(_, detail)| detail.clone()),
             };
             if let Err(error) = kept.save(dir) {
                 tracing::error!(code = %error.code(), "the fence could not be kept on disk; this run stays fenced: {}", error.detail());
             }
         }
-        lock(&self.generations().state).fence = Some((reason, records));
+        {
+            let mut state = lock(&self.generations().state);
+            state.fence = Some((reason, records));
+            state.found = found;
+        }
         self.store().fence(reason).await;
         // Enrolled nodes learn the record from their controller in a later package; until
         // then their sessions end when this controller stops answering them.

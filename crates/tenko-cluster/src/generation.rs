@@ -837,6 +837,10 @@ pub struct FenceFile {
     pub records: Vec<GenerationRecord>,
     /// When.
     pub at: Timestamp,
+    /// What the store found in what a leader sent: the leader, its vote, the index and both
+    /// log ids. Older files have none, and older binaries skip it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl FenceFile {

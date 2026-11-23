@@ -477,6 +477,14 @@ fn an_envelope_with_a_later_field_is_refused() {
 
 #[test]
 fn the_fence_file_round_trips_and_an_unknown_kind_is_strict() {
+    /// The fence file as a binary without the detail reads it.
+    #[derive(serde::Deserialize)]
+    struct Older {
+        kind: FenceReason,
+        records: Vec<GenerationRecord>,
+        at: Timestamp,
+    }
+
     let ca = ca();
     let signer = leaf(&ca, 2, "controller");
     let dir = tenko_core::testing::TempDir::new("generation-fence");
@@ -485,9 +493,22 @@ fn the_fence_file_round_trips_and_an_unknown_kind_is_strict() {
         kind: FenceReason::Superseded,
         records: vec![sign(&signer, &body(1, None, 2))],
         at: Timestamp::now(),
+        detail: None,
     };
     fence.save(dir.path()).expect("save");
     assert_eq!(FenceFile::load(dir.path()).expect("load"), Some(fence));
+    // A binary that knows only the first three fields reads a file with what the store found.
+    let found = FenceFile {
+        kind: FenceReason::Diverged,
+        records: Vec::new(),
+        at: Timestamp::now(),
+        detail: Some("node 2 sent 3-2-10".to_owned()),
+    };
+    let older: Older = from_cbor(&to_cbor(&found).expect("cbor")).expect("an older reader");
+    assert_eq!(
+        (older.kind, older.records.len(), older.at),
+        (FenceReason::Diverged, 0, found.at)
+    );
     let unknown: FenceReason = from_cbor(&to_cbor("later_kind").expect("cbor")).expect("kind");
     assert_eq!(unknown.code(), codes::SUPERSEDED);
     fs::write(dir.path().join(NODE_DIR).join(FENCE_FILE), b"\xff").expect("write");
@@ -530,9 +551,15 @@ fn the_record_lineage_and_fence_layouts_are_pinned() {
         kind: FenceReason::Conflict,
         records: vec![record],
         at: Timestamp::from_unix_nanos(AT).expect("time"),
+        detail: None,
     };
+    let bytes = to_cbor(&fence).expect("cbor");
     assert_eq!(
-        to_hex(&to_cbor(&fence).expect("cbor")),
+        from_cbor::<FenceFile>(&bytes).expect("a file without a detail"),
+        fence
+    );
+    assert_eq!(
+        to_hex(&bytes),
         concat!(
             "a3646b696e6468636f6e666c696374677265636f72647381a364626f647941a0697369676e",
             "6174757265440909090965636861696e8142010262617474323032362d30392d313054",

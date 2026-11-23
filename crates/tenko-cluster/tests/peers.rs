@@ -2858,6 +2858,72 @@ async fn a_minted_record_stops_writes_and_does_nothing_else() {
     lab.stop().await;
 }
 
+/// A follower that stops on what a leader sent keeps the fence and what it found in its
+/// fence file, through the peer layer. A later record of the same rank takes over the
+/// reason, in the store too, and what was found stays.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_store_fence_keeps_what_it_found_under_a_later_record() {
+    use tenko_cluster::generation::FenceFile;
+    use tenko_store::{FenceReason, raft::openraft};
+
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let receiver = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("a follower");
+    let metrics = receiver.store.raft().metrics().borrow().clone();
+    let bound = metrics.last_applied.expect("applied");
+    let refused = receiver
+        .store
+        .handle_append_entries(openraft::raft::AppendEntriesRequest {
+            vote: metrics.vote,
+            prev_log_id: Some(openraft::LogId::new(
+                openraft::CommittedLeaderId::new(bound.leader_id.term, 0),
+                bound.index,
+            )),
+            entries: Vec::new(),
+            leader_commit: None,
+        })
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(openraft::error::RaftError::Fatal(
+                openraft::error::Fatal::Stopped
+            ))
+        ),
+        "{refused:?}"
+    );
+    let kept = FenceFile::load(receiver.data.path())
+        .expect("load")
+        .expect("the fence file");
+    assert_eq!(kept.kind, FenceReason::Diverged);
+    let found = kept.detail.expect("what the store found");
+
+    let minted = stray_certificate(&lab, NodeId(4242));
+    let forged = record(1, None, NodeId(4242), &[], &minted);
+    receiver
+        .peers
+        .offer(std::slice::from_ref(&forged), None)
+        .await
+        .expect("a record of the CA counts");
+    assert_eq!(receiver.store.fenced(), Some(FenceReason::Superseded));
+    let kept = FenceFile::load(receiver.data.path())
+        .expect("load")
+        .expect("the fence file");
+    assert_eq!(
+        (kept.kind, kept.detail.as_deref()),
+        (FenceReason::Superseded, Some(found.as_str()))
+    );
+    assert_eq!(
+        receiver.peers.generation().found.map(|(_, detail)| detail),
+        Some(found)
+    );
+    lab.stop().await;
+}
+
 /// A member of generation 1 refuses every call of a caller that speaks for generation 0
 /// (no generation entry at all counts as 0) except a join, which the joining command makes
 /// without one; it refuses a caller that its history superseded even when the caller

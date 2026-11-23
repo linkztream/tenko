@@ -1091,11 +1091,14 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                     .map(tenko_cluster::generation::Signed::forced)
                     .into_iter()
                     .collect();
-                state.set_notice(notice(
-                    reason.code(),
-                    fence_detail(reason, other.tip(), generation.lineage.tip()),
-                    &forced,
-                ));
+                let found = generation
+                    .found
+                    .as_ref()
+                    .map_or_else(String::new, |(at, found)| {
+                        format!(". Found {}: {found}", at.to_rfc3339())
+                    });
+                let detail = fence_detail(reason, other.tip(), generation.lineage.tip()) + &found;
+                state.set_notice(notice(reason.code(), detail, &forced));
             }
             _ => state.clear_notice(reason.code()),
         }

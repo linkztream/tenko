@@ -432,6 +432,8 @@ struct Facts {
     seen: u64,
     /// What stopped this controller, when a fence is kept here.
     fence: Option<tenko_store::FenceReason>,
+    /// When the store stopped on what a leader sent, and what it found.
+    found: Option<String>,
     members: BTreeMap<NodeId, MemberRecord>,
     /// The nodes with a record in the registry: the ones `--revoke` can revoke.
     enrolled: BTreeSet<NodeId>,
@@ -496,6 +498,10 @@ impl Facts {
             stopped_by,
             address_map: resolved.config.cluster.peer_address_map.clone(),
             fence: fence.as_ref().map(|fence| fence.kind),
+            found: fence.as_ref().and_then(|fence| {
+                let detail = fence.detail.as_ref()?;
+                Some(format!("{}: {detail}", fence.at.to_rfc3339()))
+            }),
             seen: own
                 .as_ref()
                 .map_or(0, generation::Signed::number)
@@ -604,7 +610,9 @@ impl Facts {
             self.copy.bytes
         );
         let _ = writeln!(text, "fingerprint      {}", self.fingerprint());
-        if let Some(fence) = self.fence {
+        if let (Some(fence), Some(found)) = (self.fence, &self.found) {
+            let _ = writeln!(text, "stopped          {} at {found}", fence.code());
+        } else if let Some(fence) = self.fence {
             let _ = writeln!(
                 text,
                 "stopped          {} (generation {} of another history{})",
@@ -1288,12 +1296,12 @@ fn stopped_text(facts: &Facts) -> Option<String> {
             );
         }
         tenko_store::FenceReason::Reverted | tenko_store::FenceReason::Diverged => {
-            return Some(
-                "It stopped on what a leader sent. A forced step here makes this copy the \
+            return Some(format!(
+                "It stopped on what a leader sent ({}). A forced step here makes this copy the \
                  cluster: every controller still running stops writing for good when it meets \
-                 it, and what they wrote that this copy lacks does not come here."
-                    .to_owned(),
-            );
+                 it, and what they wrote that this copy lacks does not come here.",
+                facts.found.as_deref().unwrap_or("no detail kept")
+            ));
         }
         _ => "that it supersedes this controller's history",
     };
@@ -1771,6 +1779,7 @@ pub(crate) mod tests {
             own: None,
             seen: 0,
             fence: None,
+            found: None,
             marked: BTreeSet::new(),
             removed: BTreeSet::new(),
             removed_at: None,
@@ -1993,6 +2002,7 @@ pub(crate) mod tests {
             kind: tenko_store::FenceReason::Superseded,
             records: Vec::new(),
             at: Timestamp::now(),
+            detail: None,
         }
         .save(&data)
         .expect("fence");
@@ -2127,6 +2137,7 @@ pub(crate) mod tests {
             kind: tenko_store::FenceReason::Superseded,
             records: vec![minted.record().clone()],
             at: Timestamp::now(),
+            detail: None,
         }
         .save(&resolved.data_dir)
         .expect("the stop");
@@ -2213,6 +2224,7 @@ pub(crate) mod tests {
             kind: reason,
             records,
             at: Timestamp::now(),
+            detail: None,
         }
         .save(&resolved.data_dir)
         .expect("the stop");
@@ -2249,6 +2261,7 @@ pub(crate) mod tests {
             kind,
             records,
             at: Timestamp::now(),
+            detail: None,
         }
         .save(&resolved.data_dir)
         .expect("the authority's stop");

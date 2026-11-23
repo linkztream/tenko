@@ -2583,8 +2583,8 @@ mod tests {
         assert_eq!(hex(&[0, 15, 255]), "000fff");
     }
 
-    /// A fence the store raises on what a leader sent goes into the fence file, a fence held
-    /// already stands, and the next start fences again from the file.
+    /// A fence the store raises on what a leader sent goes into the fence file with what it
+    /// found, a fence held already stands, and the next start fences again from the file.
     #[tokio::test]
     async fn a_store_fence_is_kept_across_a_restart_and_a_held_one_stands() {
         use tenko_store::{FenceReason, raft::network::PeerTransport as _};
@@ -2612,7 +2612,10 @@ mod tests {
         let kept = crate::generation::FenceFile::load(dir.path())
             .expect("load")
             .expect("a fence file");
-        assert_eq!(kept.kind, FenceReason::Diverged);
+        assert_eq!(
+            (kept.kind, kept.detail.as_deref()),
+            (FenceReason::Diverged, Some(found.as_str()))
+        );
         assert!(
             network
                 .keep_fence(FenceReason::Reverted, "later".to_owned())
@@ -2636,6 +2639,10 @@ mod tests {
         let (store, _network, peers) = open().await;
         peers.load_generation().await.expect("the fence file");
         assert_eq!(reasons(&store, &peers), (diverged, diverged));
+        assert_eq!(
+            peers.generation().found.map(|(_, detail)| detail),
+            Some(found)
+        );
         let _ = store.shutdown().await;
     }
 }
