@@ -124,6 +124,10 @@ pub struct RecoverArgs {
     /// Take office at the first start even when an old majority answers.
     #[arg(long)]
     pub despite_majority: bool,
+    /// Force a copy that stopped as older than its cluster (`cluster.member.reverted`): only
+    /// when this copy is all that is left of the cluster.
+    #[arg(long)]
+    pub despite_older_copy: bool,
 }
 
 /// The phase of a forced step.
@@ -830,6 +834,24 @@ async fn force(
     }
 }
 
+/// The refusal of a forced step on a copy that stopped as older than its cluster.
+fn older_copy(node: NodeId) -> Failure {
+    failure(
+        tenko_store::FenceReason::Reverted.code(),
+        exit::USAGE,
+        format!(
+            "controller {node} stopped because its store is older than the cluster it \
+             belongs to (its data directory or virtual machine went back to an earlier \
+             copy). To bring it back, remove it from another controller (tenko cluster \
+             remove {node} --yes), empty its data directory including node/, and join it \
+             again (tenko cluster join). Only if this copy is all that is left of the \
+             cluster, force it with --despite-older-copy: every controller that still runs \
+             then stops writing for good when it meets this copy, and the writes made after \
+             this copy was taken are lost"
+        ),
+    )
+}
+
 /// The checks of `--force` before anything is written: returns the nodes the step
 /// supersedes (every other voter and learner of the copy).
 fn force_checks(
@@ -856,6 +878,9 @@ fn force_checks(
             exit::USAGE,
             format!("controller {node} is the only voter already; it needs no forced step"),
         ));
+    }
+    if facts.fence == Some(tenko_store::FenceReason::Reverted) && !args.despite_older_copy {
+        return Err(older_copy(node));
     }
     // The numbers saturate: a second step at the largest one would replace this copy's own
     // record under the same number and break its lineage.
@@ -2022,6 +2047,7 @@ pub(crate) mod tests {
             accept_older: false,
             accept_mixed: true,
             despite_majority: false,
+            despite_older_copy: false,
         }
     }
 
@@ -2403,6 +2429,23 @@ pub(crate) mod tests {
         };
         let refused = checks(&alone, &[]).expect_err("alone and not stopped");
         assert!(format!("{refused:?}").contains(codes::NOT_NEEDED));
+        alone.fence = Some(tenko_store::FenceReason::Diverged);
+        checks(&alone, &[]).expect("a copy that kept the newer rows");
+        alone.fence = Some(tenko_store::FenceReason::Reverted);
+        let refused = checks(&alone, &[]).expect_err("an older copy");
+        let text = format!("{refused:?}");
+        for part in [
+            "cluster.member.reverted",
+            "tenko cluster join",
+            "--despite-older-copy",
+        ] {
+            assert!(text.contains(part), "{part} in {text}");
+        }
+        let acknowledged = RecoverArgs {
+            despite_older_copy: true,
+            ..args()
+        };
+        force_checks(&acknowledged, &alone, &[]).expect("acknowledged");
         alone.fence = Some(tenko_store::FenceReason::Conflict);
         assert_eq!(checks(&alone, &[]).expect("stopped"), BTreeSet::new());
         checks(&alone, &[2]).expect("the other side's controller");
