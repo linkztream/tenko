@@ -57,7 +57,7 @@ use tenko_dhcp::{
     },
     ddns::{
         DdnsProfile, DdnsService, DdnsSettings, dhcid,
-        metrics::{OLDEST, OUTCOMES, Outcome},
+        metrics::{OLDEST, OUTCOMES, Outcome, QUEUE},
         plan::DHCID,
     },
     v4::ClientFqdn,
@@ -1897,6 +1897,23 @@ async fn a_new_client_followed_by_a_restart_has_the_last_clients_names_removed()
     wait_until_async("the new client's name only", async || {
         lab.a("h1.lan.example.test").await.is_empty()
             && lab.a("h2.lan.example.test").await == vec![a_of(50)]
+    })
+    .await;
+}
+
+/// A worker that stops (its controller no longer leads) leaves the DDNS gauges out of the
+/// snapshots, so the old leader shows no queue beside the new one.
+#[tokio::test]
+async fn the_ddns_gauges_go_when_the_worker_stops() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    wait_until_async("the gauges", async || {
+        QUEUE.get().is_some() && OLDEST.get().is_some()
+    })
+    .await;
+    lab.stop.cancel();
+    wait_until_async("no gauges", async || {
+        QUEUE.get().is_none() && OLDEST.get().is_none()
     })
     .await;
 }

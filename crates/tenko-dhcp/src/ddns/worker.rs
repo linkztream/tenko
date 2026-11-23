@@ -1227,7 +1227,11 @@ impl tenko_core::cluster::LeaderService for DdnsService {
     }
 
     async fn run(&self, epoch: u64, stop: CancellationToken) -> Result<(), String> {
-        Worker::new(self, epoch).run(stop).await
+        let ended = Worker::new(self, epoch).run(stop).await;
+        // Only the running worker has a queue: a member that stops leading shows none.
+        QUEUE.unset();
+        OLDEST.unset();
+        ended
     }
 }
 
