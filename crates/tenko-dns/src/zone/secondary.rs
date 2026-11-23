@@ -1048,7 +1048,8 @@ impl Inner {
                 .with_context("members", members.len().to_string())
                 .with_context("serial", step.to.to_string()),
         );
-        self.zones.store().propose(batch).await?;
+        let (store, limits) = (self.zones.store(), self.zones.config().journal);
+        journal::propose_or_trim(store.as_ref(), limits, batch).await?;
         tracing::info!(zone = %catalog.name, members = members.len(), serial = step.to, "catalog zone members written");
         Ok(())
     }
@@ -1605,9 +1606,8 @@ impl Inner {
             draft = draft.with_context("from_serial", from.to_string());
         }
         batch.audit(draft);
-        self.zones
-            .store()
-            .propose(batch)
+        let (store, limits) = (self.zones.store(), self.zones.config().journal);
+        journal::propose_or_trim(store.as_ref(), limits, batch)
             .await
             .map_err(|error| store_error(error.into()))?;
         tracing::info!(zone = %zone.name, %address, kind, serial, records = changed_records, "zone transferred in");

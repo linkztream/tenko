@@ -571,6 +571,7 @@ async fn the_journal_stays_within_its_bound() {
         journal: JournalLimits {
             entries: 5,
             days: 30,
+            ..JournalLimits::default()
         },
         ..ZoneConfig::default()
     });
@@ -601,6 +602,213 @@ async fn the_journal_stays_within_its_bound() {
     );
     assert_eq!(entries[0].to_serial, 41, "newest first");
     assert_eq!(entries[4].to_serial, 37);
+}
+
+/// The journal entries per scope and their bytes, as stored, and the bytes row.
+async fn journal_of(store: &dyn Store, zone: tenko_core::dns::ZoneId) -> (usize, u64, Option<u64>) {
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let range = KeyRange::prefix(tenko_core::codec::key::encode_key(&zone));
+    let entries = view
+        .scan(
+            tenko_core::dns::tables::JOURNAL.name(),
+            range,
+            usize::MAX,
+            false,
+        )
+        .expect("entries");
+    let bytes = entries
+        .iter()
+        .map(|(_, stored)| stored.value.len() as u64)
+        .sum();
+    let row = view
+        .get_typed(
+            &tenko_core::dns::tables::JOURNAL_BYTES,
+            &(zone, ScopeName::DEFAULT),
+        )
+        .expect("row")
+        .map(|(bytes, _)| bytes);
+    (entries.len(), bytes, row)
+}
+
+/// A zone whose journal outgrew a smaller bound (a node upgraded with the journals an earlier
+/// version let grow) on a Raft store below its disk margin: a change is refused for disk
+/// room, and the zone service trims the journal alone, to the bound, its row exact.
+#[tokio::test]
+async fn below_the_disk_margin_a_refused_change_trims_the_journal() {
+    use tenko_core::testing::wait_until_async;
+    use tenko_store::{
+        Pressure,
+        raft::{RaftStore, RaftStoreConfig},
+        test_hooks::FREE_BYTES,
+    };
+    let mut config = RaftStoreConfig::new("unused");
+    config.fsync_probe_samples = 0;
+    let raft = Arc::new(RaftStore::open_temp(config).await.expect("open"));
+    let store: Arc<dyn Store> = raft.clone();
+    let open = |journal| {
+        ZoneService::with_direct_jobs(
+            Arc::clone(&store),
+            None,
+            ZoneConfig {
+                journal,
+                ..ZoneConfig::default()
+            },
+        )
+    };
+    let wide = open(JournalLimits::default());
+    let zone = wide
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    for round in 0..10u8 {
+        let address = format!("192.0.2.{}", round + 1);
+        wide.change_records(
+            &cx(),
+            zone.id,
+            &[a("churn.example.test", &[&address])],
+            false,
+        )
+        .await
+        .expect("change");
+    }
+    let (entries, bytes, _) = journal_of(store.as_ref(), zone.id).await;
+    assert_eq!(entries, 10, "one entry a change");
+    let narrow = open(JournalLimits {
+        bytes: bytes / 4,
+        ..JournalLimits::default()
+    });
+    let reserve = raft.safety().expect("safety").reserve_bytes;
+    std::fs::write(
+        raft.config().data_dir.join(FREE_BYTES),
+        (reserve / 2 * 3).to_string(),
+    )
+    .expect("the free space");
+    wait_until_async("the store at its margin", async || {
+        raft.safety().expect("safety").pressure == Pressure::Margin
+    })
+    .await;
+    let keyed = cx().with_idempotency(tenko_core::IdempotencyKey::new("retry").expect("key"));
+    let change = [a("churn.example.test", &["192.0.2.99"])];
+    let error = narrow
+        .change_records(&keyed, zone.id, &change, false)
+        .await
+        .expect_err("refused for disk room");
+    assert!(error.is(tenko_store::StoreError::DISK_RESERVE), "{error:?}");
+    let (entries, held, row) = journal_of(store.as_ref(), zone.id).await;
+    assert!(
+        entries < 10 && held <= bytes / 4,
+        "{entries} entries, {held} bytes"
+    );
+    assert_eq!(row, Some(held));
+    // The trim carried no key, so the client's retry under its own key is a new write.
+    std::fs::write(
+        raft.config().data_dir.join(FREE_BYTES),
+        (reserve * 100).to_string(),
+    )
+    .expect("the free space");
+    wait_until_async("the store with room again", async || {
+        raft.safety().expect("safety").pressure == Pressure::Normal
+    })
+    .await;
+    narrow
+        .change_records(&keyed, zone.id, &change, false)
+        .await
+        .expect("the same keyed change passes once there is room");
+}
+
+/// The journal of a zone deleted while a write still appended to it goes with the zone's
+/// other rows.
+#[tokio::test]
+async fn the_journal_of_a_deleted_zone_goes_with_its_orphans() {
+    let (service, store) = new_service();
+    let orphan = tenko_core::dns::ZoneId::generate();
+    let entry = tenko_core::dns::JournalEntry {
+        zone: orphan,
+        scope: ScopeName::DEFAULT,
+        from_serial: 1,
+        to_serial: 2,
+        revision: tenko_core::Revision(1),
+        at: tenko_core::Timestamp::now(),
+        removed: Vec::new(),
+        added: Vec::new(),
+    };
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let mut batch = WriteBatch::for_request(&cx());
+    journal::stage_append(&mut batch, view.as_ref(), JournalLimits::default(), &entry)
+        .expect("append");
+    store.propose(batch).await.expect("written");
+    assert_eq!(journal_of(store.as_ref(), orphan).await.0, 1);
+    assert_eq!(service.purge_orphans().await.expect("purge"), 1);
+    assert_eq!(journal_of(store.as_ref(), orphan).await, (0, 0, None));
+}
+
+/// A large static zone imported into a journal bounded at 64 KiB: its one entry, larger than
+/// the bound, is the journal; the next change drops it; the bytes row is the stored bytes
+/// throughout.
+#[tokio::test]
+async fn a_large_import_entry_stays_alone_in_a_journal_bounded_by_bytes() {
+    let (service, store) = service_with(ZoneConfig {
+        journal: JournalLimits {
+            bytes: 64 * 1024,
+            ..JournalLimits::default()
+        },
+        ..ZoneConfig::default()
+    });
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let held = async || {
+        let view = store.read(ReadConsistency::Local).await.expect("view");
+        let row = view
+            .get_typed(
+                &tenko_core::dns::tables::JOURNAL_BYTES,
+                &(zone.id, ScopeName::DEFAULT),
+            )
+            .expect("row")
+            .map(|(bytes, _)| bytes);
+        let entries =
+            journal::list(view.as_ref(), zone.id, &ScopeName::DEFAULT, None, 100).expect("journal");
+        let stored: u64 = view
+            .scan(
+                tenko_core::dns::tables::JOURNAL.name(),
+                KeyRange::all(),
+                usize::MAX,
+                false,
+            )
+            .expect("entries")
+            .iter()
+            .map(|(_, stored)| stored.value.len() as u64)
+            .sum();
+        assert_eq!(row, Some(stored));
+        entries
+            .iter()
+            .map(|entry| entry.added.len())
+            .collect::<Vec<_>>()
+    };
+    let request = ImportRequest {
+        zone: zone.id,
+        scope: ScopeName::DEFAULT,
+        text: "$ORIGIN example.test.\n$TTL 300\n$GENERATE 1-5000 host-$ IN A 198.51.100.1\n"
+            .to_owned(),
+        replace: false,
+        dialect: crate::zone::zonefile::Dialect::Rfc1035,
+        claim: crate::zone::import::ClaimRequest::default(),
+    };
+    service.start_import(&cx(), request).await.expect("import");
+    assert_eq!(held().await, vec![5_001], "the import's entry alone");
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[a("www.example.test", &["192.0.2.10"])],
+            false,
+        )
+        .await
+        .expect("change");
+    assert_eq!(held().await, vec![2], "the change's entry alone");
 }
 
 const ZONE_FILE: &str = "$ORIGIN example.test.

@@ -665,7 +665,7 @@ fn tables_codes_and_actions_are_in_the_namespace() {
     assert_eq!(tables::KEYS_META.name().as_str(), "dns.keys.meta");
     let node: Vec<&str> = tables::NODE_TABLES.iter().map(TableName::as_str).collect();
     let all: Vec<&str> = tables::all().iter().map(|table| table.as_str()).collect();
-    let controller_only = ["dns.sign_state", "dns.transfer_state"];
+    let controller_only = ["dns.sign_state", "dns.transfer_state", "dns.journal_bytes"];
     let without_controller_only: Vec<&str> = all
         .iter()
         .copied()

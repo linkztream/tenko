@@ -30,6 +30,7 @@ pub mod message;
 pub mod notify;
 pub mod out;
 
+use bytes::Bytes;
 use std::{
     collections::HashMap,
     net::IpAddr,
@@ -46,7 +47,7 @@ use tenko_core::{
     audit::{AuditAction, AuditDraft},
     dns::{
         JournalEntry, KeyMeta, KeyName, QueryTransport, ScopeName, Zone, ZoneId, audit,
-        tables::{JOURNAL, KEYS_META, ZONES},
+        tables::{KEYS_META, ZONES},
     },
     metrics::{CounterVec, Desc, Registry},
 };
@@ -177,8 +178,20 @@ pub fn with_source(draft: AuditDraft, conn: &Conn) -> AuditDraft {
 /// The journal entries an IXFR answer is built from.
 #[async_trait::async_trait]
 pub trait JournalSource: Send + Sync {
-    /// The entries of a zone scope, oldest first.
-    async fn entries(&self, zone: ZoneId, scope: &ScopeName) -> Result<Vec<JournalEntry>, String>;
+    /// The keys of the entries that take a client from the serial `from` to `to`, oldest
+    /// first, decided within `budget` bytes of the journal; `None` when they are not within
+    /// them ([`crate::zone::journal::steps`]).
+    async fn steps(
+        &self,
+        zone: ZoneId,
+        scope: &ScopeName,
+        from: u32,
+        to: u32,
+        budget: u64,
+    ) -> Result<Option<Vec<Bytes>>, String>;
+
+    /// The entry at `key`, read as the answer sends it; `None` when it was dropped since.
+    async fn entry(&self, key: &[u8]) -> Result<Option<JournalEntry>, String>;
 }
 
 /// The journal in the store of this process (Phase 2: the role runs in the controller's
@@ -193,23 +206,32 @@ impl StoreJournal {
     pub fn new(store: Arc<dyn Store>) -> Self {
         Self { store }
     }
+
+    async fn view(&self) -> Result<Arc<dyn tenko_store::ReadView>, String> {
+        self.store
+            .read(ReadConsistency::Local)
+            .await
+            .map_err(|error| error.to_string())
+    }
 }
 
 #[async_trait::async_trait]
 impl JournalSource for StoreJournal {
-    async fn entries(&self, zone: ZoneId, scope: &ScopeName) -> Result<Vec<JournalEntry>, String> {
-        let view = self
-            .store
-            .read(ReadConsistency::Local)
-            .await
-            .map_err(|error| error.to_string())?;
-        let range = KeyRange::prefix(tenko_core::codec::key::encode_key(&(zone, scope.clone())));
-        Ok(view
-            .scan_typed(&JOURNAL, range, usize::MAX, false)
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .map(|(_, entry, _)| entry)
-            .collect())
+    async fn steps(
+        &self,
+        zone: ZoneId,
+        scope: &ScopeName,
+        from: u32,
+        to: u32,
+        budget: u64,
+    ) -> Result<Option<Vec<Bytes>>, String> {
+        crate::zone::journal::steps(self.view().await?.as_ref(), zone, scope, from, to, budget)
+            .map_err(|error| error.to_string())
+    }
+
+    async fn entry(&self, key: &[u8]) -> Result<Option<JournalEntry>, String> {
+        crate::zone::journal::entry(self.view().await?.as_ref(), key)
+            .map_err(|error| error.to_string())
     }
 }
 

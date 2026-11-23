@@ -7,9 +7,13 @@ mod support;
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU32, Ordering},
+    },
 };
 
+use bytes::Bytes;
 use tenko_core::{
     Revision, Timestamp,
     audit::AuditDraft,
@@ -45,18 +49,89 @@ fn key() -> TsigKey {
     TsigKey::new(&name(KEY), TsigAlgorithm::HmacSha256, SECRET)
 }
 
+/// The journal's entries by their starting serial, and the serial of one that went (0: none).
 #[derive(Default)]
-struct Journal(BTreeMap<u32, JournalEntry>);
+struct Journal(BTreeMap<u32, JournalEntry>, AtomicU32);
 
 #[async_trait::async_trait]
 impl JournalSource for Journal {
-    async fn entries(
+    async fn steps(
         &self,
         _zone: ZoneId,
         _scope: &ScopeName,
-    ) -> Result<Vec<JournalEntry>, String> {
-        Ok(self.0.values().cloned().collect())
+        from: u32,
+        to: u32,
+        _budget: u64,
+    ) -> Result<Option<Vec<Bytes>>, String> {
+        let mut keys = Vec::new();
+        let mut at = from;
+        while let Some(entry) = self.0.get(&at) {
+            keys.push(Bytes::copy_from_slice(&at.to_be_bytes()));
+            at = entry.to_serial;
+            if at == to {
+                return Ok(Some(keys));
+            }
+        }
+        Ok(None)
     }
+
+    async fn entry(&self, key: &[u8]) -> Result<Option<JournalEntry>, String> {
+        let serial = u32::from_be_bytes(key.try_into().map_err(|_| "a key".to_owned())?);
+        if serial == self.1.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        Ok(self.0.get(&serial).cloned())
+    }
+}
+
+/// A journal entry that goes between the plan of an IXFR and its read ends the answer: the
+/// client gets no closing SOA, so it cannot take a delta with a step missing.
+#[tokio::test]
+async fn an_ixfr_whose_entry_went_meanwhile_sends_no_closing_soa() {
+    let lab = lab_open();
+    lab.journal.1.store(2, Ordering::Relaxed);
+    let (message, _) = request(TYPE_IXFR, Some(1), false);
+    let client = conn([127, 0, 0, 1], QueryTransport::Tcp);
+    let sent = records(&collect(&lab.path, message, client, false).await);
+    let closing = sent
+        .iter()
+        .filter(|record| {
+            record.rtype == Rtype::SOA && soa_serial(record.rdata.as_bytes()) == Some(3)
+        })
+        .count();
+    assert!(closing <= 1, "{closing} SOAs at the current serial");
+}
+
+/// Three IXFRs one step behind, started together, all get their deltas: no request is
+/// answered in AXFR form because of the others.
+#[tokio::test]
+async fn three_ixfrs_one_step_behind_started_together_all_get_their_deltas() {
+    let lab = lab_open();
+    let client = conn([127, 0, 0, 1], QueryTransport::Tcp);
+    let transfers: Vec<_> = (0..3)
+        .map(|_| {
+            let path = Arc::clone(&lab.path);
+            let (message, _) = request(TYPE_IXFR, Some(2), false);
+            tokio::spawn(async move { records(&collect(&path, message, client, false).await) })
+        })
+        .collect();
+    for transfer in transfers {
+        assert_eq!(transfer.await.expect("the transfer").len(), 6, "the delta");
+    }
+}
+
+/// A client that does not read its answer holds its own transfer only: another client's
+/// IXFR meanwhile gets its delta.
+#[tokio::test]
+async fn a_slow_reader_does_not_make_another_ixfr_fall_back() {
+    let lab = lab_open();
+    let client = conn([127, 0, 0, 1], QueryTransport::Tcp);
+    let (message, _) = request(TYPE_IXFR, Some(1), false);
+    let slow = Arc::clone(&lab.path).stream(message, client, false);
+    let (message, _) = request(TYPE_IXFR, Some(2), false);
+    let other = records(&collect(&lab.path, message, client, false).await);
+    assert_eq!(other.len(), 6, "the delta");
+    drop(slow);
 }
 
 #[derive(Default)]
@@ -83,6 +158,7 @@ struct Lab {
     path: Arc<XfrOut>,
     audit: Arc<Audit>,
     notified: Arc<Notified>,
+    journal: Arc<Journal>,
 }
 
 fn soa_at(apex: &str, serial: u32) -> tenko_core::dns::RecordData {
@@ -195,13 +271,14 @@ fn lab(require_tsig: bool, xot: bool, limit: usize) -> Lab {
             vec![record("new.example.test", &a(78))],
         ),
     );
+    let journal = Arc::new(journal);
     let audit = Arc::new(Audit::default());
     let notified = Arc::new(Notified::default());
     let path = Arc::new(
         XfrOut::new(
             handle,
             directory,
-            Arc::new(journal),
+            Arc::clone(&journal) as Arc<dyn JournalSource>,
             Arc::clone(&audit) as Arc<dyn TransferAudit>,
             Some(Arc::clone(&notified) as Arc<dyn NotifyHandler>),
         )
@@ -214,6 +291,7 @@ fn lab(require_tsig: bool, xot: bool, limit: usize) -> Lab {
         path,
         audit,
         notified,
+        journal,
     }
 }
 

@@ -224,7 +224,9 @@ impl Signer {
     }
 
     async fn propose(&self, batch: tenko_store::WriteBatch) -> Result<Revision, StoreError> {
-        let committed = self.zones.store().propose(batch).await?;
+        let (store, limits) = (self.zones.store(), self.zones.config().journal);
+        let committed =
+            crate::zone::journal::propose_or_trim(store.as_ref(), limits, batch).await?;
         self.remember(committed.revision);
         Ok(committed.revision)
     }

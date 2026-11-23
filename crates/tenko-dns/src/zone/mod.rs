@@ -80,7 +80,7 @@ use tenko_core::{
         DnsName, DnssecPolicy, JournalEntry, JournalRecord, Origin, Rdata, RecordData, RrSet,
         Rtype, ScopeName, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, UpdatePolicy,
         Zone, ZoneId, ZoneKind, ZoneScope, audit, check_apex,
-        tables::{NAME_OWNERS, RRSETS, TRANSFER_STATE, ZONES},
+        tables::{JOURNAL, JOURNAL_BYTES, NAME_OWNERS, RRSETS, TRANSFER_STATE, ZONES},
     },
     ipam::Stamp,
 };
@@ -544,6 +544,7 @@ impl ZoneService {
             let Some(write) = planned.write else {
                 return Ok((planned.result, None));
             };
+            let journals = journal::appended_scopes(&write.batch);
             // Only DHCP's name updates are planned without a job
             // ([`ZoneService::change_dhcp_names`]); the batch keeps its audit record.
             let written = if write.job {
@@ -571,7 +572,12 @@ impl ZoneService {
                     tracing::debug!(attempt, "zone write stale; planning again");
                     last = Some(error);
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    if error.coded().code == tenko_store::StoreError::DISK_RESERVE {
+                        journal::trim(self.store.as_ref(), self.config.journal, &journals).await;
+                    }
+                    return Err(error);
+                }
             }
         }
         Err(last.unwrap_or_else(|| {
@@ -1060,7 +1066,7 @@ impl ZoneService {
         Ok(written)
     }
 
-    /// Removes the RRsets, owner rows and transfer stamps of every zone that no longer exists,
+    /// Removes the RRsets, owner rows, transfer stamps and journals of every zone that no longer exists,
     /// and returns how many zones had some. It reads one key per zone of each table, not
     /// every row.
     ///
@@ -1081,6 +1087,9 @@ impl ZoneService {
             }),
             (TRANSFER_STATE.name(), |key: &[u8]| {
                 TRANSFER_STATE.decode_key(key).ok()
+            }),
+            (JOURNAL.name(), |key: &[u8]| {
+                JOURNAL.decode_key(key).ok().map(|(zone, _, _)| zone)
             }),
         ] {
             let mut start = std::ops::Bound::Unbounded;
@@ -1136,6 +1145,13 @@ impl ZoneService {
             )?;
             if view.get_typed(&TRANSFER_STATE, &id)?.is_some() {
                 batch.delete_typed(&TRANSFER_STATE, &id);
+            }
+            // The journal of every scope, and its count of bytes.
+            for table in [JOURNAL.name(), JOURNAL_BYTES.name()] {
+                let range = KeyRange::prefix(encode_key(&id));
+                for (key, _) in view.scan(table, range, self.config.import_chunk, false)? {
+                    batch.delete(table.clone(), key);
+                }
             }
             if rows.is_empty() && !owners_left && batch.is_empty() {
                 return Ok(());

@@ -1632,7 +1632,7 @@ async fn finish(
     batch.audit(draft);
     drop(view);
     // Proposed directly, not staged with the step record, so the report names its revision.
-    let committed = cx.store.propose(batch).await?;
+    let committed = journal::propose_or_trim(cx.store.as_ref(), run.journal, batch).await?;
     report.revision = Some(committed.revision);
     Ok(report.clone())
 }

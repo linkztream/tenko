@@ -2430,6 +2430,7 @@ pub struct TransferStamp {
 /// | `dns.name_owners` | [`NameOwnerKey`] (zone, scope, name) | [`NameOwner`] |
 /// | `dns.krb_accounts` | [`Realm`] | [`KrbAccount`] |
 /// | `dns.transfer_state` | [`ZoneId`] | [`TransferStamp`] |
+/// | `dns.journal_bytes` | ([`ZoneId`], [`ScopeName`]) | the bytes of the scope's journal entries |
 pub mod tables {
     use super::{
         Acl, AclId, BlockList, BlockListId, DnsName, ForwardRule, ForwardRuleId, JournalEntry,
@@ -2481,9 +2482,14 @@ pub mod tables {
     pub static TRANSFER_STATE: TableDef<ZoneId, TransferStamp> =
         TableDef::new("dns.transfer_state");
 
+    /// The bytes of the journal entries of each zone scope, kept with every append and drop
+    /// so that the journal is bounded by bytes without reading it (controllers only).
+    pub static JOURNAL_BYTES: TableDef<(ZoneId, ScopeName), u64> =
+        TableDef::new("dns.journal_bytes");
+
     /// The tables a node with the `dns` role receives through node sync: every table of the
-    /// namespace except `dns.sign_state` and `dns.transfer_state`, which only the leader
-    /// services on the controllers read (plan section 3.2). Declared now and consumed by no
+    /// namespace except `dns.sign_state`, `dns.transfer_state` and `dns.journal_bytes`, which
+    /// only the controllers read (plan section 3.2). Declared now and consumed by no
     /// node in Phase 2: the one node of Phase 2 runs the role in the controller's process
     /// and reads the store directly (plan section 2.10); the node-file feed is Phase 5. The
     /// trust anchors and
@@ -2511,7 +2517,7 @@ pub mod tables {
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 16] {
+    pub fn all() -> [&'static TableName; 17] {
         [
             ZONES.name(),
             RRSETS.name(),
@@ -2531,6 +2537,7 @@ pub mod tables {
             NAME_OWNERS.name(),
             KRB_ACCOUNTS.name(),
             TRANSFER_STATE.name(),
+            JOURNAL_BYTES.name(),
         ]
     }
 }

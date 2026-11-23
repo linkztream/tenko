@@ -37,7 +37,7 @@ use std::{
 use tenko_core::{
     ObjectRef,
     audit::AuditDraft,
-    dns::{JournalEntry, KeyName, Rtype, Zone, audit},
+    dns::{KeyName, Rtype, Zone, audit},
 };
 use tokio::sync::mpsc;
 
@@ -57,6 +57,7 @@ use crate::{
     tsig::{self, Signer, TsigView, Verified},
     update::policy::{ProfileCell, UpdateProfile},
     wire::MAX_MESSAGE_LEN,
+    zone::JournalLimits,
 };
 
 /// Seconds since 1970.
@@ -460,17 +461,31 @@ impl XfrOut {
                 answered = "ixfr";
                 stream.push(&apex, Rtype::SOA.0, soa_ttl, &soa).await
             } else {
-                match self.journal.entries(zone.id, &scope).await {
-                    Ok(entries) => match chain(&entries, client_serial, current) {
-                        Some(steps) => {
-                            answered = "ixfr";
-                            stream_ixfr(&mut stream, &apex, soa_ttl, &soa, &steps).await
-                        }
-                        None => {
-                            stream_axfr(&mut stream, &catalog, &zone, &scope, &apex, soa_ttl, &soa)
-                                .await
-                        }
-                    },
+                // The steps are decided within the journal's bound without their records,
+                // then read and sent one at a time: a transfer holds one entry, whatever its
+                // speed.
+                let budget = JournalLimits::default().bytes;
+                match self
+                    .journal
+                    .steps(zone.id, &scope, client_serial, current, budget)
+                    .await
+                {
+                    Ok(Some(steps)) => {
+                        answered = "ixfr";
+                        stream_ixfr(
+                            &mut stream,
+                            self.journal.as_ref(),
+                            &apex,
+                            soa_ttl,
+                            &soa,
+                            &steps,
+                        )
+                        .await
+                    }
+                    Ok(None) => {
+                        stream_axfr(&mut stream, &catalog, &zone, &scope, &apex, soa_ttl, &soa)
+                            .await
+                    }
                     Err(error) => {
                         tracing::warn!(zone = %zone.name, %error, "the journal could not be read; answering in AXFR form");
                         stream_axfr(&mut stream, &catalog, &zone, &scope, &apex, soa_ttl, &soa)
@@ -569,22 +584,6 @@ fn soa_in(catalog: &Catalog, zone: &Zone, scopes: &dyn ScopeOf) -> Option<(u32, 
     }
 }
 
-/// The journal steps from `from` to `to`, oldest first, when the journal holds every one.
-pub fn chain(entries: &[JournalEntry], from: u32, to: u32) -> Option<Vec<&JournalEntry>> {
-    let mut steps = Vec::new();
-    let mut at = from;
-    for entry in entries {
-        if entry.from_serial == at && entry.to_serial != at {
-            steps.push(entry);
-            at = entry.to_serial;
-            if at == to {
-                return Some(steps);
-            }
-        }
-    }
-    None
-}
-
 /// The messages of a transfer as they are written: signed and sent one by one.
 struct Stream {
     writer: MessageWriter,
@@ -656,16 +655,23 @@ async fn stream_axfr(
 }
 
 /// The deltas in IXFR form (RFC 1995 section 4): the current SOA, then per step the old
-/// SOA, the records removed, the new SOA and the records added, then the current SOA.
+/// SOA, the records removed, the new SOA and the records added, then the current SOA. Each
+/// step is read from the journal as it is sent; one dropped meanwhile ends the transfer,
+/// and the client asks again.
 async fn stream_ixfr(
     stream: &mut Stream,
+    journal: &dyn JournalSource,
     apex: &[u8],
     soa_ttl: u32,
     soa: &[u8],
-    steps: &[&JournalEntry],
+    steps: &[bytes::Bytes],
 ) -> Result<(), ()> {
     stream.push(apex, Rtype::SOA.0, soa_ttl, soa).await?;
-    for step in steps {
+    for key in steps {
+        let Ok(Some(step)) = journal.entry(key).await else {
+            tracing::debug!("a journal entry went while an IXFR answer was sent");
+            return Err(());
+        };
         for record in step.removed.iter().chain(step.added.iter()) {
             stream
                 .push(
