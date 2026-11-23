@@ -64,6 +64,7 @@ struct Shared {
     /// The `SplitMix64` state for [`Fault::Drop`].
     random: Mutex<u64>,
     accepted: AtomicU64,
+    /// Connections the relay closed without serving: cut, dropped, or failed to set up.
     refused: AtomicU64,
 }
 
@@ -169,7 +170,7 @@ impl Relay {
         self.shared.accepted.load(Ordering::Relaxed)
     }
 
-    /// Connections closed right after the accept (cut or dropped) so far.
+    /// Connections the relay closed without serving so far (cut, dropped, or failed to set up).
     pub fn refused(&self) -> u64 {
         self.shared.refused.load(Ordering::Relaxed)
     }
@@ -209,6 +210,7 @@ fn accept_loop(listener: &TcpListener, target: SocketAddr, shared: &Arc<Shared>)
             continue;
         }
         let Ok(outbound) = TcpStream::connect_timeout(&target, CONNECT_TIMEOUT) else {
+            shared.refused.fetch_add(1, Ordering::Relaxed);
             let _ = accepted.shutdown(Shutdown::Both);
             continue;
         };
@@ -217,12 +219,15 @@ fn accept_loop(listener: &TcpListener, target: SocketAddr, shared: &Arc<Shared>)
         let id = shared.next_id.fetch_add(1, Ordering::Relaxed);
         let (Ok(accepted_copy), Ok(outbound_copy)) = (accepted.try_clone(), outbound.try_clone())
         else {
+            shared.refused.fetch_add(1, Ordering::Relaxed);
+            let _ = accepted.shutdown(Shutdown::Both);
             continue;
         };
         lock(&shared.open).push((id, accepted_copy, outbound_copy));
         shared.accepted.fetch_add(1, Ordering::Relaxed);
         let (Ok(a_read), Ok(b_read)) = (accepted.try_clone(), outbound.try_clone()) else {
             shared.forget(id);
+            shared.refused.fetch_add(1, Ordering::Relaxed);
             continue;
         };
         let done = Arc::new(AtomicU64::new(0));
