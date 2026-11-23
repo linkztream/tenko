@@ -1551,8 +1551,17 @@ The marker line is `tenko-data-format N`. The log of the new version has the lin
 | Situation | What to do |
 |---|---|
 | The format is the same | Switch back. The previous version opens the directory as it is. What the new version wrote stays; a field that the previous version does not know is dropped when it rewrites its record. |
-| The format was raised | The previous binary refuses the directory (`upgrade.format_newer`, exit status 3). Switch back and restore the store from `upgrade-backups/<name>/store` or from your own backup. Changes made after the upgrade are lost. |
+| The format was raised | The previous binary refuses the directory (`upgrade.format_newer`, exit status 3). Switch back and restore the store from `upgrade-backups/<name>/store` or from your own backup. Changes made after the upgrade are lost. On a member of a controller cluster do not restore a copy (below). |
 | The new version never became ready and the service manager gave up | Clear the failure state of the service manager first (section 9.7), then as above. |
+
+**Controller cluster.** Putting a store copy back is for a single controller only. Never put
+`upgrade-backups/<name>/store`, or any other copy, back on one member of a cluster
+([cluster.md](cluster.md) section 12.3). When the format is the same, switch the member's
+binary back as below and leave its store alone. When the format was raised, the member
+stays on the new binary. A controller whose binary does not know the stored format cannot
+join (`cluster.join.format_newer`, section 3.7), so removing the member and joining it again
+does not bring the previous version back. Going back with the format raised means going back
+with the whole cluster, from a backup ([backup.md](backup.md) section 7; section 7.7).
 
 **Linux.** The layout keeps the previous version in `updates/0.1.0`. Move the link back and,
 if the format was raised, put the store back. The `mv -T` replaces the link in one step. Keep the failed
@@ -1662,10 +1671,10 @@ is done, and `pending` disappears when the migration has been committed; `stored
   section 7.6, with no restore.
 - *After the leader migrated*: an older binary on a member refuses the directory
   (`upgrade.format_newer`, section 3.3). The rollback point of a member is its own
-  pre-migration copy, taken at its start with the new binary. Putting one member back to the
-  old binary needs that member's copy restored, and the cluster has meanwhile committed data
-  in the new format, which that copy does not hold. In practice this means restoring the
-  whole cluster from a backup ([backup.md](backup.md) section 6 and 7). The changes made after
+  pre-migration copy, taken at its start with the new binary. That copy is never put back on
+  one member ([cluster.md](cluster.md) section 12.3), and the cluster has meanwhile
+  committed data in the new format, which it does not hold. Going back means restoring the
+  whole cluster from a backup ([backup.md](backup.md) section 7). The changes made after
   the backup are lost.
 
 This is why a backup before the last voter is upgraded is recommended.
