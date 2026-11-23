@@ -1917,3 +1917,29 @@ async fn the_ddns_gauges_go_when_the_worker_stops() {
     })
     .await;
 }
+
+/// A failed lease counts in the queue until its retry: here an hour away, beside its own
+/// outcome row, which waits for the next batch an hour away too. The gauge is the process's:
+/// one worker.
+#[tokio::test]
+async fn a_failed_lease_waits_in_the_queue_for_its_retry() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let mut lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+        ZoneConfig::default(),
+        Duration::from_secs(3_600),
+    )
+    .await;
+    lab.settings.retry_after = Duration::from_secs(3_600);
+    lab.restart();
+    store.stale.store(true, Ordering::SeqCst);
+    *store.refuse() = usize::MAX;
+    lab.commit(lab.lease(52, 3, Some(("h3", ClientFqdn::FLAG_S)), None))
+        .await;
+    wait_until_async("the failed lease and its row in the queue", async || {
+        lab.ddns(52).await.last_error.is_some() && QUEUE.get() == Some(2.0)
+    })
+    .await;
+}

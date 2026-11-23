@@ -407,7 +407,7 @@ impl<'a> Worker<'a> {
     fn gauge(&self) {
         // A gauge takes a float: `set_total` would store the count as the bits of one.
         #[allow(clippy::cast_precision_loss)]
-        QUEUE.set(self.dirty.len() as f64);
+        QUEUE.set((self.dirty.len() + self.retry.len()) as f64);
         let oldest = self
             .dirty
             .front()

@@ -226,7 +226,7 @@ The `dhcp` role ([dhcp.md](dhcp.md)), registered when the role starts:
 | `tenko_dhcp_leases` | gauge | `state` | Leases in the role's table by binding state |
 | `tenko_dhcp_pool_utilization` | gauge | `scope` | The share of a scope's pool addresses that are leased, 0 to 1 |
 | `tenko_dhcp_ddns_total` | counter | `outcome` | DDNS change sets: `written`, `removed`, `refused`, `failed`, `skipped` |
-| `tenko_dhcp_ddns_queue` | gauge | | Leases waiting for the DDNS worker, at most one per address; absent on a member where the worker does not run |
+| `tenko_dhcp_ddns_queue` | gauge | | Leases waiting for the DDNS worker, a failed lease waiting for its retry included, at most one per address (a lease that changed again while it waits for its retry counts twice); absent on a member where the worker does not run |
 | `tenko_dhcp_ddns_oldest_seconds` | gauge | | Seconds the oldest waiting lease has waited since it changed, a failed lease waiting for its retry included; it grows while a flood fills every batch or the store refuses the writes (`docs/dhcp.md` section 13.5). It moves at each step of the worker, counts from the worker's start (after a restart or a change of leader every lease starts at 0), and is absent where the worker does not run |
 | `tenko_dhcp_conflicts_total` | counter | | Addresses a probe found in use before an offer |
 | `tenko_dhcp_probe_duration_seconds` | histogram | | Duration of the conflict probes |
