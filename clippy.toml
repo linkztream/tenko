@@ -5,6 +5,11 @@
 # copy into its home, so that the workspace passes the ban the day it lands.
 cognitive-complexity-threshold = 20
 too-many-arguments-threshold = 8
+# The marked sign-in batches belong to tenko-auth's sign-in code (and the store's own tests).
+disallowed-methods = [
+  { path = "tenko_store::api::WriteBatch::completed_sign_in", reason = "only tenko-auth's sign-in code marks a batch as a sign-in's writes" },
+  { path = "tenko_store::api::WriteBatch::failed_sign_in", reason = "only tenko-auth's sign-in code marks a batch as a sign-in's writes" },
+]
 # Domain terms that `clippy::doc_markdown` would otherwise ask to wrap in backticks.
 # ".." keeps the default list.
 doc-valid-idents = [

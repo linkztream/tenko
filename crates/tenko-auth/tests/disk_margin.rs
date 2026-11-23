@@ -9,11 +9,14 @@ use tenko_auth::{
     AuthError, LoginOutcome, NewSession,
     model::{ALARMS, KNOWN_DEVICES, LOCKS, SESSIONS, USERS, UserRecord},
     password::{hash::PasswordHash, policy::normalize},
-    service::{CodeLogin, PasswordLogin, TotpEnrollFinish, types::SecretString},
+    service::{
+        CodeLogin, PasswordLogin, TotpEnrollFinish, WebAuthnLoginFinish, WebAuthnLoginStart,
+        WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
+    },
     settings::Profile,
     testing::{
-        TestEnv,
-        env::{ADMIN, ADMIN_PASSWORD},
+        SoftAttestation, SoftAuthenticator, SoftKeyAlg, TestEnv,
+        env::{ADMIN, ADMIN_PASSWORD, ORIGIN},
     },
     totp::{self, TotpParams},
 };
@@ -218,6 +221,93 @@ async fn below_the_margin_a_sign_in_with_a_second_factor_passes() {
             )
             .await,
     );
+    env.store.shutdown().await.expect("shutdown");
+}
+
+/// The break-glass account signs in with its hardware key below the margin: the alarm that
+/// goes with it rides in the same completed sign-in's budget.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn below_the_margin_a_break_glass_sign_in_passes_with_its_alarm() {
+    let (env, _) = installed().await;
+    let id = env.add_admin("emergency", ADMIN_PASSWORD).await;
+    let Ok(LoginOutcome::Session(session)) = env
+        .service
+        .login_password(
+            &ctx_from(&env, "192.0.2.10"),
+            Some("test-agent"),
+            &PasswordLogin {
+                user_name: "emergency".to_owned(),
+                password: SecretString::new(ADMIN_PASSWORD),
+                provider: None,
+            },
+        )
+        .await
+    else {
+        panic!("a password sign-in before the designation");
+    };
+    let ctx = env.session_ctx(&session).await.expect("ctx");
+    let options = env
+        .service
+        .webauthn_register_start(
+            &ctx,
+            &WebAuthnRegisterStart {
+                label: Some("Test key".to_owned()),
+                security_key: true,
+            },
+        )
+        .await
+        .expect("start");
+    let mut key = SoftAuthenticator::new(SoftKeyAlg::Es256, SoftAttestation::PackedCertificate);
+    let credential = key.register(&options.public_key, ORIGIN);
+    env.service
+        .webauthn_register_finish(
+            &ctx,
+            &WebAuthnRegisterFinish {
+                ceremony_id: options.ceremony_id,
+                credential,
+            },
+        )
+        .await
+        .expect("hardware key");
+    // The designation itself needs a strong session of another administrator; the row is
+    // what the sign-in reads.
+    let mut user = rows(&env, &USERS)
+        .await
+        .into_iter()
+        .find(|user| user.id == id)
+        .expect("the account");
+    user.break_glass = true;
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch.put_typed(&USERS, &user.id, &user).expect("encode");
+    env.store.propose(batch).await.expect("designated");
+
+    below_the_margin(&env).await;
+    let options = env
+        .service
+        .webauthn_login_start(
+            &env.public_ctx(),
+            &WebAuthnLoginStart {
+                user_name: None,
+                challenge_id: None,
+            },
+        )
+        .await
+        .expect("start");
+    let credential = key.assert(&options.public_key, ORIGIN);
+    let glass = env
+        .service
+        .webauthn_login_finish(
+            &env.public_ctx(),
+            None,
+            &WebAuthnLoginFinish {
+                ceremony_id: options.ceremony_id,
+                credential,
+            },
+        )
+        .await
+        .expect("a break-glass sign-in within the completed budget");
+    assert!(glass.info.flags.break_glass);
+    assert!(!rows(&env, &ALARMS).await.is_empty(), "the alarm");
     env.store.shutdown().await.expect("shutdown");
 }
 

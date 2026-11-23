@@ -52,6 +52,10 @@ pub mod random;
 pub mod recovery;
 pub mod roles;
 pub mod secret;
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the sign-in code is the one writer of the marked sign-in batches"
+)]
 pub mod service;
 pub mod settings;
 #[cfg(any(test, feature = "testing"))]

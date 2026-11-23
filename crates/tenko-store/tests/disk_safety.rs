@@ -295,6 +295,7 @@ async fn the_state_file_is_compacted_once_after_the_prunes_go_quiet() {
     let store = single().await;
     store.propose(put(1)).await.expect("a write");
     assert_eq!(store.engine_stats().reseeds_in_place, 0);
+    let snapshots = store.engine_stats().snapshots_built;
     free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
     // The prunes run first: a delete keeps the window open.
     store.propose(delete(1)).await.expect("a prune");
@@ -308,6 +309,11 @@ async fn the_state_file_is_compacted_once_after_the_prunes_go_quiet() {
     // test-lint: allow sleep the subject is that no second compaction follows in the window
     tokio::time::sleep(Duration::from_secs(11)).await;
     assert_eq!(store.engine_stats().reseeds_in_place, 1, "once an episode");
+    assert_eq!(
+        store.engine_stats().snapshots_built,
+        snapshots,
+        "no snapshot beside it"
+    );
     assert!(!store.safety().expect("safety").compacting);
     store.shutdown().await.expect("shutdown");
 }
@@ -341,6 +347,10 @@ async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
 }
 
 /// A sign-in's batch of about 1 KiB, marked as `kind`.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the store's own test of the marked batches"
+)]
 fn sign_in(kind: SignIn, n: u64) -> WriteBatch {
     let principal = Principal::system(SystemComponent::Auth);
     let at = Timestamp::from_unix_nanos(1_791_547_200_000_000_000).expect("timestamp");

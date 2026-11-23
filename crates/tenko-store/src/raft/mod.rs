@@ -2183,33 +2183,28 @@ impl Inner {
     /// free space (prunes) go first, then one compaction on a task of its own returns the
     /// freed pages to the file system. It runs only when the state file holds at least half
     /// the live data again in free pages, no snapshot is being built and a fresh copy fits.
-    fn relieve(
-        self: &Arc<Self>,
-        pressure: Pressure,
-        episode: &mut Option<(Instant, bool)>,
-    ) -> bool {
+    fn relieve(self: &Arc<Self>, pressure: Pressure, episode: &mut Option<(Instant, bool)>) {
         if pressure == Pressure::Normal {
             *episode = None;
-            return false;
+            return;
         }
         let (since, compacted) = episode.get_or_insert_with(|| (Instant::now(), false));
         let data = self.sm.meta().data_bytes;
         let file = fs::metadata(self.sm.file_path()).map_or(0, |metadata| metadata.len());
         let worth = file >= data.saturating_add(data / 2);
-        let idle = !self.compacting.load(Ordering::Relaxed)
-            && !self.sm.stats().snapshotting.load(Ordering::Relaxed);
+        // `compacting` is taken here, before the spawn, so the snapshot trigger of this tick
+        // already sees it.
         if !*compacted
             && worth
-            && idle
+            && !self.sm.stats().snapshotting.load(Ordering::Relaxed)
             && self.copy_fits().is_ok()
             && self.disk.prunes_over(*since, Instant::now())
+            && !self.compacting.swap(true, Ordering::AcqRel)
         {
             *compacted = true;
             let inner = Arc::clone(self);
             tokio::spawn(async move { inner.compact().await });
-            return true;
         }
-        false
     }
 
     /// Whether a fresh copy of the live data fits on the disk, with the reserve's base beside
@@ -2233,7 +2228,7 @@ impl Inner {
 
     /// Compacts the state file into a fresh copy under disk pressure, once.
     async fn compact(&self) {
-        match self.rewrite().await {
+        match self.rewrite_held().await {
             Ok(rewritten) => tracing::info!(
                 bytes_before = rewritten.bytes_before,
                 bytes_after = rewritten.bytes_after,
@@ -2255,6 +2250,11 @@ impl Inner {
                 "a compaction of the state file runs already".to_owned(),
             ));
         }
+        self.rewrite_held().await
+    }
+
+    /// [`Self::rewrite`] by a caller that holds `compacting`; releases it.
+    async fn rewrite_held(&self) -> Result<sm::Rewritten, StoreError> {
         let sm = self.sm.clone();
         let rewritten = tokio::task::spawn_blocking(move || sm.rewrite_in_place()).await;
         self.compacting.store(false, Ordering::Release);
@@ -2414,8 +2414,7 @@ async fn maintain(inner: Weak<Inner>) {
         if inner.stopped.get().is_some() {
             continue;
         }
-        // The compaction's task sets `compacting` once it runs: no snapshot in this tick.
-        let compaction_started = inner.relieve(pressure, &mut short_of_room);
+        inner.relieve(pressure, &mut short_of_room);
         if last_sizes.elapsed() >= inner.config.status_refresh {
             last_sizes = Instant::now();
             inner.refresh_sizes();
@@ -2451,7 +2450,6 @@ async fn maintain(inner: Weak<Inner>) {
         // After a snapshot file that could not be written: again once one fits, not at once.
         // Never beside a compaction: both may need the room that is left.
         let settled = settled
-            && !compaction_started
             && !inner.compacting.load(Ordering::Relaxed)
             && (!inner.sm.stats().snapshot_failed.load(Ordering::Relaxed)
                 || (last_trigger.is_none_or(|at| at.elapsed() >= SNAPSHOT_RETRY)

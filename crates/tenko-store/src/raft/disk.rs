@@ -110,33 +110,12 @@ fn pressure_after(before: Pressure, free: u64, (reserve, margin): (u64, u64)) ->
     }
 }
 
-/// The OS error codes of a full disk: `ENOSPC` and `EDQUOT` (122 on Linux, 69 on macOS
-/// and the BSDs), `ERROR_HANDLE_DISK_FULL` and `ERROR_DISK_FULL` on Windows.
+/// The OS error codes of a full disk: `ENOSPC` and `EDQUOT` on Linux, `ERROR_HANDLE_DISK_FULL`
+/// and `ERROR_DISK_FULL` on Windows (the platforms Tenko ships on).
 #[cfg(target_os = "linux")]
 const FULL_DISK_CODES: &[&str] = &["os error 28)", "os error 122)"];
-#[cfg(any(
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-))]
-const FULL_DISK_CODES: &[&str] = &["os error 28)", "os error 69)"];
 #[cfg(windows)]
 const FULL_DISK_CODES: &[&str] = &["os error 39)", "os error 112)"];
-#[cfg(not(any(
-    windows,
-    target_os = "linux",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "freebsd",
-    target_os = "openbsd",
-    target_os = "netbsd",
-    target_os = "dragonfly"
-)))]
-const FULL_DISK_CODES: &[&str] = &["os error 28)"];
-
 /// Whether the cause of a stop names a full disk: the one cause a start cures once there
 /// is room again.
 pub(crate) fn names_a_full_disk(cause: &str) -> bool {
@@ -202,17 +181,8 @@ impl Budget {
         }
     }
 
-    /// Takes `units` of the minute's at `now`; `false` once the minute's are used (the
-    /// last one taken may go past them).
-    fn take(&self, now: Instant, units: u64) -> bool {
-        self.spend(now, units)
-    }
-
-    /// Whether the minute at `now` has units left.
-    fn has_room(&self, now: Instant) -> bool {
-        self.spend(now, 0)
-    }
-
+    /// Takes `units` of the minute's at `now` (0 only asks): `false` once the minute's are
+    /// used (the last one taken may go past them).
     fn spend(&self, now: Instant, units: u64) -> bool {
         let mut window = self.window.lock().unwrap_or_else(PoisonError::into_inner);
         if now.saturating_duration_since(window.0) >= Duration::from_secs(60) {
@@ -326,8 +296,8 @@ impl Guard {
             let size = u64::try_from(batch.payload_size()).unwrap_or(u64::MAX);
             let passes = pressure == Pressure::Margin
                 && match kind {
-                    SignIn::Completed => self.completed.take(now, size),
-                    SignIn::Failed => self.completed.has_room(now) && self.failed.take(now, size),
+                    SignIn::Completed => self.completed.spend(now, size),
+                    SignIn::Failed => self.completed.spend(now, 0) && self.failed.spend(now, size),
                 };
             return if passes { Ok(()) } else { refused(line) };
         }
@@ -362,7 +332,7 @@ impl Guard {
                     return refused(line);
                 }
             }
-            if draft.is_some() && !self.drafts.take(now, 1) {
+            if draft.is_some() && !self.drafts.spend(now, 1) {
                 return refused(line);
             }
             *self
@@ -659,11 +629,15 @@ mod tests {
         assert!(
             guard
                 .drafts
-                .take(Instant::now() + Duration::from_secs(60), 1)
+                .spend(Instant::now() + Duration::from_secs(60), 1)
         );
     }
 
     /// A batch of 2 KiB marked as a sign-in's writes, whatever it holds.
+    #[allow(
+        clippy::disallowed_methods,
+        reason = "the store's own test of the marked batches"
+    )]
     fn sign_in(kind: SignIn) -> WriteBatch {
         let principal = Principal::system(SystemComponent::Auth);
         let mut batch = match kind {
@@ -748,14 +722,6 @@ mod tests {
         assert!(!names_a_full_disk("Directory not empty (os error 39)"));
         assert!(!names_a_full_disk("Host is down (os error 112)"));
         assert!(!names_a_full_disk("the test hook fails the write"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn only_a_full_disk_is_a_cause_a_start_cures() {
-        assert!(names_a_full_disk("No space left on device (os error 28)"));
-        assert!(names_a_full_disk("Disc quota exceeded (os error 69)"));
-        assert!(!names_a_full_disk("(os error 122)"), "Linux's EDQUOT");
     }
 
     #[cfg(windows)]
