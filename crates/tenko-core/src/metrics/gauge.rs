@@ -156,8 +156,14 @@ impl GaugeVec {
         }
     }
 
-    /// Sets series `series` of a family of kind counter to the total `value`.
+    /// Sets series `series` of a family of kind counter to the total `value`; a gauge is set
+    /// with [`GaugeVec::set`], which keeps its float.
     pub fn set_total(&self, series: u16, value: u64) {
+        debug_assert!(
+            matches!(self.desc.kind, Kind::Counter),
+            "set_total is for counters: {}",
+            self.desc.name
+        );
         if let Some(cell) = self.cell(series) {
             cell.store(value.min(UNSET - 1), Ordering::Relaxed);
         }

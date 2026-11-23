@@ -146,6 +146,15 @@ fn a_gauge_round_trips_an_f64_and_can_be_unset() {
     assert_eq!(series[0].value, Value::Counter(41));
 }
 
+/// A gauge set with a counter's integer would read back as a float near 0.
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "set_total is for counters")]
+fn a_gauge_takes_no_counters_total() {
+    static GAUGE: Gauge = Gauge::new(Desc::gauge("test_set_total", "A gauge."));
+    GAUGE.set_total(41);
+}
+
 #[test]
 fn slots_assign_label_sets_and_sweep_the_ones_not_seen() {
     static FAMILY: GaugeVec =
