@@ -10,9 +10,10 @@ use tenko_auth::{
     AuthError, LoginOutcome, NewSession,
     model::{ALARMS, KNOWN_DEVICES, LOCKS, SESSIONS, USERS, UserRecord},
     password::{hash::PasswordHash, policy::normalize},
+    roles::RoleName,
     service::{
-        CodeLogin, PasswordLogin, TotpEnrollFinish, WebAuthnLoginFinish, WebAuthnLoginStart,
-        WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
+        CodeLogin, GrantCreate, PasswordLogin, TotpEnrollFinish, WebAuthnLoginFinish,
+        WebAuthnLoginStart, WebAuthnRegisterFinish, WebAuthnRegisterStart, types::SecretString,
     },
     settings::Profile,
     testing::{
@@ -22,10 +23,12 @@ use tenko_auth::{
     totp::{self, TotpParams},
 };
 use tenko_core::{
-    Coded, Principal, RequestCtx, SystemComponent, TableName, UserId, testing::wait_until_async,
+    Anchors, Coded, ObjectRef, Principal, RequestCtx, ScopeRule, SystemComponent, TableName,
+    UserId, VrfId, audit::AuditOutcome, testing::wait_until_async,
 };
 use tenko_store::{
-    KeyRange, Pressure, ReadConsistency, ReadViewExt, Store, StoreError, WriteBatch,
+    AnchorResolver, KeyRange, Pressure, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
+    WriteBatch,
     api::{DISK_FLOOR_BYTES, SIGN_IN_ACCOUNT_BYTES_PER_MINUTE, SIGN_IN_BYTES_PER_MINUTE},
     raft::{RaftStore, RaftStoreConfig},
     tables,
@@ -595,5 +598,87 @@ async fn a_refusal_by_an_accounts_share_takes_nothing_from_the_shared_budget() {
     .await;
     refused_for_room(&login(&env, "192.0.2.10", ADMIN_PASSWORD).await);
     second_signs_in(&env).await;
+    env.store.shutdown().await.expect("shutdown");
+}
+
+const VRF: VrfId = VrfId::from_uuid(uuid::Uuid::from_u128(0x01));
+
+/// The anchors of one VRF, so that a grant on it can be asked for.
+struct OneVrf;
+
+impl AnchorResolver for OneVrf {
+    fn anchors(&self, _: &dyn ReadView, object: &ObjectRef) -> Result<Anchors, StoreError> {
+        Ok(Anchors {
+            object: Some(*object),
+            vrf: Some(VRF),
+            ..Anchors::default()
+        })
+    }
+}
+
+/// A grant refused below the margin is logged, not stored, like any refused action: it
+/// takes nothing of the failed sign-ins' budget, so a wrong password is still recorded.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn below_the_margin_a_refused_grant_is_not_stored_and_leaves_the_failures_budget() {
+    let (env, _) = installed().await;
+    env.service.set_anchor_resolver(Arc::new(OneVrf));
+    // A person without grants: an administrator's row, its role taken away.
+    let password = "copper meadow signal 7305";
+    let id = env.add_admin("dana", password).await;
+    let mut user = rows(&env, &USERS)
+        .await
+        .into_iter()
+        .find(|user| user.id == id)
+        .expect("the account");
+    user.roles = Vec::new();
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch.put_typed(&USERS, &id, &user).expect("encode");
+    env.store.propose(batch).await.expect("no role");
+    let Ok(LoginOutcome::Session(signed)) = login_as(&env, "192.0.2.30", "dana", password).await
+    else {
+        panic!("a session");
+    };
+    let ctx = env.session_ctx(&signed).await.expect("ctx");
+    let refusals = || async {
+        rows(&env, &tables::AUDIT)
+            .await
+            .into_iter()
+            .filter(|record| {
+                matches!(&record.draft.outcome, AuditOutcome::Failed { code } if code == "auth.grant.exceeds_own")
+            })
+            .count()
+    };
+    let before = refusals().await;
+
+    below_the_margin(&env).await;
+    // Marked as failed sign-ins, these would spend the failures' 64 KiB several times.
+    for _ in 0..400 {
+        let refused = env
+            .service
+            .create_grant(
+                &ctx,
+                &GrantCreate {
+                    subject: id,
+                    role: RoleName::Viewer,
+                    scope: ScopeRule::Vrf(VRF),
+                    delegable: false,
+                },
+            )
+            .await;
+        assert_eq!(
+            refused.expect_err("beyond its own"),
+            AuthError::GrantExceedsOwn
+        );
+    }
+    assert_eq!(refusals().await, before, "logged, not stored");
+    let failures = failures_of(&env, SECOND).await;
+    fail_as(&env, ATTACKER, SECOND)
+        .await
+        .expect("a wrong password answers 401");
+    assert_eq!(
+        failures_of(&env, SECOND).await,
+        failures + 1,
+        "and is recorded"
+    );
     env.store.shutdown().await.expect("shutdown");
 }

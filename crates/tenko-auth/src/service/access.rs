@@ -459,7 +459,7 @@ impl AuthService {
         subject: UserId,
         scope: &ScopeRule,
     ) {
-        let mut batch = WriteBatch::failed_sign_in(ctx.principal.clone(), None, ctx.now);
+        let mut batch = WriteBatch::new(ctx.principal.clone(), ctx.now);
         batch.request = Some(ctx.request);
         batch.audit(
             AuditDraft::failed(
@@ -470,7 +470,10 @@ impl AuthService {
             .with_source_ip(ctx.source_ip)
             .with_context("scope", describe(scope)),
         );
-        self.record_failure(batch, ("", None)).await;
+        // Like any refused action: below the store's margin it is logged, not stored.
+        if let Err(error) = self.store.propose(batch).await {
+            tracing::warn!(%error, "could not record a refused action");
+        }
     }
 
     /// `DELETE /access/grants/{id}`: revokes a grant and every grant issued under it, in one
