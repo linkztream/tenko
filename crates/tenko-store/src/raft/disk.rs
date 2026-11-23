@@ -116,6 +116,10 @@ fn pressure_after(before: Pressure, free: u64, (reserve, margin): (u64, u64)) ->
 const FULL_DISK_CODES: &[&str] = &["os error 28)", "os error 122)"];
 #[cfg(windows)]
 const FULL_DISK_CODES: &[&str] = &["os error 39)", "os error 112)"];
+// Builds elsewhere (not shipped) keep the one code every Unix shares.
+#[cfg(not(any(windows, target_os = "linux")))]
+const FULL_DISK_CODES: &[&str] = &["os error 28)"];
+
 /// Whether the cause of a stop names a full disk: the one cause a start cures once there
 /// is room again.
 pub(crate) fn names_a_full_disk(cause: &str) -> bool {
