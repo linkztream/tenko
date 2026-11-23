@@ -4431,6 +4431,7 @@ export type MessageKey =
   | "errors.cluster.enrollment.roles"
   | "errors.cluster.enrollment.wrong_controller"
   | "errors.cluster.member.changing"
+  | "errors.cluster.member.diverged"
   | "errors.cluster.member.even_voters"
   | "errors.cluster.member.last_voter"
   | "errors.cluster.member.no_successor"
@@ -4439,6 +4440,7 @@ export type MessageKey =
   | "errors.cluster.member.not_learner"
   | "errors.cluster.member.not_revoked"
   | "errors.cluster.member.remove_pending"
+  | "errors.cluster.member.reverted"
   | "errors.cluster.member.stops_writes"
   | "errors.cluster.no_quorum"
   | "errors.cluster.node.conflict"
@@ -14778,6 +14780,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.enrollment.roles",
   "errors.cluster.enrollment.wrong_controller",
   "errors.cluster.member.changing",
+  "errors.cluster.member.diverged",
   "errors.cluster.member.even_voters",
   "errors.cluster.member.last_voter",
   "errors.cluster.member.no_successor",
@@ -14786,6 +14789,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.cluster.member.not_learner",
   "errors.cluster.member.not_revoked",
   "errors.cluster.member.remove_pending",
+  "errors.cluster.member.reverted",
   "errors.cluster.member.stops_writes",
   "errors.cluster.no_quorum",
   "errors.cluster.node.conflict",

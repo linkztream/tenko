@@ -214,6 +214,12 @@ fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Respons
         FenceReason::Superseded | FenceReason::Unknown => {
             "a newer generation of the cluster superseded this controller's history"
         }
+        FenceReason::Reverted => {
+            "its store is older than the cluster it belongs to; remove it from another controller, empty its data directory including node/ and join it again"
+        }
+        FenceReason::Diverged => {
+            "a leader sent entries that differ from what it holds as committed; when most controllers went back to an older copy, the controllers that kept the newer rows are the ones that stop (docs/cluster.md section 12.3)"
+        }
     };
     ApiError::new(
         reason.code(),
@@ -416,6 +422,8 @@ mod tests {
             (FenceReason::Conflict, "cluster.recover.conflict"),
             (FenceReason::MajorityAlive, "cluster.recover.majority_alive"),
             (FenceReason::Unknown, "cluster.superseded"),
+            (FenceReason::Reverted, "cluster.member.reverted"),
+            (FenceReason::Diverged, "cluster.member.diverged"),
         ] {
             let state = QuorumState::Fenced {
                 since,

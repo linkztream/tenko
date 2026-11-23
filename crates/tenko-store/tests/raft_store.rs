@@ -1043,6 +1043,382 @@ async fn three_voters_replicate_and_fail_over() {
     }
 }
 
+/// Copies a directory tree.
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("create the copy");
+    for entry in std::fs::read_dir(from).expect("read the directory") {
+        let entry = entry.expect("directory entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("file type").is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy a file");
+        }
+    }
+}
+
+/// Opens a member on the in-process network.
+async fn member(dir: &TestDir, network: &InProcessNetwork, node: u64) -> RaftStore {
+    let store = RaftStore::open_with(node_config(dir, node), Arc::new(network.clone()))
+        .await
+        .expect("open a member");
+    network.register(&store);
+    store
+}
+
+/// Puts the copy at `copy` in place of the store of `node`.
+fn put_back(dir: &TestDir, copy: &Path, node: u64) {
+    std::fs::remove_dir_all(dir.node(node)).expect("remove the store");
+    copy_dir(copy, &dir.node(node));
+}
+
+/// The leader a set of nodes elected.
+async fn leader_of(nodes: &[&RaftStore]) -> RaftStore {
+    wait_until_async("a leader", async || {
+        nodes
+            .iter()
+            .find(|node| node.status().role == StoreRole::Leader)
+            .map(|node| (*node).clone())
+    })
+    .await
+}
+
+/// Whether an append was refused as a stopped node refuses it.
+fn stopped<T>(answer: &Result<T, openraft::error::RaftError<u64>>) -> bool {
+    matches!(
+        answer,
+        Err(openraft::error::RaftError::Fatal(
+            openraft::error::Fatal::Stopped
+        ))
+    )
+}
+
+/// An empty append that claims `prev` (term, leader, index) as the entry before it.
+fn heartbeat(
+    vote: Vote,
+    prev: (u64, u64, u64),
+) -> openraft::raft::AppendEntriesRequest<tenko_store::raft::types::TypeConfig> {
+    let (term, node, index) = prev;
+    openraft::raft::AppendEntriesRequest {
+        vote,
+        prev_log_id: Some(openraft::LogId::new(
+            openraft::CommittedLeaderId::new(term, node),
+            index,
+        )),
+        entries: Vec::new(),
+        leader_commit: None,
+    }
+}
+
+/// A follower takes a request that contradicts what it holds as committed only under a vote
+/// openraft refuses, or when its stored vote does not read; under its leader's vote the same
+/// request stops it for good, its rows stay, and it judges nothing afterwards.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn only_a_request_the_vote_admits_stops_a_member() {
+    use tenko_store::{FenceReason, test_hooks::FAIL_VOTE_READ};
+
+    let dir = TestDir::new("judged-by-vote");
+    let (first, second) = two_voters(&dir).await;
+    let metrics = second.raft().metrics().borrow().clone();
+    let (vote, bound) = (metrics.vote, metrics.last_applied.expect("applied"));
+    let term = bound.leader_id.term;
+    let other = (term, 0, bound.index);
+
+    let unreadable = second.config().data_dir.join(FAIL_VOTE_READ);
+    for hook in [false, true] {
+        if hook {
+            std::fs::write(&unreadable, b"").expect("fail the next vote read");
+        }
+        let answer = second
+            .handle_append_entries(heartbeat(Vote::new_committed(term, 0), other))
+            .await;
+        assert!(
+            matches!(
+                answer,
+                Ok(openraft::raft::AppendEntriesResponse::HigherVote(_))
+            ),
+            "{answer:?}"
+        );
+        assert!(!unreadable.exists(), "the vote read failed");
+        assert_eq!(second.fenced(), None, "openraft decides by its vote");
+    }
+
+    let refused = second.handle_append_entries(heartbeat(vote, other)).await;
+    assert!(stopped(&refused), "{refused:?}");
+    assert_eq!(second.fenced(), Some(FenceReason::Diverged));
+    let view = second.read(ReadConsistency::Local).await.expect("view");
+    assert_eq!(
+        rows(view.as_ref()).get(&key(1)),
+        Some(&Bytes::from_static(b"replicated"))
+    );
+    drop(view);
+    let again = second
+        .handle_append_entries(heartbeat(Vote::new_committed(term + 1, 0), other))
+        .await;
+    assert!(stopped(&again), "{again:?}");
+    assert_eq!(second.fenced(), Some(FenceReason::Diverged));
+    for node in [first, second] {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// After a snapshot purged a follower's log, a position at a purged index is judged by its
+/// leader: one not above the leader of what the follower holds as committed passes, one
+/// above it can only come from another history and stops the follower.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_purged_position_is_judged_by_its_leader() {
+    use tenko_store::FenceReason;
+
+    let dir = TestDir::new("purged-position");
+    let (first, second) = two_voters(&dir).await;
+    let mut last = Revision::ZERO;
+    for n in 2..=6 {
+        last = put(&first, n, "more").await;
+    }
+    wait_for_revision(&second, last).await;
+    second.snapshot_now().await.expect("snapshot");
+    let metrics = second.raft().metrics().borrow().clone();
+    let bound = metrics.last_applied.expect("applied");
+    wait_until_async("the follower purged its log", async || {
+        second.raft().metrics().borrow().purged >= Some(bound)
+    })
+    .await;
+    let term = bound.leader_id.term;
+    let below = bound.index - 1;
+
+    let answer = second
+        .handle_append_entries(heartbeat(metrics.vote, (term, 0, below)))
+        .await;
+    assert!(answer.is_ok(), "{answer:?}");
+    assert_eq!(
+        second.fenced(),
+        None,
+        "a leader not above the bound's passes"
+    );
+    let refused = second
+        .handle_append_entries(heartbeat(metrics.vote, (term + 1, 0, below)))
+        .await;
+    assert!(stopped(&refused), "{refused:?}");
+    assert_eq!(second.fenced(), Some(FenceReason::Diverged));
+    for node in [first, second] {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// A snapshot whose last log id differs from what a follower holds as committed stops the
+/// follower under its leader's vote before openraft sees it, and its rows stay.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_snapshot_against_the_committed_log_stops_a_member() {
+    use tenko_store::{FenceReason, raft::SnapshotInstallError};
+
+    let dir = TestDir::new("snapshot-judged");
+    let (first, second) = two_voters(&dir).await;
+    second.snapshot_now().await.expect("snapshot");
+    let (mut meta, path) = second.current_snapshot().expect("a snapshot");
+    let bound = meta.last_log_id.expect("a log id");
+    meta.last_log_id = Some(openraft::LogId::new(
+        openraft::CommittedLeaderId::new(bound.leader_id.term, 0),
+        bound.index,
+    ));
+    let vote = second.raft().metrics().borrow().vote;
+    let mut receiver = second.receive_snapshot().expect("receiver");
+    receiver
+        .write_chunk(&std::fs::read(&path).expect("read"))
+        .await
+        .expect("chunk");
+    let refused = receiver.install(vote, meta).await;
+    assert!(
+        matches!(refused, Err(SnapshotInstallError::Fatal(_))),
+        "{refused:?}"
+    );
+    assert_eq!(second.fenced(), Some(FenceReason::Diverged));
+    let view = second.read(ReadConsistency::Local).await.expect("view");
+    assert!(rows(view.as_ref()).contains_key(&key(1)));
+    drop(view);
+    for node in [first, second] {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// A position above what a follower holds as committed, under a leader below the one of
+/// its bound, stops the follower: in one log, leader ids never fall as the index rises.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_position_above_the_bound_under_an_older_leader_stops_a_member() {
+    use tenko_store::FenceReason;
+
+    let dir = TestDir::new("above-the-bound");
+    let (first, second) = two_voters(&dir).await;
+    let metrics = second.raft().metrics().borrow().clone();
+    let bound = metrics.last_applied.expect("applied");
+    let above = (bound.leader_id.term, 0, bound.index + 1);
+    let refused = second
+        .handle_append_entries(heartbeat(metrics.vote, above))
+        .await;
+    assert!(stopped(&refused), "{refused:?}");
+    assert_eq!(second.fenced(), Some(FenceReason::Diverged));
+    for node in [first, second] {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// Two of three members go back to copies taken before the last writes and elect a leader
+/// among themselves: the member that kept the newer rows stops for good when that leader
+/// reaches it, and keeps every row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_member_that_kept_newer_rows_stops_when_the_others_went_back() {
+    use tenko_store::FenceReason;
+
+    let dir = TestDir::new("majority-back");
+    let network = InProcessNetwork::new();
+    let one = member(&dir, &network, 1).await;
+    let mut others = Vec::new();
+    for node in 2..=3 {
+        others.push(member(&dir, &network, node).await);
+        one.add_learner(NodeId(node), format!("in-process-{node}"), true)
+            .await
+            .expect("learner");
+    }
+    one.change_membership([NodeId(1), NodeId(2), NodeId(3)].into())
+        .await
+        .expect("three voters");
+    let first = put(&one, 1, "before the copies").await;
+    for node in &others {
+        wait_for_revision(node, first).await;
+    }
+    for node in others.drain(..) {
+        node.shutdown().await.expect("shutdown");
+    }
+    for node in 2..=3 {
+        copy_dir(&dir.node(node), &dir.path().join(format!("copy-{node}")));
+        others.push(member(&dir, &network, node).await);
+    }
+    let mut last = first;
+    for n in 2..=5 {
+        last = put(&one, n, "after the copies").await;
+    }
+    for node in &others {
+        wait_for_revision(node, last).await;
+    }
+    for node in others.drain(..).chain([one]) {
+        node.shutdown().await.expect("shutdown");
+    }
+
+    for node in 2..=3 {
+        put_back(&dir, &dir.path().join(format!("copy-{node}")), node);
+        others.push(member(&dir, &network, node).await);
+    }
+    let leader = leader_of(&[&others[0], &others[1]]).await;
+    put(&leader, 9, "on the copies").await;
+    let one = member(&dir, &network, 1).await;
+    wait_until_async("node 1 stops", async || one.fenced().is_some()).await;
+    assert_eq!(one.fenced(), Some(FenceReason::Diverged));
+    let view = one.read(ReadConsistency::Local).await.expect("view");
+    let kept = rows(view.as_ref());
+    drop(view);
+    assert!((1..=5).all(|n| kept.contains_key(&key(n))), "{kept:?}");
+    for node in others.into_iter().chain([one]) {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// A founding controller put back to a copy from before it added the others is its own
+/// only voter there. When the leader the others elected reaches it, with a log purged past
+/// everything the copy holds, its first request stops the copy for good, before an entry or
+/// a snapshot of that leader is sent.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_founder_on_a_copy_from_before_the_others_stops_when_their_leader_reaches_it() {
+    use tenko_store::FenceReason;
+
+    let dir = TestDir::new("founder-copy");
+    let network = InProcessNetwork::new();
+    let one = member(&dir, &network, 1).await;
+    put(&one, 1, "alone").await;
+    one.shutdown().await.expect("shutdown");
+    drop(one);
+    let copy = dir.path().join("copy-1");
+    copy_dir(&dir.node(1), &copy);
+    let one = member(&dir, &network, 1).await;
+    let mut others = Vec::new();
+    for node in 2..=3 {
+        others.push(member(&dir, &network, node).await);
+        one.add_learner(NodeId(node), format!("in-process-{node}"), true)
+            .await
+            .expect("learner");
+    }
+    one.change_membership([NodeId(1), NodeId(2), NodeId(3)].into())
+        .await
+        .expect("three voters");
+    let mut last = Revision::ZERO;
+    for n in 2..=10 {
+        last = put(&one, n, "with the others").await;
+    }
+    for node in &others {
+        wait_for_revision(node, last).await;
+    }
+    one.shutdown().await.expect("shutdown");
+    drop(one);
+    let leader = leader_of(&[&others[0], &others[1]]).await;
+    put(&leader, 11, "without node 1").await;
+    leader.snapshot_now().await.expect("snapshot");
+    wait_until_async("the leader purged its log", async || {
+        let metrics = leader.raft().metrics().borrow().clone();
+        metrics.purged.is_some() && metrics.purged >= metrics.snapshot
+    })
+    .await;
+
+    put_back(&dir, &copy, 1);
+    let one = member(&dir, &network, 1).await;
+    wait_until_async("node 1 stops", async || one.fenced().is_some()).await;
+    assert_eq!(one.fenced(), Some(FenceReason::Reverted));
+    for node in others.into_iter().chain([one]) {
+        let _ = node.shutdown().await;
+    }
+}
+
+/// A leader put back to a copy older than its follower does not lead again under the vote
+/// the copy saved: it is elected anew, so its next write never lands on an index the
+/// follower holds with another entry, and both members end with equal states.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_leader_on_an_older_copy_takes_office_only_by_election() {
+    let dir = TestDir::new("leader-copy");
+    let (first, second) = two_voters(&dir).await;
+    for node in [first, second] {
+        node.shutdown().await.expect("shutdown");
+    }
+    let copy = dir.path().join("copy-1");
+    copy_dir(&dir.node(1), &copy);
+    let network = InProcessNetwork::new();
+    let first = member(&dir, &network, 1).await;
+    // Node 2 starts no election until node 1 is back on its copy: node 1 leads until then.
+    let mut quiet = node_config(&dir, 2);
+    quiet.elect = false;
+    let second = RaftStore::open_with(quiet, Arc::new(network.clone()))
+        .await
+        .expect("node 2");
+    network.register(&second);
+    let leader = leader_of(&[&first]).await;
+    let written = put(&leader, 2, "after the copy").await;
+    wait_for_revision(&first, written).await;
+    wait_for_revision(&second, written).await;
+    drop(leader);
+    first.shutdown().await.expect("shutdown");
+    drop(first);
+
+    put_back(&dir, &copy, 1);
+    let first = member(&dir, &network, 1).await;
+    second.raft().runtime_config().elect(true);
+    let leader = leader_of(&[&first, &second]).await;
+    let last = put(&leader, 3, "after the restart").await;
+    let (on_first, on_second) = (
+        first.digest(Some(last)).await.expect("digest"),
+        second.digest(Some(last)).await.expect("digest"),
+    );
+    assert_eq!(on_first, on_second);
+    for node in [first, second] {
+        let _ = node.shutdown().await;
+    }
+}
+
 /// The state files in a data directory and the name `sm.current` holds, if any.
 fn state_files(dir: &Path) -> (Vec<String>, Option<String>) {
     let mut files: Vec<String> = std::fs::read_dir(dir)

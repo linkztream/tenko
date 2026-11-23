@@ -126,9 +126,10 @@ pub struct QuorumView {
     /// The revision the controller applied last, while isolated or fenced: the age of its
     /// copy.
     pub applied: Option<Revision>,
-    /// Why a fenced controller stopped writing: `superseded`, `conflict` or
-    /// `majority_alive` (its writes are refused with `cluster.superseded`,
-    /// `cluster.recover.conflict` or `cluster.recover.majority_alive`).
+    /// Why a fenced controller stopped writing: `superseded`, `conflict`, `majority_alive`,
+    /// `reverted` or `diverged` (its writes are refused with `cluster.superseded`,
+    /// `cluster.recover.conflict`, `cluster.recover.majority_alive`,
+    /// `cluster.member.reverted` or `cluster.member.diverged`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<tenko_store::FenceReason>,
 }

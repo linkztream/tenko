@@ -63,7 +63,7 @@ use super::{
     stored::Message,
     types::{RaftNodeId, Snapshot, TypeConfig, Vote},
 };
-use crate::api::{Committed, SignIn, StoreError};
+use crate::api::{Committed, FenceReason, SignIn, StoreError};
 
 /// The result of a forwarded `append_entries`.
 pub type AppendResult = Result<
@@ -183,6 +183,13 @@ pub trait PeerTransport: LeaderLink + Send + Sync + 'static {
     /// real one ([`RaftStore::set_transport`](super::RaftStore::set_transport)).
     fn reaches_peers(&self) -> bool {
         true
+    }
+
+    /// Keeps a fence the store raised on what a leader sent ([`FenceReason::Diverged`],
+    /// [`FenceReason::Reverted`]) across restarts, with what it found, and fences the store.
+    /// `false` when this transport keeps no fence: the store then fences itself for this run.
+    async fn keep_fence(&self, _reason: FenceReason, _detail: String) -> bool {
+        false
     }
 }
 
@@ -341,6 +348,10 @@ impl PeerTransport for SwitchTransport {
 
     fn reaches_peers(&self) -> bool {
         self.current().reaches_peers()
+    }
+
+    async fn keep_fence(&self, reason: FenceReason, detail: String) -> bool {
+        self.current().keep_fence(reason, detail).await
     }
 }
 

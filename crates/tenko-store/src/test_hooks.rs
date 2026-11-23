@@ -13,7 +13,7 @@
 //! machine holds every apply (a commit that has not applied yet), its log writer holds every
 //! group commit (a stalled disk), every group commit of its log writer fails, every apply of
 //! a batch fails, or the next durable checkpoint of its state file fails. Those files are only looked for,
-//! never read. [`FREE_BYTES`] holds a byte count that stands in for the free space of the
+//! never read. [`FAIL_VOTE_READ`] fails the next read of the stored vote, which removes it. [`FREE_BYTES`] holds a byte count that stands in for the free space of the
 //! store's file system.
 
 /// The environment variable naming the file whose presence refuses writes.
@@ -32,6 +32,10 @@ pub const FAIL_STATE: &str = "test-fail-state";
 /// The file in a store's data directory whose presence fails the next durable checkpoint of
 /// its state file, with the OS error of a full disk; that checkpoint removes the file.
 pub const FAIL_CHECKPOINT: &str = "test-fail-checkpoint";
+
+/// The file in a store's data directory whose presence fails the next read of the stored
+/// vote, with the OS error of a full disk; that read removes the file.
+pub const FAIL_VOTE_READ: &str = "test-fail-vote-read";
 
 /// A full disk, as the OS reports it.
 #[cfg(feature = "raft")]

@@ -37,7 +37,7 @@ use prost::bytes::Bytes;
 use rustls::ClientConfig;
 use tenko_core::NodeId;
 use tenko_store::{
-    Committed, ReadConsistency, ReadViewExt as _, SignIn, Store as _, StoreError,
+    Committed, FenceReason, ReadConsistency, ReadViewExt as _, SignIn, Store as _, StoreError,
     raft::{
         RaftStore, RaftStoreConfig, WeakRaftStore,
         network::{
@@ -162,6 +162,9 @@ pub(crate) trait GenerationHook: Send + Sync {
     fn observe(&self, status: &Status, from: NodeId);
     /// `from` answered a call without a refusal: it speaks this history.
     fn answered(&self, from: NodeId);
+    /// Keeps a fence the store raised on what a leader sent, unless this controller holds a
+    /// fence already; `None` when the peer layer is gone.
+    fn keep_fence(&self, reason: FenceReason, detail: String) -> Option<BoxFuture<'static, ()>>;
 }
 
 /// Whether a node gets no Raft message from this controller.
@@ -656,6 +659,21 @@ impl PeerTransport for PeerNetwork {
             }
         })?;
         decode_raft(&response.wire, &response.payload).map_err(|error| network(&error))
+    }
+
+    async fn keep_fence(&self, reason: FenceReason, detail: String) -> bool {
+        match self
+            .inner
+            .generation
+            .get()
+            .and_then(|hook| hook.keep_fence(reason, detail))
+        {
+            Some(kept) => {
+                kept.await;
+                true
+            }
+            None => false,
+        }
     }
 }
 

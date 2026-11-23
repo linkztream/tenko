@@ -1078,6 +1078,8 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
         FenceReason::Superseded,
         FenceReason::Conflict,
         FenceReason::MajorityAlive,
+        FenceReason::Reverted,
+        FenceReason::Diverged,
     ] {
         match &generation.fence {
             Some((current, other))
@@ -1149,6 +1151,17 @@ fn fence_detail(
     own: Option<&tenko_cluster::generation::Signed>,
 ) -> String {
     let claim = match (reason, other) {
+        (tenko_store::FenceReason::Reverted, _) => ". Its store is older than the cluster it \
+            belongs to: remove it from another controller (tenko cluster remove <id> --yes), \
+            empty its data directory including node/ and join it again (tenko cluster join)"
+            .to_owned(),
+        (tenko_store::FenceReason::Diverged, _) => ". A leader sent entries that differ from \
+            what it holds as committed. When most controllers went back to an older copy, the \
+            controllers that kept the newer rows are the ones that stop: compare the copies \
+            with tenko cluster recover --inspect, then force the newest with tenko cluster \
+            recover --force and join the others again empty, or remove this one and join it \
+            again empty"
+            .to_owned(),
         (tenko_store::FenceReason::MajorityAlive, _) | (_, None) => String::new(),
         (reason, Some(other)) => format!(
             ". A record claims generation {}, forced on controller {}, dated {}, and that it {} \

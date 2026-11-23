@@ -96,13 +96,14 @@ impl LeadershipState {
 
     /// Stops this member for good: no leadership from now on, and the quorum state is
     /// [`QuorumState::Fenced`]. A second fence keeps the first one's time and the stricter
-    /// reason ([`FenceReason::strictness`]). The leadership is cleared under the fence's lock, which
+    /// reason ([`FenceReason::strictness`]), the later one at equal rank, as the peer layer's
+    /// fence does. The leadership is cleared under the fence's lock, which
     /// [`LeadershipState::publish`] holds while it sends, so a metrics snapshot taken before
     /// the fence cannot restore it.
     pub(super) fn fence(&self, reason: FenceReason, applied: Revision) {
         let mut fence = self.fence.lock().unwrap_or_else(PoisonError::into_inner);
         let (since, current) = fence.unwrap_or((Timestamp::now(), reason));
-        let reason = if current.strictness() >= reason.strictness() {
+        let reason = if current.strictness() > reason.strictness() {
             current
         } else {
             reason

@@ -380,6 +380,11 @@ pub enum FenceReason {
     Conflict,
     /// The first start after a forced step found the old cluster alive.
     MajorityAlive,
+    /// Another node led above this controller while it was its own only voter: its store
+    /// was started from an older copy.
+    Reverted,
+    /// A leader sent entries that differ from what this controller holds as committed.
+    Diverged,
     /// A reason a newer controller reports that this build does not know.
     #[serde(other)]
     Unknown,
@@ -393,6 +398,8 @@ impl From<tenko_store::FenceReason> for FenceReason {
             Store::Superseded => Self::Superseded,
             Store::Conflict => Self::Conflict,
             Store::MajorityAlive => Self::MajorityAlive,
+            Store::Reverted => Self::Reverted,
+            Store::Diverged => Self::Diverged,
             Store::Unknown => Self::Unknown,
         }
     }
@@ -411,9 +418,10 @@ pub struct QuorumView {
     /// The revision the controller applied last, while isolated or fenced: the age of its
     /// copy.
     pub applied: Option<Revision>,
-    /// Why a fenced controller stopped writing: `superseded`, `conflict` or
-    /// `majority_alive` (its writes are refused with `cluster.superseded`,
-    /// `cluster.recover.conflict` or `cluster.recover.majority_alive`).
+    /// Why a fenced controller stopped writing: `superseded`, `conflict`, `majority_alive`,
+    /// `reverted` or `diverged` (its writes are refused with `cluster.superseded`,
+    /// `cluster.recover.conflict`, `cluster.recover.majority_alive`,
+    /// `cluster.member.reverted` or `cluster.member.diverged`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<FenceReason>,
 }

@@ -198,6 +198,14 @@
         <notes><note category="description">Error: a write was refused because the forced controller found the old cluster still alive at its first start.</note></notes>
         <segment><source>The old cluster is still alive, so this controller did not take over; it refuses changes until an operator undoes or confirms the recovery.</source><target>Det gamla klustret lever fortfarande, så den här kontrollern tog inte över; den avvisar ändringar tills en operatör ångrar eller bekräftar återställningen.</target></segment>
       </unit>
+      <unit id="errors.cluster.member.reverted">
+        <notes><note category="description">Error: a write was refused because this controller was started from an older copy of its store.</note></notes>
+        <segment><source>This controller was started from an older copy of its store and refuses changes. Remove it from another controller, empty its data directory and join it to the cluster again.</source><target>Den här kontrollern startades från en äldre kopia av sitt lager och avvisar ändringar. Ta bort den från en annan kontroller, töm dess datakatalog och anslut den till klustret igen.</target></segment>
+      </unit>
+      <unit id="errors.cluster.member.diverged">
+        <notes><note category="description">Error: a write was refused because the leader sent entries that differ from what this controller holds as committed.</note></notes>
+        <segment><source>The leader sent changes that differ from what this controller holds as committed, so it refuses changes. When most controllers went back to an older copy, the ones that kept the newer data stop: compare the copies before you choose a side.</source><target>Ledaren skickade ändringar som skiljer sig från det den här kontrollern har som bekräftat, så den avvisar ändringar. När de flesta kontroller har gått tillbaka till en äldre kopia är det de som behöll nyare data som stannar: jämför kopiorna innan du väljer sida.</target></segment>
+      </unit>
       <unit id="cluster.no_quorum.title">
         <notes><note category="description">Title of the dialog of a change refused for want of a quorum.</note></notes>
         <segment><source>Change refused</source><target>Ändringen avvisades</target></segment>

@@ -768,6 +768,19 @@ impl LogStore {
         self.inner.shared.last_purged()
     }
 
+    /// The log id of the record at `index`, if the log holds one; a read error counts as none.
+    pub(crate) fn log_id_at(&self, index: u64) -> Option<LogId> {
+        let shared = &self.inner.shared;
+        let pending = lock(&shared.pending).get(&index).map(Arc::clone);
+        if let Some(record) = pending {
+            return decode_head(&record).ok();
+        }
+        let read = shared.db.begin_read().ok()?;
+        let logs = read.open_table(LOGS).ok()?;
+        let record = logs.get(index).ok()??;
+        decode_head(record.value()).ok()
+    }
+
     /// Stops the writer thread after it has drained and committed the queue, and joins it,
     /// so a caller that then drops the last clone knows the file is closed.
     ///
@@ -849,6 +862,13 @@ impl RaftLogStorage<TypeConfig> for LogStore {
     }
 
     async fn read_vote(&mut self) -> Result<Option<Vote>, StorageError> {
+        #[cfg(feature = "test-hooks")]
+        {
+            let hook = self.inner.shared.dir.join(crate::test_hooks::FAIL_VOTE_READ);
+            if std::fs::remove_file(hook).is_ok() {
+                return Err(StorageIOError::read_vote(&crate::test_hooks::full_disk()).into());
+            }
+        }
         let stored = self
             .inner
             .shared

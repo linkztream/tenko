@@ -10850,7 +10850,7 @@ export interface components {
          * @description Why a controller stopped writing for good (the API's form of `tenko_store::FenceReason`).
          * @enum {string}
          */
-        FenceReason: "superseded" | "conflict" | "majority_alive" | "unknown";
+        FenceReason: "superseded" | "conflict" | "majority_alive" | "reverted" | "diverged" | "unknown";
         /** @description One changed field: a diff line or a toggle change. */
         FieldChange: {
             /** @description The field or toggle, for example `status` or `TGL-02`. */

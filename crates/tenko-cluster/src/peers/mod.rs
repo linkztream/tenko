@@ -2582,4 +2582,60 @@ mod tests {
     fn digests_print_as_hex() {
         assert_eq!(hex(&[0, 15, 255]), "000fff");
     }
+
+    /// A fence the store raises on what a leader sent goes into the fence file, a fence held
+    /// already stands, and the next start fences again from the file.
+    #[tokio::test]
+    async fn a_store_fence_is_kept_across_a_restart_and_a_held_one_stands() {
+        use tenko_store::{FenceReason, raft::network::PeerTransport as _};
+
+        let dir = tenko_core::testing::TempDir::new("store-fence");
+        let mut config = tenko_store::raft::RaftStoreConfig::new(dir.join("store"));
+        config.node_id = NodeId(1);
+        config.fsync_probe_samples = 0;
+        let mut peer_config = PeerConfig::new(NodeId(1), 2);
+        peer_config.data_dir = Some(dir.path().to_path_buf());
+        let open = async || {
+            let store = RaftStore::open(config.clone()).await.expect("store");
+            let network = PeerNetwork::new(NodeId(1), PeerTimings::default());
+            let peers = Peers::new(store.clone(), network.clone(), peer_config.clone());
+            (store, network, peers)
+        };
+        let found = "node 2 sent 3-2-10".to_owned();
+
+        let (store, network, peers) = open().await;
+        assert!(
+            network
+                .keep_fence(FenceReason::Diverged, found.clone())
+                .await
+        );
+        let kept = crate::generation::FenceFile::load(dir.path())
+            .expect("load")
+            .expect("a fence file");
+        assert_eq!(kept.kind, FenceReason::Diverged);
+        assert!(
+            network
+                .keep_fence(FenceReason::Reverted, "later".to_owned())
+                .await
+        );
+        assert_eq!(
+            crate::generation::FenceFile::load(dir.path()).expect("load"),
+            Some(kept)
+        );
+        let reasons = |store: &RaftStore, peers: &Peers| {
+            (
+                store.fenced(),
+                peers.generation().fence.map(|(reason, _)| reason),
+            )
+        };
+        let diverged = Some(FenceReason::Diverged);
+        assert_eq!(reasons(&store, &peers), (diverged, diverged));
+        let _ = store.shutdown().await;
+        drop((store, network, peers));
+
+        let (store, _network, peers) = open().await;
+        peers.load_generation().await.expect("the fence file");
+        assert_eq!(reasons(&store, &peers), (diverged, diverged));
+        let _ = store.shutdown().await;
+    }
 }

@@ -108,6 +108,7 @@ mod coalescer;
 mod compress;
 mod confirm;
 mod disk;
+mod guard;
 mod index;
 mod leadership;
 mod sm;
@@ -152,7 +153,7 @@ use self::{
         ReadIndex, SwitchTransport,
     },
     sm::{SmOptions, StateMachine},
-    types::{ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
+    types::{LogId, ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
     ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, Pressure,
@@ -606,8 +607,7 @@ pub enum SnapshotInstallError {
 /// Receives a snapshot in chunks into a file and installs it (the receiving side of
 /// [`network::PeerTransport::full_snapshot`]).
 pub struct SnapshotReceiver {
-    raft: Raft,
-    leadership: Arc<LeadershipState>,
+    store: RaftStore,
     path: PathBuf,
     file: Option<tokio::io::BufWriter<tokio::fs::File>>,
 }
@@ -649,15 +649,25 @@ impl SnapshotReceiver {
         file.flush().await?;
         file.get_ref().sync_all().await?;
         drop(file);
+        let positions: Vec<LogId> = meta
+            .last_log_id
+            .into_iter()
+            .chain(*meta.last_membership.log_id())
+            .collect();
+        if self.store.refuses(&vote, &positions).await {
+            let _ = fs::remove_file(&self.path);
+            return Err(SnapshotInstallError::Fatal(Box::new(Fatal::Stopped)));
+        }
         let snapshot = Snapshot {
             meta,
             snapshot: Box::new(SnapshotFile {
                 path: self.path.clone(),
             }),
         };
-        let result = self.raft.install_full_snapshot(vote, snapshot).await;
+        let inner = &self.store.inner;
+        let result = inner.raft.install_full_snapshot(vote, snapshot).await;
         if result.is_ok() {
-            self.leadership.heard_from_leader();
+            inner.leadership.heard_from_leader();
         }
         // Installed snapshots are renamed; a rejected one is left behind as a `.part` file.
         let _ = fs::remove_file(&self.path);
@@ -1469,11 +1479,73 @@ impl RaftStore {
         openraft::raft::AppendEntriesResponse<RaftNodeId>,
         openraft::error::RaftError<RaftNodeId>,
     > {
+        let mut positions: Vec<LogId> = rpc.prev_log_id.into_iter().collect();
+        positions.extend(rpc.entries.iter().map(|entry| entry.log_id));
+        if self.refuses(&rpc.vote, &positions).await {
+            return Err(openraft::error::RaftError::Fatal(Fatal::Stopped));
+        }
         let result = self.inner.raft.append_entries(rpc).await;
         if result.is_ok() {
             self.inner.leadership.heard_from_leader();
         }
         result
+    }
+
+    /// Judges a request of a leader before openraft sees it (`guard`): one that contradicts
+    /// what this store holds as committed, or another node leading above this store while it
+    /// is its own only voter, stops this member for good and is refused.
+    async fn refuses(&self, vote: &Vote, positions: &[LogId]) -> bool {
+        let inner = &self.inner;
+        if inner.leadership.fenced().is_some() {
+            return false;
+        }
+        let committed = inner.log.clone().read_committed().await.ok().flatten();
+        let held = guard::Held {
+            bound: committed.max(inner.sm.meta().last_applied),
+            committed,
+            purged: inner.log.last_purged().ok().flatten(),
+        };
+        let differs = positions
+            .iter()
+            .map(|position| {
+                let local = guard::local(&held, position.index, |at| inner.log.log_id_at(at));
+                (*position, local)
+            })
+            .find(|(position, local)| guard::contradicts(&held, *position, *local));
+        let me = inner.me();
+        let sole = vote.leader_id().voted_for() != Some(me) && sole_voter(&inner.raft, me);
+        if differs.is_none() && !sole {
+            return false;
+        }
+        // Read after `held`: openraft saves a vote before it commits anything under it. A
+        // vote that does not read judges nothing: openraft decides by the vote it holds.
+        let Ok(stored) = inner.log.clone().read_vote().await else {
+            return false;
+        };
+        let Some(reason) = guard::verdict(me, sole, vote, stored.as_ref(), differs.is_some())
+        else {
+            return false;
+        };
+        let shown =
+            |id: Option<LogId>, none: &str| id.map_or_else(|| none.to_owned(), |id| id.to_string());
+        let sent = differs.map_or_else(String::new, |(position, local)| {
+            format!(
+                " sent {position} where this controller holds {}",
+                shown(local, "no entry to compare")
+            )
+        });
+        let detail = format!(
+            "node {} under vote {vote}{sent}; this controller's vote is {}, and it holds as \
+             committed up to {}",
+            vote.leader_id().node_id,
+            stored.map_or_else(|| "none".to_owned(), |stored| stored.to_string()),
+            shown(held.bound, "nothing"),
+        );
+        tracing::error!(code = reason.code(), "{detail}");
+        if !inner.transport.keep_fence(reason, detail).await {
+            self.fence(reason).await;
+        }
+        true
     }
 
     /// Handles a vote request (receiving side of a transport).
@@ -1503,8 +1575,7 @@ impl RaftStore {
         let path = self.inner.sm.receive_path();
         let file = std::fs::File::create(&path)?;
         Ok(SnapshotReceiver {
-            raft: self.inner.raft.clone(),
-            leadership: Arc::clone(&self.inner.leadership),
+            store: self.clone(),
             path,
             file: Some(tokio::io::BufWriter::with_capacity(
                 network::SNAPSHOT_CHUNK,
@@ -1525,7 +1596,7 @@ impl RaftStore {
         let _ = inner.raft.shutdown().await;
         tracing::error!(
             code = reason.code(),
-            "this controller stopped writing for good: another history of the cluster supersedes or competes with its own"
+            "this controller stopped writing for good"
         );
     }
 
@@ -1610,9 +1681,10 @@ async fn release(raft: Raft, log: &LogStore, sm: &StateMachine) {
 /// Whether `node` is the only voter of the effective membership `raft` knows (possibly not
 /// committed yet, as of the last metrics update).
 fn sole_voter(raft: &Raft, node: RaftNodeId) -> bool {
-    let metrics = raft.metrics().borrow().clone();
-    let voters: BTreeSet<RaftNodeId> = metrics.membership_config.membership().voter_ids().collect();
-    voters.len() == 1 && voters.contains(&node)
+    let metrics = raft.metrics();
+    let metrics = metrics.borrow();
+    let mut voters = metrics.membership_config.membership().voter_ids();
+    voters.next() == Some(node) && voters.next().is_none()
 }
 
 /// Checks the node id a store directory belongs to, and records it on first use.
@@ -1692,31 +1764,37 @@ async fn bootstrap(
     Ok(())
 }
 
-/// Gives a store whose state applied entries but whose log holds no vote the vote of its last
-/// entry's term, so its first election leads the term after it (a lower one breaks openraft's
-/// leader invariant). A state copy (`copy` is true: no node-id file) has no log by design. A
-/// store this node ran has lost its log: as the only voter it goes on with a warning; as a
-/// member of a cluster it is refused, since it may have voted in a later term and could vote
-/// twice in one.
+/// Makes a saved vote of this node as leader uncommitted, so the node takes office only by a
+/// new election: restored as leader, it would append under log ids its peers may hold with
+/// other entries. Gives a store whose state applied entries but whose log holds no vote the
+/// vote of its last entry's term, so its first election leads the term after it (a lower one
+/// breaks openraft's leader invariant). A state copy (`copy` is true: no node-id file) has no
+/// log by design. A store this node ran has lost its log: as the only voter it goes on with a
+/// warning; as a member of a cluster it is refused, since it may have voted in a later term
+/// and could vote twice in one.
 async fn seed_vote(
     log: &LogStore,
     sm: &StateMachine,
     node: NodeId,
     copy: bool,
 ) -> Result<(), StoreError> {
+    let mut log = log.clone();
+    if let Some(vote) = log
+        .read_vote()
+        .await
+        .map_err(|error| open_error("vote", error))?
+    {
+        if vote.is_committed() && vote.leader_id().voted_for() == Some(node.0) {
+            log.save_vote(&Vote::new(vote.leader_id().term, node.0))
+                .await
+                .map_err(|error| open_error("vote", error))?;
+        }
+        return Ok(());
+    }
     let meta = sm.meta();
     let Some(applied) = meta.last_applied else {
         return Ok(());
     };
-    let mut log = log.clone();
-    if log
-        .read_vote()
-        .await
-        .map_err(|error| open_error("vote", error))?
-        .is_some()
-    {
-        return Ok(());
-    }
     if !copy {
         let voters: Vec<String> = meta
             .membership

@@ -830,7 +830,8 @@ impl Claim {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FenceFile {
     /// Why: [`FenceReason::Superseded`] for a descendant, [`FenceReason::Conflict`] for a
-    /// history that competes or that this controller could not place.
+    /// history that competes or that this controller could not place,
+    /// [`FenceReason::Reverted`] or [`FenceReason::Diverged`] for what a leader sent.
     pub kind: FenceReason,
     /// The records that stopped it, oldest first.
     pub records: Vec<GenerationRecord>,

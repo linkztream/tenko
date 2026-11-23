@@ -289,7 +289,7 @@ pub fn check_offline_write(resolved: &Resolved) -> Result<(), (u8, String)> {
         Ok(Some(fence)) => Err((
             exit::USAGE,
             format!(
-                "this controller stopped writing ({}): another history of the cluster superseded or met it; nothing is written here until an operator acts on it (docs/cluster.md section 12.11)",
+                "this controller stopped writing ({}); nothing is written here until an operator acts on it (docs/cluster.md section 12.11)",
                 fence.kind.code()
             ),
         )),
@@ -430,7 +430,7 @@ struct Facts {
     own: Option<generation::Signed>,
     /// The highest generation this copy has seen: its own or its fence's.
     seen: u64,
-    /// What stopped this controller, when a fence of another history is kept here.
+    /// What stopped this controller, when a fence is kept here.
     fence: Option<tenko_store::FenceReason>,
     members: BTreeMap<NodeId, MemberRecord>,
     /// The nodes with a record in the registry: the ones `--revoke` can revoke.
@@ -1284,6 +1284,14 @@ fn stopped_text(facts: &Facts) -> Option<String> {
             return Some(
                 "It stopped at its first start: the old voters answered its probe as a live \
                  majority."
+                    .to_owned(),
+            );
+        }
+        tenko_store::FenceReason::Reverted | tenko_store::FenceReason::Diverged => {
+            return Some(
+                "It stopped on what a leader sent. A forced step here makes this copy the \
+                 cluster: every controller still running stops writing for good when it meets \
+                 it, and what they wrote that this copy lacks does not come here."
                     .to_owned(),
             );
         }

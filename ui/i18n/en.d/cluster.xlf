@@ -198,6 +198,14 @@
         <notes><note category="description">Error: a write was refused because the forced controller found the old cluster still alive at its first start.</note></notes>
         <segment><source>The old cluster is still alive, so this controller did not take over; it refuses changes until an operator undoes or confirms the recovery.</source></segment>
       </unit>
+      <unit id="errors.cluster.member.reverted">
+        <notes><note category="description">Error: a write was refused because this controller was started from an older copy of its store.</note></notes>
+        <segment><source>This controller was started from an older copy of its store and refuses changes. Remove it from another controller, empty its data directory and join it to the cluster again.</source></segment>
+      </unit>
+      <unit id="errors.cluster.member.diverged">
+        <notes><note category="description">Error: a write was refused because the leader sent entries that differ from what this controller holds as committed.</note></notes>
+        <segment><source>The leader sent changes that differ from what this controller holds as committed, so it refuses changes. When most controllers went back to an older copy, the ones that kept the newer data stop: compare the copies before you choose a side.</source></segment>
+      </unit>
       <unit id="cluster.no_quorum.title">
         <notes><note category="description">Title of the dialog of a change refused for want of a quorum.</note></notes>
         <segment><source>Change refused</source></segment>

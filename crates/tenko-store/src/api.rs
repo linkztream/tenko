@@ -1022,20 +1022,26 @@ pub enum FenceReason {
     /// The first start after a forced step found the old cluster alive and did not take
     /// office.
     MajorityAlive,
+    /// A leader of another node, above this member's own vote, reached it while it was its
+    /// own only voter: its store was started from an older copy.
+    Reverted,
+    /// A leader sent log entries or a snapshot that differ from what this member holds as
+    /// committed.
+    Diverged,
     /// A reason this build does not know: as strict as [`FenceReason::Superseded`].
     #[serde(other)]
     Unknown,
 }
 
 impl FenceReason {
-    /// How strict the fence is: a later fence never weakens an earlier one. Superseded, and
-    /// a reason this build does not know, rank above a conflict, which ranks above a live
-    /// old majority.
+    /// How strict the fence is: a later fence never weakens an earlier one. Superseded,
+    /// reverted, diverged and a reason this build does not know rank above a conflict, which
+    /// ranks above a live old majority.
     pub const fn strictness(self) -> u8 {
         match self {
             Self::MajorityAlive => 0,
             Self::Conflict => 1,
-            Self::Superseded | Self::Unknown => 2,
+            Self::Superseded | Self::Reverted | Self::Diverged | Self::Unknown => 2,
         }
     }
 
@@ -1045,6 +1051,8 @@ impl FenceReason {
             Self::Superseded | Self::Unknown => "cluster.superseded",
             Self::Conflict => "cluster.recover.conflict",
             Self::MajorityAlive => "cluster.recover.majority_alive",
+            Self::Reverted => "cluster.member.reverted",
+            Self::Diverged => "cluster.member.diverged",
         }
     }
 }
