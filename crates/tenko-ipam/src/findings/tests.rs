@@ -466,6 +466,86 @@ fn health_conditions_keep_their_identity_and_their_area() {
     assert!(index.get(&first[0].id()).is_none());
 }
 
+/// A health condition whose figures change at every reading (the free space of a disk) keeps
+/// one finding, and the time it was first seen, while it lasts.
+#[test]
+fn a_health_condition_keeps_its_id_while_its_figures_change() {
+    let item = |code: &str, params: &[(&str, &str)]| HealthItem {
+        code: code.to_owned(),
+        detail: String::new(),
+        params: params
+            .iter()
+            .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+            .collect(),
+        level: FindingLevel::Act,
+    };
+    let now = at("2026-10-26T12:00:00Z");
+    let later = now.checked_add(Duration::from_secs(60)).expect("time");
+    for (first, second) in [
+        (
+            item(
+                "node.disk.low",
+                &[("available", "900"), ("severity", "act"), ("path", "/d")],
+            ),
+            item(
+                "node.disk.low",
+                &[("available", "800"), ("severity", "error"), ("path", "/d")],
+            ),
+        ),
+        (
+            item("sys.store.disk_reserve", &[("free", "9"), ("needed", "20")]),
+            item("sys.store.disk_reserve", &[("free", "8"), ("needed", "21")]),
+        ),
+        (
+            item(
+                "dns.dnssec.clock_skew",
+                &[("zone", "a"), ("behind_secs", "61")],
+            ),
+            item(
+                "dns.dnssec.clock_skew",
+                &[("zone", "a"), ("behind_secs", "62")],
+            ),
+        ),
+        (
+            item(
+                "sys.tls.certificate_expiry",
+                &[("state", "expiring"), ("days_left", "9")],
+            ),
+            item(
+                "sys.tls.certificate_expiry",
+                &[("state", "expiring"), ("days_left", "8")],
+            ),
+        ),
+        (
+            item("dns.gss.context_limit", &[("sources", "3")]),
+            item("dns.gss.context_limit", &[("sources", "4")]),
+        ),
+        (
+            item(
+                "dns.gss.clock_skew",
+                &[("spn", "s"), ("skew_secs", "301"), ("failures", "1")],
+            ),
+            item(
+                "dns.gss.clock_skew",
+                &[("spn", "s"), ("skew_secs", "302"), ("failures", "2")],
+            ),
+        ),
+    ] {
+        assert_eq!(first.id(), second.id(), "{}", first.code);
+        let index = FindingsIndex::new(FindingsConfig::default());
+        index.set_health(std::slice::from_ref(&first), now);
+        index.set_health(std::slice::from_ref(&second), later);
+        let listed = index.get(&second.id()).expect("listed");
+        assert_eq!(listed.since, now, "{}", first.code);
+        assert_eq!(listed.params, second.params, "the newest figures");
+    }
+    // A parameter that names the condition still tells two conditions apart.
+    assert_ne!(
+        item("node.disk.low", &[("path", "/a")]).id(),
+        item("node.disk.low", &[("path", "/b")]).id()
+    );
+}
+
 fn finding(id: &str, level: FindingLevel, area: FindingArea, source: FindingSource) -> Finding {
     Finding {
         id: id.to_owned(),

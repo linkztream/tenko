@@ -530,12 +530,50 @@ pub struct HealthItem {
     pub level: FindingLevel,
 }
 
+/// The parameters of a health condition that measure it rather than name it: they change
+/// from one reading to the next while the condition stays the same, so they are not part of
+/// its identifier. The rule for a new parameter of a health condition: a figure that can
+/// change while the condition lasts (bytes, counts, seconds, a skew, an error text, a
+/// severity) is listed here; one that tells two conditions of one code apart (a node, a zone,
+/// a service, a path, a key version) is not.
+pub const MEASURED_PARAMS: &[&str] = &[
+    "available",
+    "total",
+    "limit",
+    "free",
+    "needed",
+    "lag",
+    "refused",
+    "dropped",
+    "count",
+    "restarts",
+    "skew_ms",
+    "skew_secs",
+    "behind_secs",
+    "days_left",
+    "sources",
+    "failures",
+    "error",
+    "severity",
+    "cause",
+    "seconds_left",
+    "bytes",
+    "margin",
+    "raised_at",
+];
+
 impl HealthItem {
-    /// The identifier of its finding: the code and its parameters, so two conditions of one
-    /// code (two zones) are two findings and the same condition keeps its identifier.
+    /// The identifier of its finding: the code and the parameters that name the condition
+    /// (not [`MEASURED_PARAMS`]), so two conditions of one code (two zones) are two findings
+    /// and the same condition keeps its identifier, and its first sighting, while its
+    /// figures change.
     pub fn id(&self) -> String {
         let mut key = self.code.clone();
-        for (name, value) in &self.params {
+        let named = self
+            .params
+            .iter()
+            .filter(|(name, _)| !MEASURED_PARAMS.contains(&name.as_str()));
+        for (name, value) in named {
             key.push('\u{1f}');
             key.push_str(name);
             key.push('=');
