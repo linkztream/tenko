@@ -157,6 +157,8 @@ When the restored host has another `[node] id` than the source, the report says 
 
 A backup of any controller of a cluster restores to a single controller (decision S3-Q11): the restored store has one voter, this host, so it starts and takes writes on its own. The other controllers then join it with empty data directories, as when a cluster grows ([cluster.md](cluster.md), section 12): stop the old members, move their data directories aside, and run `tenko cluster join` against the restored controller. They receive the key generations through the sealed transfer. Never start an old member with its old data directory against the restored cluster: it belongs to the old Raft history.
 
+A backup is for the whole cluster. Never restore one member alone from a copy or a snapshot; to bring one member back, remove it and join it again empty ([cluster.md](cluster.md), section 12.3).
+
 The scheduled backups of a cluster are written by the leader, into its target directory; after a failover the new leader writes them into its own. Setting `target_dir` to a share mounted at the same path on every controller keeps them together.
 
 ## 8. Status and warnings
