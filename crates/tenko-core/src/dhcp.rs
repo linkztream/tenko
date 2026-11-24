@@ -56,9 +56,9 @@ pub use class::{
 };
 pub use history::{HistoryNames, HistoryRow, LeanEvent};
 pub use lease::{
-    Adopted, BindingState, ClientKey, DdnsState, Fingerprint, Lease, Lease6, Lease6Event,
-    Lease6Kind, LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease, PoolShare,
-    Relay6Info, RelayInfo, write_identity, write_identity6,
+    Adopted, BindingState, ClientKey, DdnsNames, DdnsState, Fingerprint, Lease, Lease6,
+    Lease6Event, Lease6Kind, LeaseEvent, LeaseEventKind, LeaseRef, MovingClient, MovingLease,
+    PoolShare, Relay6Info, RelayInfo, write_identity, write_identity6,
 };
 pub use option::{
     CATALOG_V4, CATALOG_V6, Catalog6Entry, CatalogEntry, OptionData, OptionDef, OptionKind,
@@ -1489,12 +1489,12 @@ pub fn check_reservations(candidates: &[ReservationCandidate]) -> Vec<Reservatio
 /// WP9.2; the plan's `dhcp.host_options` is the option set of [`OptionOwner::Host`] in
 /// `dhcp.option_sets`.
 pub mod tables {
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use super::{
-        Class, ClassId, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId, Lease, Lease6,
-        Lease6Event, LeaseRef, MovingClient, OptionDef, OptionDefId, OptionOwner, OptionSet,
-        Policy, PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
+        Class, ClassId, DdnsNames, DhcpSettings, ExclusionId, ExclusionRange, Filter, FilterId,
+        Lease, Lease6, Lease6Event, LeaseRef, MovingClient, OptionDef, OptionDefId, OptionOwner,
+        OptionSet, Policy, PolicyId, PoolSettings, Scope, SharedNetwork, SharedNetworkId,
     };
     use crate::{
         Timestamp,
@@ -1547,8 +1547,12 @@ pub mod tables {
     /// served in the role's configuration image.
     pub static MOVING: TableDef<JobId, MovingClient> = TableDef::new("dhcp.moving");
 
+    /// The names the DDNS worker wrote, by VRF and address of either family. Written only
+    /// by the worker, which runs on a controller, so no node receives it.
+    pub static DDNS_NAMES: TableDef<(VrfId, IpAddr), DdnsNames> = TableDef::new("dhcp.ddns_names");
+
     /// The tables a node with the `dhcp` role receives through node sync: every table of the
-    /// namespace except `dhcp.history` (plan section 3.2). Declared now and consumed by no
+    /// namespace except the histories and the DDNS names (plan section 3.2). Declared now and consumed by no
     /// node in Phase 3: the one node runs the role in the controller's process and reads
     /// the store directly (plan section 2.12); the fed `dhcp` node is Phase 5.
     pub static NODE_TABLES: [TableName; 14] = [
@@ -1584,7 +1588,7 @@ pub mod tables {
     ];
 
     /// Every table of the namespace.
-    pub fn all() -> [&'static TableName; 16] {
+    pub fn all() -> [&'static TableName; 17] {
         [
             SETTINGS.name(),
             SCOPES.name(),
@@ -1604,6 +1608,7 @@ pub mod tables {
             HISTORY6.name(),
             // The clients of move jobs (ADR 0027).
             MOVING.name(),
+            DDNS_NAMES.name(),
         ]
     }
 }

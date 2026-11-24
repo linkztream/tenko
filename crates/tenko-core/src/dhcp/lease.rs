@@ -206,6 +206,76 @@ pub struct DdnsState {
     pub updated: Option<Timestamp>,
 }
 
+/// The names the DDNS worker wrote for the leases at one address and has not removed yet
+/// (`dhcp.ddns_names`, key VRF and address; ADR 0020 point 5). Only the worker writes it,
+/// in the zone's own batch, so a name and its entry commit together or not at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DdnsNames {
+    /// The forward names (A or AAAA and DHCID) with their DHCID, one per owner name, the
+    /// last written last.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub forward: Vec<(DnsName, HexBytes)>,
+    /// The PTR name and the name it points at (none: taken in from a lease row of an earlier
+    /// version that recorded no forward name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ptr: Option<(DnsName, Option<DnsName>)>,
+    /// The last refusal or failure, in English.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    /// When the status last changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated: Option<Timestamp>,
+    /// The `updated` of the lease row's `ddns` last taken in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub took_in: Option<Timestamp>,
+}
+
+impl DdnsNames {
+    /// The record at an address as every reader sees it: `row`, with the names of the lease
+    /// row's `ddns` (`legacy`, written by an earlier version) taken in when they changed since
+    /// the row last took them in; no row reads as `legacy`, its error and time included.
+    #[must_use]
+    pub fn through(row: Option<Self>, legacy: &DdnsState) -> Self {
+        let fresh = row.is_none();
+        let mut names = row.unwrap_or_else(|| Self {
+            last_error: legacy.last_error.clone(),
+            updated: legacy.updated,
+            ..Self::default()
+        });
+        if fresh || names.took_in != legacy.updated {
+            names.took_in = legacy.updated;
+            if let (Some(name), Some(dhcid)) = (&legacy.forward, &legacy.dhcid) {
+                names.put_forward(name.clone(), dhcid.clone());
+            }
+            if let Some(ptr) = &legacy.reverse {
+                names.ptr = Some((ptr.clone(), legacy.forward.clone()));
+            }
+        }
+        names
+    }
+
+    /// Records a forward name written with its DHCID: it replaces only the same entry, so
+    /// another client's entry at the owner name stays until its own removal settles it.
+    pub fn put_forward(&mut self, name: DnsName, dhcid: HexBytes) {
+        let entry = (name, dhcid);
+        self.forward.retain(|held| *held != entry);
+        self.forward.push(entry);
+    }
+
+    /// The record in the shape of a lease's `ddns`: the forward name written last.
+    #[must_use]
+    pub fn state(&self) -> DdnsState {
+        let last = self.forward.last();
+        DdnsState {
+            forward: last.map(|(name, _)| name.clone()),
+            reverse: self.ptr.as_ref().map(|(name, _)| name.clone()),
+            dhcid: last.map(|(_, dhcid)| dhcid.clone()),
+            last_error: self.last_error.clone(),
+            updated: self.updated,
+        }
+    }
+}
+
 /// A DHCPv4 lease (`dhcp.leases`, key VRF and address).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct Lease {

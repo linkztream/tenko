@@ -110,11 +110,14 @@ fn names_are_in_the_namespace() {
     names.sort_unstable();
     names.dedup();
     assert_eq!(names.len(), tables::all().len());
-    // Every table except the histories is in the node subset.
+    // Every table except the histories and the controller's DDNS names is in the node subset.
     for table in tables::all() {
         assert_eq!(
             tables::NODE_TABLES.contains(table),
-            !matches!(table.as_str(), "dhcp.history" | "dhcp.history6"),
+            !matches!(
+                table.as_str(),
+                "dhcp.history" | "dhcp.history6" | "dhcp.ddns_names"
+            ),
             "{table}"
         );
     }
@@ -1017,5 +1020,112 @@ fn reservation_findings() {
     assert_eq!(
         check_reservations(&[candidate(a, "192.0.2.10", Some(vec![0]))]),
         Vec::new()
+    );
+}
+
+/// A name of 253 octets, the longest a DNS name can be.
+fn longest_name(first: char) -> crate::dns::DnsName {
+    let label = |c: char, n| std::iter::repeat_n(c, n).collect::<String>();
+    let text = format!(
+        "{}.{}.{}.{}",
+        label(first, 63),
+        label('b', 63),
+        label('c', 63),
+        label('d', 61)
+    );
+    crate::dns::DnsName::new(&text).expect("a name")
+}
+
+/// The largest record row round-trips and stays small beside a zone set's limit: six forward
+/// names of 253 octets (the cap of four, one more from a late commit, one taken in), an
+/// IPv6 PTR to a name as long, an error text and the times.
+#[test]
+fn the_largest_ddns_record_round_trips_and_its_size_is_known() {
+    let at: Timestamp = "2026-10-22T12:00:00Z".parse().expect("time");
+    let names = DdnsNames {
+        forward: ['a', 'e', 'f', 'g', 'h', 'i']
+            .into_iter()
+            .map(|first| (longest_name(first), HexBytes(vec![0xa5; 35])))
+            .collect(),
+        ptr: Some((
+            crate::dns::DnsName::new(&format!("{}ip6.arpa", "f.".repeat(32))).expect("a PTR name"),
+            Some(longest_name('a')),
+        )),
+        last_error: Some("x".repeat(600)),
+        updated: Some(at),
+        took_in: Some(at),
+    };
+    let bytes = to_cbor(&names).expect("cbor");
+    assert_eq!(from_cbor::<DdnsNames>(&bytes).expect("cbor"), names);
+    assert!(bytes.len() <= 3_000, "{} bytes", bytes.len());
+}
+
+/// No record row reads as the lease row's names, error and time; a row takes in the lease
+/// row's names when an earlier version wrote them after its last take-in, a name replacing
+/// only the same entry, and keeps its own otherwise.
+#[test]
+fn a_ddns_record_reads_through_to_the_names_of_an_earlier_version() {
+    let name = |text: &str| crate::dns::DnsName::new(text).expect("a name");
+    let (t1, t2) = (
+        Timestamp::UNIX_EPOCH,
+        "2026-10-22T12:00:00Z".parse().expect("time"),
+    );
+    let legacy = |at, forward: &str| DdnsState {
+        forward: Some(name(forward)),
+        reverse: Some(name("10.2.0.192.in-addr.arpa")),
+        dhcid: Some(HexBytes(forward.as_bytes().to_vec())),
+        last_error: None,
+        updated: Some(at),
+    };
+    let taken = DdnsNames::through(None, &legacy(t1, "h1.example.test"));
+    assert_eq!(
+        taken.forward,
+        vec![(
+            name("h1.example.test"),
+            HexBytes(b"h1.example.test".to_vec())
+        )]
+    );
+    assert_eq!(
+        taken.ptr,
+        Some((
+            name("10.2.0.192.in-addr.arpa"),
+            Some(name("h1.example.test"))
+        ))
+    );
+    assert_eq!(taken.took_in, Some(t1));
+    assert_eq!(taken.state().forward, Some(name("h1.example.test")));
+    let refused = DdnsState {
+        last_error: Some("refused".to_owned()),
+        ..legacy(t2, "h1.example.test")
+    };
+    let shown = DdnsNames::through(None, &refused).state();
+    assert_eq!(
+        (shown.last_error, shown.updated),
+        (refused.last_error, Some(t2))
+    );
+    // Taken in already: the row's own names stand.
+    let mut own = taken.clone();
+    own.put_forward(name("h2.example.test"), HexBytes(b"h2".to_vec()));
+    own.ptr = None;
+    assert_eq!(
+        DdnsNames::through(Some(own.clone()), &legacy(t1, "h1.example.test")),
+        own
+    );
+    // Written again by an earlier version: its name replaces its entry and its PTR returns.
+    let merged = DdnsNames::through(Some(own), &legacy(t2, "h1.example.test"));
+    assert_eq!(
+        merged
+            .forward
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["h2.example.test", "h1.example.test"]
+    );
+    assert!(merged.ptr.is_some());
+    assert_eq!(merged.took_in, Some(t2));
+    // No row and nothing to take in.
+    assert_eq!(
+        DdnsNames::through(None, &DdnsState::default()),
+        DdnsNames::default()
     );
 }
