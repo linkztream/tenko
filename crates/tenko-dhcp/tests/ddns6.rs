@@ -411,18 +411,27 @@ impl Lab {
     }
 
     async fn ddns6(&self, last: u16) -> DdnsState {
-        self.row6(last)
+        let legacy = self
+            .row6(last)
             .await
             .map(|lease| lease.ddns)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        tenko_dhcp::ddns::names_of(view.as_ref(), self.vrf, IpAddr::V6(ip6(last)), &legacy)
+            .expect("record")
+            .state()
     }
 
     async fn ddns4(&self, last: u8) -> DdnsState {
         let view = self.store.read(ReadConsistency::Local).await.expect("view");
-        view.get_typed(&LEASES, &(self.vrf, ip4(last)))
+        let legacy = view
+            .get_typed(&LEASES, &(self.vrf, ip4(last)))
             .expect("row")
             .map(|(lease, _)| lease.ddns)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        tenko_dhcp::ddns::names_of(view.as_ref(), self.vrf, IpAddr::V4(ip4(last)), &legacy)
+            .expect("record")
+            .state()
     }
 
     async fn rrset(&self, zone: ZoneId, owner: &str, rtype: Rtype) -> Option<RrSet> {

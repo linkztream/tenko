@@ -10,26 +10,27 @@
 //! 1. the names each lease should hold ([`plan::desired`]): the scope's DDNS settings, the
 //!    zone's DHCP switch with the profile's default, the name rules, IPAM's names;
 //! 2. the changes, by the RFC 4703 rules ([`plan::Planner`]), against one view of the
-//!    store: what the lease wrote before goes first (another name, another client at the
-//!    address, a release or expiry), then the A and DHCID set at the forward name and the
+//!    store, from the address's record (`dhcp.ddns_names`, read through to the names an
+//!    earlier version left on the lease row): every name it holds that the lease no longer
+//!    wants removed, one part per RRset, then the A and DHCID at the forward name and the
 //!    PTR in the reverse zone;
 //! 3. one change set per zone through the zone service with the origin `dhcp` and the
 //!    principal `system:dhcp`, stamped with the time it is written (audited by the zone
-//!    service, journalled, so IXFR carries it, and written without a job record), forward
-//!    zones first; the zone service checks each lease's part on the view it plans the set
-//!    against and leaves out the parts it refuses, so no lease holds up the others, and a
-//!    refused forward name takes its PTR along; a zone write the store refuses is retried
-//!    with a doubling backoff (`[dhcp.ddns] retries`, `backoff_ms`), but not one its disk
-//!    guard refuses, and once the store has been unavailable for one zone's write the rest
-//!    of the batch fails too;
-//! 4. the outcome on the lease row (`DdnsState`: the names written, the DHCID, the last
-//!    refusal or failure, the time), written with the row's version as precondition so a
-//!    newer commit is never overwritten, and counted in `tenko_dhcp_ddns_total{outcome}`.
+//!    service, journalled, so IXFR carries it, and written without a job record), one zone
+//!    after another, the zones that take PTRs last, each set fenced to the worker's term
+//!    and carrying the record of each of its leases (`settle`), so a name and its record
+//!    commit together; the zone service checks each part on the view it plans the set
+//!    against and leaves out the parts it refuses, and a PTR is written once its forward
+//!    name is; a zone write the store could not take at all is retried with a doubling
+//!    backoff (`[dhcp.ddns] retries`, `backoff_ms`), and after that the rest of the batch
+//!    fails too; any other refused write fails its zone only, at once;
+//! 4. the status batch (`Worker::status`): what no set carried (a record entry nothing was
+//!    planned for, a set that changed nothing, the last refusal or failure), counted in
+//!    `tenko_dhcp_ddns_total{outcome}`.
 //!
-//! The worker remembers per address what it wrote and for which client (read from the
-//! rows' `ddns` at start), so a row that reached it already changed (a new client at the
-//! address) still has the old names removed. A refusal is not retried until the lease's
-//! next change (a renewal), and a failure is retried after a pause. A change of the
+//! The worker keeps nothing in memory across batches, so a restart or a change of leader
+//! loses nothing, and it never wakes on its own writes. A refusal is not retried until the
+//! lease's next change (a renewal), and a failure is retried after a pause. A change of the
 //! DHCP configuration or of the zones makes the worker read every lease again.
 //!
 //! **The budget.** A batch starts when its first lease has waited the short window, but
@@ -41,7 +42,7 @@
 //! whose changes would take any zone's set past the zone service's `max_changes`; that lease
 //! and the ones after it wait, at the front, for the next batch. A lease is planned whole
 //! or not at all, and a set the store finds too large is halved: its first half is written
-//! and the other leases wait, their parts in the zones already written kept.
+//! and the other leases wait, their parts in the zones already written on their record.
 //!
 //! WP9.1: the worker follows `dhcp.leases6` the same way. A DHCPv6 lease writes an AAAA
 //! record with the DHCID of its DUID (identifier type 2) and the PTR under `ip6.arpa`; its
@@ -58,26 +59,26 @@ use std::{
 
 use futures::StreamExt as _;
 use tenko_core::{
-    Principal, RequestCtx, SystemComponent, Timestamp, VrfId,
-    dhcp::{
-        BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, Lease6, Lease6Kind,
-        tables,
-    },
+    Principal, RequestCtx, Revision, SystemComponent, Timestamp, VrfId,
+    codec::KeyCodec,
+    dhcp::{BindingState, DdnsConflict, DdnsNames, DdnsState, Lease, Lease6, Lease6Kind, tables},
     dns::{DnsName, tables::ZONES},
     serde_util::HexBytes,
+    table::TableDef,
 };
 use tenko_dns::zone::ZoneService;
 use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES};
 use tenko_store::{
-    ChangeStream, FailedPrecondition, KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store,
-    StoreError, WatchFilter, WriteBatch, fence, fenced_out,
+    ChangeStream, KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError,
+    WatchFilter, WriteBatch, fence, fenced_out,
 };
 use tokio_util::sync::CancellationToken;
 
 use super::{
     DdnsAction, DdnsRequest,
     metrics::{OLDEST, Outcome, QUEUE},
-    plan::{self, DdnsProfile, LeaseNames, Planner, Skip, Written, ZoneChanges, Zones},
+    plan::{self, DdnsProfile, LeaseNames, Planner, Skip, ZoneChanges, Zones},
+    record_of,
 };
 use crate::{config, image::ConfigImage};
 
@@ -92,7 +93,7 @@ pub type ProfileSource = Arc<dyn Fn(&dyn ReadView) -> DdnsProfile + Send + Sync>
 /// The worker's settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DdnsSettings {
-    /// Retries of a zone write the store refuses (`[dhcp.ddns] retries`).
+    /// Retries of a zone write the store could not take at all (`[dhcp.ddns] retries`).
     pub retries: u32,
     /// The first pause between them, doubled each time (`[dhcp.ddns] backoff_ms`).
     pub backoff: Duration,
@@ -133,45 +134,137 @@ impl std::fmt::Debug for DdnsService {
     }
 }
 
-/// What the worker remembers of an address.
-#[derive(Debug, Clone)]
-struct Memo {
-    client: ClientKey,
-    written: Written,
-    /// The last request handled for the address, so that the worker's own row write (and
-    /// a change that alters nothing DDNS reads) is not handled twice.
-    handled: Option<DdnsRequest>,
-}
-
-/// What became of one lease in a batch.
-#[derive(Debug, Default)]
-struct Result1 {
-    holds: Written,
+/// One lease of a batch: its request (none once its row is gone), the names its row holds
+/// from an earlier version, its record as the batch read it, and what became of it.
+#[derive(Debug)]
+struct Lease1 {
+    key: Key,
+    request: Option<DdnsRequest>,
+    legacy: DdnsState,
+    marked: Instant,
+    record: DdnsNames,
+    /// The record row's version as the batch read it.
+    version: Option<Revision>,
+    /// What only the status batch records: the entries nothing was planned for.
+    later: Vec<(Part, Done)>,
     refusal: Option<String>,
     failure: Option<String>,
     note: Option<String>,
-    removed: bool,
-    wrote: bool,
+    /// Its new forward name waits for a slot.
+    waits: bool,
 }
 
 /// One part of a lease's plan in a zone write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Part {
-    Remove,
-    Forward,
-    Reverse,
+    /// The removal of one RRset of the forward entry with this owner name and DHCID.
+    Unforward(DnsName, HexBytes),
+    /// The removal of the PTR entry with this name and target.
+    Unptr(DnsName, Option<DnsName>),
+    /// A forward name written with its DHCID.
+    Forward(DnsName, HexBytes),
+    /// The PTR written, with the name it points at.
+    Ptr(DnsName, Option<DnsName>),
 }
 
-fn written_of(state: &DdnsState) -> Written {
-    Written {
-        forward: state.forward.clone(),
-        reverse: state.reverse.clone(),
-        dhcid: state.dhcid.as_ref().map(|hex| hex.0.clone()),
+/// What became of a part.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Done {
+    Written,
+    /// The zone refused it: an addition waits for the lease's next change, a removal met
+    /// data of another origin, which is no longer the lease's.
+    Refused(String),
+    /// Not tried: a PTR whose forward name was not written, a set cut in half.
+    Waits,
+    /// Its zone's write failed: tried again after a pause.
+    Failed(String),
+}
+
+/// The record after a set's parts: removals first, a forward entry leaving when every
+/// removal of it (owner name and DHCID) is gone (written or refused) and the PTR entry when
+/// its removal (name and target) is; then a written forward name replaces only the same
+/// entry, and a written PTR becomes the one PTR entry.
+fn settle(row: &mut DdnsNames, parts: &[(Part, Done)]) {
+    let gone = |part: &Part| {
+        parts
+            .iter()
+            .filter(|(other, _)| other == part)
+            .all(|(_, done)| matches!(done, Done::Written | Done::Refused(_)))
+    };
+    for (part, _) in parts {
+        match part {
+            Part::Unforward(name, dhcid) if gone(part) => {
+                row.forward.retain(|(held, by)| (held, by) != (name, dhcid));
+            }
+            Part::Unptr(name, target)
+                if gone(part) && row.ptr.as_ref() == Some(&(name.clone(), target.clone())) =>
+            {
+                row.ptr = None;
+            }
+            _ => {}
+        }
+    }
+    for (part, done) in parts {
+        match (part, done) {
+            (Part::Forward(name, dhcid), Done::Written) => {
+                row.put_forward(name.clone(), dhcid.clone());
+            }
+            (Part::Ptr(name, target), Done::Written) => {
+                row.ptr = Some((name.clone(), target.clone()));
+            }
+            _ => {}
+        }
     }
 }
 
-fn is_empty(written: &Written) -> bool {
-    written.forward.is_none() && written.reverse.is_none()
+/// Stages `row` as `lease`'s record, expected at `version`: deleted when it holds no entry
+/// and either the lease row is gone, or it holds no error and the lease row names nothing
+/// (no earlier version's names to keep out). Returns whether it was deleted.
+fn stage_row(
+    batch: &mut WriteBatch,
+    lease: &Lease1,
+    row: &DdnsNames,
+    version: Option<Revision>,
+) -> Result<bool, StoreError> {
+    let legacy = lease.legacy.forward.is_some() || lease.legacy.reverse.is_some();
+    let delete = row.forward.is_empty()
+        && row.ptr.is_none()
+        && (lease.request.is_none() || (row.last_error.is_none() && !legacy));
+    batch.expect_typed(&tables::DDNS_NAMES, &lease.key, version);
+    if delete {
+        batch.delete_typed(&tables::DDNS_NAMES, &lease.key);
+    } else {
+        batch.put_typed(&tables::DDNS_NAMES, &lease.key, row)?;
+    }
+    Ok(delete)
+}
+
+/// Calls `each` with every row of `table`, page by page.
+fn each_row<K: KeyCodec, V: serde::Serialize + serde::de::DeserializeOwned>(
+    view: &dyn ReadView,
+    table: &TableDef<K, V>,
+    mut each: impl FnMut(K, V),
+) -> Result<(), StoreError> {
+    let mut range = KeyRange::all();
+    loop {
+        let page = view.scan_typed(table, range.clone(), crate::lease::follow::PAGE, false)?;
+        let full = page.len() == crate::lease::follow::PAGE;
+        let Some(last) = page.last().map(|(key, _, _)| table.key(key)) else {
+            return Ok(());
+        };
+        for (key, value, _) in page {
+            each(key, value);
+        }
+        if !full {
+            return Ok(());
+        }
+        range = KeyRange::all().after(last);
+    }
+}
+
+/// Whether the lease `index` is one of `leases`, a run of the ascending leases of a set.
+fn among(leases: &[usize], index: usize) -> bool {
+    matches!((leases.first(), leases.last()), (Some(first), Some(last)) if (*first..=*last).contains(&index))
 }
 
 /// The request a lease row asks for: add for a binding that holds its address now,
@@ -280,27 +373,25 @@ fn retryable(status: u16, code: &str) -> bool {
     status >= 500 || code.starts_with("sys.store") || code == "sys.unavailable"
 }
 
-/// What a zone write's error means for the batch, and whether the write is tried again in
-/// it. The worker sees the zone service's coded error, not the store's error type, so the
-/// codes are named here and a test runs every store error through this.
-fn failure_of(code: &str, status: u16) -> (Failure, bool) {
+/// What a zone write's error means for the batch; only an outage is tried again in it. The
+/// worker sees the zone service's coded error, not the store's error type, so the codes are
+/// named here and a test runs every store error through this.
+fn failure_of(code: &str, status: u16) -> Failure {
     match code {
         // The zone service's answer to a failed fence ([`tenko_store::fenced_out`]).
-        StoreError::PRECONDITION_FAILED if status == 412 => (Failure::Deposed, false),
-        StoreError::BATCH_TOO_LARGE => (Failure::TooLarge, false),
+        StoreError::PRECONDITION_FAILED if status == 412 => Failure::Deposed,
+        StoreError::BATCH_TOO_LARGE => Failure::TooLarge,
         // The store takes no write right now, so the next zone's write would fail the same way.
         StoreError::NO_QUORUM
         | StoreError::TIMEOUT
         | StoreError::SHUTTING_DOWN
         | StoreError::STOPPED
-        | StoreError::STORAGE => (Failure::Outage, true),
-        // The disk guard refuses growth until someone frees space: each zone's write is
-        // refused at once on its own (and trims that zone's journal), and the lease's own
-        // retry comes soon enough.
-        StoreError::DISK_RESERVE => (Failure::Store, false),
-        // This zone's write only: contention, or this batch's data.
-        _ if retryable(status, code) => (Failure::Store, true),
-        _ => (Failure::Refused, false),
+        | StoreError::STORAGE => Failure::Outage,
+        // This zone's write only, at once, and its leases come back after the retry pause: a
+        // stale write the zone service already planned again, the disk guard, this batch's
+        // data, which another try in the batch does not change.
+        _ if retryable(status, code) => Failure::Store,
+        _ => Failure::Refused,
     }
 }
 
@@ -308,7 +399,6 @@ fn failure_of(code: &str, status: u16) -> (Failure, bool) {
 struct Worker<'a> {
     service: &'a DdnsService,
     epoch: u64,
-    memory: HashMap<Key, Memo>,
     image: Option<ConfigImage>,
     /// The changed addresses in the order they changed, each with when.
     dirty: VecDeque<(Key, Instant)>,
@@ -325,8 +415,8 @@ struct Worker<'a> {
 /// Why a zone write failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Failure {
-    /// The store refused this zone's write, after the retries: contention on the zone, its
-    /// disk, or the batch's data.
+    /// The store refused this zone's write, not tried again in the batch: contention on the
+    /// zone, its disk, or the batch's data.
     Store,
     /// The store could take no write (no quorum, a timeout, shutting down or stopped, a
     /// storage failure), after the retries: the other zones of the batch would fail the
@@ -340,13 +430,14 @@ enum Failure {
     Deposed,
 }
 
-/// What the writes of a batch did besides writing: the parts that failed or that the zone
-/// refused, with the reason, and the leases put back to wait, whole.
+/// What the writes of a batch did: the outcome of each part by its position, the record
+/// version each committed set left a lease's row at (none: deleted), and the parts of sets
+/// that wrote nothing, whose record only the status batch writes.
 #[derive(Debug, Default)]
 struct Wrote {
-    failed: HashMap<(usize, Part), String>,
-    refused: HashMap<(usize, Part), String>,
-    deferred: HashSet<usize>,
+    done: Vec<Done>,
+    versions: HashMap<usize, Option<Revision>>,
+    unrecorded: HashSet<usize>,
     proposed: bool,
     deposed: bool,
 }
@@ -383,7 +474,6 @@ impl<'a> Worker<'a> {
         Self {
             service,
             epoch,
-            memory: HashMap::new(),
             image: None,
             dirty: VecDeque::new(),
             pending: HashSet::new(),
@@ -443,74 +533,20 @@ impl<'a> Worker<'a> {
     fn reload(&mut self, view: &dyn ReadView) -> Result<tenko_core::Revision, String> {
         let data = config::load::data(view, false).map_err(|error| error.to_string())?;
         self.image = Some(config::image::build(&data).image);
-        let mut range = KeyRange::all();
-        loop {
-            let page = view
-                .scan_typed(
-                    &tables::LEASES,
-                    range.clone(),
-                    crate::lease::follow::PAGE,
-                    false,
-                )
-                .map_err(|error| error.to_string())?;
-            let full = page.len() == crate::lease::follow::PAGE;
-            let Some((last, _, _)) = page.last() else {
-                break;
-            };
-            let last = tables::LEASES.key(last);
-            for ((vrf, addr), lease, _) in page {
-                let key = (vrf, IpAddr::V4(addr));
-                let memo = self.memory.entry(key).or_insert_with(|| Memo {
-                    client: lease.client.clone(),
-                    written: written_of(&lease.ddns),
-                    handled: None,
-                });
-                memo.handled = None;
-                self.mark(key);
+        let failed = |error: StoreError| error.to_string();
+        each_row(view, &tables::LEASES, |(vrf, addr), _| {
+            self.mark((vrf, IpAddr::V4(addr)));
+        })
+        .map_err(failed)?;
+        // WP9.1: the DHCPv6 rows; a delegated prefix has no name (WP9.2).
+        each_row(view, &tables::LEASES6, |(vrf, addr), lease| {
+            if lease.kind == Lease6Kind::Na {
+                self.mark((vrf, IpAddr::V6(addr)));
             }
-            if !full {
-                break;
-            }
-            range = KeyRange::all().after(last);
-        }
-        // WP9.1: the DHCPv6 rows.
-        let mut range = KeyRange::all();
-        loop {
-            let page = view
-                .scan_typed(
-                    &tables::LEASES6,
-                    range.clone(),
-                    crate::lease::follow::PAGE,
-                    false,
-                )
-                .map_err(|error| error.to_string())?;
-            let full = page.len() == crate::lease::follow::PAGE;
-            let Some((last, _, _)) = page.last() else {
-                break;
-            };
-            let last = tables::LEASES6.key(last);
-            for ((vrf, addr), lease, _) in page {
-                if lease.kind == Lease6Kind::Pd {
-                    continue;
-                }
-                let key = (vrf, IpAddr::V6(addr));
-                let memo = self.memory.entry(key).or_insert_with(|| Memo {
-                    client: lease.client_key(),
-                    written: written_of(&lease.ddns),
-                    handled: None,
-                });
-                memo.handled = None;
-                self.mark(key);
-            }
-            if !full {
-                break;
-            }
-            range = KeyRange::all().after(last);
-        }
-        let known: Vec<Key> = self.memory.keys().copied().collect();
-        for key in known {
-            self.mark(key);
-        }
+        })
+        .map_err(failed)?;
+        // The records of lease rows deleted while no worker ran.
+        each_row(view, &tables::DDNS_NAMES, |key, _| self.mark(key)).map_err(failed)?;
         self.resync = false;
         Ok(view.revision())
     }
@@ -557,11 +593,6 @@ impl<'a> Worker<'a> {
                     .map(|(_, key, marked)| (key, marked))
                     .collect()
             };
-            for (key, _) in &due {
-                if let Some(memo) = self.memory.get_mut(key) {
-                    memo.handled = None;
-                }
-            }
             // A failed lease is older than the ones that changed since: it goes first.
             self.put_back(due.into_iter());
             self.gauge();
@@ -673,398 +704,230 @@ impl<'a> Worker<'a> {
         let Some(image) = self.image.as_ref() else {
             return;
         };
-        let mut requests = Vec::new();
-        for (key, marked) in &keys {
-            // WP9.1: the row of the key's family.
-            let row = match key.1 {
-                IpAddr::V4(addr) => view
-                    .get_typed(&tables::LEASES, &(key.0, addr))
-                    .map(|row| row.map(|(lease, _)| request_of(&lease, image, now, trusted))),
-                IpAddr::V6(addr) => view
-                    .get_typed(&tables::LEASES6, &(key.0, addr))
-                    // WP9.2: a delegated prefix has no name.
-                    .map(|row| {
-                        row.filter(|(lease, _)| lease.kind == Lease6Kind::Na)
-                            .map(|(lease, _)| request_of6(&lease, image, now, trusted))
-                    }),
-            };
-            let request = match row {
-                Ok(Some(request)) => request,
-                Ok(None) => {
-                    let Some(memo) = self.memory.get(key) else {
-                        continue;
-                    };
-                    // A deleted row whose names are gone leaves nothing to remember.
-                    if is_empty(&memo.written) {
-                        self.memory.remove(key);
-                        continue;
-                    }
-                    DdnsRequest {
-                        action: DdnsAction::Remove,
-                        vrf: key.0,
-                        scope: tenko_core::PrefixId::from_uuid(uuid::Uuid::nil()),
-                        addr: key.1,
-                        client: memo.client.clone(),
-                        fqdn: None,
-                        hostname: None,
-                        fqdn_flags: None,
-                        policy: DdnsPolicy::default(),
-                        lease_secs: 0,
-                        ends: now,
-                    }
-                }
+        let mut leases = Vec::new();
+        let mut failed = Vec::new();
+        for (key, marked) in keys {
+            match lease_of(view.as_ref(), image, key, marked, now, trusted) {
+                Ok(Some(lease)) => leases.push(lease),
+                Ok(None) => {}
                 Err(error) => {
                     tracing::warn!(%error, "the DDNS worker cannot read a lease");
-                    self.retry.push((
-                        Instant::now() + self.service.settings.retry_after,
-                        *key,
-                        *marked,
-                    ));
-                    continue;
+                    failed.push((key, marked));
                 }
-            };
-            // The worker's own outcome on the row, or a change DDNS does not read.
-            if self.memory.get(key).and_then(|memo| memo.handled.as_ref()) == Some(&request) {
-                continue;
             }
-            requests.push((request, *marked));
         }
+        self.retry_later(failed);
         self.gauge();
-        if requests.is_empty() {
-            return;
+        if !leases.is_empty() {
+            self.apply(view.as_ref(), leases, now).await;
+            self.gauge();
         }
-        self.apply(view.as_ref(), requests, now).await;
-        self.gauge();
     }
 
-    /// Plans and writes one batch of requests, then records the outcomes.
-    #[allow(
-        clippy::too_many_lines,
-        reason = "one pass over the batch: plan, write per zone, record"
-    )]
-    async fn apply(
-        &mut self,
-        view: &dyn ReadView,
-        mut requests: Vec<(DdnsRequest, Instant)>,
-        now: Timestamp,
-    ) {
+    /// Leases tried again after the pause.
+    fn retry_later(&mut self, leases: impl IntoIterator<Item = (Key, Instant)>) {
+        let at = Instant::now() + self.service.settings.retry_after;
+        self.retry
+            .extend(leases.into_iter().map(|(key, marked)| (at, key, marked)));
+    }
+
+    /// Plans and writes one batch of leases, then records what only the status batch can.
+    async fn apply(&mut self, view: &dyn ReadView, mut leases: Vec<Lease1>, now: Timestamp) {
         let zones = match Zones::read(view) {
             Ok(zones) => zones,
             Err(error) => {
                 tracing::warn!(%error, "the DDNS worker cannot read the zones");
-                for (request, marked) in &requests {
-                    self.retry.push((
-                        Instant::now() + self.service.settings.retry_after,
-                        (request.vrf, request.addr),
-                        *marked,
-                    ));
-                }
+                self.retry_later(leases.into_iter().map(|lease| (lease.key, lease.marked)));
                 return;
             }
         };
         let profile = (self.service.profile)(view);
         let max_changes = self.service.zones.config().max_changes;
         let mut planner = Planner::new();
-        let mut results: Vec<Result1> = Vec::with_capacity(requests.len());
         // The changes of the batch in order, each with its lease and part.
         let mut writes: Vec<(usize, Part, ZoneChanges)> = Vec::new();
         let mut changes_per_zone: HashMap<tenko_core::dns::ZoneId, usize> = HashMap::new();
-        let mut taken = requests.len();
-        for (index, (request, _)) in requests.iter().enumerate() {
-            // The lease's own writes, which join the batch's only when every set still fits.
-            let mut lease: Vec<(usize, Part, ZoneChanges)> = Vec::new();
-            let mut result = Result1::default();
-            let memo = self.memory.get(&(request.vrf, request.addr));
-            let same_client = memo.is_some_and(|memo| memo.client == request.client);
-            let recorded = memo.map(|memo| memo.written.clone()).unwrap_or_default();
-            let desired = if request.action == DdnsAction::Add {
-                let named = match ipam_named(view, request.vrf, request.addr) {
-                    Ok(named) => named,
-                    Err(error) => {
-                        result.failure = Some(error.to_string());
-                        results.push(result);
-                        continue;
-                    }
-                };
-                let domain = self
-                    .image
-                    .as_ref()
-                    .and_then(|image| domain_of(image, request));
-                let lease = LeaseNames {
-                    addr: request.addr,
-                    client: &request.client,
-                    fqdn: request.fqdn.as_deref(),
-                    hostname: request.hostname.as_deref(),
-                    fqdn_flags: request.fqdn_flags,
-                    policy: &request.policy,
-                    domain,
-                    lease_secs: request.lease_secs,
-                };
-                plan::desired(view, &lease, &zones, profile, named)
-            } else {
-                Err(Skip::Quiet(None))
-            };
-            // The store could not be read: nothing is removed, and the lease is tried
-            // again.
-            if let Err(Skip::Failed(error)) = &desired {
-                result.failure = Some(error.clone());
-                results.push(result);
-                continue;
-            }
-            // Already in place: nothing to write.
-            if let Ok(want) = &desired
-                && same_client
-                && recorded.dhcid.as_deref() == want.write_a.then_some(want.dhcid.as_slice())
-                && recorded.forward.as_ref() == want.write_a.then_some(&want.name)
-                && recorded.reverse.as_ref() == want.reverse.as_ref().map(|(_, name)| name)
-            {
-                result.holds = recorded;
-                results.push(result);
-                continue;
-            }
-            let keep_forward = desired.as_ref().is_ok_and(|want| {
-                same_client
-                    && want.write_a
-                    && recorded.forward.as_ref() == Some(&want.name)
-                    && recorded.dhcid.as_deref() == Some(want.dhcid.as_slice())
-            });
-            let old = Written {
-                forward: if keep_forward {
-                    None
-                } else {
-                    recorded.forward.clone()
-                },
-                reverse: recorded.reverse.clone().filter(|ptr| {
-                    !(same_client
-                        && desired.as_ref().is_ok_and(|want| {
-                            want.reverse.as_ref().map(|(_, name)| name) == Some(ptr)
-                        }))
-                }),
-                dhcid: recorded.dhcid.clone(),
-            };
-            if !is_empty(&old) {
-                match planner.remove(view, &zones, request.addr, &old) {
-                    Ok(changes) => {
-                        result.removed = !changes.is_empty();
-                        for zc in changes {
-                            lease.push((index, Part::Remove, zc));
-                        }
-                    }
-                    Err(error) => result.failure = Some(error.to_string()),
-                }
-            }
-            match desired {
-                Ok(want) => {
-                    let conflict = if profile.always_protect {
-                        DdnsConflict::Protect
-                    } else {
-                        request.policy.conflict
-                    };
-                    match planner.add(view, &zones, request.addr, &want, conflict) {
-                        Ok(lease_plan) => {
-                            result.holds = lease_plan.holds;
-                            result.refusal = lease_plan.refusal;
-                            if let Some(zc) = lease_plan.forward {
-                                lease.push((index, Part::Forward, zc));
-                            }
-                            if let Some(zc) = lease_plan.reverse {
-                                lease.push((index, Part::Reverse, zc));
-                            }
-                        }
-                        Err(error) => result.failure = Some(error.to_string()),
-                    }
-                }
-                Err(Skip::Quiet(note)) => result.note = note,
-                Err(Skip::Refused(reason)) => result.refusal = Some(reason),
-                Err(Skip::Failed(error)) => result.failure = Some(error),
-            }
+        let mut taken = leases.len();
+        for (index, lease) in leases.iter_mut().enumerate() {
+            let image = self.image.as_ref();
+            let parts = plan_lease(view, &zones, image, profile, &mut planner, lease);
             let mut adds: HashMap<tenko_core::dns::ZoneId, usize> = HashMap::new();
-            for (_, _, zc) in &lease {
+            for (_, zc) in &parts {
                 *adds.entry(zc.zone).or_default() += zc.changes.len();
             }
             let over = adds.iter().any(|(zone, count)| {
                 changes_per_zone.get(zone).copied().unwrap_or(0) + count > max_changes
             });
             // The first lease always goes, so that a batch never stalls on one.
-            if over && !results.is_empty() {
+            if over && index > 0 {
                 taken = index;
                 break;
             }
             for (zone, count) in adds {
                 *changes_per_zone.entry(zone).or_default() += count;
             }
-            writes.extend(lease);
-            results.push(result);
+            writes.extend(parts.into_iter().map(|(part, zc)| (index, part, zc)));
         }
-        let waiting = requests.split_off(taken);
-        let wrote = self.write(&writes, profile.allows_by_default).await;
+        let waiting = leases.split_off(taken);
+        let wrote = self
+            .write(&leases, &writes, profile.allows_by_default)
+            .await;
         if wrote.proposed {
             self.quiet = Some(Instant::now() + self.service.settings.spacing);
         }
-        // The next leader plans every lease again; a fenced outcome would be refused too.
+        // The next leader plans every lease again.
         if wrote.deposed {
             self.deposed = true;
             return;
         }
-        for (index, part, _) in &writes {
-            let result = &mut results[*index];
-            let refusal = wrote.refused.get(&(*index, *part));
-            match refusal.or_else(|| wrote.failed.get(&(*index, *part))) {
-                None => {
-                    if *part != Part::Remove {
-                        result.wrote = true;
-                    }
-                }
-                Some(error) => {
-                    match part {
-                        Part::Forward => {
-                            result.holds.forward = None;
-                            result.holds.dhcid = None;
-                            result.holds.reverse = None;
-                        }
-                        Part::Reverse => result.holds.reverse = None,
-                        Part::Remove => result.removed = false,
-                    }
-                    // A refusal waits for the lease's next change; a failure is retried.
-                    let slot = if refusal.is_some() {
-                        &mut result.refusal
-                    } else {
-                        &mut result.failure
-                    };
-                    slot.get_or_insert_with(|| error.clone());
-                }
-            }
-        }
-        // A forward write that failed takes its PTR with it only when the PTR was in the
-        // same zone write; otherwise the PTR stands and is removed with the lease.
-        let mut rows = Vec::new();
         let mut back = Vec::new();
-        for (index, ((request, marked), mut result)) in
-            requests.into_iter().zip(results).enumerate()
-        {
-            let key = (request.vrf, request.addr);
-            // Put back whole: the set it was in was too large for the store.
-            if wrote.deferred.contains(&index) {
-                back.push((key, marked));
-                continue;
-            }
-            let failed = result.failure.is_some();
-            if failed {
-                Outcome::Failed.count();
-                // What could not be removed is still there.
-                if let Some(memo) = self.memory.get(&key)
-                    && !result.removed
-                    && result.holds.forward.is_none()
-                    && result.holds.reverse.is_none()
-                    && memo.client == request.client
-                {
-                    result.holds = memo.written.clone();
+        for (index, lease) in leases.iter_mut().enumerate() {
+            // A lease's parts are together, in the order of the leases.
+            let span = writes.partition_point(|(at, _, _)| *at < index)
+                ..writes.partition_point(|(at, _, _)| *at <= index);
+            let mut written = false;
+            let mut removed = false;
+            for position in span {
+                let ((_, part, _), done) = (&writes[position], &wrote.done[position]);
+                match done {
+                    Done::Failed(error) => {
+                        lease.failure.get_or_insert_with(|| error.clone());
+                    }
+                    Done::Refused(reason) => {
+                        lease.refusal.get_or_insert_with(|| reason.clone());
+                    }
+                    Done::Waits => lease.waits = true,
+                    Done::Written => match part {
+                        Part::Forward(..) | Part::Ptr(..) => written = true,
+                        Part::Unforward(..) | Part::Unptr(..) => removed = true,
+                    },
                 }
-                self.retry.push((
-                    Instant::now() + self.service.settings.retry_after,
-                    key,
-                    marked,
-                ));
-            } else if result.refusal.is_some() {
+                if wrote.unrecorded.contains(&position) {
+                    lease.later.push((part.clone(), done.clone()));
+                }
+            }
+            if lease.failure.is_some() {
+                Outcome::Failed.count();
+            } else if lease.waits {
+                back.push((lease.key, lease.marked));
+            } else if lease.refusal.is_some() {
                 Outcome::Refused.count();
-            } else if result.wrote {
+            } else if written {
                 Outcome::Written.count();
-            } else if result.note.is_some() && !result.removed {
+            } else if lease.note.is_some() && !removed {
                 Outcome::Skipped.count();
             }
-            if result.removed && !failed {
+            if removed && lease.failure.is_none() {
                 Outcome::Removed.count();
             }
-            let state = DdnsState {
-                forward: result.holds.forward.clone(),
-                reverse: result.holds.reverse.clone(),
-                dhcid: result.holds.dhcid.clone().map(HexBytes),
-                last_error: result.failure.or(result.refusal).or(result.note),
-                updated: Some(now),
-            };
-            self.memory.insert(
-                key,
-                Memo {
-                    client: request.client.clone(),
-                    written: result.holds,
-                    handled: Some(request.clone()),
-                },
-            );
-            rows.push((key, request.client, state));
         }
-        back.extend(
-            waiting
-                .into_iter()
-                .map(|(request, marked)| ((request.vrf, request.addr), marked)),
+        self.retry_later(
+            leases
+                .iter()
+                .filter(|lease| lease.failure.is_some())
+                .map(|lease| (lease.key, lease.marked)),
         );
+        back.extend(waiting.into_iter().map(|lease| (lease.key, lease.marked)));
         self.put_back(back.into_iter());
-        self.record(rows).await;
+        self.status(&leases, &wrote.versions, now).await;
     }
 
-    /// Writes the zone changes of a batch, one change set per zone, the forward zones first:
-    /// the reverse part of a lease whose forward part the zone refused or put back is left
-    /// out with it. A set the store finds too large is halved by its leases until it fits;
-    /// the leases cut from it wait, whole. Once the store has been unavailable for one
-    /// zone's write after the retries, the later zones of the batch fail with it without a
-    /// try, so an outage costs one zone's retries a batch; any other failure (contention,
-    /// the disk guard, the batch's data) leaves the others to their own tries
-    /// ([`failure_of`]). `allows` is the profile's default of the zones' DHCP switch.
-    async fn write(&self, writes: &[(usize, Part, ZoneChanges)], allows: bool) -> Wrote {
+    /// Writes the zone changes of a batch, one change set per zone and one zone after
+    /// another, the zones that take PTRs last: a PTR is tried once its forward name is
+    /// written, and a forward name the zone refused refuses its PTR. Each set carries its
+    /// leases' records ([`settle`]). A set the store finds too large is halved by its leases
+    /// until it fits; the leases cut from it wait. Once the store has been unavailable for
+    /// one zone's write after the retries, the later zones of the batch fail with it without a
+    /// try; any other failure leaves the others to their own tries ([`failure_of`]). A worker
+    /// no longer in office ends its batch. `allows` is the profile's default of the zones'
+    /// DHCP switch.
+    async fn write(
+        &self,
+        leases: &[Lease1],
+        writes: &[(usize, Part, ZoneChanges)],
+        allows: bool,
+    ) -> Wrote {
         let mut order: Vec<tenko_core::dns::ZoneId> = Vec::new();
         for (_, _, zc) in writes {
             if !order.contains(&zc.zone) {
                 order.push(zc.zone);
             }
         }
-        // Zones that take PTRs go last, so a forward part refused first takes its PTR along.
         order.sort_by_key(|zone| {
             writes
                 .iter()
-                .any(|(_, part, zc)| zc.zone == *zone && *part == Part::Reverse)
+                .any(|(_, part, zc)| zc.zone == *zone && matches!(part, Part::Ptr(..)))
         });
-        let mut wrote = Wrote::default();
+        let mut wrote = Wrote {
+            done: vec![Done::Waits; writes.len()],
+            ..Wrote::default()
+        };
+        // The position of each lease's forward name.
+        let forward_of: HashMap<usize, usize> = writes
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, part, _))| matches!(part, Part::Forward(..)))
+            .map(|(position, (index, _, _))| (*index, position))
+            .collect();
         // The store unavailable after the retries: the rest of the batch fails with it at once.
         let mut outage: Option<String> = None;
         for zone in order {
-            let parts: Vec<&(usize, Part, ZoneChanges)> = writes
-                .iter()
-                .filter(|(index, part, zc)| {
-                    zc.zone == zone
-                        && !wrote.deferred.contains(index)
-                        && !(*part == Part::Reverse
-                            && wrote.refused.contains_key(&(*index, Part::Forward)))
-                })
-                .collect();
-            if let Some(error) = &outage {
-                for (index, part, _) in parts {
-                    wrote.failed.insert((*index, *part), error.clone());
+            let mut parts: Vec<usize> = Vec::new();
+            for (position, (index, part, zc)) in writes.iter().enumerate() {
+                if zc.zone != zone {
+                    continue;
                 }
+                let forward = forward_of
+                    .get(index)
+                    .map(|&at| (writes[at].2.zone, wrote.done[at].clone()));
+                match (part, forward) {
+                    (Part::Ptr(..), Some((_, Done::Refused(reason)))) => {
+                        wrote.done[position] = Done::Refused(reason);
+                    }
+                    (Part::Ptr(..), Some((at, done))) if at != zone && done != Done::Written => {}
+                    _ => parts.push(position),
+                }
+            }
+            if let Some(error) = &outage {
+                for &position in &parts {
+                    wrote.done[position] = Done::Failed(error.clone());
+                }
+                continue;
+            }
+            if parts.is_empty() {
                 continue;
             }
             // The leases of the set, in order; the set shrinks to the first half of them
             // while the store finds it too large.
-            let mut leases: Vec<usize> = parts.iter().map(|(index, _, _)| *index).collect();
-            leases.dedup();
-            let mut kept = leases.len();
+            let mut kept: Vec<usize> = parts.iter().map(|&position| writes[position].0).collect();
+            kept.dedup();
             let outcome = loop {
-                let set: Vec<&&(usize, Part, ZoneChanges)> = parts
+                let set: Vec<usize> = parts
                     .iter()
-                    .filter(|(index, _, _)| leases[..kept].contains(index))
+                    .copied()
+                    .filter(|&position| among(&kept, writes[position].0))
                     .collect();
-                let changes: Vec<Vec<_>> =
-                    set.iter().map(|(_, _, zc)| zc.changes.clone()).collect();
                 wrote.proposed = true;
-                match self.write_zone(zone, &changes, allows).await {
-                    Err((_, Failure::TooLarge)) if kept > 1 => kept /= 2,
-                    outcome => break outcome.map(|refused| (set, refused)),
+                match self.write_zone(zone, leases, writes, &set, allows).await {
+                    Err((_, Failure::TooLarge)) if kept.len() > 1 => kept.truncate(kept.len() / 2),
+                    outcome => break outcome.map(|written| (set, written)),
                 }
             };
-            wrote.deferred.extend(leases[kept..].iter().copied());
             match outcome {
-                Ok((set, refused)) => {
-                    for (position, reason) in refused {
-                        let (index, part, _) = set[position];
-                        wrote.refused.insert((*index, *part), reason);
+                Ok((set, (revision, staged, refused))) => {
+                    for &position in &set {
+                        wrote.done[position] = Done::Written;
+                    }
+                    for (at, reason) in refused {
+                        wrote.done[set[at]] = Done::Refused(reason);
+                    }
+                    match revision {
+                        Some(revision) => wrote.versions.extend(
+                            staged
+                                .into_iter()
+                                .map(|(index, deleted)| (index, (!deleted).then_some(revision))),
+                        ),
+                        None => wrote.unrecorded.extend(set),
                     }
                 }
                 Err((_, Failure::Deposed)) => {
@@ -1072,8 +935,10 @@ impl<'a> Worker<'a> {
                     break;
                 }
                 Err((error, failure)) => {
-                    for (index, part, _) in parts {
-                        wrote.failed.insert((*index, *part), error.clone());
+                    for &position in &parts {
+                        if among(&kept, writes[position].0) {
+                            wrote.done[position] = Done::Failed(error.clone());
+                        }
                     }
                     if failure == Failure::Outage {
                         outage = Some(error);
@@ -1081,28 +946,60 @@ impl<'a> Worker<'a> {
                 }
             }
         }
-        // A part left out with its refused forward name is refused with it.
-        for (index, part, _) in writes {
-            if *part == Part::Reverse
-                && let Some(reason) = wrote.refused.get(&(*index, Part::Forward)).cloned()
-            {
-                wrote
-                    .refused
-                    .entry((*index, Part::Reverse))
-                    .or_insert(reason);
-            }
-        }
         wrote
     }
 
-    /// One zone write with the retries while the store refuses; the parts the zone refused,
-    /// by their position, with the reason.
+    /// One zone write of the parts at `set`, fenced to the worker's term and carrying each
+    /// lease's record after the set, with the retries while the store is out: the revision
+    /// written (none when the set changed nothing), the leases whose record it staged (and
+    /// whether deleted), and the parts the zone refused, by their place in the set.
+    #[allow(
+        clippy::type_complexity,
+        reason = "the three answers of one write, named in the doc"
+    )]
     async fn write_zone(
         &self,
         zone: tenko_core::dns::ZoneId,
-        parts: &[Vec<tenko_dns::zone::records::Change>],
+        leases: &[Lease1],
+        writes: &[(usize, Part, ZoneChanges)],
+        set: &[usize],
         allows: bool,
-    ) -> Result<Vec<(usize, String)>, (String, Failure)> {
+    ) -> Result<(Option<Revision>, Vec<(usize, bool)>, Vec<(usize, String)>), (String, Failure)>
+    {
+        let changes: Vec<Vec<_>> = set
+            .iter()
+            .map(|&position| writes[position].2.changes.clone())
+            .collect();
+        let mut staged: Vec<(usize, bool)> = Vec::new();
+        // On each attempt, against its view: the record of each lease of the set.
+        let mut record = |view: &dyn ReadView,
+                          refused: &[usize],
+                          batch: &mut WriteBatch|
+         -> tenko_dns::zone::ZoneResult<()> {
+            staged.clear();
+            let refused: HashSet<usize> = refused.iter().copied().collect();
+            let mut at = 0;
+            for run in set.chunk_by(|a, b| writes[*a].0 == writes[*b].0) {
+                let index = writes[run[0]].0;
+                let parts: Vec<(Part, Done)> = run
+                    .iter()
+                    .map(|&position| {
+                        let done = if refused.contains(&at) {
+                            Done::Refused(String::new())
+                        } else {
+                            Done::Written
+                        };
+                        at += 1;
+                        (writes[position].1.clone(), done)
+                    })
+                    .collect();
+                let lease = &leases[index];
+                let (mut row, version) = record_of(view, lease.key.0, lease.key.1, &lease.legacy)?;
+                settle(&mut row, &parts);
+                staged.push((index, stage_row(batch, &leases[index], &row, version)?));
+            }
+            Ok(())
+        };
         let settings = self.service.settings;
         let mut pause = settings.backoff;
         let mut attempt = 0;
@@ -1113,29 +1010,24 @@ impl<'a> Worker<'a> {
             match self
                 .service
                 .zones
-                .change_dhcp_names(
-                    &cx,
-                    zone,
-                    parts,
-                    allows,
-                    Some(self.epoch),
-                    &mut |_, _, _| Ok(()),
-                )
+                .change_dhcp_names(&cx, zone, &changes, allows, Some(self.epoch), &mut record)
                 .await
             {
-                Ok((_, refused)) => {
-                    return Ok(refused
+                Ok((outcome, refused)) => {
+                    let refused = refused
                         .into_iter()
                         .map(|(position, error)| {
                             let coded = error.coded();
                             (position, format!("{}: {}", coded.code, coded.detail))
                         })
-                        .collect());
+                        .collect();
+                    let revision = outcome.written.map(|written| written.revision);
+                    return Ok((revision, staged, refused));
                 }
                 Err(error) => {
                     let coded = error.coded();
-                    let (failure, again) = failure_of(&coded.code, coded.status);
-                    if !again || attempt >= settings.retries {
+                    let failure = failure_of(&coded.code, coded.status);
+                    if failure != Failure::Outage || attempt >= settings.retries {
                         tracing::info!(code = %coded.code, detail = %coded.detail, "a DDNS change set was not written");
                         return Err((format!("{}: {}", coded.code, coded.detail), failure));
                     }
@@ -1147,105 +1039,265 @@ impl<'a> Worker<'a> {
         }
     }
 
-    /// Records the outcomes on the lease rows, each with the row's version as
-    /// precondition; a row that changed meanwhile is read again, and a row of another
-    /// client is left alone (its own request follows).
-    async fn record(&mut self, rows: Vec<(Key, ClientKey, DdnsState)>) {
-        let mut todo = rows;
-        for _ in 0..4 {
-            if todo.is_empty() {
+    /// The status batch: for each lease whose record changes outside the zone sets (entries
+    /// nothing was planned for, parts of a set that wrote nothing, a new last error, a row
+    /// to delete), its record read again and expected at the version this batch's own sets
+    /// left it, else at the batch's; a record that moved meanwhile is planned again.
+    async fn status(
+        &mut self,
+        leases: &[Lease1],
+        versions: &HashMap<usize, Option<Revision>>,
+        now: Timestamp,
+    ) {
+        let view = match self.service.store.read(ReadConsistency::Local).await {
+            Ok(view) => view,
+            Err(error) => {
+                tracing::warn!(%error, "the DDNS worker cannot read its records");
+                self.retry_later(leases.iter().map(|lease| (lease.key, lease.marked)));
                 return;
             }
-            let view = match self.service.store.read(ReadConsistency::Local).await {
-                Ok(view) => view,
-                Err(error) => {
-                    tracing::warn!(%error, "the DDNS worker cannot record its outcomes");
-                    return;
+        };
+        let mut rows = Vec::new();
+        let mut again = Vec::new();
+        for (index, lease) in leases.iter().enumerate() {
+            let error = lease
+                .failure
+                .clone()
+                .or_else(|| lease.refusal.clone())
+                .or_else(|| lease.note.clone());
+            // A row no set of this batch wrote is still written to take in the names an
+            // earlier version left on the lease row, and deleted once that row is gone.
+            let untouched = !versions.contains_key(&index);
+            let take_in = lease.version.is_none()
+                && (lease.legacy.forward.is_some() || lease.legacy.reverse.is_some());
+            let empty = lease.record.forward.is_empty() && lease.record.ptr.is_none();
+            let delete = lease.version.is_some() && lease.request.is_none() && empty;
+            if lease.later.is_empty()
+                && error == lease.record.last_error
+                && !(untouched && (take_in || delete))
+            {
+                continue;
+            }
+            let expected = versions.get(&index).copied().unwrap_or(lease.version);
+            match record_of(view.as_ref(), lease.key.0, lease.key.1, &lease.legacy) {
+                Ok((mut row, version)) if version == expected => {
+                    settle(&mut row, &lease.later);
+                    if row.last_error != error {
+                        (row.last_error, row.updated) = (error, Some(now));
+                    }
+                    rows.push((index, row, version));
                 }
-            };
+                Ok(_) => again.push((lease.key, lease.marked)),
+                Err(error) => {
+                    tracing::warn!(%error, "the DDNS worker cannot read a record");
+                    again.push((lease.key, lease.marked));
+                }
+            }
+        }
+        drop(view);
+        self.put_back(again.into_iter());
+        // A thousand rows of at most about 2.8 KB stay well inside the store's limit.
+        for chunk in rows.chunks(1_000) {
             let mut batch =
                 WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
             batch.preconditions.push(fence(self.epoch));
-            let mut staged = Vec::new();
-            for (key, client, state) in &todo {
-                // WP9.1: the outcome goes to the row of the key's family.
-                let staged_one = match key.1 {
-                    IpAddr::V4(addr) => {
-                        let row_key = (key.0, addr);
-                        let Ok(Some((mut lease, revision))) =
-                            view.get_typed(&tables::LEASES, &row_key)
-                        else {
-                            continue;
-                        };
-                        if lease.client != *client || same_state(&lease.ddns, state) {
-                            continue;
-                        }
-                        lease.ddns = state.clone();
-                        batch.expect_typed(&tables::LEASES, &row_key, Some(revision));
-                        batch.put_typed(&tables::LEASES, &row_key, &lease).is_ok()
-                    }
-                    IpAddr::V6(addr) => {
-                        let row_key = (key.0, addr);
-                        let Ok(Some((mut lease, revision))) =
-                            view.get_typed(&tables::LEASES6, &row_key)
-                        else {
-                            continue;
-                        };
-                        if lease.client_key() != *client || same_state(&lease.ddns, state) {
-                            continue;
-                        }
-                        lease.ddns = state.clone();
-                        batch.expect_typed(&tables::LEASES6, &row_key, Some(revision));
-                        batch.put_typed(&tables::LEASES6, &row_key, &lease).is_ok()
-                    }
-                };
-                if staged_one {
-                    staged.push((*key, client.clone(), state.clone()));
+            for (index, row, version) in chunk {
+                if let Err(error) = stage_row(&mut batch, &leases[*index], row, *version) {
+                    tracing::warn!(%error, "the DDNS worker cannot write a record");
                 }
             }
-            drop(view);
-            if staged.is_empty() {
-                return;
-            }
+            let keys = chunk
+                .iter()
+                .map(|(index, _, _)| (leases[*index].key, leases[*index].marked));
             match self.service.store.propose(batch).await {
-                Ok(_) => return,
-                Err(StoreError::PreconditionFailed(failures))
-                    if failures
-                        .iter()
-                        .all(|failure| matches!(failure, FailedPrecondition::Version { .. })) =>
-                {
-                    // Some row moved on; write the rest one by one next round.
-                    if staged.len() == 1 {
-                        todo = staged;
-                    } else {
-                        for one in staged {
-                            Box::pin(self.record(vec![one])).await;
-                        }
-                        return;
-                    }
-                }
-                // A reload's outcomes may pass the store's limit: halve them.
-                Err(StoreError::BatchTooLarge { .. }) if staged.len() > 1 => {
-                    let second = staged.split_off(staged.len() / 2);
-                    Box::pin(self.record(staged)).await;
-                    Box::pin(self.record(second)).await;
+                Ok(_) => {}
+                Err(error) if fenced_out(&error) => {
+                    self.deposed = true;
                     return;
                 }
+                // A late commit of the worker's own moved a record: plan those leases again.
+                Err(StoreError::PreconditionFailed(_)) => self.put_back(keys),
                 Err(error) => {
-                    self.deposed |= fenced_out(&error);
                     tracing::warn!(%error, "the DDNS worker could not record its outcomes");
-                    return;
+                    self.retry_later(keys);
                 }
             }
         }
     }
 }
 
-/// Whether the outcome held on a row is `state`, apart from its time.
-fn same_state(held: &DdnsState, state: &DdnsState) -> bool {
-    let mut held = held.clone();
-    held.updated = state.updated;
-    held == *state
+/// The lease at `key` with its record, or none when neither its row nor a record is left.
+fn lease_of(
+    view: &dyn ReadView,
+    image: &ConfigImage,
+    key: Key,
+    marked: Instant,
+    now: Timestamp,
+    trusted: bool,
+) -> Result<Option<Lease1>, StoreError> {
+    let (request, legacy) = match key.1 {
+        IpAddr::V4(addr) => view
+            .get_typed(&tables::LEASES, &(key.0, addr))?
+            .map(|(lease, _)| (request_of(&lease, image, now, trusted), lease.ddns)),
+        // WP9.2: a delegated prefix has no name.
+        IpAddr::V6(addr) => view
+            .get_typed(&tables::LEASES6, &(key.0, addr))?
+            .filter(|(lease, _)| lease.kind == Lease6Kind::Na)
+            .map(|(lease, _)| (request_of6(&lease, image, now, trusted), lease.ddns)),
+    }
+    .unzip();
+    let legacy = legacy.unwrap_or_default();
+    let (record, version) = record_of(view, key.0, key.1, &legacy)?;
+    if request.is_none() && version.is_none() {
+        return Ok(None);
+    }
+    Ok(Some(Lease1 {
+        key,
+        request,
+        record,
+        legacy,
+        marked,
+        version,
+        later: Vec::new(),
+        refusal: None,
+        failure: None,
+        note: None,
+        waits: false,
+    }))
+}
+
+/// The parts of one lease's plan from its record: every entry not wanted removed, one part
+/// per RRset (an entry nothing is planned for leaves in the status batch), then the forward
+/// name and the PTR it wants and does not hold. A new forward entry waits while the client
+/// holds two other entries or the row four, and its PTR with it.
+#[allow(
+    clippy::too_many_lines,
+    reason = "one lease: what it wants, its removals, the cap, its additions"
+)]
+fn plan_lease(
+    view: &dyn ReadView,
+    zones: &Zones,
+    image: Option<&ConfigImage>,
+    profile: DdnsProfile,
+    planner: &mut Planner,
+    lease: &mut Lease1,
+) -> Vec<(Part, ZoneChanges)> {
+    let mut parts = Vec::new();
+    let desired = match &lease.request {
+        Some(request) if request.action == DdnsAction::Add => {
+            match ipam_named(view, request.vrf, request.addr) {
+                Ok(named) => {
+                    let lease_names = LeaseNames {
+                        addr: request.addr,
+                        client: &request.client,
+                        fqdn: request.fqdn.as_deref(),
+                        hostname: request.hostname.as_deref(),
+                        fqdn_flags: request.fqdn_flags,
+                        policy: &request.policy,
+                        domain: image.and_then(|image| domain_of(image, request)),
+                        lease_secs: request.lease_secs,
+                    };
+                    plan::desired(view, &lease_names, zones, profile, named)
+                }
+                Err(error) => Err(Skip::Failed(error.to_string())),
+            }
+        }
+        _ => Err(Skip::Quiet(None)),
+    };
+    let want = match desired {
+        Ok(want) => Some(want),
+        // The store could not be read: nothing is removed, and the lease is tried again.
+        Err(Skip::Failed(error)) => {
+            lease.failure = Some(error);
+            return parts;
+        }
+        Err(Skip::Refused(reason)) => {
+            lease.refusal = Some(reason);
+            None
+        }
+        Err(Skip::Quiet(note)) => {
+            lease.note = note;
+            None
+        }
+    };
+    let forward = want
+        .as_ref()
+        .filter(|want| want.write_a)
+        .map(|want| (want.name.clone(), HexBytes(want.dhcid.clone())));
+    let ptr = want.as_ref().and_then(|want| {
+        let (_, ptr) = want.reverse.as_ref()?;
+        Some((ptr.clone(), Some(want.name.clone())))
+    });
+    let addr = lease.key.1;
+    for (name, dhcid) in lease.record.forward.clone() {
+        if forward.as_ref() == Some(&(name.clone(), dhcid.clone())) {
+            continue;
+        }
+        match planner.remove_name(view, zones, addr, &name, &dhcid.0) {
+            Ok(Some(zc)) => parts.extend(zc.changes.into_iter().map(|change| {
+                let part = ZoneChanges {
+                    zone: zc.zone,
+                    changes: vec![change],
+                };
+                (Part::Unforward(name.clone(), dhcid.clone()), part)
+            })),
+            // What an earlier lease of the batch does at the name is not a fact yet: wait.
+            Ok(None) if planner.decided(zones, &name) => lease.waits = true,
+            Ok(None) => lease
+                .later
+                .push((Part::Unforward(name, dhcid), Done::Written)),
+            Err(error) => lease.failure = Some(error.to_string()),
+        }
+    }
+    if let Some((name, target)) = lease.record.ptr.clone()
+        && ptr.as_ref() != Some(&(name.clone(), target.clone()))
+    {
+        match Planner::remove_ptr(view, zones, &name, target.as_ref()) {
+            Ok(Some(zc)) => parts.push((Part::Unptr(name, target), zc)),
+            Ok(None) => lease.later.push((Part::Unptr(name, target), Done::Written)),
+            Err(error) => lease.failure = Some(error.to_string()),
+        }
+    }
+    let (Some(want), Some(request)) = (want, &lease.request) else {
+        return parts;
+    };
+    let forward_held = forward
+        .as_ref()
+        .is_none_or(|forward| lease.record.forward.contains(forward));
+    let ptr_held = ptr.is_none() || lease.record.ptr == ptr;
+    if forward_held && ptr_held {
+        return parts;
+    }
+    if !forward_held {
+        let mine = lease
+            .record
+            .forward
+            .iter()
+            .filter(|(held, dhcid)| dhcid.0 == super::dhcid::dhcid(&request.client, held))
+            .count();
+        if mine >= 2 || lease.record.forward.len() >= 4 {
+            lease.waits = true;
+            return parts;
+        }
+    }
+    let conflict = if profile.always_protect {
+        DdnsConflict::Protect
+    } else {
+        request.policy.conflict
+    };
+    match planner.add(view, zones, addr, &want, conflict) {
+        Ok(plan) => {
+            lease.refusal = plan.refusal;
+            if let (Some(zc), Some((name, dhcid)), false) = (plan.forward, forward, forward_held) {
+                parts.push((Part::Forward(name, dhcid), zc));
+            }
+            if let (Some(zc), Some((name, target)), false) = (plan.reverse, ptr, ptr_held) {
+                parts.push((Part::Ptr(name, target), zc));
+            }
+        }
+        Err(error) => lease.failure = Some(error.to_string()),
+    }
+    parts
 }
 
 #[async_trait::async_trait]
@@ -1264,7 +1316,7 @@ impl tenko_core::cluster::LeaderService for DdnsService {
 }
 
 #[cfg(test)]
-mod memo_tests;
+mod record_tests;
 
 #[cfg(test)]
 mod tests {
@@ -1276,9 +1328,9 @@ mod tests {
     use crate::{image::ImageBuilder, lease::PendingChange};
 
     /// Every error the store can return to a zone write, as the worker sees it through the
-    /// zone service: whether it fails the rest of the batch and whether it is tried again in
-    /// the batch. The expectation is a match with no wildcard arm, so a new store error does
-    /// not compile here until it has its place.
+    /// zone service: an outage fails the rest of the batch and is the only failure tried
+    /// again in the batch. The expectation is a match with no wildcard arm, so a new store
+    /// error does not compile here until it has its place.
     #[test]
     fn every_store_error_has_its_place_in_a_batch() {
         let table = tenko_core::TableName::from_static("dns.rrsets");
@@ -1302,38 +1354,151 @@ mod tests {
             StoreError::Codec(String::new()),
         ];
         for error in every {
-            // (fails the rest of the batch, tried again in the batch)
             let expected = match &error {
                 StoreError::NoQuorum
                 | StoreError::Timeout
                 | StoreError::ShuttingDown
                 | StoreError::Stopped
-                | StoreError::Storage(_) => (true, true),
+                | StoreError::Storage(_) => Failure::Outage,
                 StoreError::PreconditionFailed(_)
                 | StoreError::IdempotencyMismatch
                 | StoreError::Compacted { .. }
                 | StoreError::ReservedTable { .. }
                 | StoreError::PlaintextSecret { .. }
-                | StoreError::Codec(_) => (false, true),
-                StoreError::BatchTooLarge { .. } | StoreError::DiskReserve { .. } => (false, false),
+                | StoreError::Codec(_)
+                | StoreError::DiskReserve { .. } => Failure::Store,
+                StoreError::BatchTooLarge { .. } => Failure::TooLarge,
             };
             let zone = tenko_dns::zone::ZoneError::from(error.clone());
-            let (failure, again) = failure_of(&zone.coded().code, zone.coded().status);
-            assert_eq!((failure == Failure::Outage, again), expected, "{error:?}");
+            let failure = failure_of(&zone.coded().code, zone.coded().status);
+            assert_eq!(failure, expected, "{error:?}");
         }
         // The zone's own refusal of the whole set: this zone only, not tried again.
         let refused =
             tenko_dns::zone::ZoneError::zone_not_found(tenko_core::dns::ZoneId::generate());
         let refused = refused.coded();
-        assert_eq!(
-            failure_of(&refused.code, refused.status),
-            (Failure::Refused, false)
-        );
+        assert_eq!(failure_of(&refused.code, refused.status), Failure::Refused);
         // The zone service's failed fence: final.
         assert_eq!(
             failure_of(StoreError::PRECONDITION_FAILED, 412),
-            (Failure::Deposed, false)
+            Failure::Deposed
         );
+    }
+
+    /// The delta of a set on a record, the table of the design note: what each part's
+    /// outcome leaves in the row.
+    #[test]
+    #[allow(clippy::too_many_lines, reason = "the rows of one table")]
+    fn a_record_is_what_it_held_with_each_part_of_the_set_applied() {
+        use Done::{Failed, Refused, Waits, Written as W};
+        let name = |n: u8| DnsName::new(&format!("h{n}.example.test")).expect("a name");
+        let f = |n: u8| (name(n), HexBytes(vec![n]));
+        let p = |n: u8| {
+            (
+                DnsName::new("10.2.0.192.in-addr.arpa").expect("a PTR"),
+                Some(name(n)),
+            )
+        };
+        let row = |forward: &[u8], ptr: Option<u8>| DdnsNames {
+            forward: forward.iter().map(|&n| f(n)).collect(),
+            ptr: ptr.map(p),
+            ..DdnsNames::default()
+        };
+        let un = |n: u8| Part::Unforward(f(n).0, f(n).1);
+        let unptr = || Part::Unptr(p(1).0, p(1).1);
+        // Another client's entry at the same owner name.
+        let other = |n: u8| (name(n), HexBytes(vec![n + 100]));
+        let add = |n: u8| Part::Forward(f(n).0, f(n).1);
+        let ptr = |n: u8| Part::Ptr(p(n).0, p(n).1);
+        let no = || "no".to_owned();
+        let table = [
+            (
+                row(&[], None),
+                vec![(add(1), W), (ptr(1), W)],
+                row(&[1], Some(1)),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![(add(1), W), (ptr(1), W)],
+                row(&[1], Some(1)),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![
+                    (un(1), W),
+                    (un(1), W),
+                    (unptr(), W),
+                    (add(2), W),
+                    (ptr(2), W),
+                ],
+                row(&[2], Some(2)),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![
+                    (un(1), W),
+                    (un(1), W),
+                    (unptr(), W),
+                    (add(2), Refused(no())),
+                    (ptr(2), Refused(no())),
+                ],
+                row(&[], None),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![(un(1), Refused(no())), (un(1), W)],
+                row(&[], Some(1)),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![(un(1), W), (un(1), Refused(no())), (unptr(), Refused(no()))],
+                row(&[], None),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![(un(1), Failed(no())), (un(1), Failed(no())), (add(2), W)],
+                row(&[1, 2], Some(1)),
+            ),
+            (
+                row(&[1], Some(1)),
+                vec![(add(2), W), (unptr(), Waits), (ptr(2), Waits)],
+                row(&[1, 2], Some(1)),
+            ),
+            (row(&[1, 2], None), vec![(add(3), W)], row(&[1, 2, 3], None)),
+            (
+                row(&[1], Some(1)),
+                vec![(un(1), W), (unptr(), W)],
+                row(&[], None),
+            ),
+            // A removal drops only its own entry: not the new client's at the same name,
+            // nor a PTR that points elsewhere now.
+            (
+                DdnsNames {
+                    forward: vec![other(1)],
+                    ptr: Some(p(2)),
+                    ..DdnsNames::default()
+                },
+                vec![(un(1), W), (unptr(), W)],
+                DdnsNames {
+                    forward: vec![other(1)],
+                    ptr: Some(p(2)),
+                    ..DdnsNames::default()
+                },
+            ),
+            // A written name replaces only the same entry.
+            (
+                row(&[1], None),
+                vec![(Part::Forward(other(1).0, other(1).1), W)],
+                DdnsNames {
+                    forward: vec![f(1), other(1)],
+                    ..DdnsNames::default()
+                },
+            ),
+        ];
+        for (at, (mut held, parts, expected)) in table.into_iter().enumerate() {
+            settle(&mut held, &parts);
+            assert_eq!(held, expected, "row {at}");
+        }
     }
 
     #[test]

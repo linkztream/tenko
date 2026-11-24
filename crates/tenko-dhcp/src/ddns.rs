@@ -5,8 +5,8 @@
 //! after the commit (the client has its answer already), builds a [`DdnsRequest`] from it
 //! and applies it as a change set through the zone service with the RRset origin `dhcp`,
 //! retrying with a backoff while the store refuses (`[dhcp.ddns] retries`, `backoff_ms`),
-//! and records the outcome on the lease row. On release and expiry the records go if their
-//! DHCID still matches.
+//! and records the names it wrote in `dhcp.ddns_names` in the same batch ([`names_of`]). On
+//! release and expiry the records go while they are still the lease's.
 //!
 //! | Module | What |
 //! |---|---|
@@ -32,9 +32,38 @@ pub use self::{
 use std::net::IpAddr;
 
 use tenko_core::{
-    PrefixId, Timestamp, VrfId,
-    dhcp::{ClientKey, DdnsPolicy},
+    PrefixId, Revision, Timestamp, VrfId,
+    dhcp::{ClientKey, DdnsNames, DdnsPolicy, DdnsState, tables::DDNS_NAMES},
 };
+use tenko_store::{ReadView, ReadViewExt as _, StoreError};
+
+/// The names the DDNS worker wrote for the lease at `addr`, whose row holds `legacy`, as every
+/// reader sees them: its record read through to the names an earlier version left on the
+/// lease row ([`DdnsNames::through`]).
+///
+/// # Errors
+///
+/// The store's error.
+pub fn names_of(
+    view: &dyn ReadView,
+    vrf: VrfId,
+    addr: IpAddr,
+    legacy: &DdnsState,
+) -> Result<DdnsNames, StoreError> {
+    Ok(record_of(view, vrf, addr, legacy)?.0)
+}
+
+/// [`names_of`] with the record row's version (none: no row).
+fn record_of(
+    view: &dyn ReadView,
+    vrf: VrfId,
+    addr: IpAddr,
+    legacy: &DdnsState,
+) -> Result<(DdnsNames, Option<Revision>), StoreError> {
+    let row = view.get_typed(&DDNS_NAMES, &(vrf, addr))?;
+    let version = row.as_ref().map(|(_, version)| *version);
+    Ok((DdnsNames::through(row.map(|(row, _)| row), legacy), version))
+}
 
 /// Whether names are written or removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

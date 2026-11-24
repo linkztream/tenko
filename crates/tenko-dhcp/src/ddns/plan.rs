@@ -369,22 +369,13 @@ pub fn desired(
     })
 }
 
-/// The names a lease wrote, as the worker remembers them.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Written {
-    /// The forward name (A and DHCID).
-    pub forward: Option<DnsName>,
-    /// The PTR name.
-    pub reverse: Option<DnsName>,
-    /// The DHCID at the forward name.
-    pub dhcid: Option<Vec<u8>>,
-}
-
 /// The changes of one batch, by zone, with what each lease asked for.
 #[derive(Debug, Default)]
 pub struct Planner {
     /// What earlier requests of the batch did to a name: claimed with a DHCID, or removed.
     overlay: HashMap<(ZoneId, DnsName), Option<Vec<u8>>>,
+    /// The addresses earlier removals of the batch take out of a `dhcp` address record.
+    removed: HashMap<(ZoneId, DnsName, Rtype), Vec<Rdata>>,
     /// The names IPAM gives its addresses, read once per batch when a name is first
     /// checked.
     ipam_names: Option<HashSet<DnsName>>,
@@ -399,22 +390,15 @@ pub struct ZoneChanges {
     pub changes: Vec<Change>,
 }
 
-/// The plan of one lease: changes per zone, the names it will hold when they apply, and
-/// the refusal it shows.
+/// The plan of one lease's names: its forward changes, its PTR, and the refusal it shows.
 #[derive(Debug, Clone, Default)]
 pub struct LeasePlan {
-    /// Removal changes, per zone.
-    pub remove: Vec<ZoneChanges>,
     /// The forward changes (A and DHCID).
     pub forward: Option<ZoneChanges>,
     /// The PTR changes.
     pub reverse: Option<ZoneChanges>,
-    /// What the lease holds once every change applied.
-    pub holds: Written,
     /// What was refused, in English.
     pub refusal: Option<String>,
-    /// Whether the plan removes names.
-    pub removes: bool,
 }
 
 fn rrset(
@@ -531,109 +515,125 @@ impl Planner {
             .contains(name))
     }
 
-    /// The zone that holds the client's DHCID at `name`: the most specific zone that holds
-    /// the name first, then the zones above it (a name an earlier version wrote into a
-    /// parent zone is still found and removed there).
-    fn holder<'z>(
-        &self,
+    /// The changes that remove the forward name `name` a lease at `addr` wrote with `dhcid`,
+    /// one per RRset, in the most specific zone above the name that holds some of it (a name
+    /// an earlier version wrote into a parent zone is removed there): the address from a
+    /// `dhcp` address record, unless another client's `dhcp` DHCID holds the name, and the
+    /// client's `dhcp` DHCID once no `dhcp` address record of either family stays. None when
+    /// nothing of the lease's is left at the name.
+    ///
+    /// # Errors
+    ///
+    /// The store's error.
+    pub fn remove_name(
+        &mut self,
         view: &dyn ReadView,
-        zones: &'z Zones,
+        zones: &Zones,
+        addr: IpAddr,
         name: &DnsName,
         dhcid: &[u8],
-    ) -> Result<Option<&'z Zone>, StoreError> {
+    ) -> Result<Option<ZoneChanges>, StoreError> {
+        let (rtype, a) = address_record(addr);
+        let ours = dhcid_record(dhcid);
         for zone in zones.enclosing(name) {
-            if self.dhcid_is(view, zone.id, name, dhcid)? == Some(true) {
-                return Ok(Some(zone));
+            let dhcp = |set: Option<RrSet>| set.filter(|set| set.origin == Origin::Dhcp);
+            // What earlier leases of the batch did at the name counts first: a DHCID one of
+            // them claimed stays, whoever's it is.
+            let (mine, theirs) = match self.overlay.get(&(zone.id, name.clone())) {
+                Some(None) => continue,
+                Some(Some(claimed)) => (false, claimed != dhcid),
+                None => dhcp(rrset(view, zone.id, name, DHCID)?).map_or((false, false), |set| {
+                    (holds(&set, &ours), !holds(&set, &ours))
+                }),
+            };
+            let set = dhcp(rrset(view, zone.id, name, rtype)?);
+            let mut changes = Vec::new();
+            if !theirs && set.as_ref().is_some_and(|set| holds(set, &a)) {
+                changes.push(change(Op::Remove, name, rtype, None, vec![a.clone()]));
+                self.removed
+                    .entry((zone.id, name.clone(), rtype))
+                    .or_default()
+                    .push(Rdata::from_data(&a));
+            }
+            // WP9.1: the DHCID stays while a `dhcp` address record of either family keeps an
+            // address that neither this removal nor an earlier one of the batch takes out.
+            let other = dhcp(rrset(view, zone.id, name, other_family(rtype))?);
+            let stays = [(rtype, set), (other_family(rtype), other)]
+                .into_iter()
+                .any(|(rtype, set)| {
+                    let gone = self.removed.get(&(zone.id, name.clone(), rtype));
+                    set.is_some_and(|set| {
+                        set.rdata.iter().any(|r| {
+                            *r != Rdata::from_data(&a) && gone.is_none_or(|gone| !gone.contains(r))
+                        })
+                    })
+                });
+            if mine && !stays {
+                changes.push(change(Op::Remove, name, DHCID, None, vec![ours.clone()]));
+                self.overlay.insert((zone.id, name.clone()), None);
+            }
+            if !changes.is_empty() {
+                return Ok(Some(ZoneChanges {
+                    zone: zone.id,
+                    changes,
+                }));
             }
         }
         Ok(None)
     }
 
-    /// The changes that remove what a lease at `addr` wrote.
+    /// Whether an earlier lease of the batch claimed or removed `name`: what its zone holds
+    /// there is known only once that lease's set commits.
+    pub fn decided(&self, zones: &Zones, name: &DnsName) -> bool {
+        zones
+            .enclosing(name)
+            .any(|zone| self.overlay.contains_key(&(zone.id, name.clone())))
+    }
+
+    /// The change that removes the PTR `ptr` a lease wrote: a `dhcp` PTR that points at
+    /// `target`, or at any name when an earlier version recorded none. None otherwise: two
+    /// VRFs with overlapping addresses share the PTR's name.
     ///
     /// # Errors
     ///
     /// The store's error.
-    pub fn remove(
-        &mut self,
+    pub fn remove_ptr(
         view: &dyn ReadView,
         zones: &Zones,
-        addr: IpAddr,
-        written: &Written,
-    ) -> Result<Vec<ZoneChanges>, StoreError> {
-        let mut out = Vec::new();
-        if let (Some(name), Some(dhcid)) = (&written.forward, &written.dhcid)
-            && let Some(zone) = self.holder(view, zones, name, dhcid)?
-        {
-            let (rtype, a) = address_record(addr);
-            let removed = self
-                .overlay
-                .get(&(zone.id, name.clone()))
-                .is_some_and(Option::is_none);
-            let set = if removed {
-                None
-            } else {
-                rrset(view, zone.id, name, rtype)?
-            };
-            // WP9.1: the DHCID stays while the client's records of the other family do.
-            let other = if removed {
-                None
-            } else {
-                rrset(view, zone.id, name, other_family(rtype))?
-                    .filter(|set| set.origin == Origin::Dhcp)
-            };
-            let mut changes = Vec::new();
-            match set {
-                Some(set) if set.origin == Origin::Dhcp && holds(&set, &a) => {
-                    if set.rdata.len() == 1 {
-                        changes.push(change(Op::Delete, name, rtype, None, Vec::new()));
-                        if other.is_none() {
-                            changes.push(change(Op::Delete, name, DHCID, None, Vec::new()));
-                        }
-                    } else {
-                        changes.push(change(Op::Remove, name, rtype, None, vec![a]));
-                    }
-                }
-                None if other.is_none() => {
-                    changes.push(change(Op::Delete, name, DHCID, None, Vec::new()));
-                }
-                Some(_) | None => {}
-            }
-            if changes.iter().any(|c| c.rtype == DHCID) {
-                self.overlay.insert((zone.id, name.clone()), None);
-            }
-            if !changes.is_empty() {
-                out.push(ZoneChanges {
-                    zone: zone.id,
-                    changes,
-                });
-            }
-        }
-        if let Some(ptr) = &written.reverse
-            && let Some(zone) = zones.holding(ptr)
-            && let Some(set) = rrset(view, zone.id, ptr, Rtype::PTR)?
-            && set.origin == Origin::Dhcp
-        {
-            let points_home = written.forward.as_ref().is_none_or(|target| {
-                holds(
-                    &set,
-                    &RecordData::Ptr {
-                        target: target.clone(),
-                    },
-                )
-            });
-            if points_home {
-                let changes = vec![change(Op::Delete, ptr, Rtype::PTR, None, Vec::new())];
-                match out.iter_mut().find(|zc| zc.zone == zone.id) {
-                    Some(zc) => zc.changes.extend(changes),
-                    None => out.push(ZoneChanges {
-                        zone: zone.id,
-                        changes,
-                    }),
-                }
-            }
-        }
-        Ok(out)
+        ptr: &DnsName,
+        target: Option<&DnsName>,
+    ) -> Result<Option<ZoneChanges>, StoreError> {
+        let Some(zone) = zones.holding(ptr) else {
+            return Ok(None);
+        };
+        let ours = rrset(view, zone.id, ptr, Rtype::PTR)?.is_some_and(|set| {
+            set.origin == Origin::Dhcp
+                && target.is_none_or(|target| {
+                    holds(
+                        &set,
+                        &RecordData::Ptr {
+                            target: target.clone(),
+                        },
+                    )
+                })
+        });
+        // The exact data, so that a set planned again on a newer view removes nothing else.
+        let removal = match target {
+            Some(target) => change(
+                Op::Remove,
+                ptr,
+                Rtype::PTR,
+                None,
+                vec![RecordData::Ptr {
+                    target: target.clone(),
+                }],
+            ),
+            None => change(Op::Delete, ptr, Rtype::PTR, None, Vec::new()),
+        };
+        Ok(ours.then(|| ZoneChanges {
+            zone: zone.id,
+            changes: vec![removal],
+        }))
     }
 
     /// The changes that give a lease at `addr` the names of `desired`. `conflict` is the
@@ -767,8 +767,6 @@ impl Planner {
                 zone: zone.id,
                 changes,
             });
-            plan.holds.forward = Some(name.clone());
-            plan.holds.dhcid = Some(desired.dhcid.clone());
             self.overlay.insert(key, Some(desired.dhcid.clone()));
         }
         if let Some((reverse, ptr)) = &desired.reverse
@@ -801,7 +799,6 @@ impl Planner {
                     zone: rzone.id,
                     changes: vec![set],
                 });
-                plan.holds.reverse = Some(ptr.clone());
             }
         }
         Ok(plan)
@@ -1361,26 +1358,23 @@ mod tests {
         .await;
         let view = lab.view().await;
         let removed = Planner::new()
-            .remove(
+            .remove_name(
                 view.as_ref(),
                 &zones,
                 IpAddr::V4(std::net::Ipv4Addr::new(192, 0, 2, 50)),
-                &Written {
-                    forward: Some(name(owner)),
-                    reverse: None,
-                    dhcid: Some(dhcid),
-                },
+                &name(owner),
+                &dhcid,
             )
-            .expect("plan");
-        assert_eq!(removed.len(), 1);
-        assert_eq!(removed[0].zone, lab.forward.id);
+            .expect("plan")
+            .expect("the name's removal");
+        assert_eq!(removed.zone, lab.forward.id);
         assert_eq!(
-            removed[0]
+            removed
                 .changes
                 .iter()
                 .map(|change| (change.op, change.rtype))
                 .collect::<Vec<_>>(),
-            vec![(Op::Delete, Rtype::A), (Op::Delete, DHCID)]
+            vec![(Op::Remove, Rtype::A), (Op::Remove, DHCID)]
         );
     }
 }

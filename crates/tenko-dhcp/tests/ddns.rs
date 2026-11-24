@@ -41,7 +41,10 @@ use tenko_core::{
     AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp,
     UserId, VrfId,
     cluster::{LEADER_EPOCH, LeaderService as _},
-    dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, tables::LEASES},
+    dhcp::{
+        BindingState, ClientKey, DdnsConflict, DdnsNames, DdnsPolicy, DdnsState, Lease,
+        tables::LEASES,
+    },
     dns::{
         DnsName, Origin, RecordData, RrSet, RrSetKey, Rtype, ScopeName, SerialPolicy, SoaDefaults,
         TextBytes, UpdatePolicy, ZoneId, ZoneKind, tables::RRSETS,
@@ -397,12 +400,21 @@ impl Lab {
         .map(|(set, _)| set)
     }
 
+    /// The names written for the lease at `last`, as the lease API shows them.
     async fn ddns(&self, last: u8) -> DdnsState {
+        self.record(last).await.state()
+    }
+
+    /// The record of the names written for the lease at `last`.
+    async fn record(&self, last: u8) -> DdnsNames {
         let view = self.store.read(ReadConsistency::Local).await.expect("view");
-        view.get_typed(&LEASES, &(self.vrf, ip(last)))
+        let legacy = view
+            .get_typed(&LEASES, &(self.vrf, ip(last)))
             .expect("row")
             .map(|(lease, _)| lease.ddns)
-            .unwrap_or_default()
+            .unwrap_or_default();
+        tenko_dhcp::ddns::names_of(view.as_ref(), self.vrf, IpAddr::V4(ip(last)), &legacy)
+            .expect("record")
     }
 
     async fn a(&self, owner: &str) -> Vec<RecordData> {
@@ -795,8 +807,9 @@ async fn a_name_update_the_store_refuses_shows_on_the_lease_and_in_the_counter()
 }
 
 /// A zone whose write keeps losing to other writers is contention on that zone, not an
-/// outage: the reverse zone of the same batch is still written, before the forward zone
-/// gets its set on the lease's retry.
+/// outage: the reverse zone of the same batch is still written for a client that writes
+/// its own A record, before the forward zone gets its set on the lease's retry; the PTR of
+/// the lease whose forward name failed waits for it.
 #[tokio::test]
 async fn a_zone_lost_to_contention_does_not_fail_the_other_zones_of_its_batch() {
     let store = Arc::new(Refusing::<MemStore>::default());
@@ -813,16 +826,41 @@ async fn a_zone_lost_to_contention_does_not_fail_the_other_zones_of_its_batch() 
     .await;
     // Every try of the forward zone's write, the worker's retries included, finds the zone
     // changed; the reverse zone's write that follows does not.
+    // Option 81 with S clear lets a client write its own A record: the phone needs a PTR only.
+    lab.config
+        .update_scope(
+            &cx(),
+            lab.scope,
+            ScopeChange {
+                ddns: Some(DdnsPolicy {
+                    enabled: true,
+                    forward_zone: Some(lab.forward),
+                    client_may_update_a: true,
+                    ..DdnsPolicy::default()
+                }),
+                ..ScopeChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("scope");
     store.stale.store(true, Ordering::SeqCst);
     *store.refuse() = usize::try_from(DdnsSettings::default().retries).expect("retries") + 1;
-    lab.commit(lab.lease(50, 1, None, Some("printer"))).await;
-    wait_until_async("both names", async || {
-        lab.a("printer.lan.example.test").await == vec![a_of(50)] && lab.ptr(50).await.is_some()
+    lab.commit_all([
+        lab.lease(50, 1, None, Some("printer")),
+        lab.lease(51, 2, Some(("phone", 0)), None),
+    ])
+    .await;
+    wait_until_async("every name", async || {
+        lab.a("printer.lan.example.test").await == vec![a_of(50)]
+            && lab.ptr(50).await.is_some()
+            && lab.ptr(51).await.is_some()
     })
     .await;
     let forward = lab.set_times("lan.example.test").await;
     let reverse = lab.set_times("2.0.192.in-addr.arpa").await;
     assert!(reverse[0] < forward[0], "{reverse:?} {forward:?}");
+    assert!(forward[0] < reverse[1], "{reverse:?} {forward:?}");
 }
 
 #[tokio::test]
@@ -990,6 +1028,8 @@ async fn a_batch_too_large_writes_its_first_half_and_the_rest_waits() {
     )
     .await;
     new_clients(&lab, 50..=53, 1).await;
+    // A PTR follows its forward name, so the cut leases' PTRs come with their second set.
+    wait_until_async("the last PTR", async || lab.ptr(53).await.is_some()).await;
     assert_eq!(lab.change_sets("lan.example.test").await, 2);
     assert_eq!(lab.change_sets("2.0.192.in-addr.arpa").await, 2);
 
@@ -1044,10 +1084,10 @@ async fn a_lease_that_does_not_fit_its_window_waits_whole() {
         DdnsState::default(),
         "not planned, not recorded"
     );
-    // Two wait for the next batch an hour away: the second lease, and the first one's own
-    // outcome row, which the worker reads again before it skips it.
+    // The second lease waits for the next batch an hour away; the worker's own record of
+    // the first does not wake it.
     wait_until_async("the queue gauge", async || {
-        tenko_dhcp::ddns::metrics::QUEUE.get() == Some(2.0)
+        tenko_dhcp::ddns::metrics::QUEUE.get() == Some(1.0)
     })
     .await;
 }
@@ -1930,9 +1970,8 @@ async fn the_ddns_gauges_go_when_the_worker_stops() {
     .await;
 }
 
-/// A failed lease counts in the queue until its retry: here an hour away, beside its own
-/// outcome row, which waits for the next batch an hour away too. The gauge is the process's:
-/// one worker.
+/// A failed lease counts in the queue until its retry, here an hour away; the worker's own
+/// record of its failure does not wake it. The gauge is the process's: one worker.
 #[tokio::test]
 async fn a_failed_lease_waits_in_the_queue_for_its_retry() {
     let store = Arc::new(Refusing::<MemStore>::default());
@@ -1950,8 +1989,8 @@ async fn a_failed_lease_waits_in_the_queue_for_its_retry() {
     *store.refuse() = usize::MAX;
     lab.commit(lab.lease(52, 3, Some(("h3", ClientFqdn::FLAG_S)), None))
         .await;
-    wait_until_async("the failed lease and its row in the queue", async || {
-        lab.ddns(52).await.last_error.is_some() && QUEUE.get() == Some(2.0)
+    wait_until_async("the failed lease in the queue", async || {
+        lab.ddns(52).await.last_error.is_some() && QUEUE.get() == Some(1.0)
     })
     .await;
 }
@@ -1988,4 +2027,211 @@ async fn a_worker_that_lost_its_office_plans_its_set_once_and_stops() {
     );
     assert_eq!(store.attempts.load(Ordering::SeqCst), 1, "planned once");
     assert_eq!(lab.a("h1.lan.example.test").await, Vec::new());
+}
+
+/// An operator's set of `rtype` at `owner`, taken over from DHCP.
+async fn operator_sets(lab: &Lab, zone: ZoneId, owner: &str, rtype: Rtype, data: RecordData) {
+    lab.zones
+        .change_records(
+            &cx(),
+            zone,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name(owner),
+                rtype,
+                ttl: Some(300),
+                records: vec![data],
+                take_over: true,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("the operator's set");
+}
+
+/// An operator takes over the A record of a lease's name: on release the lease's DHCID is
+/// removed on its own, the operator's A stays, and the record holds no name.
+#[tokio::test]
+async fn an_address_record_taken_over_leaves_the_dhcid_to_its_removal() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    operator_sets(&lab, lab.forward, "h1.lan.example.test", Rtype::A, a_of(99)).await;
+    lab.end(50, BindingState::Released).await;
+    wait_until_async("the DHCID removed", async || {
+        lab.rrset(lab.forward, "h1.lan.example.test", DHCID)
+            .await
+            .is_none()
+            && lab.record(50).await.forward.is_empty()
+    })
+    .await;
+    assert_eq!(lab.a("h1.lan.example.test").await, vec![a_of(99)]);
+}
+
+/// A name an operator took over whole is no longer the lease's: on release nothing is
+/// planned for it, its entry leaves the record in the status batch, and the operator's
+/// records stay.
+#[tokio::test]
+async fn a_name_taken_over_whole_leaves_the_record_without_a_change() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    let other = RecordData::Unknown {
+        rtype: DHCID,
+        data: HexBytes(vec![7; 35]),
+    };
+    operator_sets(&lab, lab.forward, "h1.lan.example.test", Rtype::A, a_of(99)).await;
+    operator_sets(&lab, lab.forward, "h1.lan.example.test", DHCID, other).await;
+    let sets = lab.change_sets("lan.example.test").await;
+    lab.end(50, BindingState::Released).await;
+    wait_until_async("the entry gone", async || {
+        lab.record(50).await.forward.is_empty()
+    })
+    .await;
+    assert_eq!(lab.a("h1.lan.example.test").await, vec![a_of(99)]);
+    assert_eq!(lab.change_sets("lan.example.test").await, sets);
+}
+
+/// A DHCID taken over at a lease's name: on release the lease's A record is removed on its
+/// own, the other DHCID stays, and the record holds no name.
+#[tokio::test]
+async fn a_dhcid_taken_over_leaves_the_address_record_to_its_removal() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    let other = RecordData::Unknown {
+        rtype: DHCID,
+        data: HexBytes(vec![7; 35]),
+    };
+    operator_sets(&lab, lab.forward, "h1.lan.example.test", DHCID, other).await;
+    lab.end(50, BindingState::Released).await;
+    wait_until_async("the A removed", async || {
+        lab.a("h1.lan.example.test").await.is_empty() && lab.record(50).await.forward.is_empty()
+    })
+    .await;
+    assert!(
+        lab.rrset(lab.forward, "h1.lan.example.test", DHCID)
+            .await
+            .is_some_and(|set| set.origin == Origin::Manual)
+    );
+}
+
+/// A PTR another network wrote at the same reverse name (two VRFs with overlapping
+/// addresses share it, here written as the other network's worker writes it) is not the
+/// lease's: its release removes its forward name and leaves that PTR.
+#[tokio::test]
+async fn a_release_leaves_a_ptr_that_points_at_another_name() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    new_clients(&lab, 50..=50, 1).await;
+    wait_until_async("the PTR", async || lab.ptr(50).await.is_some()).await;
+    let other = RecordData::Ptr {
+        target: name("other.example.test"),
+    };
+    lab.zones
+        .change_dhcp_names(
+            &RequestCtx::system(SystemComponent::Dhcp),
+            lab.reverse,
+            &[vec![Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("50.2.0.192.in-addr.arpa"),
+                rtype: Rtype::PTR,
+                ttl: Some(300),
+                records: vec![other.clone()],
+                take_over: false,
+                origin: Origin::Dhcp,
+            }]],
+            true,
+            None,
+            &mut |_, _, _| Ok(()),
+        )
+        .await
+        .expect("the other network's PTR");
+    lab.end(50, BindingState::Released).await;
+    wait_until_async("the release", async || {
+        let record = lab.record(50).await;
+        lab.a("h1.lan.example.test").await.is_empty()
+            && record.forward.is_empty()
+            && record.ptr.is_none()
+    })
+    .await;
+    assert_eq!(lab.ptr(50).await, Some(other));
+}
+
+/// Puts two names of client 1 at the address `.50` in DNS and on its record, as names whose
+/// removal is pending.
+async fn two_pending_names(lab: &Lab) {
+    let mut full = DdnsNames::default();
+    let mut names = Vec::new();
+    for host in ["old1", "old2"] {
+        let owner = name(&format!("{host}.lan.example.test"));
+        let dhcid = HexBytes(tenko_dhcp::ddns::dhcid::dhcid(&client(1), &owner));
+        let mut dhcid_set = dhcp_a(owner.as_str(), 50);
+        dhcid_set.rtype = DHCID;
+        dhcid_set.records = vec![RecordData::Unknown {
+            rtype: DHCID,
+            data: dhcid.clone(),
+        }];
+        names.push(vec![dhcp_a(owner.as_str(), 50), dhcid_set]);
+        full.put_forward(owner, dhcid);
+    }
+    lab.zones
+        .change_dhcp_names(
+            &RequestCtx::system(SystemComponent::Dhcp),
+            lab.forward,
+            &names,
+            true,
+            None,
+            &mut |_, _, _| Ok(()),
+        )
+        .await
+        .expect("the old names");
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+    batch
+        .put_typed(
+            &tenko_core::dhcp::tables::DDNS_NAMES,
+            &(lab.vrf, IpAddr::V4(ip(50))),
+            &full,
+        )
+        .expect("record");
+    lab.store.propose(batch).await.expect("record");
+}
+
+/// The cap: a client that holds two forward names waits with a third until one is gone; the
+/// next client at the address has slots of its own and gets its name in the same batch that
+/// removes the last client's. The next batch is an hour away.
+#[tokio::test]
+async fn a_full_record_holds_back_its_client_and_not_the_next() {
+    for (who, host) in [(1, "h3"), (2, "h9")] {
+        let lab = lab_with(
+            DdnsProfile::HOME,
+            UpdatePolicy::default(),
+            Arc::new(MemStore::default()),
+            ZoneConfig::default(),
+            Duration::from_secs(3_600),
+        )
+        .await;
+        two_pending_names(&lab).await;
+        lab.commit(lab.lease(50, who, Some((host, ClientFqdn::FLAG_S)), None))
+            .await;
+        let owner = format!("{host}.lan.example.test");
+        wait_until_async("the old names removed", async || {
+            lab.a("old1.lan.example.test").await.is_empty()
+                && lab.a("old2.lan.example.test").await.is_empty()
+                && lab
+                    .record(50)
+                    .await
+                    .forward
+                    .iter()
+                    .all(|(held, _)| held.as_str() == owner)
+        })
+        .await;
+        if who == 1 {
+            assert_eq!(lab.a(&owner).await, Vec::new(), "waits for the next batch");
+        } else {
+            wait_until_async("the next client's name", async || {
+                lab.a(&owner).await == vec![a_of(50)]
+            })
+            .await;
+        }
+    }
 }
