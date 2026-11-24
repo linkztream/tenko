@@ -801,6 +801,47 @@ async fn a_dual_stack_client_holds_one_name_with_an_a_and_an_aaaa_record_and_one
     .await;
 }
 
+/// A dual-stack client whose two leases end in one batch: each removal sees the other
+/// family's address record in the batch's view, and the DHCID still goes with the last.
+#[tokio::test]
+async fn a_dual_stack_client_whose_leases_end_together_leaves_no_dhcid() {
+    let lab = lab().await;
+    let owner = "desktop.example.test";
+    lab.commit4(lab.lease4_rfc4361(150, 7, 1, ("desktop", ClientFqdn::FLAG_S)))
+        .await;
+    wait_until_async("the A record", async || !lab.a(owner).await.is_empty()).await;
+    lab.commit6(lab.lease6(0x30, 7, Some(("desktop", FLAGS_S_E))))
+        .await;
+    wait_until_async("the AAAA record", async || {
+        lab.aaaa(owner).await == vec![aaaa_of(0x30)]
+    })
+    .await;
+    let view = lab.store.read(ReadConsistency::Local).await.expect("view");
+    let (mut lease4, _) = view
+        .get_typed(&LEASES, &(lab.vrf, ip4(150)))
+        .expect("row")
+        .expect("lease");
+    drop(view);
+    let mut lease6 = lab.row6(0x30).await.expect("lease");
+    let now = Timestamp::now();
+    (lease4.state, lease4.ends) = (BindingState::Released, now);
+    (lease6.state, lease6.ends) = (BindingState::Released, now);
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), now);
+    batch
+        .put_typed(&LEASES, &(lab.vrf, ip4(150)), &lease4)
+        .expect("lease");
+    batch
+        .put_typed(&LEASES6, &(lab.vrf, ip6(0x30)), &lease6)
+        .expect("lease");
+    lab.store.propose(batch).await.expect("both ends");
+    wait_until_async("every record of the name gone", async || {
+        lab.a(owner).await.is_empty()
+            && lab.aaaa(owner).await.is_empty()
+            && lab.rrset(lab.forward, owner, DHCID).await.is_none()
+    })
+    .await;
+}
+
 /// A name is one owner's whatever the family of its records (RFC 4703 section 5, ADR 0020
 /// point 2): a manual A with no AAAA beside it refuses a DHCPv6 claim, a manual AAAA
 /// refuses a DHCPv4 claim, a name IPAM gives a host with only an IPv4 address keeps it
