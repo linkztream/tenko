@@ -229,13 +229,18 @@ Tenko before you run the script again.
 
 ## After the finish
 
-Before the finish records anything, it checks that Tenko admits what its steps ask, without
-changing anything: the release of each zone's frozen names as a dry run, and a read of each
-mirror (no read can prove that the deletion of a mirror will be admitted; the deletion is
-the finish's last call to Tenko). A refusal ends the sitting with exit 1: the message names
-what Tenko refused, nothing was changed, the state file is as it was, and the takeover can
-still be reversed. Only then does the confirmation come, and you type the domain's name to
-accept it.
+Before the finish records anything, it checks that Tenko admits what its steps ask: the
+release of each zone's frozen names as a dry run, which changes nothing; then the
+confirmation, where you type the domain's name; then its first change, the real release of
+the first zone, still before anything of the finish is recorded. When Tenko refuses the
+session (401, or 403 with `auth.delegation.refused`, `auth.step_up_required` or
+`auth.forbidden`), it has changed nothing: the sitting ends with exit 1, the message names
+the zone and Tenko's code, nothing of the finish is recorded, and the takeover can still be
+reversed. A first release that fails otherwise, for example with no answer, may have
+happened, so the finish counts as started and a run without a parameter resumes it; a
+release done twice changes nothing the second time. The deletion of the mirrors, the
+finish's last call to Tenko, is not checked in advance: when Tenko refuses it after the rest
+is done, delete the run's mirrors in Tenko's interface and run the script again.
 
 The finish has started as soon as its first step is recorded in the state file, and from
 then on there is no scripted way back: `-Reverse` is refused with exit 1, also after a
@@ -258,8 +263,8 @@ each zone's export of phase 2 (`tenko-backup-<zone>.dns`).
 ### Going back by hand
 
 This manual path has not been rehearsed in the lab. It follows the order of the script's own
-reverse of the DHCP window, so that a network is never without a DHCP server and Windows
-serves only once Tenko is silent. For each DHCP server:
+reverse of the DHCP window, so that a network is never without a DHCP server. For each DHCP
+server:
 
 1. Start the service while the server is still unauthorized, where it serves nobody but its
    cmdlets answer: `Set-Service DHCPServer -StartupType Automatic; Start-Service DHCPServer`.
@@ -271,7 +276,9 @@ serves only once Tenko is silent. For each DHCP server:
    `Set-DhcpServerDnsCredential`.
 3. The authorization: `Add-DhcpServerInDC -DnsName <server> -IPAddress <address>`, then
    `repadmin /syncall /AdeP`, until `Get-DhcpServerInDC` lists the server on every
-   controller. A running server reads it only when its service starts again.
+   controller. What is known: the server serves after the restart below. Whether and when a
+   running server finds its authorization on its own is not measured, so keep the time from
+   here to Tenko's silence short; conflict detection limits what two answering servers do.
 
 Then make Tenko silent: disable each of the scopes in Tenko (the scope's own setting; the
 takeover itself cannot be reverted once the finish has deleted the mirrors). Then on each
@@ -286,7 +293,11 @@ directory-integrated in its partition (`ConvertTo-DnsServerPrimaryZone -Name <zo
 -ReplicationScope <scope> -Force`) and set its update setting back
 (`Set-DnsServerPrimaryZone -Name <zone> -DynamicUpdate Secure`); remove the other
 controllers' secondaries so that they load the directory copy; then make Tenko's zone a
-secondary or delete it. The exports of phase 2 are the last resort.
+secondary or delete it. Before a controller's copy of a zone becomes authoritative again,
+compare the records that steer sign-in (the `_msdcs` zone, the SRV records, the apex NS and
+the controllers' own address records) with the zone's export of phase 2, as the scripted
+reverse does, and set back by hand any that differ. The exports of phase 2 are otherwise the
+last resort.
 
 ### Removing the DHCP Server role yourself
 
@@ -302,7 +313,7 @@ server at a time, with one restart each:
    (by default `%SystemRoot%\System32\dhcp`); and the export of phase 2 where the previous
    section says, with a copy kept off the server.
 2. `Uninstall-WindowsFeature -Name DHCP`. Right after it `Get-WindowsFeature DHCP` already
-   reads not installed while the service still runs: the removal is not done yet.
+   reads not installed while the service still exists: the removal is not done yet.
 3. Restart the server (`Restart-Computer`) and wait until it is back, the other controller
    answering meanwhile.
 4. After the restart, with `Get-Service DHCPServer` finding no service, move the database

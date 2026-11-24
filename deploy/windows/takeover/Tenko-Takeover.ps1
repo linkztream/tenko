@@ -877,7 +877,10 @@ function Invoke-TkCall {
     $answer = Invoke-TkHttp -Method $Method -Path "/api/v1$Path" -Body $bytes
     if ($Expect -notcontains $answer.Status) {
         $hint = $(if ($answer.Code -eq 'auth.delegation.refused') { " (this node's release does not open $Method $Path to a takeover's session: the takeover cannot go on with it)" } else { '' })
-        throw "Tenko refused $Method $Path with $($answer.Status) $($answer.Code): $($answer.Detail)$hint"
+        $failure = [System.Exception]::new("Tenko refused $Method $Path with $($answer.Status) $($answer.Code): $($answer.Detail)$hint")
+        $failure.Data['tk.status'] = [int]$answer.Status
+        $failure.Data['tk.code'] = [string]$answer.Code
+        throw $failure
     }
     return , $answer.Json
 }
@@ -3566,29 +3569,46 @@ function Write-TkLeaseBack {
 # ---------------------------------------------------------------------------------------
 
 function Test-TkFinishAdmitted {
-    # Before the finish records anything: Tenko admits what its steps ask, read without a
-    # change (each zone's release as a dry run, each mirror read), or the finish does not start.
-    param([hashtable]$State)
-    try {
-        foreach ($zone in $State.Data.readings.zones) {
+    # Before anything of the finish is recorded: each zone's release as a dry run or, with
+    # -First, the finish's first change, the real release of the first zone. The server refuses
+    # a session with 401, or 403 auth.delegation.refused, auth.step_up_required or
+    # auth.forbidden, before it changes anything: then the finish does not start.
+    param([hashtable]$State, [switch]$First)
+    foreach ($zone in $State.Data.readings.zones) {
+        $id = ''
+        try {
             $id = Get-TkZoneId $zone.name
-            if ($id) { [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/release" -Body ([ordered]@{ dry_run = $true })) }
+            if (-not $id) { continue }
+            [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/release" -Body ([ordered]@{ dry_run = -not $First }))
+            if ($First) { return }
+        } catch {
+            $failure = $_.Exception
+            $status = $failure.Data['tk.status']
+            if (-not $First -or -not $id -or $status -eq 401 -or $status -eq 403) {
+                $why = $(if ($status) { "$status $($failure.Data['tk.code'])$(if ($failure.Data['tk.code'] -eq 'auth.delegation.refused') { ', not opened to a takeover''s session by this node' })" } else { ConvertTo-TkSafeText $failure.Message })
+                Exit-TkTakeover 1 "finish not started, nothing changed, -Reverse works: release of $($zone.name): $why"
+            }
+            # Any other failure leaves the outcome unknown: the zone may be released, so the finish has started.
+            $State.Data.steps['6.tenko'] = [ordered]@{ state = 'failed'; at = [datetime]::UtcNow.ToString('o'); error = (ConvertTo-TkSafeText $failure.Message) }
+            $State.Data.phases['6'] = 'failed'
+            Save-TkState $State
+            throw
         }
-        foreach ($id in @($State.Data.mirrors.Values)) { [void](Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id" -Expect @(200, 404)) }
-    } catch {
-        Exit-TkTakeover 1 "the finish did not start, nothing was changed and -Reverse still works: $(ConvertTo-TkSafeText $_.Exception.Message)"
     }
 }
 
 function Get-TkDhcpEndText {
     # The DHCP servers as read now: each service, and whether the directory lists the server.
+    # Only a text: a read that fails says so and changes nothing the finish did.
     param([System.Collections.IDictionary]$Readings)
-    $listed = @(Invoke-TkRemote -Server $Readings.pdc -Name ReadDhcpInDirectory | ForEach-Object { [string]$_.Name })
-    $read = foreach ($server in $Readings.dhcp) {
-        $service = Invoke-TkRemote -Server $server.name -Name ReadDhcpService | Select-Object -Last 1
-        "$($server.name) $(ConvertTo-TkSafeText $service.Status) and $(ConvertTo-TkSafeText $service.Start), $(if ($listed -contains $server.name) { 'authorized' } else { 'not authorized' })"
-    }
-    return "The DHCP Server service and authorization read now: $($read -join '; ')."
+    try {
+        $listed = @(Invoke-TkRemote -Server $Readings.pdc -Name ReadDhcpInDirectory | ForEach-Object { [string]$_.Name })
+        $read = foreach ($server in $Readings.dhcp) {
+            $service = Invoke-TkRemote -Server $server.name -Name ReadDhcpService | Select-Object -Last 1
+            "$($server.name) $(ConvertTo-TkSafeText $service.Status) and $(ConvertTo-TkSafeText $service.Start), $(if ($listed -contains $server.name) { 'authorized' } else { 'not authorized' })"
+        }
+        return "The DHCP Server service and authorization read now: $($read -join '; ')."
+    } catch { return "The DHCP Server service and authorization could not be read now ($(ConvertTo-TkSafeText $_.Exception.Message))." }
 }
 
 function Get-TkPhase6 {
@@ -3833,6 +3853,7 @@ function Invoke-Takeover {
                 "Each DHCP server keeps the DHCP Server role and its database; the finish neither starts nor authorizes its service. $(Get-TkDhcpEndText $data.readings) Removing the role is yours to do later (README.md). " +
                 "The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path $state.Dir 'backup') here.$dnsNote$note Type the domain's name to go on"
                 if (-not (Confirm-TkTyped $text $domain)) { Exit-TkTakeover 3 'waiting for the parallel period' }
+                Test-TkFinishAdmitted -State $state -First
             }
             # The DNS window is confirmed at the console in every sitting that starts it; the
             # DHCP window by its own one confirmation, right before the silence.

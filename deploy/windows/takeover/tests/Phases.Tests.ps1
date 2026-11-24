@@ -68,6 +68,7 @@ Describe 'A whole run' {
     It 'calls on Windows exactly the blocks the finish is known to call, none that installs, removes, starts or restarts' {
         # A new remote call in the finish fails here until someone has decided that it belongs.
         @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique) | Should -Be @('ProtectDirectory', 'ReadComputers', 'ReadDhcpInDirectory', 'ReadDhcpService', 'ReadDirectoryZones', 'ReadDomain', 'ReadFeature', 'ReadHardening', 'ReadLocalAdmins', 'ReadMarker', 'ReadProgramFiles', 'ReadZones', 'RemoveAccount', 'RemoveBatchRight', 'RemoveExporter', 'WriteMarker')
+        foreach ($name in @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique)) { $script:TkRemote[$name].ToString() | Should -Not -Match '\b(Install|Uninstall|Add|Remove)-WindowsFeature\b|\b(Enable|Disable)-WindowsOptionalFeature\b|\b(Restart|Stop)-Computer\b|\bshutdown\b|\bdism\b' -Because $name }
     }
 
     It 'refuses -Reverse after the finish with exit 1 and changes nothing' {
@@ -127,16 +128,58 @@ Describe 'A whole run' {
         @($script:world.mirrors.Keys).Count | Should -Be 0
     }
 
-    It 'does not start the finish when Tenko refuses its check: the state file stays as it was and -Reverse still works' {
+    It 'does not start the finish when Tenko refuses its dry run: nothing of the finish is recorded and -Reverse still works' {
         Install-FakeWorld
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
-        $path = Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'
-        $before = [System.IO.File]::ReadAllBytes($path)
         $script:world.failRoute = 'release$'
         Invoke-FakeRun -Answers @('c') | Should -Be 1
-        $script:lastError | Should -Match '^the finish did not start, nothing was changed and -Reverse still works: Tenko refused POST /dns/zones/[^/]+/release'
-        [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($path)) | Should -Be ([System.Convert]::ToBase64String($before))
+        $script:lastError | Should -Match '^finish not started, nothing changed, -Reverse works: release of [^:]+: Tenko refused POST /dns/zones/[^/]+/release'
+        @((Read-State).steps.Keys | Where-Object { $_ -like '6.*' }) | Should -BeNullOrEmpty
+        (Read-State).phases.Contains('6') | Should -BeFalse
         Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+    }
+
+    It 'does not start the finish when Tenko refuses its first real release after the confirmation: nothing is recorded and -Reverse still works' {
+        Install-FakeWorld
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run } {
+            $refusal = [System.Exception]::new("Tenko refused POST $Path with 403 auth.delegation.refused: refused")
+            $refusal.Data['tk.status'] = 403
+            $refusal.Data['tk.code'] = 'auth.delegation.refused'
+            throw $refusal
+        }
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1
+        $script:lastError | Should -Match '^finish not started, nothing changed, -Reverse works: release of [^:]+: 403 auth\.delegation\.refused, not opened to a takeover''s session by this node$'
+        @((Read-State).steps.Keys | Where-Object { $_ -like '6.*' }) | Should -BeNullOrEmpty
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+    }
+
+    It 'counts the finish as started when its first real release ends with no answer, and resumes it' {
+        Install-FakeWorld
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:timedOut = $false
+        Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run -and -not $script:timedOut } { $script:timedOut = $true; throw 'the request to Tenko timed out' }
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 2
+        (Read-State).steps['6.tenko'].state | Should -Be 'failed'
+        Invoke-FakeRun -Reverse | Should -Be 1
+        Invoke-FakeRun | Should -Be 0 -Because $script:lastError
+    }
+
+    It 'records a refusal of a later zone''s release, after the first succeeded, as a failed step' {
+        Install-FakeWorld
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:realReleases = 0
+        Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run } {
+            $script:realReleases++
+            if ($script:realReleases -ne 3) { return [ordered]@{ names = @(); rrsets = 0 } }
+            $refusal = [System.Exception]::new("Tenko refused POST $Path with 403 auth.step_up_required: refused")
+            $refusal.Data['tk.status'] = 403
+            $refusal.Data['tk.code'] = 'auth.step_up_required'
+            throw $refusal
+        }
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 2
+        (Read-State).steps['6.tenko'].state | Should -Be 'failed'
+        Invoke-FakeRun -Reverse | Should -Be 1
     }
 
     It 'deletes the DNS update account it made and says that the servers need another credential before a start' {
@@ -186,7 +229,7 @@ Describe 'A failure at a step' {
     }
 
     It 'stops at the finish''s <step> with exit 2, refuses -Reverse and resumes there' -ForEach @(
-        @{ step = '6.tenko'; route = 'release$'; pre = { $script:world.failSkip = @($script:world.tzones.Keys).Count } }
+        @{ step = '6.tenko'; route = 'release$'; pre = { $script:world.failSkip = @($script:world.tzones.Keys).Count + 1 } }
         @{ step = '6.exporter'; block = 'RemoveExporter' }
         @{ step = '6.mirror-account'; block = 'RemoveAccount' }
         @{ step = '6.zone-objects'; block = 'RemoveZoneObject'; pre = { $script:world.directory += 'corp.example.test' } }
