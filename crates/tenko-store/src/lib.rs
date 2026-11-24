@@ -67,7 +67,7 @@ pub use api::{
     DerivedIndex, FailedPrecondition, FenceReason, IndexImage, IndexStatus, KeyRange, Leadership,
     MemberStatus, Mutation, Precondition, Pressure, QuorumState, ReadConsistency, ReadView,
     ReadViewExt, SignIn, Store, StoreError, StoreRole, StoreSafety, StoreStatus, Versioned,
-    WatchError, WatchFilter, WriteBatch, downcast_image, fence, tables,
+    WatchError, WatchFilter, WriteBatch, downcast_image, fence, fenced_out, tables,
 };
 pub use layout::sync_dir;
 pub use mem::{MemStore, MemStoreConfig};

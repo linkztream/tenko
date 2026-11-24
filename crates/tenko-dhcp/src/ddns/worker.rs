@@ -70,7 +70,7 @@ use tenko_dns::zone::ZoneService;
 use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES};
 use tenko_store::{
     ChangeStream, FailedPrecondition, KeyRange, ReadConsistency, ReadView, ReadViewExt as _, Store,
-    StoreError, WatchFilter, WriteBatch, fence,
+    StoreError, WatchFilter, WriteBatch, fence, fenced_out,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -285,6 +285,8 @@ fn retryable(status: u16, code: &str) -> bool {
 /// codes are named here and a test runs every store error through this.
 fn failure_of(code: &str, status: u16) -> (Failure, bool) {
     match code {
+        // The zone service's answer to a failed fence ([`tenko_store::fenced_out`]).
+        StoreError::PRECONDITION_FAILED if status == 412 => (Failure::Deposed, false),
         StoreError::BATCH_TOO_LARGE => (Failure::TooLarge, false),
         // The store takes no write right now, so the next zone's write would fail the same way.
         StoreError::NO_QUORUM
@@ -316,6 +318,8 @@ struct Worker<'a> {
     resync: bool,
     /// No batch starts before this: a spacing after the last that proposed a change set.
     quiet: Option<Instant>,
+    /// Another member has taken office: the worker ends.
+    deposed: bool,
 }
 
 /// Why a zone write failed.
@@ -332,6 +336,8 @@ enum Failure {
     Refused,
     /// Above the store's batch limit.
     TooLarge,
+    /// The set's fence failed: another member has taken office.
+    Deposed,
 }
 
 /// What the writes of a batch did besides writing: the parts that failed or that the zone
@@ -342,6 +348,7 @@ struct Wrote {
     refused: HashMap<(usize, Part), String>,
     deferred: HashSet<usize>,
     proposed: bool,
+    deposed: bool,
 }
 
 impl DdnsService {
@@ -383,6 +390,7 @@ impl<'a> Worker<'a> {
             retry: Vec::new(),
             resync: true,
             quiet: None,
+            deposed: false,
         }
     }
 
@@ -588,6 +596,9 @@ impl<'a> Worker<'a> {
                     }
                 }
                 self.batch().await;
+                if self.deposed {
+                    return Err("the DDNS worker is no longer the leader".to_owned());
+                }
                 continue;
             }
             let next_retry = self.retry.iter().map(|(at, _, _)| *at).min();
@@ -890,6 +901,11 @@ impl<'a> Worker<'a> {
         if wrote.proposed {
             self.quiet = Some(Instant::now() + self.service.settings.spacing);
         }
+        // The next leader plans every lease again; a fenced outcome would be refused too.
+        if wrote.deposed {
+            self.deposed = true;
+            return;
+        }
         for (index, part, _) in &writes {
             let result = &mut results[*index];
             let refusal = wrote.refused.get(&(*index, *part));
@@ -1051,6 +1067,10 @@ impl<'a> Worker<'a> {
                         wrote.refused.insert((*index, *part), reason);
                     }
                 }
+                Err((_, Failure::Deposed)) => {
+                    wrote.deposed = true;
+                    break;
+                }
                 Err((error, failure)) => {
                     for (index, part, _) in parts {
                         wrote.failed.insert((*index, *part), error.clone());
@@ -1093,7 +1113,7 @@ impl<'a> Worker<'a> {
             match self
                 .service
                 .zones
-                .change_dhcp_names(&cx, zone, parts, allows)
+                .change_dhcp_names(&cx, zone, parts, allows, Some(self.epoch))
                 .await
             {
                 Ok((_, refused)) => {
@@ -1205,6 +1225,7 @@ impl<'a> Worker<'a> {
                     return;
                 }
                 Err(error) => {
+                    self.deposed |= fenced_out(&error);
                     tracing::warn!(%error, "the DDNS worker could not record its outcomes");
                     return;
                 }
@@ -1300,6 +1321,11 @@ mod tests {
         assert_eq!(
             failure_of(&refused.code, refused.status),
             (Failure::Refused, false)
+        );
+        // The zone service's failed fence: final.
+        assert_eq!(
+            failure_of(StoreError::PRECONDITION_FAILED, 412),
+            (Failure::Deposed, false)
         );
     }
 

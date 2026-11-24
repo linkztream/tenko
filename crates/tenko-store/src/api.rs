@@ -1140,6 +1140,14 @@ pub fn fence(epoch: u64) -> Precondition {
     }
 }
 
+/// Whether a write failed its [`fence`]: another member took office after the epoch the
+/// batch was fenced with, whatever other preconditions failed beside it.
+pub fn fenced_out(error: &StoreError) -> bool {
+    matches!(error, StoreError::PreconditionFailed(failures) if failures.iter().any(|failure| {
+        matches!(failure, FailedPrecondition::Counter { counter, .. } if *counter == tenko_core::cluster::LEADER_EPOCH)
+    }))
+}
+
 /// Finds the [`Anchors`] of an object for scope checks (IAM-01, plan section 2.5): a prefix
 /// anchors to itself and its ancestors, an address or a range to its most specific prefix,
 /// a host to its site and the prefixes of its addresses, and so on. Implemented over the
@@ -1946,6 +1954,30 @@ mod tests {
             .accepts_writes()
         );
         assert_eq!(QuorumState::default(), QuorumState::Single);
+    }
+
+    /// Any failed fence among the failures is fenced out; another counter or a version alone
+    /// is not.
+    #[test]
+    fn a_failed_fence_among_other_failures_is_fenced_out() {
+        let version = FailedPrecondition::Version {
+            table: TableName::from_static("dhcp.leases"),
+            key: Bytes::new(),
+            expected: None,
+            actual: Some(Revision(1)),
+        };
+        let counter = |counter| FailedPrecondition::Counter {
+            counter,
+            expected: 7,
+            actual: 8,
+        };
+        let fence = counter(tenko_core::cluster::LEADER_EPOCH);
+        let other = counter(CounterKey::new("sys.other"));
+        let failed = |failures| StoreError::PreconditionFailed(failures);
+        assert!(fenced_out(&failed(vec![version.clone(), fence])));
+        assert!(!fenced_out(&failed(vec![version, other])));
+        assert!(!fenced_out(&failed(Vec::new())));
+        assert!(!fenced_out(&StoreError::NoQuorum));
     }
 
     #[test]

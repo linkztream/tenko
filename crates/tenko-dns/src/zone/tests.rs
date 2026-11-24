@@ -1659,3 +1659,37 @@ async fn the_check_of_a_change_reads_no_journal() {
     .expect("the plan reads the journal");
     assert!(format!("{error:?}").contains("dns.journal"), "{error:?}");
 }
+
+/// A DHCP set fenced to a term that has ended fails at once with 412, which is never
+/// planned again.
+#[tokio::test]
+async fn a_fenced_dhcp_set_of_an_ended_term_fails_at_once() {
+    let (service, store) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let mut bump = WriteBatch::new(cx().principal, tenko_core::Timestamp::now());
+    bump.bump(tenko_core::cluster::LEADER_EPOCH);
+    store
+        .propose(bump)
+        .await
+        .expect("another member takes office");
+    let mut change = a("host.example.test", &["192.0.2.1"]);
+    change.origin = Origin::Dhcp;
+    let error = service
+        .change_dhcp_names(
+            &RequestCtx::system(SystemComponent::Dhcp),
+            zone.id,
+            &[vec![change]],
+            true,
+            Some(0),
+        )
+        .await
+        .expect_err("fenced");
+    assert_eq!(
+        (&*error.coded().code, error.coded().status),
+        (tenko_store::StoreError::PRECONDITION_FAILED, 412)
+    );
+}

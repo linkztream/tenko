@@ -43,14 +43,14 @@ use std::{
 
 use futures::StreamExt;
 use tenko_core::{Coded, JobId, NodeId, Revision, Timestamp, codec::encode_key};
-use tenko_store::{KeyRange, ReadView, ReadViewExt, WatchFilter, WriteBatch};
+use tenko_store::{KeyRange, ReadView, ReadViewExt, WatchFilter, WriteBatch, fenced_out};
 use tokio::{
     sync::mpsc,
     task::{JoinHandle, JoinSet},
 };
 
 use crate::{
-    drive::{DriveEnd, drive, fenced_out, lease},
+    drive::{DriveEnd, drive, lease},
     engine::Inner,
     model::{GroupKey, Job, JobState},
     persist::{self, PAGE},

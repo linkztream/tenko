@@ -46,13 +46,11 @@ use std::{
 use futures::StreamExt;
 use serde::Serialize;
 use tenko_core::{
-    NodeId, RequestCtx, SystemComponent, Timestamp,
-    audit::AuditDraft,
-    cluster::{LEADER_EPOCH, LeaderService},
+    NodeId, RequestCtx, SystemComponent, Timestamp, audit::AuditDraft, cluster::LeaderService,
 };
 use tenko_store::{
-    FailedPrecondition, Precondition, ReadConsistency, ReadView, Store, StoreError, WatchFilter,
-    WriteBatch, fence,
+    Precondition, ReadConsistency, ReadView, Store, StoreError, WatchFilter, WriteBatch, fence,
+    fenced_out,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -1082,14 +1080,7 @@ fn nodes(nodes: &[NodeId]) -> String {
 /// Whether an error says that this controller lost its term of office (a leader-only write
 /// failed its leader epoch precondition).
 pub fn deposed(error: &VaultError) -> bool {
-    matches!(
-        error,
-        VaultError::Store(StoreError::PreconditionFailed(failures))
-            if failures.iter().any(|failure| matches!(
-                failure,
-                FailedPrecondition::Counter { counter, .. } if *counter == LEADER_EPOCH
-            ))
-    )
+    matches!(error, VaultError::Store(error) if fenced_out(error))
 }
 
 /// The leader-only service of online rotations.

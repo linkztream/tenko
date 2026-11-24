@@ -564,7 +564,18 @@ impl ZoneService {
                         revision: committed.revision,
                         job: None,
                     })
-                    .map_err(ZoneError::from)
+                    .map_err(|error| {
+                        if tenko_store::fenced_out(&error) {
+                            // 412, not stale: planning again cannot bring the office back.
+                            ZoneError::new(
+                                tenko_store::StoreError::PRECONDITION_FAILED,
+                                412,
+                                "another member has taken office",
+                            )
+                        } else {
+                            ZoneError::from(error)
+                        }
+                    })
             };
             match written {
                 Ok(written) => return Ok((planned.result, Some(written))),

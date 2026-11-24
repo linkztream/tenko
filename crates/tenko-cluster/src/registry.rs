@@ -41,7 +41,6 @@ use tenko_core::{
     Coded, MessageKey, NodeId, ObjectKind, ObjectRef, Principal, RequestCtx, Revision, Role,
     RoleSet, SystemComponent, Timestamp,
     audit::AuditDraft,
-    cluster::LEADER_EPOCH,
     codec::{from_cbor, to_cbor},
     secret::SecretClass,
     serde_util::HexBytes,
@@ -52,8 +51,7 @@ use tenko_jobs::{
 };
 use tenko_store::WatchFilter;
 use tenko_store::{
-    FailedPrecondition, KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError,
-    WriteBatch,
+    KeyRange, ReadConsistency, ReadView, ReadViewExt, Store, StoreError, WriteBatch, fenced_out,
 };
 use tenko_vault::{SecretPurpose, SecretSpec, Vault, VaultError};
 use tokio::{
@@ -764,7 +762,7 @@ impl NodeRegistry {
                 }
                 // A row changed since the plan (a token deleted meanwhile): the next pass
                 // plans again. Only the fence's failure means that the office moved on.
-                Err(StoreError::PreconditionFailed(failed)) if !failed.iter().any(is_fence) => {
+                Err(error @ StoreError::PreconditionFailed(_)) if !fenced_out(&error) => {
                     removed = 0;
                 }
                 Err(error) => return Err(error.into()),
@@ -2684,11 +2682,6 @@ fn reserved(
                 && token.expires_at > now
                 && token.name.is_some_and(|name| name.to_lowercase() == key)
         }))
-}
-
-/// Whether `failed` is the leader fence of [`tenko_store::fence`].
-fn is_fence(failed: &FailedPrecondition) -> bool {
-    matches!(failed, FailedPrecondition::Counter { counter, .. } if *counter == LEADER_EPOCH)
 }
 
 /// The position of the endpoint that names one of `listening` (by port), if any.

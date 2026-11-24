@@ -43,7 +43,7 @@ use futures::FutureExt;
 use tenko_core::{
     Coded, CodedError, JobId, NodeId, RequestCtx, Revision, Timestamp, cluster::LEADER_EPOCH,
 };
-use tenko_store::{FailedPrecondition, ReadConsistency, ReadViewExt, StoreError};
+use tenko_store::{ReadConsistency, ReadViewExt, StoreError, fenced_out};
 use tracing::Instrument as _;
 
 use crate::{
@@ -61,14 +61,6 @@ const RACE_LIMIT: u32 = 100;
 
 /// Longest pause between two attempts to confirm leadership.
 const CONFIRM_BACKOFF_MAX: Duration = Duration::from_secs(2);
-
-/// Whether a write failed because the leader epoch moved on: another controller took
-/// office after the epoch the batch was fenced with.
-pub(crate) fn fenced_out(error: &StoreError) -> bool {
-    matches!(error, StoreError::PreconditionFailed(failures) if failures.iter().any(|failure| {
-        matches!(failure, FailedPrecondition::Counter { counter, .. } if *counter == LEADER_EPOCH)
-    }))
-}
 
 /// The outcome of a leadership confirmation.
 enum Confirmation {

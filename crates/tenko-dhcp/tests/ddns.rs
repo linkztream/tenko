@@ -40,7 +40,7 @@ use tenko_core::testing::wait_until_async;
 use tenko_core::{
     AddressId, NodeId, PrefixId, Principal, RangeId, RequestCtx, SystemComponent, Timestamp,
     UserId, VrfId,
-    cluster::LeaderService as _,
+    cluster::{LEADER_EPOCH, LeaderService as _},
     dhcp::{BindingState, ClientKey, DdnsConflict, DdnsPolicy, DdnsState, Lease, tables::LEASES},
     dns::{
         DnsName, Origin, RecordData, RrSet, RrSetKey, Rtype, ScopeName, SerialPolicy, SoaDefaults,
@@ -275,20 +275,23 @@ impl Lab {
     fn restart(&mut self) {
         self.stop.cancel();
         self.stop = CancellationToken::new();
-        let source = {
-            let profile = Arc::clone(&self.profile);
-            Arc::new(move |_: &dyn tenko_store::ReadView| {
-                *profile.lock().unwrap_or_else(PoisonError::into_inner)
-            })
-        };
-        let service = Arc::new(DdnsService::new(
+        let service = self.service();
+        let token = self.stop.child_token();
+        tokio::spawn(async move { service.run(0, token).await });
+    }
+
+    /// A worker over the lab's store and zones.
+    fn service(&self) -> DdnsService {
+        let profile = Arc::clone(&self.profile);
+        let source = Arc::new(move |_: &dyn tenko_store::ReadView| {
+            *profile.lock().unwrap_or_else(PoisonError::into_inner)
+        });
+        DdnsService::new(
             Arc::clone(&self.store),
             Arc::clone(&self.zones),
             source,
             self.settings,
-        ));
-        let token = self.stop.child_token();
-        tokio::spawn(async move { service.run(0, token).await });
+        )
     }
 
     fn lease(&self, last: u8, who: u8, fqdn: Option<(&str, u8)>, hostname: Option<&str>) -> Lease {
@@ -841,6 +844,7 @@ async fn a_stale_name_update_is_planned_again_and_written_without_a_job() {
             lab.forward,
             &[vec![dhcp_a("stale.lan.example.test", 7)]],
             true,
+            None,
         )
         .await
         .expect("planned again");
@@ -868,7 +872,7 @@ async fn only_the_dhcp_component_itself_writes_names_without_a_job() {
         let owner = format!("h{index}.lan.example.test");
         let outcome = lab
             .zones
-            .change_dhcp_names(cx, lab.forward, &[vec![dhcp_a(&owner, 10)]], true)
+            .change_dhcp_names(cx, lab.forward, &[vec![dhcp_a(&owner, 10)]], true, None)
             .await
             .expect("names");
         let after = job_rows(lab.store.as_ref()).await;
@@ -1942,4 +1946,38 @@ async fn a_failed_lease_waits_in_the_queue_for_its_retry() {
         lab.ddns(52).await.last_error.is_some() && QUEUE.get() == Some(2.0)
     })
     .await;
+}
+
+/// A worker whose term has ended plans its fenced set once and stops: planning again cannot
+/// bring its office back.
+#[tokio::test]
+async fn a_worker_that_lost_its_office_plans_its_set_once_and_stops() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    lab.stop.cancel();
+    let mut bump = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+    bump.bump(LEADER_EPOCH);
+    lab.store
+        .propose(bump)
+        .await
+        .expect("another member takes office");
+    lab.commit(lab.lease(50, 1, Some(("h1", ClientFqdn::FLAG_S)), None))
+        .await;
+    let ended = tokio::time::timeout(
+        Duration::from_secs(60),
+        lab.service().run(0, CancellationToken::new()),
+    )
+    .await
+    .expect("the deposed worker stops");
+    assert_eq!(
+        ended,
+        Err("the DDNS worker is no longer the leader".to_owned())
+    );
+    assert_eq!(store.attempts.load(Ordering::SeqCst), 1, "planned once");
+    assert_eq!(lab.a("h1.lan.example.test").await, Vec::new());
 }

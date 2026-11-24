@@ -792,24 +792,28 @@ impl ZoneService {
     /// returned with its reason: a change of another origin than `dhcp`, an addition to a
     /// zone that takes no DHCP updates (`allows_by_default` is the profile's default of the
     /// zone's switch), or a part the rules of a batch refuse; the writer's removals go
-    /// wherever its names stand. Made by the DHCP component itself, the change set runs
+    /// wherever its names stand. With `fence`, the set commits only while the leader epoch
+    /// is still that value ([`tenko_store::fence`]), so a writer that lost its office writes
+    /// nothing. Made by the DHCP component itself, the change set runs
     /// without a job: a client can change its lease without limit, and so would the job
     /// rows. It keeps its audit record `dns.record.change` and its journal entry. Any
     /// other principal's change set is a job.
     ///
     /// # Errors
     ///
-    /// As [`ZoneService::change_records`], for the set or a store error.
+    /// As [`ZoneService::change_records`], for the set or a store error; a failed fence is
+    /// `sys.store.precondition_failed` with status 412 at once, never planned again.
     pub async fn change_dhcp_names(
         &self,
         cx: &RequestCtx,
         zone: ZoneId,
         parts: &[Vec<Change>],
         allows_by_default: bool,
+        fence: Option<u64>,
     ) -> ZoneResult<(BatchOutcome, Vec<(usize, ZoneError)>)> {
         let job = cx.principal != Principal::system(SystemComponent::Dhcp);
         let parts: Vec<&[Change]> = parts.iter().map(Vec::as_slice).collect();
-        self.write_records(cx, zone, &parts, job, Some(allows_by_default))
+        self.write_records(cx, zone, &parts, job, Some((allows_by_default, fence)))
             .await
     }
 
@@ -819,7 +823,7 @@ impl ZoneService {
         zone: ZoneId,
         parts: &[&[Change]],
         job: bool,
-        dhcp: Option<bool>,
+        dhcp: Option<(bool, Option<u64>)>,
     ) -> ZoneResult<(BatchOutcome, Vec<(usize, ZoneError)>)> {
         let limits = self.config.journal;
         let max_changes = self.config.max_changes;
@@ -829,7 +833,7 @@ impl ZoneService {
                 let mut refused = Vec::new();
                 let mut changes = Vec::new();
                 for (index, part) in parts.iter().enumerate() {
-                    if let Some(allows) = dhcp
+                    if let Some((allows, _)) = dhcp
                         && let Err(error) = dhcp_part(view, &row.zone, part, cx, allows)
                     {
                         // A store error is the write's, not the part's.
@@ -841,7 +845,12 @@ impl ZoneService {
                     }
                     changes.extend_from_slice(part);
                 }
-                let planned = plan(view, &row.zone, &changes, cx, limits, max_changes)?;
+                let mut planned = plan(view, &row.zone, &changes, cx, limits, max_changes)?;
+                if let Some((_, Some(epoch))) = dhcp
+                    && let Some(batch) = planned.batch.as_mut()
+                {
+                    batch.preconditions.push(tenko_store::fence(epoch));
+                }
                 let result = (planned.diff, planned.serials, refused);
                 Ok(match planned.batch {
                     Some(batch) => Planned {
