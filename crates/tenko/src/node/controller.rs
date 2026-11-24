@@ -1094,9 +1094,7 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                 let found = generation
                     .found
                     .as_ref()
-                    .map_or_else(String::new, |(at, found)| {
-                        format!(". Found {}: {found}", at.to_rfc3339())
-                    });
+                    .map_or_else(String::new, |found| format!(". Found {found}"));
                 let node = layer.store().node_id();
                 let detail =
                     fence_detail(reason, other.tip(), generation.lineage.tip(), node) + &found;
@@ -1461,6 +1459,8 @@ mod tests {
         }
         let detail = fence_detail(FenceReason::MajorityAlive, Some(&other), None, NodeId(1));
         assert!(!detail.contains("claims"), "{detail}");
+        let detail = fence_detail(FenceReason::Diverged, None, None, NodeId(7));
+        assert!(detail.contains("tenko cluster remove 7 --yes"), "{detail}");
     }
 
     fn at(text: &str) -> Timestamp {

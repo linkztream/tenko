@@ -864,7 +864,11 @@ impl RaftLogStorage<TypeConfig> for LogStore {
     async fn read_vote(&mut self) -> Result<Option<Vote>, StorageError> {
         #[cfg(feature = "test-hooks")]
         {
-            let hook = self.inner.shared.dir.join(crate::test_hooks::FAIL_VOTE_READ);
+            let hook = self
+                .inner
+                .shared
+                .dir
+                .join(crate::test_hooks::FAIL_VOTE_READ);
             if std::fs::remove_file(hook).is_ok() {
                 return Err(StorageIOError::read_vote(&crate::test_hooks::full_disk()).into());
             }

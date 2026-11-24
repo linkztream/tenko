@@ -129,8 +129,9 @@ pub struct GenerationState {
     pub lineage: Lineage,
     /// Why this controller stopped writing, and the records that stopped it.
     pub fence: Option<(FenceReason, Lineage)>,
-    /// When the store stopped on what a leader sent, and what it found.
-    pub found: Option<(Timestamp, String)>,
+    /// What the store found when it stopped on what a leader sent, led by the time of the
+    /// finding.
+    pub found: Option<String>,
 }
 
 impl GenerationState {
@@ -173,7 +174,7 @@ impl GenerationHook for Hook {
         Some(Box::pin(async move {
             let _one_at_a_time = peers.generations().fencing.lock().await;
             if peers.generation().fence.is_none() {
-                let found = Some((Timestamp::now(), detail));
+                let found = Some(format!("{}: {detail}", Timestamp::now().to_rfc3339()));
                 peers
                     .fence_now(reason, Lineage::default(), true, found)
                     .await;
@@ -273,9 +274,8 @@ impl Peers {
         };
         if let Some(kept) = kept {
             let records = Lineage::kept(&kept.records)?;
-            let found = kept.detail.map(|detail| (kept.at, detail));
             let _one_at_a_time = self.generations().fencing.lock().await;
-            self.fence_now(kept.kind, records, false, found).await;
+            self.fence_now(kept.kind, records, false, kept.detail).await;
         }
         Ok(self.generation())
     }
@@ -664,7 +664,7 @@ impl Peers {
         reason: FenceReason,
         records: Lineage,
         persist: bool,
-        found: Option<(Timestamp, String)>,
+        found: Option<String>,
     ) {
         // A fence never weakens: a weaker reason after a stricter one changes nothing.
         if lock(&self.generations().state)
@@ -681,7 +681,7 @@ impl Peers {
                 kind: reason,
                 records: records_of(&records),
                 at: Timestamp::now(),
-                detail: found.as_ref().map(|(_, detail)| detail.clone()),
+                detail: found.clone(),
             };
             if let Err(error) = kept.save(dir) {
                 tracing::error!(code = %error.code(), "the fence could not be kept on disk; this run stays fenced: {}", error.detail());

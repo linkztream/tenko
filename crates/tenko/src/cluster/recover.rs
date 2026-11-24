@@ -502,10 +502,7 @@ impl Facts {
             stopped_by,
             address_map: resolved.config.cluster.peer_address_map.clone(),
             fence: fence.as_ref().map(|fence| fence.kind),
-            found: fence.as_ref().and_then(|fence| {
-                let detail = fence.detail.as_ref()?;
-                Some(format!("{}: {detail}", fence.at.to_rfc3339()))
-            }),
+            found: fence.as_ref().and_then(|fence| fence.detail.clone()),
             seen: own
                 .as_ref()
                 .map_or(0, generation::Signed::number)
@@ -614,7 +611,9 @@ impl Facts {
             self.copy.bytes
         );
         let _ = writeln!(text, "fingerprint      {}", self.fingerprint());
-        if let (Some(fence), Some(found)) = (self.fence, &self.found) {
+        if let (Some(fence), Some(found)) = (self.fence, &self.found)
+            && fence.way_out(self.node).is_some()
+        {
             let _ = writeln!(text, "stopped          {} at {found}", fence.code());
         } else if let Some(fence) = self.fence {
             let _ = writeln!(
@@ -629,6 +628,9 @@ impl Facts {
                         tip.forced()
                     ))
             );
+            if let Some(found) = &self.found {
+                let _ = writeln!(text, "found            {found}");
+            }
         }
         {
             let next = self.next();
@@ -834,17 +836,6 @@ async fn force(
     }
 }
 
-/// The refusal of a forced step on a copy that stopped as older than its cluster.
-fn older_copy(node: NodeId) -> Failure {
-    let reverted = tenko_store::FenceReason::Reverted;
-    let way_out = reverted.way_out(node).unwrap_or_default();
-    failure(
-        reverted.code(),
-        exit::USAGE,
-        format!("controller {node} stopped writing: {way_out}"),
-    )
-}
-
 /// The checks of `--force` before anything is written: returns the nodes the step
 /// supersedes (every other voter and learner of the copy).
 fn force_checks(
@@ -873,7 +864,13 @@ fn force_checks(
         ));
     }
     if facts.fence == Some(tenko_store::FenceReason::Reverted) && !args.despite_older_copy {
-        return Err(older_copy(node));
+        let reverted = tenko_store::FenceReason::Reverted;
+        let way_out = reverted.way_out(node).unwrap_or_default();
+        return Err(failure(
+            reverted.code(),
+            exit::USAGE,
+            format!("controller {node} stopped writing: {way_out}"),
+        ));
     }
     // The numbers saturate: a second step at the largest one would replace this copy's own
     // record under the same number and break its lineage.
@@ -2541,6 +2538,15 @@ pub(crate) mod tests {
         let text = copy.describe();
         assert!(text.contains("creates generation 4"), "{text}");
         assert!(!text.contains("1:4"), "{text}");
+        // A detail kept from an earlier finding stays beside the generation that stopped it.
+        copy.found = Some("2026-11-20T10:00:00+00:00: node 2 sent 3-2-10".to_owned());
+        let text = copy.describe();
+        assert!(text.contains("generation 3 of another history"), "{text}");
+        assert!(
+            text.contains("found            2026-11-20T10:00:00+00:00: node 2"),
+            "{text}"
+        );
+        copy.found = None;
         let wrong = RecoverArgs {
             confirm: Some("1:3".to_owned()),
             ..args()

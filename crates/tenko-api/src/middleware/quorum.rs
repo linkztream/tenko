@@ -204,18 +204,12 @@ fn refusal(state: &QuorumState, staleness: Staleness, queueable: bool) -> Respon
 /// The refusal of a controller that stopped writing for good (the cluster recovery): no
 /// `Retry-After`, since only an operator ends the state.
 fn fenced(reason: FenceReason, staleness: Staleness, queueable: bool) -> Response {
-    let why = reason.way_out("<id>").unwrap_or_else(|| {
-        match reason {
-            FenceReason::Conflict => {
-                "a competing forced history of the cluster was seen, and an operator chooses which one stays"
-            }
-            FenceReason::MajorityAlive => {
-                "the forced step found the old cluster alive at its first start and this controller did not take office"
-            }
-            _ => "a newer generation of the cluster superseded this controller's history",
-        }
-        .to_owned()
-    });
+    let why = match reason {
+        FenceReason::Reverted | FenceReason::Diverged => reason.way_out("<id>").unwrap_or_default(),
+        FenceReason::Conflict => "a competing forced history of the cluster was seen, and an operator chooses which one stays".to_owned(),
+        FenceReason::MajorityAlive => "the forced step found the old cluster alive at its first start and this controller did not take office".to_owned(),
+        _ => "a newer generation of the cluster superseded this controller's history".to_owned(),
+    };
     ApiError::new(
         reason.code(),
         503,
@@ -437,6 +431,12 @@ mod tests {
             assert_eq!(problem["params"]["state"], "fenced", "{problem}");
             let detail = problem["detail"].as_str().expect("detail");
             assert!(!detail.contains("  "), "{detail}");
+            if matches!(reason, FenceReason::Reverted | FenceReason::Diverged) {
+                assert!(
+                    detail.contains("tenko cluster remove <id> --yes"),
+                    "{detail}"
+                );
+            }
         }
     }
 

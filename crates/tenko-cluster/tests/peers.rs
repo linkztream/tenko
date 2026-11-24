@@ -2917,10 +2917,7 @@ async fn a_store_fence_keeps_what_it_found_under_a_later_record() {
         (kept.kind, kept.detail.as_deref()),
         (FenceReason::Superseded, Some(found.as_str()))
     );
-    assert_eq!(
-        receiver.peers.generation().found.map(|(_, detail)| detail),
-        Some(found)
-    );
+    assert_eq!(receiver.peers.generation().found, Some(found));
     lab.stop().await;
 }
 

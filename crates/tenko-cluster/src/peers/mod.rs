@@ -2612,10 +2612,10 @@ mod tests {
         let kept = crate::generation::FenceFile::load(dir.path())
             .expect("load")
             .expect("a fence file");
-        assert_eq!(
-            (kept.kind, kept.detail.as_deref()),
-            (FenceReason::Diverged, Some(found.as_str()))
-        );
+        // The time of the finding leads what was found.
+        let stored = kept.detail.clone().expect("what was found");
+        assert!(stored.ends_with(&format!(": {found}")), "{stored}");
+        assert_eq!(kept.kind, FenceReason::Diverged);
         assert!(
             network
                 .keep_fence(FenceReason::Reverted, "later".to_owned())
@@ -2639,10 +2639,7 @@ mod tests {
         let (store, _network, peers) = open().await;
         peers.load_generation().await.expect("the fence file");
         assert_eq!(reasons(&store, &peers), (diverged, diverged));
-        assert_eq!(
-            peers.generation().found.map(|(_, detail)| detail),
-            Some(found)
-        );
+        assert_eq!(peers.generation().found, Some(stored));
         let _ = store.shutdown().await;
     }
 }
