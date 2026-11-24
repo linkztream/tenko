@@ -77,7 +77,7 @@ function Get-FakeWorld {
         # Records Tenko serves beside the flip-time ones, which a secondary of it then holds.
         tenkoAdds = @{}
         directory = @($script:FakeDomain, "_msdcs.$($script:FakeDomain)", '2.0.192.in-addr.arpa')
-        services = @{ dc1 = @{ Status = 'Running'; Start = 'Automatic'; Role = $true; Serving = $true }; dc2 = @{ Status = 'Running'; Start = 'Automatic'; Role = $true; Serving = $true } }
+        services = @{ dc1 = @{ Status = 'Running'; Start = 'Automatic'; Serving = $true }; dc2 = @{ Status = 'Running'; Start = 'Automatic'; Serving = $true } }
         authorized = [System.Collections.ArrayList]@('dc1', 'dc2')
         foreign = @()
         accounts = [ordered]@{}; marks = @{}; crashAfterCreate = ''; crashed = $false
@@ -367,10 +367,6 @@ function Invoke-FakeRemote {
             foreach ($lease in $a[1]) { [void]$w.written.Add("$s|$($lease.Ip)|$($lease.Client)|$($lease.Seconds)") }
             @('192.0.2.101') + @($a[1] | ForEach-Object { $_.Ip })
         }
-        'RemoveDhcpRole' { $w.services[$s].Role = $false; $false }
-        'RestoreDhcpRole' { $w.services[$s].Role = $true; $w.services[$s].Start = 'Disabled'; $w.services[$s].Status = 'Stopped'; $true }
-        'ReadGroups' { foreach ($group in $a[0]) { @{ Name = $group; Count = 1; Conflicts = 0 } } }
-        'AddFailover' { }
         'RemoveZoneObject' { }
         default { throw "the fake has no block $Name" }
     }

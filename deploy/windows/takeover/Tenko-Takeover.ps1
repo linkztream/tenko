@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Moves an Active Directory domain's DNS zones and DHCP scopes from its Windows servers to
-  Tenko DDI, phase by phase, each phase reversible (MIG-17, MIG-08; ADR 0038).
+  Tenko DDI, phase by phase, each phase but the finish reversible (MIG-17, MIG-08; ADR 0038).
 
 .DESCRIPTION
   Run elevated, as a member of the domain's Domain Admins, on a domain controller or a
@@ -13,8 +13,9 @@
 
   Phases: 0 discover (read only), 1 approval, 2 prepare (nothing served), 3 review (the
   window is started in Tenko's UI), 4 the DNS window, 5 the DHCP window, then the parallel
-  period; 6 the finish, in a later sitting. Started without a parameter it runs or resumes
-  the next phase; when a run exists it offers to reverse the latest phase instead.
+  period; 6 the finish, in a later sitting, which leaves the DHCP Server role installed and
+  has no scripted way back. Started without a parameter it runs or resumes the next phase;
+  when a run exists it offers to reverse the latest phase instead, until the finish starts.
 
   Exit codes: 0 the phase is done; 1 refused before any change; 2 stopped at a failed step
   (named in the state file); 3 waiting for the review or the parallel period; 4 a value from
@@ -27,7 +28,8 @@
   Discover and print the change list. Changes nothing on Windows and contacts no Tenko.
 
 .PARAMETER Reverse
-  Undo the latest phase done, both halves. Run again to walk one more phase back.
+  Undo the latest phase done, both halves. Run again to walk one more phase back. Refused
+  once the finish (phase 6) has started.
 #>
 [CmdletBinding()]
 param(
@@ -1795,38 +1797,9 @@ $script:TkRemote = @{
         Set-DhcpServerSetting -ConflictDetectionAttempts $Conflict
         @(Get-DhcpServerv4Lease -ScopeId $ScopeId -AllLeases | ForEach-Object { [string]$_.IPAddress })
     }
-    RemoveDhcpRole        = {
-        param([string]$Backup)
-        if ([string](Get-Service -Name DHCPServer -ErrorAction SilentlyContinue).Status -eq 'Running') { throw 'the DHCP Server service runs; the finish never removes a running server' }
-        $null = Uninstall-WindowsFeature -Name DHCP
-        $database = Join-Path $env:SystemRoot 'System32\dhcp'
-        if (Test-Path -LiteralPath $database) {
-            if (-not (Test-Path -LiteralPath $Backup)) { $null = New-Item -ItemType Directory -Path $Backup }
-            Move-Item -LiteralPath $database -Destination (Join-Path $Backup 'dhcp') -Force
-        }
-        [bool](Get-WindowsFeature -Name DHCP).Installed
-    }
-    RestoreDhcpRole       = {
-        param([string]$Backup, [string]$Export, [bool]$Import, [string]$Group)
-        $null = Install-WindowsFeature -Name DHCP -IncludeManagementTools
-        if ($Group) { Add-DhcpServerSecurityGroup }
-        if ($Import) { Import-DhcpServer -File $Export -BackupPath (Join-Path $Backup 'import') -Leases -Force }
-        Set-Service -Name DHCPServer -StartupType Disabled
-        [bool](Get-WindowsFeature -Name DHCP).Installed
-    }
-    AddFailover           = {
-        param([string]$Name, [string]$Partner, [string[]]$Scopes)
-        if (-not (Get-DhcpServerv4Failover -Name $Name -ErrorAction SilentlyContinue)) {
-            Add-DhcpServerv4Failover -Name $Name -PartnerServer $Partner -ScopeId $Scopes -LoadBalancePercent 50 -MaxClientLeadTime (New-TimeSpan -Hours 1) -Force
-        }
-    }
     RemoveZoneObject      = {
         param([string]$Dn)
         Remove-ADObject -Identity $Dn -Recursive -Confirm:$false
-    }
-    ReadGroups            = {
-        param([string[]]$Names)
-        foreach ($name in $Names) { @{ Name = $name; Count = @(Get-ADGroup -Filter "sAMAccountName -eq '$name'").Count; Conflicts = @(Get-ADGroup -Filter "Name -like '$name*CNF:*'").Count } }
     }
 }
 
@@ -2249,6 +2222,7 @@ function Show-TkChangeList {
     $lines += "  domain: the group policy object '$($script:TkGpoName)' for $(@($Readings.members).Count) member computers (removed)"
     foreach ($zone in $Readings.zones) { $lines += "  every controller, at the DNS window: $($zone.name) becomes a secondary of Tenko (made directory-integrated again, its update setting $($zone.update) restored)" }
     foreach ($server in $Readings.dhcp) { $lines += "  $($server.name), at the DHCP window: the DHCP Server service stopped and disabled, its authorization removed (authorized and started again)" }
+    $lines += '  after the parallel period, the finish: the exporter, its accounts, the zone objects and the mirrors removed, the DHCP Server role left installed (no scripted way back)'
     $lines += 'Changes on Tenko: the mirrors, the secondary zones (not served), the forwarding rules (inactive), the prepare, then at the windows the flip and the takeover (each reverted).'
     if (@($Readings.warnings).Count -gt 0) { $lines += 'Warnings:'; foreach ($w in $Readings.warnings) { $lines += "  - $w" } }
     $minimum = @($Readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.lease_secs } | Measure-Object -Minimum).Minimum
@@ -3582,8 +3556,16 @@ function Write-TkLeaseBack {
 }
 
 # ---------------------------------------------------------------------------------------
-# Phase 6: the finish, after the parallel period. The DHCP Server service is never started.
+# Phase 6: the finish, after the parallel period. The DHCP Server service is never started,
+# no role is removed or installed and no server restarted; the finish has no reverse.
 # ---------------------------------------------------------------------------------------
+
+function Get-TkDnsAccountNote {
+    # The account the run made for the DHCP servers' DNS updates goes with the finish.
+    param([System.Collections.IDictionary]$Readings)
+    if ($Readings.dns_credential -ne 'create') { return '' }
+    return " The DHCP servers' DNS credential names $($script:TkDnsCredentialUser), an account the finish deletes: set another with Set-DhcpServerDnsCredential before their service is ever started again."
+}
 
 function Get-TkPhase6 {
     param([hashtable]$State, [hashtable]$Payloads)
@@ -3598,30 +3580,6 @@ function Get-TkPhase6 {
                     if (-not $id) { continue }
                     [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/release" -Body ([ordered]@{ dry_run = $true }))
                     [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/release" -Body ([ordered]@{ dry_run = $false }))
-                }
-            }
-        }
-        @{ Name = 'dhcp-role'
-            Do = {
-                foreach ($server in $r.dhcp) {
-                    $backup = Protect-TkRemoteDirectory -Server $server.name -Below @('takeover', 'backup')
-                    if (Invoke-TkRemote -Server $server.name -Name RemoveDhcpRole -Arguments @($backup) | Select-Object -Last 1) { throw "the DHCP role is still installed on $($server.name)" }
-                }
-            }
-            Undo = {
-                # The way back: the role, its groups on one server, replication, then the other;
-                # the backup imported on the first; the relationship; the authorization stays removed.
-                $first = $r.dhcp[0]
-                $backup = Protect-TkRemoteDirectory -Server $first.name -Below @('takeover', 'backup')
-                [void](Invoke-TkRemote -Server $first.name -Name RestoreDhcpRole -Arguments @($backup, "$backup\dhcp-export.xml", $true, 'yes'))
-                [void](Invoke-TkRemote -Server $pdc -Name Replicate)
-                foreach ($controller in $r.controllers) {
-                    $groups = @(Invoke-TkRemote -Server $controller.name -Name ReadGroups -Arguments (, [string[]]@('DHCP Users', 'DHCP Administrators')))
-                    if (@($groups | Where-Object { $_.Count -ne 1 -or $_.Conflicts -gt 0 }).Count -gt 0) { throw "the DHCP groups have not replicated to $($controller.name) cleanly yet; run -Reverse again" }
-                }
-                foreach ($server in @($r.dhcp | Select-Object -Skip 1)) { [void](Invoke-TkRemote -Server $server.name -Name RestoreDhcpRole -Arguments @((Protect-TkRemoteDirectory -Server $server.name -Below @('takeover', 'backup')), '', $false, '')) }
-                foreach ($relationship in $first.failover) {
-                    [void](Invoke-TkRemote -Server $first.name -Name AddFailover -Arguments @($relationship.name, $relationship.partner, [string[]]@($relationship.scopes)))
                 }
             }
         }
@@ -3737,12 +3695,19 @@ function Invoke-Takeover {
         Assert-TkStateShape $data
         $phase = Get-TkNextPhase $data.phases
         $latest = Get-TkLatestPhase $data.phases
+        # Once the finish has started a run only goes forward.
+        if ($latest -eq '6') {
+            if ($Reverse) { Exit-TkTakeover 1 'the finish (phase 6) has started: there is no scripted way back, going back is manual work (README.md, after the finish); nothing was changed' }
+            if (-not $phase) { Write-TkNote "The takeover of $domain is finished; nothing is left to run."; return 0 }
+        }
         if (-not $Reverse -and $latest) {
             Write-TkNote "A run of $domain against Tenko at $($data.tenko.host):$($data.tenko.port) exists; the next phase is $phase, the latest done or failed ${latest}."
             $pending = @(@(Get-TkField $data.values 'barrier_pending') | Where-Object { $_ })
             if ($pending.Count -gt 0) { Write-TkNote "Pending: the removal of the DHCP servers' authorization has not reached $($pending -join ', '); this sitting reads it again." }
-            $choice = (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant()
-            if ($choice -eq 'r') { $Reverse = $true }
+            if ($latest -ne '6') {
+                $choice = (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant()
+                if ($choice -eq 'r') { $Reverse = $true }
+            }
         }
         # A precondition of the DNS window's check, with the others: before any change.
         $checked = Get-TkField $data.steps '4.check'
@@ -3836,7 +3801,10 @@ function Invoke-Takeover {
             if ($phase -eq '6' -and (Get-TkField $data.values 'finish_confirmed') -ne $true) {
                 $open = @(@(Get-TkField $data.values 'unproven') | Where-Object { $_ })
                 $note = $(if ($open.Count -gt 0) { " Tenko reports no answered client yet for $($open -join ', ')." } else { '' })
-                if (-not (Confirm-TkTyped "The parallel period is over and the finish (phase 6) removes the DHCP role from both servers.$note Type the domain's name to go on" $domain)) { Exit-TkTakeover 3 'waiting for the parallel period' }
+                $text = "The parallel period is over. The finish (phase 6) removes the exporter and its account, the zones' objects in the directory partitions and Tenko's mirrors. After it there is no scripted way back: -Reverse is refused and going back is manual work. " +
+                "Each DHCP server keeps the DHCP Server role and its database, the service stopped and disabled, the authorization removed; removing the role is yours to do later (README.md). " +
+                "The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path $state.Dir 'backup') here.$(Get-TkDnsAccountNote $data.readings)$note Type the domain's name to go on"
+                if (-not (Confirm-TkTyped $text $domain)) { Exit-TkTakeover 3 'waiting for the parallel period' }
                 $data.values.finish_confirmed = $true
             }
             # The DNS window is confirmed at the console in every sitting that starts it; the
@@ -3846,7 +3814,7 @@ function Invoke-Takeover {
             Invoke-TkPhase -State $state -Phase $phase -Payloads $payloads
             [void](Invoke-Tenko -Method PUT -Path "/migrate/runs/$run/phases/$phase" -Body ([ordered]@{ state = 'done' }) -Expect @(200, 204, 404))
             if ($phase -eq '5') { Write-TkNote 'The parallel period runs now. After it, run the script again for the finish.'; return 3 }
-            if ($phase -eq '6') { [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, '', '', $true)); Write-TkNote 'The takeover is finished.'; return 0 }
+            if ($phase -eq '6') { [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, '', '', $true)); Write-TkNote "The takeover is finished. The DHCP Server role stays installed on each DHCP server, its service stopped and disabled, its authorization removed; README.md says how to remove it yourself.$(Get-TkDnsAccountNote $data.readings)"; return 0 }
             $phase = Get-TkNextPhase $data.phases
         }
         return 0

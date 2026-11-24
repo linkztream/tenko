@@ -10,14 +10,14 @@ BeforeAll {
     $savedRoot = $script:TkDataRoot
     function Get-WindowsChange {
         # The calls that change Windows, from the world's log.
-        $reads = 'ReadDomain', 'ReadZones', 'ReadDirectoryZones', 'ReadDhcpInDirectory', 'ReadDhcpServer', 'ReadComputers', 'ReadNameUse', 'ReadHardening', 'ReadLocalAdmins', 'ReadFeature', 'ReadMarker', 'ReadDhcpConfiguration', 'ReadRecords', 'ReadZone', 'ReadLeases', 'ReadAuthorization', 'ReadPwdLastSet', 'ReadGroups', 'ReadSoa', 'ReadProgramFiles'
+        $reads = 'ReadDomain', 'ReadZones', 'ReadDirectoryZones', 'ReadDhcpInDirectory', 'ReadDhcpServer', 'ReadComputers', 'ReadNameUse', 'ReadHardening', 'ReadLocalAdmins', 'ReadFeature', 'ReadMarker', 'ReadDhcpConfiguration', 'ReadRecords', 'ReadZone', 'ReadLeases', 'ReadAuthorization', 'ReadPwdLastSet', 'ReadSoa', 'ReadProgramFiles'
         return @($script:world.calls | Where-Object { $reads -notcontains $_.Split('|')[1] })
     }
     function Get-WindowsShape {
         # What the reverse must bring back.
         $w = $script:world
         $zones = foreach ($zone in $w.zones.Keys) { foreach ($dc in 'dc1', 'dc2') { $z = $w.zones[$zone][$dc]; "$zone|$dc|$($z.Type)|$($z.Ds)|$($z.Update)|$($z.Transfer)|$($z.Notify)|$(@($z.Secondaries) -join ',')|$(@($z.NotifyServers) -join ',')" } }
-        return (@($zones) + "services $($w.services.dc1.Status)/$($w.services.dc1.Start)/$($w.services.dc1.Role) $($w.services.dc2.Status)/$($w.services.dc2.Start)/$($w.services.dc2.Role)" +
+        return (@($zones) + "services $($w.services.dc1.Status)/$($w.services.dc1.Start) $($w.services.dc2.Status)/$($w.services.dc2.Start)" +
             "authorized $(@($w.authorized | Sort-Object) -join ',')" + "accounts $(@($w.accounts.Keys) -join ',')" + "gpo $($w.gpo)" + "tasks $(@($w.tasks) -join ',')" + "batch $($w.batchRight)" + "marker $($null -ne $w.marker)") -join "`n"
     }
     function Read-State { ConvertFrom-TkJson -Chars ([System.IO.File]::ReadAllText((Join-Path (Get-TkStateDir 'corp.example.test') 'state.json')).ToCharArray()) }
@@ -45,28 +45,67 @@ Describe 'A whole run' {
     It 'finishes in the second sitting after the confirmation, without starting the DHCP Server service or reading a stopped server' {
         $script:world.calls.Clear()
         Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 0 -Because $script:lastError
-        $script:world.services.dc1.Role | Should -BeFalse
+        $script:finishCalls = @($script:world.calls)
+        foreach ($dc in 'dc1', 'dc2') { "$($script:world.services[$dc].Status)/$($script:world.services[$dc].Start)" | Should -Be 'Stopped/Disabled' -Because $dc }
+        @($script:world.authorized).Count | Should -Be 0
         $script:world.calls | Should -Not -Contain 'dc1|StartDhcp'
         $script:world.calls | Should -Not -Contain 'dc1|ReadDhcpServer'
         $script:world.marker | Should -BeNullOrEmpty
         @($script:world.mirrors.Keys).Count | Should -Be 0
     }
 
+    It 'says before the finish that there is no scripted way back, what stays on the servers and where the export is' {
+        $prompt = @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1]
+        $prompt | Should -Match 'After it there is no scripted way back: -Reverse is refused and going back is manual work\.'
+        $prompt | Should -Match 'Each DHCP server keeps the DHCP Server role and its database, the service stopped and disabled, the authorization removed'
+        $prompt | Should -Match ([regex]::Escape("The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path (Get-TkStateDir 'corp.example.test') 'backup') here."))
+        $prompt | Should -Not -Match 'Set-DhcpServerDnsCredential' -Because 'the servers keep the DNS credential they had'
+    }
+
+    It 'removes or installs no feature and restarts no server in the finish' {
+        $changing = @($script:TkRemote.Keys | Where-Object { $script:TkRemote[$_].ToString() -match '\b(Install|Uninstall|Add|Remove)-WindowsFeature\b|\b(Restart|Stop)-Computer\b' })
+        $changing | Should -Be @('SetFeature') -Because 'the mirror host''s tools are the only feature the script changes, in phase 2'
+        @($script:finishCalls | Where-Object { $changing -contains $_.Split('|')[1] }) | Should -BeNullOrEmpty
+    }
+
+    It 'refuses -Reverse after the finish with exit 1 and changes nothing' {
+        $script:world.calls.Clear()
+        $script:world.tenkoCalls.Clear()
+        Invoke-FakeRun -Reverse | Should -Be 1
+        $script:lastError | Should -Match 'the finish \(phase 6\) has started: there is no scripted way back'
+        $script:world.calls | Should -BeNullOrEmpty
+        $script:world.tenkoCalls | Should -BeNullOrEmpty
+        (Read-State).phases['6'] | Should -Be 'done'
+    }
+
     It 'changes nothing when run again' {
         $script:world.calls.Clear()
         $script:world.tenkoCalls.Clear()
-        Invoke-FakeRun -Answers @('c') | Should -Be 0 -Because $script:lastError
-        Get-WindowsChange | Where-Object { $_ -notmatch '\|WriteMarker$' } | Should -BeNullOrEmpty
-        @($script:world.tenkoCalls | Where-Object { $_ -notmatch '^GET ' }) | Should -BeNullOrEmpty
+        Invoke-FakeRun | Should -Be 0 -Because $script:lastError
+        $script:world.calls | Should -BeNullOrEmpty
+        $script:world.tenkoCalls | Should -BeNullOrEmpty
     }
 
-    It 'walks every phase back with -Reverse to the starting state' {
-        foreach ($phase in 6, 5, 4, 3, 2) {
+    It 'walks every phase before the finish back with -Reverse to the starting state' {
+        Install-FakeWorld
+        $start = Get-WindowsShape
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        foreach ($phase in 5, 4, 3, 2) {
             Invoke-FakeRun -Reverse | Should -Be 5 -Because "phase $phase is reversed ($script:lastError)"
         }
-        Get-WindowsShape | Should -Be $script:start
+        Get-WindowsShape | Should -Be $start
         @($script:world.mirrors.Keys).Count | Should -Be 0
         @($script:world.tzones.Keys).Count | Should -Be 0
+    }
+
+    It 'deletes the DNS update account it made and says that the servers need another credential before a start' {
+        Install-FakeWorld
+        $script:world.dnsUser = ''
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:world.accounts.Contains('tenko-dhcp-dns') | Should -BeTrue
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 0 -Because $script:lastError
+        $script:world.accounts.Contains('tenko-dhcp-dns') | Should -BeFalse
+        @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1] | Should -Match 'names tenko-dhcp-dns, an account the finish deletes: set another with Set-DhcpServerDnsCredential before their service is ever started again\.'
     }
 }
 
@@ -105,9 +144,8 @@ Describe 'A failure at a step' {
         @($script:world.tasks).Count | Should -Be 2
     }
 
-    It 'stops at the finish''s <step> with exit 2 and resumes there' -ForEach @(
+    It 'stops at the finish''s <step> with exit 2, refuses -Reverse and resumes there' -ForEach @(
         @{ step = '6.tenko'; route = 'release$' }
-        @{ step = '6.dhcp-role'; block = 'RemoveDhcpRole' }
         @{ step = '6.exporter'; block = 'RemoveExporter' }
         @{ step = '6.mirror-account'; block = 'RemoveAccount' }
         @{ step = '6.zone-objects'; block = 'RemoveZoneObject'; pre = { $script:world.directory += 'corp.example.test' } }
@@ -118,7 +156,9 @@ Describe 'A failure at a step' {
         if ($_.ContainsKey('pre')) { & $_.pre }
         if ($_.ContainsKey('block')) { $script:world.failAt = $_.block } else { $script:world.failRoute = $_.route }
         Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 2
-        Invoke-FakeRun -Answers @('c') | Should -Be 0 -Because $script:lastError
+        Invoke-FakeRun -Reverse | Should -Be 1
+        (Read-State).steps[$step].state | Should -Be 'failed'
+        Invoke-FakeRun | Should -Be 0 -Because $script:lastError
     }
 }
 

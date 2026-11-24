@@ -1,7 +1,8 @@
 # The Windows takeover script
 
 `Tenko-Takeover.ps1` moves the DNS zones and the DHCP scopes of an Active Directory domain
-from its Windows servers to Tenko DDI, one phase at a time, each phase reversible
+from its Windows servers to Tenko DDI, one phase at a time, each phase up to the parallel
+period reversible; the finish after it has no scripted way back
 (MIG-17, MIG-08; [ADR 0038](../../../docs/adr/0038-takeover-script-and-delegated-session.md)).
 A domain administrator runs it, elevated, on a domain controller or on a privileged access
 workstation of the domain. It uses the logon it runs under and asks for no credential. It
@@ -145,7 +146,7 @@ the zones: a name no computer account or service principal name of the domain ho
 that resolves to the node only. A resumed run reads the domain and the address from its
 state file. You confirm by typing the domain's name: the change list before the first
 change, the DNS window before phase 4 (the script shows who started the window and when,
-according to Tenko), the finish, and, in the reverse of phase 4, the records Tenko added
+according to Tenko), the finish (below), and, in the reverse of phase 4, the records Tenko added
 (below). The DNS window's confirmation carries the DHCP window's warning in its own prompt,
 where no redirection of the script's output can hide it: what happens
 (the DHCP Server service stopped and disabled on the named servers, Tenko answering their
@@ -175,9 +176,9 @@ apart, the DHCP window's Continue is a fourth confirmation.
 
 | Parameter | What it does |
 |---|---|
-| none | Runs or resumes the next phase; when a run exists, offers to reverse its latest phase instead |
+| none | Runs or resumes the next phase; when a run exists, offers to reverse its latest phase instead, until the finish has started |
 | `-DryRun` | Discovers and prints the change list and the warnings; changes nothing on Windows and contacts no Tenko |
-| `-Reverse` | Undoes the latest phase done or failed, both halves; run again to walk one more phase back |
+| `-Reverse` | Undoes the latest phase done or failed, both halves; run again to walk one more phase back. Refused with exit 1 once the finish has started |
 
 ## The phases
 
@@ -189,7 +190,7 @@ apart, the DHCP window's Continue is a fourth confirmation.
 | 3. Review | None | You start the window on the run page; the script waits | None |
 | 4. DNS window | Each DHCP server's configuration compared with the one the window bound (leases are not); replication forced; per zone, `_msdcs` last: the PDC emulator's copy converted to a secondary of Tenko and the other controllers' added at once, each set to refuse transfers; the controllers register | A transfer, the copy compared with every controller's records, then the flip, forward zones first | First each zone on the PDC emulator is cut loose from Tenko: its secondary becomes a file-backed primary that takes no transfer, notify or update. Then those copies are compared with the records read at the flip, counted per zone and type, and every difference is shown by name and type. Typing the domain's name keeps that version, except at the records that steer authentication or hand a subtree away (everything at or under `_msdcs`, `_tcp`, `_udp`, `_sites`, `DomainDnsZones` and `ForestDnsZones`, the `_kerberos`, `_kpasswd`, `_ldap` and `_gc` names, every NS and DNAME below the apex, the apex's A, AAAA, NS, CNAME and DNAME, every wildcard, the controllers' own addresses, and the A and AAAA of a name server the zone names or of a name below a delegation), which go back to their flip-time records unless each name is typed too; anything else, or a difference there in a type the script cannot write back, restores the export of phase 2 (put in place under its own name and checked by its SHA-256 first, so that a stop halfway is finished by the next reverse). The start of authority goes back to its flip-time names. What the copy then holds is compared record by record with what was shown, every time to live and the start of authority's timers included (they are not shown, and come as the copy held them), and only then is it made directory-integrated in the partition the discovery read (a zone that was not directory-integrated, or whose partition the script cannot name, is refused in phase 0), its update setting set back and read back (a zone left open to unsigned updates fails the reverse); then each other controller loads the directory copy; Tenko's flip back |
 | 5. DHCP window | After the takeover's final pushes and adoption, the window's confirmation (the DNS window's typed one within 15 minutes in the same run, otherwise Abort or Continue); the manual restore lines printed; the DHCP Server service (`DHCPServer`, never the DHCP client) stopped and disabled on both servers and the silence read back on each (if it cannot be read back, both services are started again as they were and Tenko stays off); then the job's task completed, so Tenko answers at once; then both authorizations removed, replication forced, the removal read back on each controller's replica every 5 s for up to five minutes. A replica that has not caught up by then does not stop the run: the barrier is recorded as pending, a warning names the controllers, and the check step and every later sitting read it again until it holds (the services stay stopped and disabled meanwhile); it is also recorded beside the run's marker on the PDC emulator, so that a sitting without the state file says so and offers to read it again. When Tenko's task is not completed after three tries, or Tenko's job fails after it, Tenko's completed takeovers are reverted first, then both Windows services start again as they were (still authorized, so they answer at once, with no wait for replicas), and the last lines name who answers each scope and what to run next. A resume reads each service again before it completes the task, and stops one that answers again | The takeover of each scope: final pushes, adoption with Tenko's scopes off, then Tenko's scopes on as soon as the script completes the job's task, right after the silence is read back | Tenko serves until Windows is ready: each service's start type restored and the service started while its server is still unauthorized (it serves nobody, its cmdlets answer); the leases written into both servers (addresses, client identifiers and ends only, inside the pool, outside exclusions and others' reservations) and read back; conflict detection on (at least 1, or the value the discovery read; it is not set back afterwards); the authorization added back, replicated and read back on each controller (each read-back repeats for up to five minutes); only then Tenko's scopes silent and each service restarted, event 1044 read back. A revert in Tenko or a restart that fails leaves one side for every scope: every Windows server the reverse started is stopped and disabled again and read back, and only then are Tenko's scopes on again. When Tenko does not answer that call (three tries), when the session has ended (the next sitting's approval opens a new one), or when Tenko refuses it for the takeover itself (that refusal stands: the next reverse brings Windows back without asking again), the script says that no server answers the scope and what to run next |
-| 6. Finish, after the parallel period | The DHCP role removed from both servers without starting the service, the database directory moved into the backup; the exporter, its tasks, account and batch logon right removed; the DNS credential user removed when the script created it; the plan's zone objects deleted from the directory partitions | The frozen names released; the mirrors deleted | The role back from the backup, its groups replicated, the relationship again; the authorization stays removed |
+| 6. Finish, after the parallel period | The exporter, its tasks, account and batch logon right removed; the DNS credential user removed when the script created it; the plan's zone objects deleted from the directory partitions. The DHCP Server role stays installed on each DHCP server with its database, the service stopped and disabled and the authorization removed, as in the parallel period; no role is removed or installed and no server restarted | The frozen names released; the mirrors deleted | None: `-Reverse` is refused (below) |
 
 The DHCP window refuses while a DHCPv6 or multicast scope exists that Tenko does not take
 over, while a group policy sets the start mode of `DHCPServer`, or while a scope's lease
@@ -225,6 +226,55 @@ the same as a warning and keeps the scopes recorded as unproven. A node that nam
 for two scopes, or lists one job twice, is refused with exit 4; Tenko may then hold an
 unrecorded takeover job for the scope it names, waiting at its manual step: cancel it in
 Tenko before you run the script again.
+
+## After the finish
+
+The finish's confirmation says what follows, and you type the domain's name to accept it:
+after the finish there is no scripted way back. `-Reverse` is refused with exit 1, also
+after a finish that stopped at a failed step, which a run of the script without a parameter
+resumes. A run started after the finish says that the takeover is finished and ends with
+exit 0, changing nothing.
+
+What stays on each DHCP server: the DHCP Server role with its database, the DHCP Server
+service stopped and disabled, and the server's authorization removed from the directory.
+What stays as files: the export of phase 2 (`Export-DhcpServer -Leases`), as
+`dhcp-export.xml` in `Tenko\takeover\backup` below each DHCP server's Program Files folder,
+and as `dhcp-<server>.xml` in `%ProgramData%\Tenko\takeover\<domain>\backup` on the machine
+that ran the script, beside each zone's export of phase 2 (`tenko-backup-<zone>.dns`).
+
+Going back after the finish is manual work. Revert each scope's takeover in Tenko first, so
+that Tenko is silent, then on each server the two lines above (the authorization, then the
+service). The database still holds what the server had at the DHCP window, so set conflict
+detection on
+(`Set-DhcpServerSetting -ConflictDetectionAttempts 1`) before the start. Where the script
+created the DNS credential user `tenko-dhcp-dns`, the finish deleted it while each server's
+stored DNS credential still names it: set another with `Set-DhcpServerDnsCredential` before
+the service is ever started again. The zones come back from their exports of phase 2.
+
+### Removing the DHCP Server role yourself
+
+The finish leaves the role installed because removing it needs a restart of the server, a
+domain controller, and the script never restarts a server. Remove it when you choose, one
+server at a time, with one restart each:
+
+1. Check first: Tenko answers every scope (no scope listed as unproven); on the server
+   `Get-Service DHCPServer` reads `Stopped` and `Disabled`; `Get-DhcpServerInDC` does not
+   list it; `(Get-DhcpServerDatabase).FileName` names the database folder (by default
+   `%SystemRoot%\System32\dhcp`), since the cmdlet is gone once the role is; and the export
+   of phase 2 is where the previous section says, with a copy kept off the server.
+2. `Uninstall-WindowsFeature -Name DHCP`. Right after it `Get-WindowsFeature DHCP` already
+   reads not installed while the service still exists: the removal is not done yet.
+3. Restart the server (`Restart-Computer`) and wait until it is back, the other controller
+   answering meanwhile.
+4. After the restart, with `Get-Service DHCPServer` finding no service, move the database
+   folder of step 1 into the backup folder or delete it. A role installed later over a
+   folder left in place loads the old scopes and leases again instead of starting empty.
+5. The same on the other server.
+
+What remains of the Windows DHCP configuration is then the export file, as it was when
+phase 2 ran. Import it (`Import-DhcpServer -Leases`) only into a newly installed role whose
+database folder was cleared: over a scope that already exists the import changes nothing and
+only warns. It does not carry the DNS credential, which is set again by hand.
 
 ## The state, the exit codes and a failed step
 
