@@ -74,6 +74,12 @@ pub const DDNS: Desc =
 /// DDNS requests waiting.
 pub const DDNS_QUEUE: Desc = Desc::gauge("tenko_dhcp_ddns_queue", "DHCP DDNS requests waiting");
 
+/// How long the oldest waiting DDNS request has waited, in seconds.
+pub const DDNS_OLDEST: Desc = Desc::gauge(
+    "tenko_dhcp_ddns_oldest_seconds",
+    "Seconds the oldest waiting DHCP DDNS request has waited",
+);
+
 /// Requests dropped, by reason (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`,
 /// `store_refused`, `rate_limited`, `untrusted_relay`, `limited`, `wrong_network`).
 pub const DROPPED: Desc =
@@ -98,7 +104,7 @@ pub const RENEWALS_CACHED: Desc = Desc::counter(
 );
 
 /// Every family of the role, for registration and the contracts document.
-pub const ALL: [&Desc; 15] = [
+pub const ALL: [&Desc; 16] = [
     &PACKETS,
     &EXCHANGE_DURATION,
     &COMMIT_DURATION,
@@ -114,6 +120,7 @@ pub const ALL: [&Desc; 15] = [
     &STORE_REFUSED,
     &LIMITED,
     &RENEWALS_CACHED,
+    &DDNS_OLDEST,
 ];
 
 #[cfg(test)]

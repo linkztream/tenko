@@ -94,7 +94,6 @@ All in the namespace `dhcp` of the replicated store; the constants are `tenko_co
 | `allocator::PoolOwnership`, `grant_time`, `PartnerLimit` | Which addresses the node may hand out (`SingleNode`: all); the lease time, capped by the partner's acknowledged end plus the MCLT in Phase 5 | `SingleNode` |
 | `allocator::OfferHold` | Offers held in memory for their lifetime; a DISCOVER writes nothing | `NoOffers` (WP7.2 builds the hold) |
 | `probe::ConflictProbe` | `available()`, `probe(addr, timeout)` -> `Clear`, `InUse { mac }`, `Unavailable` (P3-Q7, at most about 300 ms) | `MemProbe`, `NoProbe` |
-| `ddns::DdnsQueue` | `enqueue(DdnsRequest)` after the commit, never inside it (ADR 0020); bounded, `QueueFull` is dropped and counted | `MemDdnsQueue` |
 | `fingerprint::Fingerprinter` | `fingerprint_of(&Message)` (options 55, 60, 77, 81, 93) and `classify` to an `OsGuess` with a confidence (P3-Q15) | `RuleTable` (first match), `NoFingerprinter` |
 | `metrics` | The families of section 8 | — |
 | `v6::Message`, `v6::RelayChain`, `v6::MessageBuilder` (WP9.1) | The borrowed view over a DHCPv6 message, the walk of its relay chain, and the builder with nested options; none allocates (`docs/dhcp.md` section 19.1) | — |
@@ -209,6 +208,7 @@ The system component `dhcp` (`SystemComponent::Dhcp`) is the principal of the ro
 | `tenko_dhcp_probe_duration_seconds` | histogram | |
 | `tenko_dhcp_ddns_total` | counter | `outcome` |
 | `tenko_dhcp_ddns_queue` | gauge | |
+| `tenko_dhcp_ddns_oldest_seconds` | gauge | |
 | `tenko_dhcp_dropped_total` | counter | `reason` (`malformed`, `filtered`, `no_scope`, `pool_full`, `queue`, `store_refused`, `rate_limited`, `untrusted_relay`, `limited`, `wrong_network`) |
 | `tenko_dhcp_store_refused_total` | counter | |
 | `tenko_dhcp_limited_total` | counter | `limit` (`leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`, `conflicts_per_mac`, `conflict_share`, `bindings_per_scope`) |
@@ -290,7 +290,7 @@ Where the code settles what the plan left to it (recorded in ADR 0019 and ADR 00
 - **Slice 8 follow-ups: the policy's DDNS settings on the lease.** `Lease.ddns_policy` and `PendingChange.ddns_policy` carry the DDNS settings of the first matching policy that sets them, as the matcher decided them at the REQUEST (none: the scope's apply); the DDNS worker writes the names by them, so the worker and the reply's option 81 follow one decision. The field has a serde default and is skipped when absent, so the data format stays 4. Recording the decision was chosen over running the matcher again in the worker: the matcher needs facts of the request (options 60, 77, 82 and 93) that the row does not keep, and a recorded decision cannot drift from the reply's.
 - **Slice 8 follow-ups: `replace` under Hardened.** The configuration service refuses a scope's, a policy's or the server's DDNS settings with `conflict: replace` under the Hardened profile with `dhcp.ddns.invalid` (field `ddns.conflict` or `action.ddns.conflict`); it reads the profile through the same source as the DDNS worker (`ConfigService::set_profile`).
 - **Slice 8 follow-ups: proxy listeners in the status.** `DhcpListenMode` has the value `proxy`: `GET /nodes/{id}/dhcp` lists the proxy DHCP listeners of `[dhcp] proxy` after the others, one worker each (`DhcpStatus.proxies`).
-- **WP8.3: `UpdatePolicy.dhcp`** is `Option<bool>`: none follows the profile (Home and Lab allow DHCP updates, Standard and Hardened do not); the DDNS outcomes of `tenko_dhcp_ddns_total` are `written`, `removed`, `refused`, `failed`, `skipped` and `dropped`, and the worker is the leader service `dhcp.ddns` following `dhcp.leases` by a store watch (`docs/dhcp.md` section 13).
+- **WP8.3: `UpdatePolicy.dhcp`** is `Option<bool>`: none follows the profile (Home and Lab allow DHCP updates, Standard and Hardened do not); the DDNS outcomes of `tenko_dhcp_ddns_total` are `written`, `removed`, `refused`, `failed` and `skipped` (`dropped` went with the request queue: the worker's queue holds one entry per lease row), and the worker is the leader service `dhcp.ddns` following `dhcp.leases` by a store watch (`docs/dhcp.md` section 13).
 - **WP9.1: the DHCPv6 listeners in `[dhcp] listen`.** An entry with an IPv6 address is a DHCPv6 listener; `[dhcp.v6]` holds only the ports and the server's DUID, so one list says where the role answers.
 - **WP9.1: one change per message.** A DHCPv6 message changes up to eight bindings (`PendingChange6`), committed as one batch with one revision and one REPLY, rather than one change per IA: the REPLY of a REQUEST with two `IA_NA`s promises both or neither.
 - **WP9.1: no `dhcp.leases6.by_client`.** The DHCPv6 client index is derived from the rows in memory; the rows are the only truth.

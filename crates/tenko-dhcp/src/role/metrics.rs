@@ -296,7 +296,7 @@ static UTILIZATION: Utilization = Utilization;
 pub(crate) static CONFLICTS: Counter = Counter::new(families::CONFLICTS);
 pub(crate) static PROBE_DURATION: Histogram = Histogram::new(families::PROBE_DURATION);
 // WP8.3: the DDNS worker counts `tenko_dhcp_ddns{outcome}` and sets the queue gauge.
-use crate::ddns::metrics::{OUTCOMES as DDNS, QUEUE as DDNS_QUEUE};
+use crate::ddns::metrics::{OLDEST as DDNS_OLDEST, OUTCOMES as DDNS, QUEUE as DDNS_QUEUE};
 
 /// Registers every family of the role with `registry`.
 pub fn register(registry: &Registry) {
@@ -311,6 +311,7 @@ pub fn register(registry: &Registry) {
     registry.register(&PROBE_DURATION);
     registry.register(&DDNS);
     registry.register(&DDNS_QUEUE);
+    registry.register(&DDNS_OLDEST);
     registry.register(&DROPPED);
     registry.register(&lease::STORE_REFUSED);
     registry.register(&crate::limits::LIMITED);

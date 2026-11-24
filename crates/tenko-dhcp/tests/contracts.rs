@@ -13,8 +13,8 @@ use support::fixture;
 use tenko_core::{
     HostId, InterfaceId, NodeId, PrefixId, RangeId, Revision, Timestamp, VrfId,
     dhcp::{
-        BindingState, ClientKey, DdnsPolicy, DhcpSettings, Fingerprint, Lease, LeaseEventKind,
-        LeaseTimes, Scope, SharedNetworkId, lease::MAX_IDENTITY, write_identity,
+        BindingState, DdnsPolicy, DhcpSettings, Fingerprint, Lease, LeaseEventKind, LeaseTimes,
+        Scope, SharedNetworkId, lease::MAX_IDENTITY, write_identity,
     },
     ipam::Stamp,
     principal::{Principal, SystemComponent},
@@ -25,7 +25,6 @@ use tenko_dhcp::{
         AdmitAll, Allocator, Choice, NoOffers, OfferHold, PartnerLimit, ReferenceAllocator,
         Request, SingleNode, grant_time,
     },
-    ddns::{DdnsAction, DdnsQueue, DdnsRequest, MemDdnsQueue, QueueFull},
     feed::{Change, Delta, DhcpData, DhcpFeed, FeedError, FeedEvent, MemFeed},
     fingerprint::{Fingerprinter, NoFingerprinter, OsGuess, Rule, RuleTable, fingerprint_of},
     image::{ConfigImage, ImageBuilder, PoolImage, ReservationImage, ScopeImage},
@@ -1526,55 +1525,6 @@ async fn no_probe_is_not_available_and_probes_nothing() {
             ProbeOutcome::Unavailable
         );
     }
-}
-
-fn ddns_request(last: u8, action: DdnsAction) -> DdnsRequest {
-    DdnsRequest {
-        action,
-        vrf: VrfId::generate(),
-        scope: PrefixId::generate(),
-        addr: std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, last)),
-        client: ClientKey {
-            htype: 1,
-            chaddr: HexBytes(mac(last).to_vec()),
-            client_id: None,
-        },
-        fqdn: None,
-        hostname: Some(format!("host{last}")),
-        fqdn_flags: None,
-        policy: DdnsPolicy::default(),
-        lease_secs: 3_600,
-        ends: at(3_600),
-    }
-}
-
-#[test]
-fn the_ddns_queue_is_bounded_and_first_in_first_out() {
-    let queue = MemDdnsQueue::new(2);
-    assert!(queue.is_empty());
-    assert_eq!(queue.len(), 0);
-    let first = ddns_request(10, DdnsAction::Add);
-    let second = ddns_request(11, DdnsAction::Remove);
-    assert_eq!(queue.enqueue(first.clone()), Ok(()));
-    assert_eq!(queue.enqueue(second.clone()), Ok(()));
-    assert_eq!(queue.len(), 2);
-    assert!(!queue.is_empty());
-    assert_eq!(
-        queue.enqueue(ddns_request(12, DdnsAction::Add)),
-        Err(QueueFull)
-    );
-    assert_eq!(queue.len(), 2);
-    assert_eq!(queue.drain(), vec![first, second]);
-    assert!(queue.is_empty());
-    assert_eq!(queue.drain(), Vec::new());
-    // Room again after a drain.
-    assert_eq!(queue.enqueue(ddns_request(12, DdnsAction::Add)), Ok(()));
-    assert_eq!(queue.len(), 1);
-    // A queue of none takes nothing.
-    assert_eq!(
-        MemDdnsQueue::new(0).enqueue(ddns_request(1, DdnsAction::Add)),
-        Err(QueueFull)
-    );
 }
 
 fn guess(family: &str, confidence: u8) -> OsGuess {

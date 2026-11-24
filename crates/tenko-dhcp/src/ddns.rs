@@ -1,13 +1,12 @@
 //! DDNS from DHCP (plan section 2.9, ADR 0020): names are written after the lease commit,
 //! never inside it.
 //!
-//! When a committed lease gains, keeps or loses a name, a [`DdnsRequest`] goes into the
-//! [`DdnsQueue`] and the client has its answer already; the DDNS worker applies it as a
-//! change set through the zone service with the RRset origin `dhcp`, retries with a
-//! backoff while the store refuses (`[dhcp.ddns] retries`, `backoff_ms`), and records the
-//! outcome on the lease row. On release and expiry the records go if their DHCID still
-//! matches. A full queue drops the request and counts it; the lease rows are read again.
-//! [`MemDdnsQueue`] is the queue, sized at start.
+//! When a committed lease gains, keeps or loses a name, the DDNS worker sees its row change
+//! after the commit (the client has its answer already), builds a [`DdnsRequest`] from it
+//! and applies it as a change set through the zone service with the RRset origin `dhcp`,
+//! retrying with a backoff while the store refuses (`[dhcp.ddns] retries`, `backoff_ms`),
+//! and records the outcome on the lease row. On release and expiry the records go if their
+//! DHCID still matches.
 //!
 //! | Module | What |
 //! |---|---|
@@ -16,7 +15,7 @@
 //! | [`flags`] | who writes the A record, and the flags of the reply's option 81 |
 //! | [`plan`] | the RFC 4703 rules: what a request changes in the zones |
 //! | [`worker`] | [`worker::DdnsService`], the leader service `dhcp.ddns` that follows the lease rows |
-//! | [`metrics`] | `tenko_dhcp_ddns_total{outcome}` and `tenko_dhcp_ddns_queue` |
+//! | [`metrics`] | `tenko_dhcp_ddns_total{outcome}`, `tenko_dhcp_ddns_queue` and `tenko_dhcp_ddns_oldest_seconds` |
 
 pub mod dhcid;
 pub mod flags;
@@ -30,11 +29,7 @@ pub use self::{
     worker::{DdnsService, DdnsSettings, ProfileSource},
 };
 
-use std::{
-    collections::VecDeque,
-    net::IpAddr,
-    sync::{Mutex, PoisonError},
-};
+use std::net::IpAddr;
 
 use tenko_core::{
     PrefixId, Timestamp, VrfId,
@@ -76,73 +71,4 @@ pub struct DdnsRequest {
     pub lease_secs: u32,
     /// When the lease ends.
     pub ends: Timestamp,
-}
-
-/// The queue is full.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("the DDNS queue is full")]
-pub struct QueueFull;
-
-/// Where the role puts DDNS work.
-pub trait DdnsQueue: Send + Sync {
-    /// Adds a request.
-    ///
-    /// # Errors
-    ///
-    /// [`QueueFull`] when the queue holds its limit; the request is dropped and counted.
-    fn enqueue(&self, request: DdnsRequest) -> Result<(), QueueFull>;
-
-    /// The number of waiting requests (`tenko_dhcp_ddns_queue`).
-    fn len(&self) -> usize;
-
-    /// Whether no request waits.
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-/// The reference queue: bounded, first in first out.
-#[derive(Debug)]
-pub struct MemDdnsQueue {
-    limit: usize,
-    queue: Mutex<VecDeque<DdnsRequest>>,
-}
-
-impl MemDdnsQueue {
-    /// A queue of at most `limit` requests. E32: its room starts at 1,024 requests and grows
-    /// as it fills (the queue is fed by a store watch after the commit, not by the DORA
-    /// path), so an idle role does not hold room for 65,536.
-    pub fn new(limit: usize) -> Self {
-        Self {
-            limit,
-            queue: Mutex::new(VecDeque::with_capacity(limit.min(1_024))),
-        }
-    }
-
-    /// Takes every waiting request.
-    pub fn drain(&self) -> Vec<DdnsRequest> {
-        self.queue
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .drain(..)
-            .collect()
-    }
-}
-
-impl DdnsQueue for MemDdnsQueue {
-    fn enqueue(&self, request: DdnsRequest) -> Result<(), QueueFull> {
-        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
-        if queue.len() >= self.limit {
-            return Err(QueueFull);
-        }
-        queue.push_back(request);
-        Ok(())
-    }
-
-    fn len(&self) -> usize {
-        self.queue
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .len()
-    }
 }

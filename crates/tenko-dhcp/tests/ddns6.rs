@@ -55,7 +55,9 @@ use tenko_dns::zone::{
 };
 use tenko_ipam::tables::{ADDRESS_IPS, ADDRESSES, PREFIX_RANGES, PREFIXES, RANGES};
 use tenko_jobs::{EngineConfig, JobEngine, tables::JOBS};
-use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch};
+use tenko_store::{
+    KeyRange, MemStore, ReadConsistency, ReadViewExt as _, Store, WriteBatch, tables::AUDIT,
+};
 use tokio_util::sync::CancellationToken;
 
 /// The forward zone.
@@ -205,6 +207,11 @@ fn new_scope(prefix: PrefixId, v6: bool, forward: ZoneId) -> NewScope {
 }
 
 async fn lab() -> Lab {
+    lab_spaced(Duration::from_millis(10)).await
+}
+
+/// The lab with the worker's `spacing`.
+async fn lab_spaced(spacing: Duration) -> Lab {
     let store: Arc<dyn Store> = Arc::new(MemStore::default());
     // The zone service writes through the job engine, as the server's does.
     let staging = Arc::new(ImportStaging::default());
@@ -260,6 +267,7 @@ async fn lab() -> Lab {
         DdnsSettings {
             backoff: Duration::from_millis(20),
             retry_after: Duration::from_millis(200),
+            spacing,
             ..DdnsSettings::default()
         },
     ));
@@ -460,6 +468,21 @@ impl Lab {
         self.rrset(self.reverse6, &ptr6(ip6(last)), Rtype::PTR)
             .await
             .map(|set| set.rdata[0].decode(Rtype::PTR).expect("PTR"))
+    }
+
+    /// The times of the worker's change sets to the zone `apex` (their audit records).
+    async fn set_times(&self, apex: &str) -> Vec<Timestamp> {
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+            .expect("audit")
+            .into_iter()
+            .filter(|(_, record, _)| {
+                record.principal == Principal::system(SystemComponent::Dhcp)
+                    && record.draft.action.as_str() == "dns.record.change"
+                    && record.draft.details.context.get("zone").map(String::as_str) == Some(apex)
+            })
+            .map(|(_, record, _)| record.at)
+            .collect()
     }
 
     async fn ptr4(&self, last: u8) -> Option<RecordData> {
@@ -925,4 +948,68 @@ async fn a_name_of_another_origin_is_refused_whatever_the_family_of_its_records(
     .await;
     assert_eq!(lab.ddns6(0x44).await.last_error, None);
     assert_eq!(lab.ptr6(0x44).await, Some(ptr_to("phone.example.test")));
+}
+
+/// A steady flow of DHCPv4 and DHCPv6 leases, 20 a tick of 100 ms for 100 ticks, each lease
+/// with a new name every tick, writes one change set a spacing to each zone at most, and the
+/// last names all the same; a lone lease after a quiet spacing comes in one set of its own.
+#[tokio::test]
+async fn a_steady_flow_of_both_families_writes_one_set_a_spacing_to_each_zone() {
+    let spacing = Duration::from_secs(5);
+    let lab = lab_spaced(spacing).await;
+    let host = |tick: u8, client: u8| format!("t{tick}c{client}");
+    let started = Timestamp::now();
+    for tick in 0..100u8 {
+        for client in 0..10u8 {
+            let name = host(tick, client);
+            let fqdn = (name.as_str(), ClientFqdn::FLAG_S);
+            lab.commit4(lab.lease4_rfc4361(100 + client, client, 1, fqdn))
+                .await;
+            let name = format!("{name}v6");
+            let lease = lab.lease6(u16::from(client), 100 + client, Some((&name, FLAGS_S_E)));
+            lab.commit6(lease).await;
+        }
+        // test-lint: allow sleep the pace of the flow is what the spacing is measured against
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let ended = Timestamp::now();
+    for client in 0..10u8 {
+        let name = host(99, client);
+        wait_until_async("the last names of the flow", async || {
+            lab.a(&format!("{name}.example.test")).await.len() == 1
+                && lab.aaaa(&format!("{name}v6.example.test")).await.len() == 1
+                && lab.ptr4(100 + client).await.is_some()
+                && lab.ptr6(u16::from(client)).await.is_some()
+        })
+        .await;
+    }
+    let elapsed = ended.saturating_since(started);
+    let bound = usize::try_from(elapsed.as_millis() / spacing.as_millis()).expect("bound") + 1;
+    for apex in [FORWARD, REVERSE4, REVERSE6] {
+        let times = lab.set_times(apex).await;
+        let sets = times.iter().filter(|at| **at <= ended).count();
+        // The measured rate, for the report.
+        eprintln!("{apex}: {sets} change sets in {elapsed:?} of flow");
+        assert!(
+            sets <= bound,
+            "{apex}: {sets} sets, bound {bound}: {times:?}"
+        );
+    }
+
+    // test-lint: allow sleep a quiet spacing after the last set is the case under test
+    tokio::time::sleep(spacing).await;
+    let sets = lab.set_times(FORWARD).await.len();
+    let asked = Timestamp::now();
+    lab.commit4(lab.lease4_rfc4361(150, 50, 1, ("lone", ClientFqdn::FLAG_S)))
+        .await;
+    wait_until_async("the lone name", async || {
+        lab.a("lone.example.test").await.len() == 1
+    })
+    .await;
+    let times = lab.set_times(FORWARD).await;
+    assert_eq!(times.len(), sets + 1, "one set for the lone lease");
+    eprintln!(
+        "the lone lease's name came {:?} after its commit",
+        times[sets].saturating_since(asked)
+    );
 }

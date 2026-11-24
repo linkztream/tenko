@@ -31,7 +31,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     sync::{
         Arc, Mutex, PoisonError,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -57,7 +57,7 @@ use tenko_dhcp::{
     },
     ddns::{
         DdnsProfile, DdnsService, DdnsSettings, dhcid,
-        metrics::{OUTCOMES, Outcome},
+        metrics::{OLDEST, OUTCOMES, Outcome},
         plan::DHCID,
     },
     v4::ClientFqdn,
@@ -73,9 +73,9 @@ use tenko_jobs::{
     tables::{BY_STATE, BY_TARGET, IDEMPOTENCY, JOBS, PREVIEWS, TRANSITIONS},
 };
 use tenko_store::{
-    ChangeStream, Committed, DerivedIndex, KeyRange, Leadership, MemStore, ReadConsistency,
-    ReadView, ReadViewExt as _, Store, StoreError, StoreStatus, WatchFilter, WriteBatch,
-    tables::AUDIT,
+    ChangeStream, Committed, DerivedIndex, KeyRange, Leadership, MemStore, Mutation,
+    ReadConsistency, ReadView, ReadViewExt as _, Store, StoreError, StoreStatus, WatchFilter,
+    WriteBatch, tables::AUDIT,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -119,8 +119,13 @@ struct Lab {
     forward: ZoneId,
     reverse: ZoneId,
     profile: Arc<Mutex<DdnsProfile>>,
+    settings: DdnsSettings,
     stop: CancellationToken,
 }
+
+/// The spacing of the labs whose test is not about it: short, so that each step's names
+/// follow at once.
+const SHORT: Duration = Duration::from_millis(10);
 
 fn new_zone(apex: &str, update: UpdatePolicy) -> NewZone {
     NewZone {
@@ -147,21 +152,26 @@ async fn lab(profile: DdnsProfile, update: UpdatePolicy) -> Lab {
 
 /// A lab on `store` whose zone service writes through the job engine, as the server's
 /// does.
+async fn lab_on(profile: DdnsProfile, update: UpdatePolicy, store: Arc<dyn Store>) -> Lab {
+    lab_with(profile, update, store, ZoneConfig::default(), SHORT).await
+}
+
+/// [`lab_on`] with the zone service's limits `config` and the worker's `spacing`.
 #[allow(
     clippy::too_many_lines,
     reason = "the zones, the network, the scope and the worker of one lab"
 )]
-async fn lab_on(profile: DdnsProfile, update: UpdatePolicy, store: Arc<dyn Store>) -> Lab {
+async fn lab_with(
+    profile: DdnsProfile,
+    update: UpdatePolicy,
+    store: Arc<dyn Store>,
+    config: ZoneConfig,
+    spacing: Duration,
+) -> Lab {
     let staging = Arc::new(ImportStaging::default());
     let mut engine = JobEngine::new(Arc::clone(&store), EngineConfig::default());
     register_steps(&mut engine, &staging);
-    let zones = ZoneService::new(
-        Arc::clone(&store),
-        Arc::new(engine),
-        None,
-        staging,
-        ZoneConfig::default(),
-    );
+    let zones = ZoneService::new(Arc::clone(&store), Arc::new(engine), None, staging, config);
     let forward = zones
         .create(&cx(), new_zone("lan.example.test", update.clone()))
         .await
@@ -232,27 +242,7 @@ async fn lab_on(profile: DdnsProfile, update: UpdatePolicy, store: Arc<dyn Store
         )
         .await
         .expect("scope");
-    let profile = Arc::new(Mutex::new(profile));
-    let stop = CancellationToken::new();
-    let source = {
-        let profile = Arc::clone(&profile);
-        Arc::new(move |_: &dyn tenko_store::ReadView| {
-            *profile.lock().unwrap_or_else(PoisonError::into_inner)
-        })
-    };
-    let service = Arc::new(DdnsService::new(
-        Arc::clone(&store),
-        Arc::clone(&zones),
-        source,
-        DdnsSettings {
-            backoff: Duration::from_millis(20),
-            retry_after: Duration::from_millis(200),
-            ..DdnsSettings::default()
-        },
-    ));
-    let token = stop.child_token();
-    tokio::spawn(async move { service.run(0, token).await });
-    Lab {
+    let mut lab = Lab {
         store,
         zones,
         config,
@@ -260,9 +250,17 @@ async fn lab_on(profile: DdnsProfile, update: UpdatePolicy, store: Arc<dyn Store
         scope: prefix.id,
         forward,
         reverse,
-        profile,
-        stop,
-    }
+        profile: Arc::new(Mutex::new(profile)),
+        settings: DdnsSettings {
+            backoff: Duration::from_millis(20),
+            retry_after: Duration::from_millis(200),
+            spacing,
+            ..DdnsSettings::default()
+        },
+        stop: CancellationToken::new(),
+    };
+    lab.restart();
+    lab
 }
 
 impl Drop for Lab {
@@ -272,6 +270,27 @@ impl Drop for Lab {
 }
 
 impl Lab {
+    /// Stops the worker, if one runs, and starts a new one, as a restart or a change of
+    /// leader does.
+    fn restart(&mut self) {
+        self.stop.cancel();
+        self.stop = CancellationToken::new();
+        let source = {
+            let profile = Arc::clone(&self.profile);
+            Arc::new(move |_: &dyn tenko_store::ReadView| {
+                *profile.lock().unwrap_or_else(PoisonError::into_inner)
+            })
+        };
+        let service = Arc::new(DdnsService::new(
+            Arc::clone(&self.store),
+            Arc::clone(&self.zones),
+            source,
+            self.settings,
+        ));
+        let token = self.stop.child_token();
+        tokio::spawn(async move { service.run(0, token).await });
+    }
+
     fn lease(&self, last: u8, who: u8, fqdn: Option<(&str, u8)>, hostname: Option<&str>) -> Lease {
         let now = Timestamp::now();
         Lease {
@@ -315,6 +334,37 @@ impl Lab {
             .put_typed(&LEASES, &(lease.vrf, lease.addr), &lease)
             .expect("lease");
         self.store.propose(batch).await.expect("commit");
+    }
+
+    /// Writes new lease rows in one batch, so that the worker takes them in one window.
+    async fn commit_all(&self, leases: impl IntoIterator<Item = Lease>) {
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+        for lease in leases {
+            batch
+                .put_typed(&LEASES, &(lease.vrf, lease.addr), &lease)
+                .expect("lease");
+        }
+        self.store.propose(batch).await.expect("commit");
+    }
+
+    /// The worker's change sets written to the zone `apex` (their audit records).
+    async fn change_sets(&self, apex: &str) -> usize {
+        self.set_times(apex).await.len()
+    }
+
+    /// The times of the worker's change sets to the zone `apex` (their audit records).
+    async fn set_times(&self, apex: &str) -> Vec<Timestamp> {
+        let view = self.store.read(ReadConsistency::Local).await.expect("view");
+        view.scan_typed(&AUDIT, KeyRange::all(), usize::MAX, false)
+            .expect("audit")
+            .into_iter()
+            .filter(|(_, record, _)| {
+                record.principal == Principal::system(SystemComponent::Dhcp)
+                    && record.draft.action.as_str() == "dns.record.change"
+                    && record.draft.details.context.get("zone").map(String::as_str) == Some(apex)
+            })
+            .map(|(_, record, _)| record.at)
+            .collect()
     }
 
     /// Ends a binding as a release or the expiry service does.
@@ -497,28 +547,111 @@ async fn new_clients_at_every_address_leave_no_job_and_an_operator_edit_still_is
     assert!(rows > before.0 && records > before.1, "the edit is a job");
 }
 
-/// A memory store that refuses the next `refuse` record change sets: as a stale write when
-/// `stale` is set, else as a store without a quorum.
+/// A store (a memory store by default) that refuses the next `refuse` record change sets:
+/// as a stale write when `stale` is set, else as a store without a quorum.
 #[derive(Default)]
-struct Refusing {
-    inner: MemStore,
+struct Refusing<S = MemStore> {
+    inner: S,
     refuse: Mutex<usize>,
     stale: AtomicBool,
+    /// RRsets a change set may write (zero: any number).
+    max_rrsets: AtomicUsize,
+    /// Lease rows a batch of the worker's outcomes may write (zero: any number).
+    max_leases: AtomicUsize,
+    /// The record change sets proposed.
+    attempts: AtomicUsize,
+    /// A writer's RRset put at a name of the next change set after that set was planned,
+    /// with the zone's SOA put again (by its key): a race the set then loses.
+    race: Mutex<Option<(RrSetKey, RrSet)>>,
+    /// How long each change set takes to be written.
+    delay: Mutex<Duration>,
+    /// The lease rows read through each view the store handed out.
+    lease_reads: Mutex<Vec<Arc<AtomicUsize>>>,
 }
 
-impl Refusing {
+impl<S> Refusing<S> {
     fn refuse(&self) -> std::sync::MutexGuard<'_, usize> {
         self.refuse.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The most lease rows one view was asked for.
+    fn most_lease_reads(&self) -> usize {
+        self.lease_reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .map(|reads| reads.load(Ordering::SeqCst))
+            .max()
+            .unwrap_or_default()
+    }
+}
+
+/// A view that counts the lease rows asked for by key.
+struct CountingView {
+    inner: Arc<dyn ReadView>,
+    lease_reads: Arc<AtomicUsize>,
+}
+
+impl ReadView for CountingView {
+    fn revision(&self) -> tenko_core::Revision {
+        self.inner.revision()
+    }
+
+    fn get(
+        &self,
+        table: &tenko_core::TableName,
+        key: &[u8],
+    ) -> Result<Option<tenko_store::Versioned>, StoreError> {
+        if table == LEASES.name() {
+            self.lease_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner.get(table, key)
+    }
+
+    fn scan(
+        &self,
+        table: &tenko_core::TableName,
+        range: KeyRange,
+        limit: usize,
+        reverse: bool,
+    ) -> Result<Vec<(bytes::Bytes, tenko_store::Versioned)>, StoreError> {
+        self.inner.scan(table, range, limit, reverse)
+    }
+
+    fn counter(&self, counter: &tenko_core::CounterKey) -> Result<u64, StoreError> {
+        self.inner.counter(counter)
     }
 }
 
 #[async_trait::async_trait]
-impl Store for Refusing {
+impl<S: Store> Store for Refusing<S> {
     async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
         let records = batch
             .audit
             .iter()
             .any(|draft| draft.action.as_str() == "dns.record.change");
+        if records {
+            self.attempts.fetch_add(1, Ordering::SeqCst);
+            let delay = *self.delay.lock().unwrap_or_else(PoisonError::into_inner);
+            // test-lint: allow sleep a slow store is what the spacing test measures against
+            tokio::time::sleep(delay).await;
+            let race = self
+                .race
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            if let Some((soa, rrset)) = race {
+                let view = self.inner.read(ReadConsistency::Local).await?;
+                let (held, _) = view.get_typed(&RRSETS, &soa)?.expect("the SOA");
+                let mut other =
+                    WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+                other.put_typed(&RRSETS, &soa, &held).expect("the SOA");
+                other
+                    .put_typed(&RRSETS, &rrset.key(), &rrset)
+                    .expect("the RRset");
+                self.inner.propose(other).await?;
+            }
+        }
         let refused = records && {
             let mut left = self.refuse();
             let refused = *left > 0;
@@ -532,11 +665,41 @@ impl Store for Refusing {
                 StoreError::NoQuorum
             });
         }
+        // The store's batch limit, counted in the RRsets of a change set and in the lease
+        // rows of the worker's outcomes (the batch behind its fence).
+        let puts = |name: &tenko_core::TableName| {
+            batch
+                .mutations
+                .iter()
+                .filter(|mutation| matches!(mutation, Mutation::Put { table, .. } if table == name))
+                .count()
+        };
+        for (applies, size, limit) in [
+            (records, puts(RRSETS.name()), &self.max_rrsets),
+            (
+                !batch.preconditions.is_empty(),
+                puts(LEASES.name()),
+                &self.max_leases,
+            ),
+        ] {
+            let limit = limit.load(Ordering::SeqCst);
+            if applies && limit > 0 && size > limit {
+                return Err(StoreError::BatchTooLarge { size, limit });
+            }
+        }
         self.inner.propose(batch).await
     }
 
     async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
-        self.inner.read(consistency).await
+        let lease_reads = Arc::new(AtomicUsize::new(0));
+        self.lease_reads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(Arc::clone(&lease_reads));
+        Ok(Arc::new(CountingView {
+            inner: self.inner.read(consistency).await?,
+            lease_reads,
+        }))
     }
 
     fn watch(
@@ -573,9 +736,12 @@ fn dhcp_a(owner: &str, last: u8) -> Change {
     }
 }
 
+/// A store that refuses every change set: the failure shows on the lease and in the counter,
+/// one zone's retries a batch, the rest of the batch failing with it; the oldest-wait gauge
+/// counts the lease while it waits for its retry, and reads 0 once its name is written.
 #[tokio::test]
 async fn a_name_update_the_store_refuses_shows_on_the_lease_and_in_the_counter() {
-    let store = Arc::new(Refusing::default());
+    let store = Arc::new(Refusing::<MemStore>::default());
     let lab = lab_on(
         DdnsProfile::HOME,
         UpdatePolicy::default(),
@@ -599,11 +765,66 @@ async fn a_name_update_the_store_refuses_shows_on_the_lease_and_in_the_counter()
         lab.a("printer.lan.example.test").await,
         Vec::<RecordData>::new()
     );
+    // The forward zone's write takes its retries, the reverse zone's fails with it untried:
+    // two failed batches make at most three batches' worth of one zone's attempts (a third
+    // batch may have started), where every zone's retries would make at least four.
+    wait_until_async("a second failed batch", async || {
+        OUTCOMES.get(Outcome::Failed as u16) >= failed + 2
+    })
+    .await;
+    let one_zone = usize::try_from(DdnsSettings::default().retries).expect("retries") + 1;
+    let attempts = store.attempts.load(Ordering::SeqCst);
+    assert!(
+        attempts <= 3 * one_zone,
+        "{attempts} attempts in two batches"
+    );
+    // The lease waits for its retry all along, and the gauge shows it.
+    wait_until_async("the oldest lease a second old", async || {
+        OLDEST.get().is_some_and(|age| age >= 1.0)
+    })
+    .await;
+    *store.refuse() = 0;
+    wait_until_async("the name once the store takes it", async || {
+        lab.a("printer.lan.example.test").await == vec![a_of(50)]
+    })
+    .await;
+    wait_until_async("no lease waiting", async || OLDEST.get() == Some(0.0)).await;
+}
+
+/// A zone whose write keeps losing to other writers is contention on that zone, not an
+/// outage: the reverse zone of the same batch is still written, before the forward zone
+/// gets its set on the lease's retry.
+#[tokio::test]
+async fn a_zone_lost_to_contention_does_not_fail_the_other_zones_of_its_batch() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+        ZoneConfig {
+            max_attempts: 1,
+            ..ZoneConfig::default()
+        },
+        SHORT,
+    )
+    .await;
+    // Every try of the forward zone's write, the worker's retries included, finds the zone
+    // changed; the reverse zone's write that follows does not.
+    store.stale.store(true, Ordering::SeqCst);
+    *store.refuse() = usize::try_from(DdnsSettings::default().retries).expect("retries") + 1;
+    lab.commit(lab.lease(50, 1, None, Some("printer"))).await;
+    wait_until_async("both names", async || {
+        lab.a("printer.lan.example.test").await == vec![a_of(50)] && lab.ptr(50).await.is_some()
+    })
+    .await;
+    let forward = lab.set_times("lan.example.test").await;
+    let reverse = lab.set_times("2.0.192.in-addr.arpa").await;
+    assert!(reverse[0] < forward[0], "{reverse:?} {forward:?}");
 }
 
 #[tokio::test]
 async fn a_stale_name_update_is_planned_again_and_written_without_a_job() {
-    let store = Arc::new(Refusing::default());
+    let store = Arc::new(Refusing::<MemStore>::default());
     let lab = lab_on(
         DdnsProfile::HOME,
         UpdatePolicy::default(),
@@ -618,12 +839,13 @@ async fn a_stale_name_update_is_planned_again_and_written_without_a_job() {
         .change_dhcp_names(
             &RequestCtx::system(SystemComponent::Dhcp),
             lab.forward,
-            &[dhcp_a("stale.lan.example.test", 7)],
+            &[vec![dhcp_a("stale.lan.example.test", 7)]],
+            true,
         )
         .await
         .expect("planned again");
     assert_eq!(*store.refuse(), 0, "one write was stale");
-    assert_eq!(outcome.written.expect("written").job, None);
+    assert_eq!(outcome.0.written.expect("written").job, None);
     assert_eq!(lab.a("stale.lan.example.test").await, vec![a_of(7)]);
     assert_eq!(job_rows(lab.store.as_ref()).await, before);
 }
@@ -646,12 +868,12 @@ async fn only_the_dhcp_component_itself_writes_names_without_a_job() {
         let owner = format!("h{index}.lan.example.test");
         let outcome = lab
             .zones
-            .change_dhcp_names(cx, lab.forward, &[dhcp_a(&owner, 10)])
+            .change_dhcp_names(cx, lab.forward, &[vec![dhcp_a(&owner, 10)]], true)
             .await
             .expect("names");
         let after = job_rows(lab.store.as_ref()).await;
         assert_eq!(
-            outcome.written.expect("written").job.is_some(),
+            outcome.0.written.expect("written").job.is_some(),
             job,
             "{owner}"
         );
@@ -669,6 +891,416 @@ async fn only_the_dhcp_component_itself_writes_names_without_a_job() {
         .await
         .expect("records");
     assert!(job_rows(lab.store.as_ref()).await.0 > before.0);
+}
+
+/// Commits new clients at `addresses` in one batch, client `first` and up, each asking for
+/// the name `h<client>`, and waits until every lease records its forward name.
+async fn new_clients(lab: &Lab, addresses: std::ops::RangeInclusive<u8>, first: u8) {
+    let names: Vec<(u8, u8, String)> = addresses
+        .zip(first..)
+        .map(|(last, who)| (last, who, format!("h{who}")))
+        .collect();
+    lab.commit_all(names.iter().map(|(last, who, host)| {
+        lab.lease(*last, *who, Some((host.as_str(), ClientFqdn::FLAG_S)), None)
+    }))
+    .await;
+    for (last, _, host) in &names {
+        let owner = name(&format!("{host}.lan.example.test"));
+        wait_until_async("the forward name", async || {
+            lab.ddns(*last).await.forward.as_ref() == Some(&owner)
+        })
+        .await;
+    }
+}
+
+/// A client cannot make the worker write lease by lease: a PTR the zone service refuses (a
+/// manual TXT stands at the reverse name of the address it took) is left out of its
+/// window's change set, round after round of new clients, so every round writes one change
+/// set per zone and the lease shows the refusal.
+#[tokio::test]
+async fn a_lease_the_zone_refuses_does_not_spoil_its_window_round_after_round() {
+    let lab = lab(DdnsProfile::HOME, UpdatePolicy::default()).await;
+    lab.zones
+        .change_records(
+            &cx(),
+            lab.reverse,
+            &[Change {
+                op: Op::Set,
+                scope: ScopeName::DEFAULT,
+                name: name("60.2.0.192.in-addr.arpa"),
+                rtype: Rtype::TXT,
+                ttl: None,
+                records: vec![RecordData::Txt {
+                    strings: vec![TextBytes(b"rack=4".to_vec())],
+                }],
+                take_over: false,
+                origin: Origin::Manual,
+            }],
+            false,
+        )
+        .await
+        .expect("manual TXT");
+    for round in 0..3 {
+        new_clients(&lab, 50..=60, 1 + round * 11).await;
+        assert_eq!(
+            lab.change_sets("lan.example.test").await,
+            usize::from(round) + 1
+        );
+        assert_eq!(
+            lab.change_sets("2.0.192.in-addr.arpa").await,
+            usize::from(round) + 1
+        );
+        let refused = lab.ddns(60).await;
+        assert_eq!(refused.reverse, None);
+        assert!(
+            refused
+                .last_error
+                .is_some_and(|error| error.contains(tenko_core::dns::codes::RECORD_ORIGIN)),
+            "the refusal on the lease"
+        );
+    }
+}
+
+/// A change set above the store's batch limit is halved: its first half is written and the
+/// other leases wait, whole, for the next batch; so the batch of outcomes on the lease rows.
+/// A batch above the zone service's `max_changes` stops before the lease that would pass it.
+/// Either way no window writes a second set to a zone.
+#[tokio::test]
+async fn a_batch_too_large_writes_its_first_half_and_the_rest_waits() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    // Two leases' A and DHCID sets with the SOA; two lease rows.
+    store.max_rrsets.store(5, Ordering::SeqCst);
+    store.max_leases.store(2, Ordering::SeqCst);
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    new_clients(&lab, 50..=53, 1).await;
+    assert_eq!(lab.change_sets("lan.example.test").await, 2);
+    assert_eq!(lab.change_sets("2.0.192.in-addr.arpa").await, 2);
+
+    // Two leases' A and DHCID changes.
+    let lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::new(MemStore::default()),
+        ZoneConfig {
+            max_changes: 4,
+            ..ZoneConfig::default()
+        },
+        SHORT,
+    )
+    .await;
+    new_clients(&lab, 50..=53, 1).await;
+    assert_eq!(lab.change_sets("lan.example.test").await, 2);
+    assert_eq!(lab.change_sets("2.0.192.in-addr.arpa").await, 2);
+}
+
+/// A lease is planned whole or waits whole: with room for one lease's forward set in the
+/// window, the second lease writes neither its forward name nor its PTR.
+#[tokio::test]
+async fn a_lease_that_does_not_fit_its_window_waits_whole() {
+    let lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::new(MemStore::default()),
+        ZoneConfig {
+            max_changes: 3,
+            ..ZoneConfig::default()
+        },
+        Duration::from_secs(3_600),
+    )
+    .await;
+    lab.commit_all([
+        lab.lease(50, 1, Some(("first", ClientFqdn::FLAG_S)), None),
+        lab.lease(51, 2, Some(("second", ClientFqdn::FLAG_S)), None),
+    ])
+    .await;
+    wait_until_async("the first lease's names", async || {
+        lab.ddns(50).await.reverse.is_some()
+    })
+    .await;
+    assert_eq!(
+        lab.a("second.lan.example.test").await,
+        Vec::<RecordData>::new()
+    );
+    assert_eq!(lab.ptr(51).await, None);
+    assert_eq!(
+        lab.ddns(51).await,
+        DdnsState::default(),
+        "not planned, not recorded"
+    );
+    // Two wait for the next batch an hour away: the second lease, and the first one's own
+    // outcome row, which the worker reads again before it skips it.
+    wait_until_async("the queue gauge", async || {
+        tenko_dhcp::ddns::metrics::QUEUE.get() == Some(2.0)
+    })
+    .await;
+}
+
+/// A name taken in a race inside the write (another writer's record at the lease's name
+/// after the batch read the zone) refuses that lease's part only, in the same set, and its
+/// PTR stays out with it, also when the batch opens with a release in the reverse zone; the
+/// other lease of the window gets both names.
+#[tokio::test]
+async fn a_forward_name_refused_inside_the_write_takes_its_ptr_along() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    let soa = RrSetKey {
+        zone: lab.forward,
+        scope: ScopeName::DEFAULT,
+        name: name("lan.example.test"),
+        rtype: Rtype::SOA,
+    };
+    let txt = RrSet {
+        zone: lab.forward,
+        scope: ScopeName::DEFAULT,
+        name: name("racer.lan.example.test"),
+        rtype: Rtype::TXT,
+        ttl: 300,
+        rdata: vec![tenko_core::dns::Rdata::from_data(&RecordData::Txt {
+            strings: vec![TextBytes(b"mine".to_vec())],
+        })],
+        origin: Origin::Dynamic,
+        key: None,
+        principal: None,
+        updated: Stamp::new(Timestamp::now(), Principal::system(SystemComponent::Dns)),
+    };
+    // A client that writes its own A record holds only a PTR. Its release, at an address
+    // before the others, opens the batch, so the reverse zone comes first in the batch until
+    // the worker puts the forward zones first.
+    lab.config
+        .update_scope(
+            &cx(),
+            lab.scope,
+            ScopeChange {
+                ddns: Some(DdnsPolicy {
+                    enabled: true,
+                    forward_zone: Some(lab.forward),
+                    client_may_update_a: true,
+                    ..DdnsPolicy::default()
+                }),
+                ..ScopeChange::default()
+            },
+            None,
+        )
+        .await
+        .expect("scope");
+    lab.commit(lab.lease(40, 3, Some(("phone", 0)), None)).await;
+    wait_until_async("the PTR only", async || lab.ptr(40).await.is_some()).await;
+    let mut released = lab.lease(40, 3, Some(("phone", 0)), None);
+    released.state = BindingState::Released;
+    *store.race.lock().unwrap_or_else(PoisonError::into_inner) = Some((soa, txt));
+    lab.commit_all([
+        released,
+        lab.lease(50, 1, Some(("racer", ClientFqdn::FLAG_S)), None),
+        lab.lease(51, 2, Some(("good", ClientFqdn::FLAG_S)), None),
+    ])
+    .await;
+    wait_until_async("the refusal on the lease", async || {
+        lab.ddns(50)
+            .await
+            .last_error
+            .is_some_and(|error| error.contains(tenko_core::dns::codes::RECORD_ORIGIN))
+    })
+    .await;
+    assert_eq!(
+        lab.a("racer.lan.example.test").await,
+        Vec::<RecordData>::new()
+    );
+    assert_eq!(lab.ptr(50).await, None, "the PTR stays out with its name");
+    assert_eq!(lab.a("good.lan.example.test").await, vec![a_of(51)]);
+    assert!(lab.ptr(51).await.is_some());
+    assert_eq!(
+        lab.change_sets("lan.example.test").await,
+        1,
+        "one set, not one a lease"
+    );
+}
+
+/// A real client behind N waiting leases gets its name within ⌈4N / `max_changes`⌉ + 1
+/// windows: the waiting leases are taken in the order they changed, and none overtakes it.
+#[tokio::test]
+async fn a_real_client_behind_a_backlog_gets_its_name_within_a_bounded_number_of_windows() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+        ZoneConfig {
+            max_changes: 8,
+            ..ZoneConfig::default()
+        },
+        SHORT,
+    )
+    .await;
+    let backlog: Vec<(u8, String)> = (50..=69).map(|last| (last, format!("bot{last}"))).collect();
+    lab.commit_all(
+        backlog
+            .iter()
+            .map(|(last, host)| lab.lease(*last, *last, Some((host, ClientFqdn::FLAG_S)), None)),
+    )
+    .await;
+    lab.commit(lab.lease(70, 99, Some(("real", ClientFqdn::FLAG_S)), None))
+        .await;
+    wait_until_async("the real client's name", async || {
+        lab.ddns(70).await.forward.is_some()
+    })
+    .await;
+    let windows = lab.change_sets("lan.example.test").await;
+    let bound = (4 * backlog.len()).div_ceil(8) + 1;
+    assert!(windows <= bound, "{windows} windows, bound {bound}");
+    // A batch reads the rows of no more leases than the zone service takes changes.
+    let most = store.most_lease_reads();
+    assert!(most <= 8, "{most} lease rows read through one view");
+}
+
+/// A restart writes at most one set before the spacing applies again: the new worker's
+/// first set may follow the old one's at once, the next waits the spacing after it.
+#[tokio::test]
+async fn a_restart_writes_at_most_one_set_before_the_spacing() {
+    let spacing = Duration::from_secs(2);
+    let mut lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::new(MemStore::default()),
+        ZoneConfig::default(),
+        spacing,
+    )
+    .await;
+    for (last, host) in [(50, "one"), (51, "two"), (52, "three")] {
+        if last == 51 {
+            lab.restart();
+        }
+        lab.commit(lab.lease(last, last, Some((host, ClientFqdn::FLAG_S)), None))
+            .await;
+        wait_until_async("the name", async || lab.ddns(last).await.forward.is_some()).await;
+    }
+    let times = lab.set_times("lan.example.test").await;
+    assert_eq!(times.len(), 3, "{times:?}");
+    assert!(times[2].saturating_since(times[1]) >= spacing, "{times:?}");
+}
+
+/// The spacing counts from the end of a batch: with a store that takes a while to write a
+/// set, consecutive sets of a zone are the batch's two writes (the forward and the reverse
+/// set, from the first one's time stamp) plus the spacing apart, so a sliding minute never
+/// holds more than one set a spacing. Without the spacing the gap is the two writes and the
+/// window alone.
+#[tokio::test]
+async fn the_spacing_counts_from_the_end_of_the_last_batch() {
+    let store = Arc::new(Refusing::<MemStore>::default());
+    let delay = Duration::from_millis(1_500);
+    let spacing = Duration::from_secs(1);
+    let lab = lab_with(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+        ZoneConfig::default(),
+        spacing,
+    )
+    .await;
+    *store.delay.lock().unwrap_or_else(PoisonError::into_inner) = delay;
+    for last in 50..=52 {
+        let host = format!("h{last}");
+        lab.commit(lab.lease(last, last, Some((&host, ClientFqdn::FLAG_S)), None))
+            .await;
+        wait_until_async("the name", async || lab.ddns(last).await.forward.is_some()).await;
+    }
+    let times = lab.set_times("lan.example.test").await;
+    for pair in times.windows(2) {
+        assert!(
+            pair[1].saturating_since(pair[0]) >= 2 * delay + spacing,
+            "{times:?}"
+        );
+    }
+}
+
+/// On a Raft store below its disk margin, which refuses the worker's change sets: the
+/// lease's release goes through, the removal fails once per window (no retries in the
+/// window, one log line per change set), shows in the counter, and is written once the
+/// disk has room again.
+#[tokio::test]
+async fn below_the_disk_margin_a_name_update_fails_once_a_window_and_follows_with_room() {
+    use tenko_store::{
+        Pressure,
+        raft::{RaftStore, RaftStoreConfig},
+        test_hooks::FREE_BYTES,
+    };
+    let mut config = RaftStoreConfig::new("unused");
+    config.fsync_probe_samples = 0;
+    let store = Arc::new(Refusing {
+        inner: RaftStore::open_temp(config).await.expect("open"),
+        refuse: Mutex::default(),
+        stale: AtomicBool::default(),
+        max_rrsets: AtomicUsize::default(),
+        max_leases: AtomicUsize::default(),
+        attempts: AtomicUsize::default(),
+        race: Mutex::default(),
+        delay: Mutex::default(),
+        lease_reads: Mutex::default(),
+    });
+    let free = async |bytes: u64, pressure: Pressure| {
+        let file = store.inner.config().data_dir.join(FREE_BYTES);
+        std::fs::write(file, bytes.to_string()).expect("the free space");
+        wait_until_async("the store reads its free space", async || {
+            let safety = store.inner.safety().expect("safety");
+            safety.free_bytes == bytes && safety.pressure == pressure
+        })
+        .await;
+    };
+    let lab = lab_on(
+        DdnsProfile::HOME,
+        UpdatePolicy::default(),
+        Arc::clone(&store) as _,
+    )
+    .await;
+    new_clients(&lab, 50..=50, 1).await;
+    let reserve = store.inner.safety().expect("safety").reserve_bytes;
+    free(reserve / 2 * 3, Pressure::Margin).await;
+
+    // The counter is the process's: nextest runs each test in a process of its own.
+    let failed = OUTCOMES.get(Outcome::Failed as u16);
+    let attempts = store.attempts.load(Ordering::SeqCst);
+    // The binding ends with a row no larger than before, which the store takes below its
+    // margin, as it takes a renewal.
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let (mut lease, _) = view
+        .get_typed(&LEASES, &(lab.vrf, ip(50)))
+        .expect("row")
+        .expect("lease");
+    drop(view);
+    lease.state = BindingState::Free;
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+    batch
+        .put_typed(&LEASES, &(lab.vrf, ip(50)), &lease)
+        .expect("lease");
+    store.propose(batch).await.expect("the end of the binding");
+    wait_until_async("the refused removal", async || {
+        OUTCOMES.get(Outcome::Failed as u16) > failed
+    })
+    .await;
+    // A window writes the forward and the reverse change set once each; the next window
+    // may have started.
+    let rounds = usize::try_from(OUTCOMES.get(Outcome::Failed as u16) - failed).expect("rounds");
+    let tried = store.attempts.load(Ordering::SeqCst) - attempts;
+    assert!(
+        tried <= 2 * rounds + 2,
+        "{tried} attempts in {rounds} windows"
+    );
+    assert_eq!(lab.a("h1.lan.example.test").await, vec![a_of(50)]);
+
+    free(u64::MAX, Pressure::Normal).await;
+    wait_until_async("the removal", async || {
+        lab.a("h1.lan.example.test").await.is_empty() && lab.ptr(50).await.is_none()
+    })
+    .await;
 }
 
 #[tokio::test]

@@ -225,8 +225,9 @@ The `dhcp` role ([dhcp.md](dhcp.md)), registered when the role starts:
 | `tenko_dhcp_limited_total` | counter | `limit` | Requests refused by a limit: `leases_per_mac`, `addresses_per_duid`, `prefixes_per_duid`, `offers_per_second`, `conflicts_per_mac`, `conflict_share`, `bindings_per_scope` |
 | `tenko_dhcp_leases` | gauge | `state` | Leases in the role's table by binding state |
 | `tenko_dhcp_pool_utilization` | gauge | `scope` | The share of a scope's pool addresses that are leased, 0 to 1 |
-| `tenko_dhcp_ddns_total` | counter | `outcome` | DDNS change sets: `written`, `removed`, `refused`, `failed`, `skipped`, `dropped` |
-| `tenko_dhcp_ddns_queue` | gauge | | DDNS requests waiting |
+| `tenko_dhcp_ddns_total` | counter | `outcome` | DDNS change sets: `written`, `removed`, `refused`, `failed`, `skipped` |
+| `tenko_dhcp_ddns_queue` | gauge | | Leases waiting for the DDNS worker, at most one per address |
+| `tenko_dhcp_ddns_oldest_seconds` | gauge | | Seconds the oldest waiting lease has waited since it changed, a failed lease waiting for its retry included; it grows while a flood fills every batch or the store refuses the writes (`docs/dhcp.md` section 13.5) |
 | `tenko_dhcp_conflicts_total` | counter | | Addresses a probe found in use before an offer |
 | `tenko_dhcp_probe_duration_seconds` | histogram | | Duration of the conflict probes |
 | `tenko_dhcp_renewals_cached_total` | counter | | Renewals answered from the stored lease without a commit |
@@ -322,7 +323,7 @@ The start page shows administrators live metrics of the controllers (OPS-20): nu
 | `dhcp.naks_per_second`, `dhcp.declines_per_second` | The change of `tenko_dhcp_naks_total` and `tenko_dhcp_declines_total` |
 | `dhcp.active_leases`, `dhcp.abandoned_leases` | `tenko_dhcp_leases{state}` |
 | `dhcp.scopes`, `dhcp.fullest[]` | The series of `tenko_dhcp_pool_utilization{scope}` and the three highest (`scope`, the network, and `utilization`, 0 to 1) |
-| `dhcp.ddns.{written,removed,refused,failed,skipped,dropped}`, `dhcp.ddns.queue` | The change of `tenko_dhcp_ddns_total` by `outcome`; `tenko_dhcp_ddns_queue` |
+| `dhcp.ddns.{written,removed,refused,failed,skipped,dropped}`, `dhcp.ddns.queue` | The change of `tenko_dhcp_ddns_total` by `outcome` (`dropped` stays 0: no outcome is counted under it any more); `tenko_dhcp_ddns_queue` |
 | `host.cpu_percent`, `host.memory_total`, `host.memory_available`, `host.disk_total`, `host.disk_available` | `tenko_host_cpu_busy_ratio` in percent, `tenko_host_memory_bytes{kind}` and `tenko_host_disk_bytes{kind}`: the latest reading of the host, repeated by the samples between two readings (five seconds); each is absent when it was not read, and `host` is absent when none was |
 
 **The cluster merge.** While a stream listens, a controller of a cluster asks every other member for its newest sample once per tick, in parallel, with a deadline of 500 ms per peer. A peer that does not answer keeps its last good sample in `nodes`, marked `stale: true` (one that has not answered since the publisher woke appears with `stale: true` and no role); a member of an older build answers `UNIMPLEMENTED` and appears with `unsupported: true` and no figures. `cluster` sums the rates, sizes and counts of the current samples (neither stale nor unsupported) and takes the highest quantiles, term and lag per member; the jobs are shared by the cluster, so it takes the highest job counts rather than their sum. The `dns` part of `cluster` is there when a current sample has one: its rates, cache entries and connections summed, its quantiles at their highest, the block lists summed by name, and the hit ratio computed again from the summed hits and misses, and the recursion rates summed. On a single controller `cluster` is its own sample without the node id. The tiles show `cluster`, except the Raft tile, which lists every controller with its role and lag.

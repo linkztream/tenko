@@ -13,7 +13,6 @@
 //! | [`store`] | [`LeaseStore`](store::LeaseStore): the commit before the ACK | [`MemLeaseStore`](store::MemLeaseStore) |
 //! | [`allocator`] | [`Allocator`](allocator::Allocator), [`PoolOwnership`](allocator::PoolOwnership), [`OfferHold`](allocator::OfferHold), [`grant_time`](allocator::grant_time) | [`ReferenceAllocator`](allocator::ReferenceAllocator), [`SingleNode`](allocator::SingleNode) |
 //! | [`probe`] | [`ConflictProbe`](probe::ConflictProbe) | [`MemProbe`](probe::MemProbe), [`NoProbe`](probe::NoProbe) |
-//! | [`ddns`] | [`DdnsQueue`](ddns::DdnsQueue) | [`MemDdnsQueue`](ddns::MemDdnsQueue) |
 //! | [`fingerprint`] | [`Fingerprinter`](fingerprint::Fingerprinter) | [`RuleTable`](fingerprint::RuleTable) |
 //! | [`metrics`] | the `tenko_dhcp_*` families | |
 //! | [`v4::engine`], [`server`] | the DHCPv4 engine and its listeners (WP7.3) | |

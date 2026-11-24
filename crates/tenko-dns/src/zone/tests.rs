@@ -1577,3 +1577,85 @@ async fn a_kerberos_entry_with_a_bad_pattern_is_refused() {
         .expect("a computer-account entry");
     assert_eq!(acl.entries.len(), 1);
 }
+
+/// A view that refuses every read of the journal and its bytes row.
+struct NoJournal(Arc<dyn tenko_store::ReadView>);
+
+impl NoJournal {
+    fn refuse(table: &tenko_core::TableName) -> Result<(), tenko_store::StoreError> {
+        let journal = [
+            tenko_core::dns::tables::JOURNAL.name(),
+            tenko_core::dns::tables::JOURNAL_BYTES.name(),
+        ];
+        if journal.contains(&table) {
+            return Err(tenko_store::StoreError::Storage(format!("{table} read")));
+        }
+        Ok(())
+    }
+}
+
+impl tenko_store::ReadView for NoJournal {
+    fn revision(&self) -> tenko_core::Revision {
+        self.0.revision()
+    }
+
+    fn get(
+        &self,
+        table: &tenko_core::TableName,
+        key: &[u8],
+    ) -> Result<Option<tenko_store::Versioned>, tenko_store::StoreError> {
+        Self::refuse(table)?;
+        self.0.get(table, key)
+    }
+
+    fn scan(
+        &self,
+        table: &tenko_core::TableName,
+        range: KeyRange,
+        limit: usize,
+        reverse: bool,
+    ) -> Result<Vec<(bytes::Bytes, tenko_store::Versioned)>, tenko_store::StoreError> {
+        Self::refuse(table)?;
+        self.0.scan(table, range, limit, reverse)
+    }
+
+    fn counter(&self, counter: &tenko_core::CounterKey) -> Result<u64, tenko_store::StoreError> {
+        self.0.counter(counter)
+    }
+}
+
+/// The check of a change reads the zone's records only, never its journal, so the name
+/// update parts are checked on the view their set is planned against at no journal cost.
+#[tokio::test]
+async fn the_check_of_a_change_reads_no_journal() {
+    let (service, store) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    service
+        .change_records(
+            &cx(),
+            zone.id,
+            &[a("host.example.test", &["192.0.2.1"])],
+            false,
+        )
+        .await
+        .expect("a journal to stay away from");
+    let view = NoJournal(store.read(ReadConsistency::Local).await.expect("view"));
+    let change = [a("host.example.test", &["192.0.2.2"])];
+    super::records::check(&view, &zone, &change, &cx(), 10_000).expect("checked");
+    // The view does refuse: the whole plan, which appends, fails on its journal read.
+    let error = super::records::plan(
+        &view,
+        &zone,
+        &change,
+        &cx(),
+        JournalLimits::default(),
+        10_000,
+    )
+    .err()
+    .expect("the plan reads the journal");
+    assert!(format!("{error:?}").contains("dns.journal"), "{error:?}");
+}

@@ -232,16 +232,12 @@ fn check_dhcp_writer<'a>(
 }
 
 /// Plans `changes` against `view`: the diff, the serial steps and the batch that writes
-/// them (none when nothing changes).
+/// them (none when nothing changes): [`check`], then [`stage`].
 ///
 /// # Errors
 ///
 /// `dns.zone.invalid` for a zone without data or an unknown scope, `dns.record.invalid`,
 /// `dns.record.conflict`, `dns.record.origin`, or the store's error.
-#[allow(
-    clippy::too_many_lines,
-    reason = "the steps of one batch read best in order"
-)]
 pub(crate) fn plan(
     view: &dyn ReadView,
     zone: &Zone,
@@ -250,6 +246,35 @@ pub(crate) fn plan(
     limits: JournalLimits,
     max_changes: usize,
 ) -> ZoneResult<BatchPlan> {
+    let checked = check(view, zone, changes, cx, max_changes)?;
+    stage(view, zone, changes, cx, limits, checked)
+}
+
+/// What [`check`] found: the diff, the revisions of the RRsets it read, and the RRsets
+/// taken over.
+pub(crate) struct Checked {
+    diff: Vec<Diff>,
+    before: BTreeMap<RrSetKey, Revision>,
+    taken_over: Vec<String>,
+}
+
+/// Runs `changes` over the RRsets of `view` and checks the result with every rule of a
+/// batch, without the serial step, the journal or the batch: what a write would refuse.
+///
+/// # Errors
+///
+/// As [`plan`].
+#[allow(
+    clippy::too_many_lines,
+    reason = "the steps of one batch read best in order"
+)]
+pub(crate) fn check(
+    view: &dyn ReadView,
+    zone: &Zone,
+    changes: &[Change],
+    cx: &RequestCtx,
+    max_changes: usize,
+) -> ZoneResult<Checked> {
     // WP6.1: a secondary zone's records come from its transfers only.
     super::secondary::check_writable(zone)?;
     if !holds_data(zone.kind) {
@@ -476,6 +501,42 @@ pub(crate) fn plan(
             check_dhcp_writer(zone, name, entry.before.values().map(|(rrset, _)| rrset))?;
         }
     }
+    let before = nodes
+        .into_iter()
+        .flat_map(|((scope, name), node)| {
+            node.before.into_iter().map(move |(rtype, (_, revision))| {
+                let key = RrSetKey {
+                    zone: zone.id,
+                    scope: scope.clone(),
+                    name: name.clone(),
+                    rtype,
+                };
+                (key, revision)
+            })
+        })
+        .collect();
+    Ok(Checked {
+        diff,
+        before,
+        taken_over,
+    })
+}
+
+/// Stages what [`check`] found: the RRsets, the serial step and the journal entry of each
+/// scope, and the audit record (none when nothing changes).
+fn stage(
+    view: &dyn ReadView,
+    zone: &Zone,
+    changes: &[Change],
+    cx: &RequestCtx,
+    limits: JournalLimits,
+    checked: Checked,
+) -> ZoneResult<BatchPlan> {
+    let Checked {
+        diff,
+        before,
+        taken_over,
+    } = checked;
     if diff.is_empty() {
         return Ok(BatchPlan {
             diff,
@@ -483,13 +544,10 @@ pub(crate) fn plan(
             batch: None,
         });
     }
-
+    let stamp = Stamp::new(cx.now, cx.principal.clone());
     let mut batch = WriteBatch::for_request(cx);
     for item in &diff {
-        let revision = nodes
-            .get(&(item.key.scope.clone(), item.key.name.clone()))
-            .and_then(|entry| entry.before.get(&item.key.rtype))
-            .map(|(_, revision)| *revision);
+        let revision = before.get(&item.key).copied();
         batch.expect_typed(&RRSETS, &item.key, revision);
         match (&item.before, &item.after) {
             (before, Some(after)) => stage_put(&mut batch, before.as_ref(), after)?,
@@ -530,8 +588,9 @@ pub(crate) fn plan(
     })
 }
 
-/// Checks `changes` against `view` as a batch would and returns the diff, without
-/// writing: the validation alone, for tools and the fuzz target.
+/// Plans `changes` against `view` as a batch would, the serial step, the stored rows and the
+/// journal entry included, and returns the diff without writing: the validation alone, for
+/// tools and the fuzz target.
 ///
 /// # Errors
 ///
@@ -644,6 +703,41 @@ pub(crate) fn stage_serial_step(
     })
 }
 
+/// Whether one part of DHCP's names may be written into `zone`: every change of the
+/// origin `dhcp`, data added only where the zone takes DHCP updates, and the rules of a
+/// batch ([`check`]).
+fn dhcp_part(
+    view: &dyn ReadView,
+    zone: &Zone,
+    part: &[Change],
+    cx: &RequestCtx,
+    allows_by_default: bool,
+) -> ZoneResult<()> {
+    if let Some(change) = part.iter().find(|change| change.origin != Origin::Dhcp) {
+        return Err(ZoneError::new(
+            codes::RECORD_ORIGIN,
+            409,
+            format!(
+                "{} {} is not a change of the origin dhcp",
+                change.name, change.rtype
+            ),
+        )
+        .param("origin", origin_name(change.origin)));
+    }
+    let adds = part
+        .iter()
+        .any(|change| matches!(change.op, Op::Set | Op::Add));
+    if adds && !zone.update.dhcp_allowed(allows_by_default) {
+        return Err(ZoneError::new(
+            codes::UPDATE_REFUSED,
+            403,
+            format!("the zone {} does not allow DHCP updates", zone.name),
+        )
+        .param("zone", zone.name.as_str()));
+    }
+    check(view, zone, part, cx, usize::MAX).map(drop)
+}
+
 /// The stable name of an origin.
 pub fn origin_name(origin: Origin) -> &'static str {
     match origin {
@@ -686,42 +780,69 @@ impl ZoneService {
                 written: None,
             });
         }
-        self.write_records(cx, zone, changes, true).await
+        Ok(self
+            .write_records(cx, zone, &[changes], true, None)
+            .await?
+            .0)
     }
 
-    /// Applies DHCP's name updates to a zone as [`ZoneService::change_records`] does. Made
-    /// by the DHCP component itself, the change set runs without a job: a client can
-    /// change its lease without limit, and so would the job rows. It keeps its audit
-    /// record `dns.record.change` and its journal entry. Any other principal's change set
-    /// is a job.
+    /// Applies DHCP's name updates to a zone as [`ZoneService::change_records`] does, as one
+    /// change set of `parts` (one list of changes per part of a lease). Each part is checked
+    /// on the view the set is planned against, and a part the zone refuses is left out and
+    /// returned with its reason: a change of another origin than `dhcp`, an addition to a
+    /// zone that takes no DHCP updates (`allows_by_default` is the profile's default of the
+    /// zone's switch), or a part the rules of a batch refuse; the writer's removals go
+    /// wherever its names stand. Made by the DHCP component itself, the change set runs
+    /// without a job: a client can change its lease without limit, and so would the job
+    /// rows. It keeps its audit record `dns.record.change` and its journal entry. Any
+    /// other principal's change set is a job.
     ///
     /// # Errors
     ///
-    /// As [`ZoneService::change_records`].
+    /// As [`ZoneService::change_records`], for the set or a store error.
     pub async fn change_dhcp_names(
         &self,
         cx: &RequestCtx,
         zone: ZoneId,
-        changes: &[Change],
-    ) -> ZoneResult<BatchOutcome> {
+        parts: &[Vec<Change>],
+        allows_by_default: bool,
+    ) -> ZoneResult<(BatchOutcome, Vec<(usize, ZoneError)>)> {
         let job = cx.principal != Principal::system(SystemComponent::Dhcp);
-        self.write_records(cx, zone, changes, job).await
+        let parts: Vec<&[Change]> = parts.iter().map(Vec::as_slice).collect();
+        self.write_records(cx, zone, &parts, job, Some(allows_by_default))
+            .await
     }
 
     async fn write_records(
         &self,
         cx: &RequestCtx,
         zone: ZoneId,
-        changes: &[Change],
+        parts: &[&[Change]],
         job: bool,
-    ) -> ZoneResult<BatchOutcome> {
+        dhcp: Option<bool>,
+    ) -> ZoneResult<(BatchOutcome, Vec<(usize, ZoneError)>)> {
         let limits = self.config.journal;
         let max_changes = self.config.max_changes;
-        let ((diff, serials), written) = self
+        let ((diff, serials, refused), written) = self
             .execute(cx, |view| {
                 let row = Self::zone(view, zone)?;
-                let planned = plan(view, &row.zone, changes, cx, limits, max_changes)?;
-                let result = (planned.diff, planned.serials);
+                let mut refused = Vec::new();
+                let mut changes = Vec::new();
+                for (index, part) in parts.iter().enumerate() {
+                    if let Some(allows) = dhcp
+                        && let Err(error) = dhcp_part(view, &row.zone, part, cx, allows)
+                    {
+                        // A store error is the write's, not the part's.
+                        if !error.coded().code.starts_with("dns.") {
+                            return Err(error);
+                        }
+                        refused.push((index, error));
+                        continue;
+                    }
+                    changes.extend_from_slice(part);
+                }
+                let planned = plan(view, &row.zone, &changes, cx, limits, max_changes)?;
+                let result = (planned.diff, planned.serials, refused);
                 Ok(match planned.batch {
                     Some(batch) => Planned {
                         result,
@@ -740,11 +861,12 @@ impl ZoneService {
                 })
             })
             .await?;
-        Ok(BatchOutcome {
+        let outcome = BatchOutcome {
             dry_run: false,
             diff,
             serials,
             written,
-        })
+        };
+        Ok((outcome, refused))
     }
 }

@@ -1,5 +1,6 @@
-//! The DDNS series (`docs/dhcp-contracts.md` section 8): `tenko_dhcp_ddns_total{outcome}`
-//! and `tenko_dhcp_ddns_queue`, registered by the role's metrics with the other families.
+//! The DDNS series (`docs/dhcp-contracts.md` section 8): `tenko_dhcp_ddns_total{outcome}`,
+//! `tenko_dhcp_ddns_queue` and `tenko_dhcp_ddns_oldest_seconds`, registered by the role's
+//! metrics with the other families.
 
 use tenko_core::metrics::{CounterVec, Gauge};
 
@@ -20,8 +21,6 @@ pub enum Outcome {
     Failed = 3,
     /// Nothing to do for DDNS: IPAM manages the address's names, or the scope has no zone.
     Skipped = 4,
-    /// The queue was full; the request is read again from the lease rows.
-    Dropped = 5,
 }
 
 impl Outcome {
@@ -42,7 +41,6 @@ const LABELS: &[&[&str]] = &[
     &["refused"],
     &["failed"],
     &["skipped"],
-    &["dropped"],
 ];
 
 /// `tenko_dhcp_ddns_total{outcome}`.
@@ -51,6 +49,9 @@ pub static OUTCOMES: CounterVec = CounterVec::fixed(families::DDNS, LABELS);
 /// `tenko_dhcp_ddns_queue`: requests waiting for the worker.
 pub static QUEUE: Gauge = Gauge::new(families::DDNS_QUEUE);
 
+/// `tenko_dhcp_ddns_oldest_seconds`: how long the oldest of them has waited.
+pub static OLDEST: Gauge = Gauge::new(families::DDNS_OLDEST);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -58,8 +59,7 @@ mod tests {
     #[test]
     fn outcomes_follow_the_series() {
         assert_eq!(Outcome::Refused.label(), "refused");
-        assert_eq!(Outcome::Dropped.label(), "dropped");
-        assert_eq!(LABELS.len(), Outcome::Dropped as usize + 1);
+        assert_eq!(LABELS.len(), Outcome::Skipped as usize + 1);
         let before = OUTCOMES.get(Outcome::Skipped as u16);
         Outcome::Skipped.count();
         assert!(OUTCOMES.get(Outcome::Skipped as u16) > before);
