@@ -96,7 +96,7 @@ function Get-FakeWorld {
         batchRight = $false
         rsat = $true
         marker = $null
-        markerThief = $false; markerPending = ''
+        markerThief = $false; markerPending = ''; finished = ''
         completes = 0; completeFails = $false; completeOk = 0; completeThenFail = $false; completeFailedOnce = $false; jobFailsAfter = $false; crashAtComplete = $false; crashedAtComplete = $false
         dnsUser = 'CORP\dhcp-dns'
         v6 = @(); leaseSeconds = 28800; startPolicy = @(); gpp = @(); timeSource = 'time.example.test'
@@ -114,7 +114,7 @@ function Get-FakeWorld {
         # Tenko
         mirrors = [ordered]@{}; tzones = [ordered]@{}; jobs = [ordered]@{}; window = $null; scopesOn = $false
         tenkoCalls = [System.Collections.ArrayList]@()
-        failRoute = ''; tenkoFailed = $false
+        failRoute = ''; failSkip = 0; tenkoFailed = $false
         badMirror = $false; badToken = $false; fingerprint = ''
         tenkoLeases = @()
         answers = [System.Collections.ArrayList]@()
@@ -157,7 +157,7 @@ function Invoke-FakeRemote {
     param([string]$Server, [string]$Name, [object[]]$Arguments)
     $w = $script:world
     [void]$w.calls.Add("$(Get-FakeShort $Server)|$Name")
-    if ($w.failAt -eq $Name -and -not $w.failed -and (-not $w.failOn -or $w.failOn -eq (Get-FakeShort $Server))) { $w.failed = $true; throw "injected failure at $Name on $Server" }
+    if ($w.failAt -eq $Name -and -not $w.failed -and (-not $w.failOn -or $w.failOn -eq (Get-FakeShort $Server)) -and $w.failSkip-- -le 0) { $w.failed = $true; throw "injected failure at $Name on $Server" }
     $s = Get-FakeShort $Server
     $a = $Arguments
     $domain = $script:FakeDomain
@@ -205,11 +205,11 @@ function Invoke-FakeRemote {
         'ReadLocalAdmins' { @{ Name = 'CORP\Domain Admins'; Sid = "$($script:FakeSid)-512"; Class = 'Group' } }
         'ReadFeature' { $w.rsat }
         'SetFeature' { $w.rsat = [bool]$a[1]; $w.rsat }
-        'ReadMarker' { if ($w.marker) { $m = @{} + $w.marker; $m.Pending = $w.markerPending; [pscustomobject]$m } }
+        'ReadMarker' { if ($w.marker -or $w.finished) { $m = $(if ($w.marker) { @{} + $w.marker } else { @{ Run = ''; Host = ''; Time = '' } }); $m.Pending = $w.markerPending; $m.Finished = $w.finished; [pscustomobject]$m } }
         'WriteMarkerPending' { if ($w.marker) { $w.markerPending = $a[1] } }
         'ReadDhcpService' { $service = $w.services[$s]; @{ Status = $service.Status; Start = $service.Start; Listening = $(if ($service.Status -eq 'Running') { 1 } else { 0 }) } }
         'WriteMarker' {
-            if ($a[3]) { $w.marker = $null; $w.markerPending = '' }
+            if ($a[3]) { $w.marker = $null; $w.markerPending = ''; $w.finished = $(if ($a.Count -gt 4) { [string]$a[4] } else { '' }) }
             elseif ($w.markerThief) { $w.marker = @{ Run = 'another-run'; Host = 'ADM2'; Time = '2026-11-21T10:00:00Z' } }
             else { $w.marker = @{ Run = $a[1]; Host = $a[2]; Time = '2026-11-21T10:00:00Z' } }
         }
@@ -390,7 +390,7 @@ function Invoke-FakeTenko {
     param([string]$Method, [string]$Path, [object]$Body)
     $w = $script:world
     [void]$w.tenkoCalls.Add("$Method $Path")
-    if ($w.failRoute -and "$Method $Path" -match $w.failRoute -and -not $w.tenkoFailed) { $w.tenkoFailed = $true; throw "Tenko refused $Method $Path with 503 injected" }
+    if ($w.failRoute -and "$Method $Path" -match $w.failRoute -and -not $w.tenkoFailed -and $w.failSkip-- -le 0) { $w.tenkoFailed = $true; throw "Tenko refused $Method $Path with 503 injected" }
     $route = "$Method $($Path -replace '\?.*$', '')"
     $query = $(if ($Path -match '\?(.*)$') { $Matches[1] } else { '' })
     switch -Regex ($route) {

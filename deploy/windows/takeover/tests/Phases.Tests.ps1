@@ -40,6 +40,7 @@ Describe 'A whole run' {
         @($w.tasks).Count | Should -Be 2
         @($w.tzones.Values | Where-Object { $_.kind -eq 'primary' }).Count | Should -Be 3
         @($w.gpoMembers) | Should -Be @('pc1')
+        $script:beforeFinish = [System.IO.File]::ReadAllBytes((Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'))
     }
 
     It 'finishes in the second sitting after the confirmation, without starting the DHCP Server service or reading a stopped server' {
@@ -51,21 +52,22 @@ Describe 'A whole run' {
         $script:world.calls | Should -Not -Contain 'dc1|StartDhcp'
         $script:world.calls | Should -Not -Contain 'dc1|ReadDhcpServer'
         $script:world.marker | Should -BeNullOrEmpty
+        $script:world.finished | Should -Be (Read-State).id -Because 'the domain names the finished run'
         @($script:world.mirrors.Keys).Count | Should -Be 0
     }
 
     It 'says before the finish that there is no scripted way back, what stays on the servers and where the export is' {
         $prompt = @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1]
         $prompt | Should -Match 'After it there is no scripted way back: -Reverse is refused and going back is manual work\.'
-        $prompt | Should -Match 'Each DHCP server keeps the DHCP Server role and its database, the service stopped and disabled, the authorization removed'
+        $prompt | Should -Match 'The finish \(phase 6\) releases the frozen names in Tenko''s zones and removes'
+        $prompt | Should -Match 'Each DHCP server keeps the DHCP Server role and its database; the finish neither starts nor authorizes its service\. The DHCP Server service and authorization read now: dc1\.corp\.example\.test Stopped and Disabled, not authorized; dc2\.corp\.example\.test Stopped and Disabled, not authorized\.'
         $prompt | Should -Match ([regex]::Escape("The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path (Get-TkStateDir 'corp.example.test') 'backup') here."))
         $prompt | Should -Not -Match 'Set-DhcpServerDnsCredential' -Because 'the servers keep the DNS credential they had'
     }
 
-    It 'removes or installs no feature and restarts no server in the finish' {
-        $changing = @($script:TkRemote.Keys | Where-Object { $script:TkRemote[$_].ToString() -match '\b(Install|Uninstall|Add|Remove)-WindowsFeature\b|\b(Restart|Stop)-Computer\b' })
-        $changing | Should -Be @('SetFeature') -Because 'the mirror host''s tools are the only feature the script changes, in phase 2'
-        @($script:finishCalls | Where-Object { $changing -contains $_.Split('|')[1] }) | Should -BeNullOrEmpty
+    It 'calls on Windows exactly the blocks the finish is known to call, none that installs, removes, starts or restarts' {
+        # A new remote call in the finish fails here until someone has decided that it belongs.
+        @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique) | Should -Be @('ProtectDirectory', 'ReadComputers', 'ReadDhcpInDirectory', 'ReadDhcpService', 'ReadDirectoryZones', 'ReadDomain', 'ReadFeature', 'ReadHardening', 'ReadLocalAdmins', 'ReadMarker', 'ReadProgramFiles', 'ReadZones', 'RemoveAccount', 'RemoveBatchRight', 'RemoveExporter', 'WriteMarker')
     }
 
     It 'refuses -Reverse after the finish with exit 1 and changes nothing' {
@@ -86,6 +88,16 @@ Describe 'A whole run' {
         $script:world.tenkoCalls | Should -BeNullOrEmpty
     }
 
+    It 'refuses -Reverse from a copy of the state file made before the finish, by the mark the domain keeps' {
+        $script:world.calls.Clear()
+        $script:world.tenkoCalls.Clear()
+        [System.IO.File]::WriteAllBytes((Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'), $script:beforeFinish)
+        Invoke-FakeRun -Reverse | Should -Be 1
+        $script:lastError | Should -Match 'the finish \(phase 6\) has started: there is no scripted way back'
+        Get-WindowsChange | Should -BeNullOrEmpty
+        $script:world.tenkoCalls | Should -BeNullOrEmpty
+    }
+
     It 'walks every phase before the finish back with -Reverse to the starting state' {
         Install-FakeWorld
         $start = Get-WindowsShape
@@ -98,6 +110,35 @@ Describe 'A whole run' {
         @($script:world.tzones.Keys).Count | Should -Be 0
     }
 
+    It 'resumes a finish cut short, with a step done and one running and no phase recorded, and refuses -Reverse meanwhile' {
+        Install-FakeWorld
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $path = Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'
+        $text = [System.IO.File]::ReadAllText($path)
+        $text = $text -replace '"steps":\{', '"steps":{"6.tenko":{"state":"done","at":"2026-11-24T10:00:00Z"},"6.exporter":{"state":"running","at":"2026-11-24T10:00:01Z"},'
+        [System.IO.File]::WriteAllText($path, $text)
+        $script:world.calls.Clear()
+        $script:world.tenkoCalls.Clear()
+        Invoke-FakeRun -Reverse | Should -Be 1
+        $script:world.calls | Should -BeNullOrEmpty
+        $script:world.tenkoCalls | Should -BeNullOrEmpty
+        Invoke-FakeRun | Should -Be 0 -Because $script:lastError
+        (Read-State).phases['6'] | Should -Be 'done'
+        @($script:world.mirrors.Keys).Count | Should -Be 0
+    }
+
+    It 'does not start the finish when Tenko refuses its check: the state file stays as it was and -Reverse still works' {
+        Install-FakeWorld
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $path = Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'
+        $before = [System.IO.File]::ReadAllBytes($path)
+        $script:world.failRoute = 'release$'
+        Invoke-FakeRun -Answers @('c') | Should -Be 1
+        $script:lastError | Should -Match '^the finish did not start, nothing was changed and -Reverse still works: Tenko refused POST /dns/zones/[^/]+/release'
+        [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($path)) | Should -Be ([System.Convert]::ToBase64String($before))
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+    }
+
     It 'deletes the DNS update account it made and says that the servers need another credential before a start' {
         Install-FakeWorld
         $script:world.dnsUser = ''
@@ -105,7 +146,7 @@ Describe 'A whole run' {
         $script:world.accounts.Contains('tenko-dhcp-dns') | Should -BeTrue
         Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 0 -Because $script:lastError
         $script:world.accounts.Contains('tenko-dhcp-dns') | Should -BeFalse
-        @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1] | Should -Match 'names tenko-dhcp-dns, an account the finish deletes: set another with Set-DhcpServerDnsCredential before their service is ever started again\.'
+        @($script:world.prompts | Where-Object { $_ -match 'finish \(phase 6\)' })[-1] | Should -Match 'names tenko-dhcp-dns, an account the finish deletes: to serve again, a server needs another, set with Set-DhcpServerDnsCredential after its service is started unauthorized and before it is authorized\.'
     }
 }
 
@@ -145,11 +186,12 @@ Describe 'A failure at a step' {
     }
 
     It 'stops at the finish''s <step> with exit 2, refuses -Reverse and resumes there' -ForEach @(
-        @{ step = '6.tenko'; route = 'release$' }
+        @{ step = '6.tenko'; route = 'release$'; pre = { $script:world.failSkip = @($script:world.tzones.Keys).Count } }
         @{ step = '6.exporter'; block = 'RemoveExporter' }
         @{ step = '6.mirror-account'; block = 'RemoveAccount' }
         @{ step = '6.zone-objects'; block = 'RemoveZoneObject'; pre = { $script:world.directory += 'corp.example.test' } }
         @{ step = '6.mirrors'; route = '^DELETE /migrate/mirrors' }
+        @{ step = '6.marker'; block = 'WriteMarker'; pre = { $script:world.failSkip = 1 } }
     ) {
         Install-FakeWorld
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError

@@ -1423,8 +1423,13 @@ $script:TkRemote = @{
         [bool](Get-WindowsFeature -Name $Name).Installed
     }
     WriteMarker           = {
-        param([string]$Key, [string]$Run, [string]$Machine, [bool]$Remove)
-        if ($Remove) { if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }; return }
+        # A removal that names a finished run leaves that run's id as Finished.
+        param([string]$Key, [string]$Run, [string]$Machine, [bool]$Remove, [string]$Finished)
+        if ($Remove) {
+            if (Test-Path -LiteralPath $Key) { Remove-Item -LiteralPath $Key -Recurse -Force }
+            if ($Finished) { $null = New-Item -Path $Key -Force; $null = New-ItemProperty -Path $Key -Name Finished -Value $Finished -PropertyType String -Force }
+            return
+        }
         if (-not (Test-Path -LiteralPath $Key)) { $null = New-Item -Path $Key -Force }
         $null = New-ItemProperty -Path $Key -Name Run -Value $Run -PropertyType String -Force
         $null = New-ItemProperty -Path $Key -Name Host -Value $Machine -PropertyType String -Force
@@ -1434,7 +1439,7 @@ $script:TkRemote = @{
         param([string]$Key)
         if (Test-Path -LiteralPath $Key) {
             $values = Get-ItemProperty -LiteralPath $Key
-            @{ Run = [string]$values.Run; Host = [string]$values.Host; Time = [string]$values.Time; Pending = [string]$values.Pending }
+            @{ Run = [string]$values.Run; Host = [string]$values.Host; Time = [string]$values.Time; Pending = [string]$values.Pending; Finished = [string]$values.Finished }
         }
     }
     WriteMarkerPending    = {
@@ -2250,7 +2255,7 @@ function Invoke-TkStepList {
             $State.Data.phases[$Phase] = 'failed'
             Save-TkState $State
             if (-not $_.Exception.Data.Contains('tk.exit')) { $_.Exception.Data['tk.exit'] = 2 }
-            Write-TkNote "The step $key failed. Run the script again to resume at this step after reading the actual state, or run it with -Reverse to undo the phase's done steps."
+            Write-TkNote "The step $key failed. Run the script again to resume at this step after reading the actual state$(if ($Phase -ne '6') { ", or run it with -Reverse to undo the phase's done steps" })."
             throw
         }
         $State.Data.steps[$key] = [ordered]@{ state = 'done'; at = [datetime]::UtcNow.ToString('o') }
@@ -3114,7 +3119,7 @@ function Get-TkSilenceText {
             "  1. The DHCP Server service is stopped and disabled on $($servers -join ' and ')."
             "  2. Tenko starts answering $($scopes -join ', ') at once."
             "  3. The servers' authorization in the directory is removed right after; it may take some minutes to reach every controller."
-            'To go back later, run Tenko-Takeover.ps1 -Reverse: Tenko keeps answering until Windows answers again.'
+            'To go back later, before the finish, run Tenko-Takeover.ps1 -Reverse: Tenko keeps answering until Windows answers again.'
         ) -join "`n")
 }
 
@@ -3560,11 +3565,30 @@ function Write-TkLeaseBack {
 # no role is removed or installed and no server restarted; the finish has no reverse.
 # ---------------------------------------------------------------------------------------
 
-function Get-TkDnsAccountNote {
-    # The account the run made for the DHCP servers' DNS updates goes with the finish.
+function Test-TkFinishAdmitted {
+    # Before the finish records anything: Tenko admits what its steps ask, read without a
+    # change (each zone's release as a dry run, each mirror read), or the finish does not start.
+    param([hashtable]$State)
+    try {
+        foreach ($zone in $State.Data.readings.zones) {
+            $id = Get-TkZoneId $zone.name
+            if ($id) { [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/release" -Body ([ordered]@{ dry_run = $true })) }
+        }
+        foreach ($id in @($State.Data.mirrors.Values)) { [void](Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id" -Expect @(200, 404)) }
+    } catch {
+        Exit-TkTakeover 1 "the finish did not start, nothing was changed and -Reverse still works: $(ConvertTo-TkSafeText $_.Exception.Message)"
+    }
+}
+
+function Get-TkDhcpEndText {
+    # The DHCP servers as read now: each service, and whether the directory lists the server.
     param([System.Collections.IDictionary]$Readings)
-    if ($Readings.dns_credential -ne 'create') { return '' }
-    return " The DHCP servers' DNS credential names $($script:TkDnsCredentialUser), an account the finish deletes: set another with Set-DhcpServerDnsCredential before their service is ever started again."
+    $listed = @(Invoke-TkRemote -Server $Readings.pdc -Name ReadDhcpInDirectory | ForEach-Object { [string]$_.Name })
+    $read = foreach ($server in $Readings.dhcp) {
+        $service = Invoke-TkRemote -Server $server.name -Name ReadDhcpService | Select-Object -Last 1
+        "$($server.name) $(ConvertTo-TkSafeText $service.Status) and $(ConvertTo-TkSafeText $service.Start), $(if ($listed -contains $server.name) { 'authorized' } else { 'not authorized' })"
+    }
+    return "The DHCP Server service and authorization read now: $($read -join '; ')."
 }
 
 function Get-TkPhase6 {
@@ -3595,6 +3619,8 @@ function Get-TkPhase6 {
             }
         }
         @{ Name = 'mirrors'; Do = { foreach ($id in @($State.Data.mirrors.Values)) { [void](Invoke-Tenko -Method DELETE -Path "/migrate/mirrors/$id" -Expect @(200, 204, 404)) } } }
+        # Last: the run marker gives way to the run's finished mark, which refuses any reverse.
+        @{ Name = 'marker'; Do = { [void](Invoke-TkRemote -Server $pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, '', '', $true, $State.Data.id)) } }
     )
 }
 
@@ -3695,19 +3721,17 @@ function Invoke-Takeover {
         Assert-TkStateShape $data
         $phase = Get-TkNextPhase $data.phases
         $latest = Get-TkLatestPhase $data.phases
-        # Once the finish has started a run only goes forward.
-        if ($latest -eq '6') {
-            if ($Reverse) { Exit-TkTakeover 1 'the finish (phase 6) has started: there is no scripted way back, going back is manual work (README.md, after the finish); nothing was changed' }
-            if (-not $phase) { Write-TkNote "The takeover of $domain is finished; nothing is left to run."; return 0 }
-        }
+        # The finish has started once any of its steps is recorded: from then on a run only goes
+        # forward, and a resume asks nothing again.
+        $finishing = @($data.steps.Keys | Where-Object { $_ -like '6.*' }).Count -gt 0
+        $noWayBack = 'the finish (phase 6) has started: there is no scripted way back, going back is manual work (README.md, after the finish); nothing was changed'
+        if ($finishing -and $Reverse) { Exit-TkTakeover 1 $noWayBack }
+        if ($finishing -and -not $phase) { Write-TkNote "The takeover of $domain is finished; nothing is left to run."; return 0 }
         if (-not $Reverse -and $latest) {
             Write-TkNote "A run of $domain against Tenko at $($data.tenko.host):$($data.tenko.port) exists; the next phase is $phase, the latest done or failed ${latest}."
             $pending = @(@(Get-TkField $data.values 'barrier_pending') | Where-Object { $_ })
             if ($pending.Count -gt 0) { Write-TkNote "Pending: the removal of the DHCP servers' authorization has not reached $($pending -join ', '); this sitting reads it again." }
-            if ($latest -ne '6') {
-                $choice = (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant()
-                if ($choice -eq 'r') { $Reverse = $true }
-            }
+            if (-not $finishing -and (Read-TkAnswer "Continue with phase $phase, or reverse phase ${latest}? [C/r]").Trim().ToLowerInvariant() -eq 'r') { $Reverse = $true }
         }
         # A precondition of the DNS window's check, with the others: before any change.
         $checked = Get-TkField $data.steps '4.check'
@@ -3738,6 +3762,8 @@ function Invoke-Takeover {
         $installed = Get-TkField $data.steps '2.exporter'
         if (-not $Reverse -and $phase -eq '2' -and ($null -eq $installed -or $installed.state -ne 'done')) { Assert-TkInstallerContract -Path $payloads.installer.Path }
 
+        # A copy of the state file from before the finish: the domain names this run finished.
+        if ($Reverse -and $null -ne $data.readings -and [string](Invoke-TkRemote -Server $data.readings.pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1 | ForEach-Object { $_.Finished }) -eq $data.id) { Exit-TkTakeover 1 $noWayBack }
         $address = $(if ($data.tenko.Contains('host')) { "$($data.tenko.host):$($data.tenko.port)" } else { Read-TkAnswer "Tenko's address (host name, port $($script:TkPort) unless host:port)" })
         if ($Reverse -and $latest -and -not (Test-TkReachable $address)) {
             Write-Warning 'Tenko cannot be reached. A node whose API is unreachable may still serve DHCP, so a Windows server made to answer again would answer beside it (conflict detection, which the reverse turns on, limits the damage).'
@@ -3763,7 +3789,7 @@ function Invoke-Takeover {
         # The run marker before the approval, read back: two machines never both pass it.
         $marker = Invoke-TkRemote -Server $data.readings.pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1
         if ($null -ne $marker -and $marker.Run -and $marker.Run -ne $data.id -and [string]$marker.Pending) { Complete-TkMarkedBarrier -Readings $readings -Pending ([string]$marker.Pending) }
-        if ($null -ne $marker -and $marker.Run -and $marker.Run -ne $data.id) { Exit-TkTakeover 1 "another run ($($marker.Run) from $($marker.Host) at $($marker.Time)) is recorded on $($data.readings.pdc); it must end or be reversed first" }
+        if ($null -ne $marker -and $marker.Run -and $marker.Run -ne $data.id) { Exit-TkTakeover 1 "another run ($($marker.Run) from $($marker.Host) at $($marker.Time)) is recorded on $($data.readings.pdc); it must end first, or be reversed before its finish" }
         [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, $data.id, [System.Environment]::MachineName, $false))
         $marker = Invoke-TkRemote -Server $data.readings.pdc -Name ReadMarker -Arguments @($script:TkMarkerKey) | Select-Object -Last 1
         if ($null -eq $marker -or $marker.Run -ne $data.id) { Exit-TkTakeover 1 "another run wrote its marker on $($data.readings.pdc) at the same time; let one of them go on" }
@@ -3798,14 +3824,15 @@ function Invoke-Takeover {
             return 5
         }
         while ($phase) {
-            if ($phase -eq '6' -and (Get-TkField $data.values 'finish_confirmed') -ne $true) {
+            $dnsNote = $(if ($data.readings.dns_credential -eq 'create') { " The DHCP servers' DNS credential names $($script:TkDnsCredentialUser), an account the finish deletes: to serve again, a server needs another, set with Set-DhcpServerDnsCredential after its service is started unauthorized and before it is authorized." })
+            if ($phase -eq '6' -and -not $finishing) {
+                Test-TkFinishAdmitted -State $state
                 $open = @(@(Get-TkField $data.values 'unproven') | Where-Object { $_ })
                 $note = $(if ($open.Count -gt 0) { " Tenko reports no answered client yet for $($open -join ', ')." } else { '' })
-                $text = "The parallel period is over. The finish (phase 6) removes the exporter and its account, the zones' objects in the directory partitions and Tenko's mirrors. After it there is no scripted way back: -Reverse is refused and going back is manual work. " +
-                "Each DHCP server keeps the DHCP Server role and its database, the service stopped and disabled, the authorization removed; removing the role is yours to do later (README.md). " +
-                "The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path $state.Dir 'backup') here.$(Get-TkDnsAccountNote $data.readings)$note Type the domain's name to go on"
+                $text = "The parallel period is over. The finish (phase 6) releases the frozen names in Tenko's zones and removes the exporter and its account, the zones' objects in the directory partitions and Tenko's mirrors. After it there is no scripted way back: -Reverse is refused and going back is manual work. " +
+                "Each DHCP server keeps the DHCP Server role and its database; the finish neither starts nor authorizes its service. $(Get-TkDhcpEndText $data.readings) Removing the role is yours to do later (README.md). " +
+                "The export of phase 2 stays in Program Files\Tenko\takeover\backup on each DHCP server and in $(Join-Path $state.Dir 'backup') here.$dnsNote$note Type the domain's name to go on"
                 if (-not (Confirm-TkTyped $text $domain)) { Exit-TkTakeover 3 'waiting for the parallel period' }
-                $data.values.finish_confirmed = $true
             }
             # The DNS window is confirmed at the console in every sitting that starts it; the
             # DHCP window by its own one confirmation, right before the silence.
@@ -3814,7 +3841,7 @@ function Invoke-Takeover {
             Invoke-TkPhase -State $state -Phase $phase -Payloads $payloads
             [void](Invoke-Tenko -Method PUT -Path "/migrate/runs/$run/phases/$phase" -Body ([ordered]@{ state = 'done' }) -Expect @(200, 204, 404))
             if ($phase -eq '5') { Write-TkNote 'The parallel period runs now. After it, run the script again for the finish.'; return 3 }
-            if ($phase -eq '6') { [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, '', '', $true)); Write-TkNote "The takeover is finished. The DHCP Server role stays installed on each DHCP server, its service stopped and disabled, its authorization removed; README.md says how to remove it yourself.$(Get-TkDnsAccountNote $data.readings)"; return 0 }
+            if ($phase -eq '6') { Write-TkNote "The takeover is finished. The DHCP Server role stays installed on each DHCP server. $(Get-TkDhcpEndText $data.readings) README.md says how to remove the role yourself.$dnsNote"; return 0 }
             $phase = Get-TkNextPhase $data.phases
         }
         return 0

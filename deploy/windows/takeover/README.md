@@ -229,27 +229,64 @@ Tenko before you run the script again.
 
 ## After the finish
 
-The finish's confirmation says what follows, and you type the domain's name to accept it:
-after the finish there is no scripted way back. `-Reverse` is refused with exit 1, also
-after a finish that stopped at a failed step, which a run of the script without a parameter
-resumes. A run started after the finish says that the takeover is finished and ends with
-exit 0, changing nothing.
+Before the finish records anything, it checks that Tenko admits what its steps ask, without
+changing anything: the release of each zone's frozen names as a dry run, and a read of each
+mirror (no read can prove that the deletion of a mirror will be admitted; the deletion is
+the finish's last call to Tenko). A refusal ends the sitting with exit 1: the message names
+what Tenko refused, nothing was changed, the state file is as it was, and the takeover can
+still be reversed. Only then does the confirmation come, and you type the domain's name to
+accept it.
+
+The finish has started as soon as its first step is recorded in the state file, and from
+then on there is no scripted way back: `-Reverse` is refused with exit 1, also after a
+finish that stopped at a failed step or was cut short (a closed window, a stopped process),
+and a run of the script without a parameter resumes the finish without asking again. Its
+last step replaces the run's marker on the PDC emulator by a mark that names the run as
+finished, so that a copy of the state file from before the finish cannot reverse it either.
+A run started after the finish says that the takeover is finished and ends with exit 0,
+changing nothing.
 
 What stays on each DHCP server: the DHCP Server role with its database, the DHCP Server
-service stopped and disabled, and the server's authorization removed from the directory.
-What stays as files: the export of phase 2 (`Export-DhcpServer -Leases`), as
-`dhcp-export.xml` in `Tenko\takeover\backup` below each DHCP server's Program Files folder,
-and as `dhcp-<server>.xml` in `%ProgramData%\Tenko\takeover\<domain>\backup` on the machine
-that ran the script, beside each zone's export of phase 2 (`tenko-backup-<zone>.dns`).
+service stopped and disabled, and the server's authorization removed from the directory;
+the confirmation and the last line read the service and the authorization of each server
+and say what they read. What stays as files: the export of phase 2
+(`Export-DhcpServer -Leases`), as `dhcp-export.xml` in `Tenko\takeover\backup` below each
+DHCP server's Program Files folder, and as `dhcp-<server>.xml` in
+`%ProgramData%\Tenko\takeover\<domain>\backup` on the machine that ran the script, beside
+each zone's export of phase 2 (`tenko-backup-<zone>.dns`).
 
-Going back after the finish is manual work. Revert each scope's takeover in Tenko first, so
-that Tenko is silent, then on each server the two lines above (the authorization, then the
-service). The database still holds what the server had at the DHCP window, so set conflict
-detection on
-(`Set-DhcpServerSetting -ConflictDetectionAttempts 1`) before the start. Where the script
-created the DNS credential user `tenko-dhcp-dns`, the finish deleted it while each server's
-stored DNS credential still names it: set another with `Set-DhcpServerDnsCredential` before
-the service is ever started again. The zones come back from their exports of phase 2.
+### Going back by hand
+
+This manual path has not been rehearsed in the lab. It follows the order of the script's own
+reverse of the DHCP window, so that a network is never without a DHCP server and Windows
+serves only once Tenko is silent. For each DHCP server:
+
+1. Start the service while the server is still unauthorized, where it serves nobody but its
+   cmdlets answer: `Set-Service DHCPServer -StartupType Automatic; Start-Service DHCPServer`.
+2. What needs the running service: conflict detection on
+   (`Set-DhcpServerSetting -ConflictDetectionAttempts 1`), since the database holds what the
+   server had at the DHCP window and Tenko has given out addresses since; and, where the
+   script created the DNS credential user `tenko-dhcp-dns`, which the finish deleted while
+   the server's stored DNS credential still names it, another credential with
+   `Set-DhcpServerDnsCredential`.
+3. The authorization: `Add-DhcpServerInDC -DnsName <server> -IPAddress <address>`, then
+   `repadmin /syncall /AdeP`, until `Get-DhcpServerInDC` lists the server on every
+   controller. A running server reads it only when its service starts again.
+
+Then make Tenko silent: disable each of the scopes in Tenko (the scope's own setting; the
+takeover itself cannot be reverted once the finish has deleted the mirrors). Then on each
+server `Restart-Service DHCPServer`, and check that the System log shows event 1044
+(authorized) after the restart, not 1046.
+
+DNS goes back as ADR 0034 decides, from the controllers' current secondary copies of Tenko's
+zones, not from the exports of phase 2, which are older than the parallel period: on the PDC
+emulator turn each zone's secondary into a file-backed primary
+(`ConvertTo-DnsServerPrimaryZone -Name <zone> -ZoneFile <zone>.dns -Force`), make it
+directory-integrated in its partition (`ConvertTo-DnsServerPrimaryZone -Name <zone>
+-ReplicationScope <scope> -Force`) and set its update setting back
+(`Set-DnsServerPrimaryZone -Name <zone> -DynamicUpdate Secure`); remove the other
+controllers' secondaries so that they load the directory copy; then make Tenko's zone a
+secondary or delete it. The exports of phase 2 are the last resort.
 
 ### Removing the DHCP Server role yourself
 
@@ -258,12 +295,14 @@ domain controller, and the script never restarts a server. Remove it when you ch
 server at a time, with one restart each:
 
 1. Check first: Tenko answers every scope (no scope listed as unproven); on the server
-   `Get-Service DHCPServer` reads `Stopped` and `Disabled`; `Get-DhcpServerInDC` does not
-   list it; `(Get-DhcpServerDatabase).FileName` names the database folder (by default
-   `%SystemRoot%\System32\dhcp`), since the cmdlet is gone once the role is; and the export
-   of phase 2 is where the previous section says, with a copy kept off the server.
+   `Get-Service DHCPServer | Select-Object Status, StartType` reads `Stopped` and
+   `Disabled`; `Get-DhcpServerInDC` does not list it; the database folder, read from the
+   registry since the DHCP cmdlets need the running service:
+   `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\DHCPServer\Parameters').DatabasePath`
+   (by default `%SystemRoot%\System32\dhcp`); and the export of phase 2 where the previous
+   section says, with a copy kept off the server.
 2. `Uninstall-WindowsFeature -Name DHCP`. Right after it `Get-WindowsFeature DHCP` already
-   reads not installed while the service still exists: the removal is not done yet.
+   reads not installed while the service still runs: the removal is not done yet.
 3. Restart the server (`Restart-Computer`) and wait until it is back, the other controller
    answering meanwhile.
 4. After the restart, with `Get-Service DHCPServer` finding no service, move the database
@@ -272,10 +311,10 @@ server at a time, with one restart each:
 5. The same on the other server.
 
 What remains of the Windows DHCP configuration is then the export file, as it was when
-phase 2 ran. Import it (`Import-DhcpServer -Leases`) only into a newly installed role whose
+phase 2 ran, and the moved database folder where you kept it, as it was at the DHCP window.
+Import the export (`Import-DhcpServer -Leases`) only into a newly installed role whose
 database folder was cleared: over a scope that already exists the import changes nothing and
-only warns. It does not carry the DNS credential, which is set again by hand.
-
+only warns. Neither carries the DNS credential, which is set again by hand.
 ## The state, the exit codes and a failed step
 
 The state file is `%ProgramData%\Tenko\takeover\<domain>\state.json`, beside the backups.
