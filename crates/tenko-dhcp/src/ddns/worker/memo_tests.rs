@@ -82,6 +82,9 @@ async fn a_deleted_row_whose_names_are_gone_leaves_the_memo() {
     })
     .await;
     worker.mark(key);
+    // The queue gauge shows the one address that waits.
+    worker.gauge();
+    assert_eq!(super::QUEUE.get(), Some(1.0));
     worker.batch().await;
     assert!(!worker.memory.contains_key(&key), "{:?}", worker.memory);
 }

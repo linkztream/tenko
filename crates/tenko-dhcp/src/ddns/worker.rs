@@ -338,7 +338,9 @@ impl<'a> Worker<'a> {
 
     fn gauge(&self) {
         let waiting = self.dirty.len() + self.queue.len();
-        QUEUE.set_total(u64::try_from(waiting).unwrap_or(u64::MAX));
+        // A gauge takes a float: `set_total` would store the count as the bits of one.
+        #[allow(clippy::cast_precision_loss)]
+        QUEUE.set(waiting as f64);
     }
 
     /// Reads the configuration image and every lease again; returns the revision read.
