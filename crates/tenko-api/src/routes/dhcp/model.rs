@@ -888,7 +888,10 @@ pub struct DhcpLeaseItem {
     /// DHCPv4: the DDNS settings of the policy that decided the names.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ddns_policy: Option<DdnsPolicy>,
-    /// The DDNS outcome.
+    /// The DDNS outcome, from the worker's record of the address (`dhcp.ddns_names`): the
+    /// forward name written last, the PTR, the last refusal or failure. After a new client
+    /// takes the address, the names can be the last client's until the worker has removed
+    /// them.
     #[serde(default)]
     pub ddns: DdnsState,
     /// DHCPv4: the client's fingerprint.

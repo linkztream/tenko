@@ -423,3 +423,36 @@ async fn an_abandoned_row_keeps_its_hold_below_the_ceiling_and_yields_at_it() {
     assert_eq!(at.stored().await, vec![4, 5, 6]);
     assert_eq!(at.held(), vec![4, 5, 6]);
 }
+
+/// A row that still holds names an earlier version wrote goes once the DDNS worker's record
+/// of its address has taken in those names, and not while it holds others.
+#[tokio::test]
+async fn a_row_with_names_goes_once_the_record_took_them_in() {
+    use tenko_core::dhcp::{DdnsNames, tables::DDNS_NAMES};
+    let rows = rows().await;
+    let put = async |took_in| {
+        let record = DdnsNames {
+            took_in,
+            ..DdnsNames::default()
+        };
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dhcp), Timestamp::now());
+        batch
+            .put_typed(&DDNS_NAMES, &(rows.vrf, IpAddr::V6(addr(4))), &record)
+            .expect("a record");
+        rows.store.propose(batch).await.expect("committed");
+    };
+    // The record took in names of another time.
+    put(Some(Timestamp::UNIX_EPOCH)).await;
+    let pass = async || {
+        rows.service()
+            .delete_ended(0, Timestamp::now())
+            .await
+            .expect("a pass")
+    };
+    assert_eq!(pass().await, 3);
+    assert!(rows.stored().await.contains(&4));
+    // The row's own names, whose time is none.
+    put(None).await;
+    assert_eq!(pass().await, 1);
+    assert!(!rows.stored().await.contains(&4));
+}

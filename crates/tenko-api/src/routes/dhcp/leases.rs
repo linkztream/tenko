@@ -683,12 +683,29 @@ async fn list(
     // so a client that saw a newer change reads again. Never the store's revision beside it,
     // which can be ahead of the rows.
     let revision = page.revision.unwrap_or(Revision::ZERO);
-    let items = visible(app, &cx.principal, page.items, page.items6);
+    let items = with_names(app, visible(app, &cx.principal, page.items, page.items6)).await?;
     Ok(Page::new(
         items,
         next.map(|next| encode_cursor(lease_scope(), &next)),
         revision,
     ))
+}
+
+/// The names of each lease as the DDNS worker's record holds them, read through to the names
+/// an earlier version left on its row.
+async fn with_names(
+    app: &AppState,
+    mut items: Vec<DhcpLeaseItem>,
+) -> Result<Vec<DhcpLeaseItem>, ApiError> {
+    let view = app
+        .store()
+        .read(tenko_store::ReadConsistency::Local)
+        .await?;
+    for item in &mut items {
+        let names = tenko_dhcp::ddns::names_of(view.as_ref(), item.vrf, item.addr, &item.ddns)?;
+        item.ddns = names.state();
+    }
+    Ok(items)
 }
 
 fn visible(
@@ -908,11 +925,13 @@ async fn release(
         draft = draft.with_context("reason", reason);
     }
     let record = record(configs, cx, node, kind, encoded, &result, Some(draft)).await?;
-    match result.output {
-        Output::Lease(row) => Ok((record, item(*row))),
-        Output::Lease6(row) => Ok((record, item6(*row))),
-        _ => Err(command_failed(kind, &result)),
-    }
+    let item = match result.output {
+        Output::Lease(row) => item(*row),
+        Output::Lease6(row) => item6(*row),
+        _ => return Err(command_failed(kind, &result)),
+    };
+    let mut items = with_names(app, vec![item]).await?;
+    Ok((record, items.remove(0)))
 }
 
 fn listener_item(

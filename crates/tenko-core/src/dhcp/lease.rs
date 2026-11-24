@@ -201,7 +201,7 @@ pub struct DdnsState {
     /// The last failure, in English (a refused name, a store that refused).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
-    /// When the worker last ran for the lease.
+    /// When the worker last changed what it recorded for the address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated: Option<Timestamp>,
 }

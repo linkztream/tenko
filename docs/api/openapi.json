@@ -48901,7 +48901,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "When the worker last ran for the lease."
+                "description": "When the worker last changed what it recorded for the address."
               },
               {
                 "type": "null"
@@ -49805,7 +49805,7 @@
           },
           "ddns": {
             "$ref": "#/components/schemas/DdnsState",
-            "description": "The DDNS outcome."
+            "description": "The DDNS outcome, from the worker's record of the address (`dhcp.ddns_names`): the\nforward name written last, the PTR, the last refusal or failure. After a new client\ntakes the address, the names can be the last client's until the worker has removed\nthem."
           },
           "ddns_policy": {
             "oneOf": [
@@ -69959,7 +69959,7 @@
                 },
                 "ddns": {
                   "$ref": "#/components/schemas/DdnsState",
-                  "description": "The DDNS outcome."
+                  "description": "The DDNS outcome, from the worker's record of the address (`dhcp.ddns_names`): the\nforward name written last, the PTR, the last refusal or failure. After a new client\ntakes the address, the names can be the last client's until the worker has removed\nthem."
                 },
                 "ddns_policy": {
                   "oneOf": [

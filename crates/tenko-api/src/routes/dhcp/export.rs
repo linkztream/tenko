@@ -11,6 +11,8 @@
 //! audited as `dhcp.export` with the format, whether the leases were included and the
 //! counts.
 
+use std::net::IpAddr;
+
 use axum::{
     Extension, Json,
     extract::{Query, State},
@@ -25,6 +27,7 @@ use tenko_core::{
 };
 use tenko_dhcp::{
     config::load,
+    ddns::names_of,
     export::kea::{self, KeaInput},
 };
 use tenko_store::WriteBatch;
@@ -119,7 +122,14 @@ pub(super) async fn export_dhcp(
     let leases = params.leases.unwrap_or(true);
     let service = configs.get()?;
     let view = service.view(None).await?;
-    let data = load::data(view.as_ref(), leases)?;
+    let mut data = load::data(view.as_ref(), leases)?;
+    // The names of each lease as the DDNS worker's record holds them.
+    for (&(vrf, addr), lease) in &mut data.leases {
+        lease.ddns = names_of(view.as_ref(), vrf, IpAddr::V4(addr), &lease.ddns)?.state();
+    }
+    for (&(vrf, addr), lease) in &mut data.leases6 {
+        lease.ddns = names_of(view.as_ref(), vrf, IpAddr::V6(addr), &lease.ddns)?.state();
+    }
     let zones = kea::zone_names(view.as_ref())?;
     let profile = settings::profile(view.as_ref())?;
     let conflict_detection = data

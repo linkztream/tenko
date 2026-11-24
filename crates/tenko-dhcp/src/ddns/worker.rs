@@ -996,6 +996,7 @@ impl<'a> Worker<'a> {
                 let lease = &leases[index];
                 let (mut row, version) = record_of(view, lease.key.0, lease.key.1, &lease.legacy)?;
                 settle(&mut row, &parts);
+                row.updated = Some(Timestamp::now());
                 staged.push((index, stage_row(batch, &leases[index], &row, version)?));
             }
             Ok(())

@@ -20,7 +20,10 @@
 //! of every row, so a commit in between keeps its row; the history keeps the whole event.
 //! While the clock guard holds the clock nothing is deleted.
 
-use std::{net::Ipv6Addr, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv6Addr},
+    sync::Arc,
+};
 
 use tenko_core::{
     NodeId, PrefixId, Principal, SystemComponent, Timestamp, VrfId,
@@ -78,26 +81,35 @@ fn is_due(lease: &Lease6, now: Timestamp) -> bool {
     matches!(lease.state, BindingState::Active | BindingState::Abandoned) && lease.ends <= now
 }
 
-/// Whether `lease` ended at least `after` before `now` and holds no name: a row DDNS has
-/// nothing left to remove for. The wait gives the DDNS worker, whose window is 100 ms, the
-/// time to record names it was still writing when the row ended.
+/// Whether `lease` ended at least `after` before `now`.
 fn is_ended(lease: &Lease6, now: Timestamp, after: std::time::Duration) -> bool {
     !matches!(lease.state, BindingState::Active | BindingState::Abandoned)
-        && lease.ddns.forward.is_none()
-        && lease.ddns.reverse.is_none()
         && lease.ends <= now
         && now.saturating_since(lease.ends) >= after
 }
 
 /// Whether `lease` is deleted at `now`: ended ([`is_ended`]), or an abandoned row of a scope
-/// in `full` declined at least `after` ago that holds no name.
+/// in `full` declined at least `after` ago.
 fn is_gone(lease: &Lease6, now: Timestamp, after: std::time::Duration, full: &[PrefixId]) -> bool {
     is_ended(lease, now, after)
         || (lease.state == BindingState::Abandoned
             && full.contains(&lease.scope)
-            && lease.ddns.forward.is_none()
-            && lease.ddns.reverse.is_none()
             && now.saturating_since(lease.cltt) >= after)
+}
+
+/// Whether the DDNS worker has taken in the names an earlier version left on the row at
+/// `key`: there are none, or its record took in these (the record outlives the row, so the
+/// worker still removes what it holds).
+fn taken_in(
+    view: &dyn ReadView,
+    key: &(VrfId, Ipv6Addr),
+    lease: &Lease6,
+) -> Result<bool, StoreError> {
+    if lease.ddns.forward.is_none() && lease.ddns.reverse.is_none() {
+        return Ok(true);
+    }
+    let record = view.get_typed(&tables::DDNS_NAMES, &(key.0, IpAddr::V6(key.1)))?;
+    Ok(record.is_some_and(|(record, _)| record.took_in == lease.ddns.updated))
 }
 
 impl Expiry6Service {
@@ -266,6 +278,7 @@ impl Expiry6Service {
             for key in chunk {
                 if let Some((lease, revision)) = view.get_typed(&tables::LEASES6, key)?
                     && is_gone(&lease, now, after, &full)
+                    && taken_in(view.as_ref(), key, &lease)?
                 {
                     batch.expect_typed(&tables::LEASES6, key, Some(revision));
                     batch.delete_typed(&tables::LEASES6, key);
