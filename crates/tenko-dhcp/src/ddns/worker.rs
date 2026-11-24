@@ -1113,7 +1113,14 @@ impl<'a> Worker<'a> {
             match self
                 .service
                 .zones
-                .change_dhcp_names(&cx, zone, parts, allows, Some(self.epoch))
+                .change_dhcp_names(
+                    &cx,
+                    zone,
+                    parts,
+                    allows,
+                    Some(self.epoch),
+                    &mut |_, _, _| Ok(()),
+                )
                 .await
             {
                 Ok((_, refused)) => {

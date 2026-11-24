@@ -845,6 +845,7 @@ async fn a_stale_name_update_is_planned_again_and_written_without_a_job() {
             &[vec![dhcp_a("stale.lan.example.test", 7)]],
             true,
             None,
+            &mut |_, _, _| Ok(()),
         )
         .await
         .expect("planned again");
@@ -872,7 +873,14 @@ async fn only_the_dhcp_component_itself_writes_names_without_a_job() {
         let owner = format!("h{index}.lan.example.test");
         let outcome = lab
             .zones
-            .change_dhcp_names(cx, lab.forward, &[vec![dhcp_a(&owner, 10)]], true, None)
+            .change_dhcp_names(
+                cx,
+                lab.forward,
+                &[vec![dhcp_a(&owner, 10)]],
+                true,
+                None,
+                &mut |_, _, _| Ok(()),
+            )
             .await
             .expect("names");
         let after = job_rows(lab.store.as_ref()).await;

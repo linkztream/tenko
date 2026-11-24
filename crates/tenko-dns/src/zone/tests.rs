@@ -1685,6 +1685,7 @@ async fn a_fenced_dhcp_set_of_an_ended_term_fails_at_once() {
             &[vec![change]],
             true,
             Some(0),
+            &mut |_, _, _| Ok(()),
         )
         .await
         .expect_err("fenced");
@@ -1692,4 +1693,128 @@ async fn a_fenced_dhcp_set_of_an_ended_term_fails_at_once() {
         (&*error.coded().code, error.coded().status),
         (tenko_store::StoreError::PRECONDITION_FAILED, 412)
     );
+}
+
+/// A DHCP change of the A record at `owner`.
+fn dhcp_a(owner: &str, address: &str) -> Vec<Change> {
+    let mut change = a(owner, &[address]);
+    change.origin = Origin::Dhcp;
+    vec![change]
+}
+
+/// Whether the zone holds an A record at `owner`.
+async fn has_a(store: &MemStore, zone: tenko_core::dns::ZoneId, owner: &str) -> bool {
+    let key = tenko_core::dns::RrSetKey {
+        zone,
+        scope: ScopeName::DEFAULT,
+        name: name(owner),
+        rtype: Rtype::A,
+    };
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    view.get_typed(&RRSETS, &key).expect("read").is_some()
+}
+
+/// The DHCP writer's hook runs on every attempt with that attempt's view: a late write to
+/// its row between the first plan and its commit makes that attempt stale, the second
+/// attempt stages on the newer row, and the hook's row commits with the set.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_dhcp_hook_stages_on_the_view_of_each_attempt() {
+    use tenko_core::dhcp::{DdnsNames, tables::DDNS_NAMES};
+    let (service, store) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let key = (
+        tenko_core::VrfId::generate(),
+        std::net::IpAddr::from([192, 0, 2, 1]),
+    );
+    let row = |n: u8| DdnsNames {
+        last_error: Some(n.to_string()),
+        ..DdnsNames::default()
+    };
+    let put = async |store: &MemStore, value: DdnsNames| {
+        let mut batch = WriteBatch::new(cx().principal, tenko_core::Timestamp::now());
+        batch.put_typed(&DDNS_NAMES, &key, &value).expect("row");
+        store.propose(batch).await.expect("put");
+    };
+    put(&store, row(1)).await;
+    let mut seen = Vec::new();
+    service
+        .change_dhcp_names(
+            &RequestCtx::system(SystemComponent::Dhcp),
+            zone.id,
+            &[dhcp_a("host.example.test", "192.0.2.1")],
+            true,
+            None,
+            &mut |view, _, batch| {
+                let (held, revision) = view.get_typed(&DDNS_NAMES, &key)?.expect("the row");
+                if seen.is_empty() {
+                    tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current().block_on(put(&store, row(2)));
+                    });
+                }
+                seen.push(held.last_error);
+                batch.expect_typed(&DDNS_NAMES, &key, Some(revision));
+                batch.put_typed(&DDNS_NAMES, &key, &row(3))?;
+                Ok(())
+            },
+        )
+        .await
+        .expect("written on the second attempt");
+    assert_eq!(seen, [Some("1".to_owned()), Some("2".to_owned())]);
+    let view = store.read(ReadConsistency::Local).await.expect("view");
+    let (held, _) = view
+        .get_typed(&DDNS_NAMES, &key)
+        .expect("read")
+        .expect("row");
+    assert_eq!(held, row(3));
+    assert!(has_a(&store, zone.id, "host.example.test").await);
+}
+
+/// The hook gets the positions of the parts the zone refused, and its error fails the whole
+/// set.
+#[tokio::test]
+async fn the_dhcp_hook_sees_the_refused_parts_and_its_error_fails_the_set() {
+    let (service, store) = new_service();
+    let zone = service
+        .create(&cx(), new_zone("example.test"))
+        .await
+        .expect("create")
+        .zone;
+    let dhcp = RequestCtx::system(SystemComponent::Dhcp);
+    let mut seen = Vec::new();
+    service
+        .change_dhcp_names(
+            &dhcp,
+            zone.id,
+            &[
+                vec![a("manual.example.test", &["192.0.2.9"])],
+                dhcp_a("d.example.test", "192.0.2.1"),
+            ],
+            true,
+            None,
+            &mut |_, refused, _| {
+                seen.push(refused.to_vec());
+                Ok(())
+            },
+        )
+        .await
+        .expect("written");
+    assert_eq!(seen, [vec![0]]);
+    assert!(has_a(&store, zone.id, "d.example.test").await);
+    let error = service
+        .change_dhcp_names(
+            &dhcp,
+            zone.id,
+            &[dhcp_a("e.example.test", "192.0.2.2")],
+            true,
+            None,
+            &mut |_, _, _| Err(tenko_store::StoreError::Codec("a row".to_owned()).into()),
+        )
+        .await
+        .expect_err("the hook's error");
+    assert_eq!(&*error.coded().code, tenko_store::StoreError::CODEC);
+    assert!(!has_a(&store, zone.id, "e.example.test").await);
 }
