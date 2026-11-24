@@ -228,7 +228,7 @@ Node-local settings of the role in `tenko.toml`, built and documented in `deploy
 | `[dhcp.probe] pending` | 1,024 | The pending table's size: offers waiting for a probe (WP8.5); a full table offers unprobed |
 | `[dhcp.decline] hold_secs` | 86,400 | How long a declined address stays abandoned |
 | `[dhcp.decline] limit`, `window_secs` | 3, 3,600 | DECLINEs accepted per client per window; one beyond is dropped as `rate_limited` and the client keeps its lease (WP8.5) |
-| `[dhcp.ddns] retries`, `backoff_ms` | WP8.3 | The DDNS worker's retries while the store refuses |
+| `[dhcp.ddns] retries`, `backoff_ms` | WP8.3 | The DDNS worker's retries while the store can take no write |
 | `[dhcp.history] days` | per profile (P3-Q13) | A node-local override of the retention |
 | `[dhcp.v6] port`, `relay_port`, `client_port` | 547, 547, 546 | The DHCPv6 ports (WP9.1); the DHCPv6 listeners are the `[dhcp] listen` entries with an IPv6 address |
 | `[dhcp.v6] server_duid` | a DUID-UUID derived from the node identifier | The server's DUID in hexadecimal, 3 to 130 octets |

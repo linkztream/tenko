@@ -759,8 +759,9 @@ limit = 3
 window_secs = 3600
 
 [dhcp.ddns]
-# The dynamic DNS updates of leases (WP8.3): attempts after the first, and the wait before
-# the first retry in milliseconds (it doubles for each further attempt).
+# The dynamic DNS updates of leases (WP8.3): attempts after the first while the store can
+# take no write, and the wait before the first retry in milliseconds (it doubles for each
+# further attempt).
 retries = 5
 backoff_ms = 1000
 

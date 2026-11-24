@@ -34,6 +34,22 @@ WP7.0 wrote the scope's settings as `tenko_core::dhcp::DdnsPolicy` (enabled, the
 - **The outcome** is written to the lease row with the row's version as precondition and the leader fence: the names held, the DHCID, the refusal or failure in `last_error`, the time. The worker remembers per address what it wrote for which client, so names of a client that lost its address are removed even when the row already shows the next client. A refusal waits for the lease's next change; a failure after the retries waits 30 s. The outcomes count in `tenko_dhcp_ddns_total{outcome}` with `written`, `removed`, `refused`, `failed`, `skipped` and `dropped`.
 - **Audit.** The zone service audits each change set (`dns.record.change`, principal `system:dhcp`) and journals it; the record names the zone, not each lease's address, and the lease's history and outcome name the lease.
 
+## Amendment (2026-11-24): the record of written names
+
+Point 5's outcome no longer lives on the lease row. The committer puts the whole lease row
+without a version check, from the role's lease table, which follows the store with a lag, so
+a renewal could erase a name the worker had just recorded there, and that name was then on no
+row. The names the worker writes are recorded in a table of their own, `dhcp.ddns_names`
+(key VRF and address), staged into the zone's own change set, so a name and its record commit
+together or not at all; only the worker writes it. The worker keeps nothing in memory, plans
+every lease from the record, removes names one RRset at a time, writes the zones one after
+another with the PTR zones last, fences every set to its term of office, and writes in one
+status batch what no set carried. The lease row's `ddns` is read through as the record of an
+earlier version and taken in on the address's first handling. A member of an earlier
+version does not read the table, so while it leads during a rolling upgrade, or after a
+downgrade, it removes no name only the table records. `docs/dhcp.md` section 13.5 has the
+rules.
+
 ## Consequences
 
 - One write path and one audit trail for every change to a zone: API, actuator, RFC 2136, transfers in, signing, and now DHCP.
