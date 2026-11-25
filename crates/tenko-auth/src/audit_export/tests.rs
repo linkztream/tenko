@@ -948,6 +948,11 @@ async fn an_alarm_whose_write_failed_is_recorded_on_the_next_pass_and_once() {
     outage_with_a_failed_write(ALARM_ACTION).await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_recovery_whose_write_failed_is_recorded_on_the_next_success() {
+    outage_with_a_failed_write(RECOVERED_ACTION).await;
+}
+
 /// A sink fails, raises the alarm and recovers while the first write that records `fails`
 /// fails; afterwards the log holds one alarm and one recovery.
 async fn outage_with_a_failed_write(fails: AuditAction) {

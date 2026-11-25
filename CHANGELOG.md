@@ -37,6 +37,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 
 ### Fixed
 
+- When the store write that records the recovery `sys.audit_export.recovered` of a sink whose alarm was raised fails, the audit export records the recovery on the sink's next success, and the sink shows the state `alarm` until that write succeeds.
 - The audit export records the alarm `audit.export.failing` of a failing sink on the next try when the store write that records it fails; it records the alarm again only when its write was not confirmed.
 - When the audit export cannot read a sink's stored position at start, it tries the read again with its usual pause (one second, doubling up to a minute) and sends and stores nothing until the read answers; the sink then gets the records after its stored position, not the whole audit log again. A sink whose stored position cannot be decoded exports nothing: the server logs an error, and the audit export settings page and `GET /api/v1/settings/audit-export` show that sink in the state `alarm` with the code `audit.export.cursor` (which raises the warning `audit.export.failing`) while the other sinks show as usual. Remove that sink in the audit export settings and add it again in the same change, or add the new sink under another name first; the new sink gets the whole audit log.
 - The gauge `tenko_dhcp_ddns_queue`, the leases whose names wait for DDNS, and the dashboard figure that reads it always showed 0. It now shows the number of leases that wait.

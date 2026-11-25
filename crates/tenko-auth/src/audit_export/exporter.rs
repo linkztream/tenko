@@ -609,7 +609,13 @@ impl Worker {
             }
             draft
         });
-        self.save(progress, draft).await
+        self.save(progress, draft).await?;
+        if progress.stored.failing_since.is_some() {
+            // The write did not land: the recovery stays due for the next success.
+            progress.current.failing_since = since;
+            progress.current.alarmed = alarmed;
+        }
+        Ok(())
     }
 
     /// Records a failure: at once on the first failure, on a new failure code and when
@@ -726,8 +732,8 @@ impl Worker {
         row.updated_at = now;
         // The alarm's mark rides with its record and reaches memory only from a written row,
         // so a failed write leaves the alarm due for the next pass.
-        // shortcut: an alarm write that times out but commits is recorded again on the next
-        // pass; make the write conditional on the cursor's revision if duplicates matter.
+        // shortcut: an alarm or recovery write that times out but commits is recorded again on
+        // the next try; make the write conditional on the cursor's revision if duplicates matter.
         row.alarmed |= draft
             .as_ref()
             .is_some_and(|draft| draft.action == ALARM_ACTION);
