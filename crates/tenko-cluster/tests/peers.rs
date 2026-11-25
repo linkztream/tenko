@@ -4022,6 +4022,50 @@ async fn a_dial_whose_store_cannot_be_read_is_refused() {
     lab.stop().await;
 }
 
+/// A connection open when its certificate is revoked carries no further call: the next
+/// one fails, a forward on the cached channel dials again and is refused as unreachable,
+/// and a new channel is refused.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revocation_stops_an_open_channel_at_once() {
+    use tenko_store::raft::network::ForwardError;
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let target = lab.follower().await;
+    let stray = stray_certificate(&lab, target.node());
+    let at = impostor(&lab, &target, &stray).await;
+    leader.peers.network().pin(target.node(), at.to_string());
+    let mut client = leader
+        .peers
+        .network()
+        .cluster_client(target.node())
+        .await
+        .expect("a certificate of the node that is not revoked");
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect("the open channel answers");
+    let serial = revoke_certificate(&leader, target.node(), &stray).await;
+    wait_until_async("the revocation in the leader's set", async || {
+        leader.registry.is_revoked_serial(&serial)
+    })
+    .await;
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect_err("the open connection carries no further call");
+    // Never `NoAnswer`: the dial marks its refusal, so nothing counts as sent.
+    let (write, _) = forwards(&leader, target.node()).await;
+    assert!(
+        matches!(write, Err(ForwardError::Unreachable(_))),
+        "a forward on the cached channel: {write:?}"
+    );
+    let refused = dial_refusal(&leader, target.node())
+        .await
+        .expect("a new channel");
+    assert!(refused.contains("is revoked"), "{refused}");
+    lab.stop().await;
+}
+
 /// The cached channel of one node never serves another at the same endpoint: a controller
 /// that answers at an address another controller used before is reached as itself, and the
 /// one that left is refused there.
@@ -4406,5 +4450,43 @@ async fn the_probe_hears_a_controller_that_answers_in_an_old_voters_place() {
             "{status:?}"
         );
     }
+    lab.stop().await;
+}
+
+/// An open channel of other calls carries no call once its node is removed, also with a
+/// certificate whose serial the removal did not revoke.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_open_channel_ends_when_its_node_is_removed() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let node = NodeId(4242);
+    let shown = stray_certificate(&lab, node);
+    let stays = lab.follower().await;
+    let at = impostor(&lab, &stays, &shown).await;
+    leader.peers.network().pin(node, at.to_string());
+    let mut client = leader
+        .peers
+        .network()
+        .cluster_client(node)
+        .await
+        .expect("a node that is not removed");
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect("the open channel answers");
+    // A revocation that names the node, with no node record, removes it.
+    revoke_certificate(&leader, node, &stray_certificate(&lab, node)).await;
+    wait_until_async("the removal in the leader's set", async || {
+        leader.registry.is_revoked_node(node)
+    })
+    .await;
+    let serial = tenko_cluster::ca::CertInfo::from_der(&shown.0[0])
+        .expect("info")
+        .serial;
+    assert!(!leader.registry.is_revoked_serial(&serial));
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect_err("the open connection carries no further call");
     lab.stop().await;
 }

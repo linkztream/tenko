@@ -1863,12 +1863,13 @@ impl NodeRegistry {
             .filter(|node| nodes.contains(node))
             .collect();
         let serials: HashSet<String> = rows.into_iter().map(|(serial, _, _)| serial).collect();
-        // The verifier first: a handshake after this point is refused. A connection whose
-        // handshake completed before it and that is not tracked yet when the loop below
-        // looks finds the node record gone at its first call (the record and the rows
-        // commit together).
-        self.revoked.replace(generations.0, serials.iter().cloned());
+        // The sets before the loop below: a handshake after this point is refused. A
+        // connection whose handshake completed before it and that is not tracked yet when the
+        // loop looks finds the node record gone at its first call (the record and the rows
+        // commit together). The nodes before the serials: a dialed connection that may still
+        // reach a removed node never sees its serial revoked before its removal.
         self.revoked_nodes.replace(generations.1, nodes);
+        self.revoked.replace(generations.0, serials.iter().cloned());
         *known = serials;
         let now = Timestamp::now();
         for node in fresh {
@@ -2000,8 +2001,9 @@ impl NodeRegistry {
                 Err(error) => return Err(error),
             }
         };
-        self.revoked.insert(serial_list.iter().cloned());
+        // The node before its serials, as `apply_revocations` does.
         self.revoked_nodes.insert([node]);
+        self.revoked.insert(serial_list.iter().cloned());
         self.sessions.revoke(node, cx.now);
         self.lock_touched().remove(&node);
         tracing::warn!(node = %node, name = %record.name, "node revoked");

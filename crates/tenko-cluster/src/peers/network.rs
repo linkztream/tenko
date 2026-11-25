@@ -18,8 +18,10 @@
 //! read refuses. A refusal is a dial failure: the peer counts as unreachable. A removed
 //! node is still reached, with a certificate that names it, by the Raft messages the peer
 //! layer lets through ([`PeerNetwork::set_refused`]) and the forced-step probe; every other
-//! call to it is refused before a channel is taken. The seed of a join, which names no node
-//! yet, is dialed through [`PeerNetwork::seed_client`].
+//! call to it is refused before a channel is taken. An open connection ends at its next
+//! read or write once its serial is revoked or, for a channel of other calls, its node
+//! removed. The seed of a join, which names no node yet, is dialed through
+//! [`PeerNetwork::seed_client`].
 //!
 //! **Deadlines** derive from the Raft timers and the store timeouts ([`PeerTimings`]).
 //!
@@ -37,10 +39,12 @@
 use std::{
     collections::HashMap,
     fmt, io,
+    pin::Pin,
     sync::{
         Arc, Mutex, OnceLock, PoisonError, RwLock, Weak,
         atomic::{AtomicU64, Ordering},
     },
+    task::{Context, Poll},
     time::{Duration, Instant},
 };
 
@@ -65,7 +69,10 @@ use tenko_store::{
         types::{RaftNodeId, Snapshot, Vote},
     },
 };
-use tokio::{io::AsyncReadExt as _, net::TcpStream};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, ReadBuf},
+    net::TcpStream,
+};
 use tokio_rustls::{TlsConnector, client::TlsStream};
 use tonic::{Request, Status, transport::Channel};
 
@@ -167,8 +174,9 @@ struct Inner {
     /// The generation of this controller's history on its calls
     /// ([`PeerNetwork::set_generation`]).
     generation: OnceLock<Box<dyn GenerationHook>>,
-    /// The registry's revocation sets ([`PeerNetwork::set_revocations`]).
-    revoked: OnceLock<Revoked>,
+    /// The registry's revocation sets ([`PeerNetwork::set_revocations`]), shared with every
+    /// dialed connection.
+    revoked: Arc<OnceLock<Revoked>>,
     /// How many dials of each [`Class`] were refused, for the warning.
     refusals: [AtomicU64; 2],
 }
@@ -240,7 +248,7 @@ impl PeerNetwork {
                 channels: Mutex::new(HashMap::new()),
                 refused: OnceLock::new(),
                 generation: OnceLock::new(),
-                revoked: OnceLock::new(),
+                revoked: Arc::new(OnceLock::new()),
                 refusals: [AtomicU64::new(0), AtomicU64::new(0)],
             }),
         }
@@ -309,8 +317,8 @@ impl PeerNetwork {
         let _ = self.inner.refused.set(Box::new(refused));
     }
 
-    /// Hands over the registry's revoked serials and revoked nodes, which every dial checks
-    /// beside the store. Set once.
+    /// Hands over the registry's revoked serials and revoked nodes, which every dial and
+    /// every open connection checks beside the store. Set once.
     pub(crate) fn set_revocations(
         &self,
         serials: Arc<RevocationSet>,
@@ -1119,7 +1127,7 @@ async fn dial(
     config: Arc<ClientConfig>,
     timeout: Duration,
     check: Option<Check>,
-) -> io::Result<hyper_util::rt::TokioIo<TlsStream<TcpStream>>> {
+) -> io::Result<hyper_util::rt::TokioIo<PeerStream<TlsStream<TcpStream>>>> {
     let failed = |detail: String| io::Error::other(format!("{DIAL_FAILED}: {detail}"));
     let (host, port) = split_host_port(&target).map_err(|error| failed(error.to_string()))?;
     let tcp = tokio::time::timeout(timeout, TcpStream::connect((host.as_str(), port)))
@@ -1138,7 +1146,10 @@ async fn dial(
         return Err(failed(format!("{target} did not agree on HTTP/2")));
     }
     let Some(check) = check else {
-        return Ok(hyper_util::rt::TokioIo::new(tls));
+        return Ok(hyper_util::rt::TokioIo::new(PeerStream {
+            inner: tls,
+            guard: None,
+        }));
     };
     let network = check
         .network
@@ -1155,7 +1166,101 @@ async fn dial(
         network.refuse(reason, check.class, &format!("{target}: {detail}"));
         return Err(failed(format!("{target}: {REFUSED}: {detail}")));
     }
-    Ok(hyper_util::rt::TokioIo::new(tls))
+    Ok(hyper_util::rt::TokioIo::new(PeerStream {
+        inner: tls,
+        guard: Some(Guard {
+            node: check.node,
+            class: check.class,
+            serial: peer.serial,
+            revoked: Arc::clone(&network.revoked),
+        }),
+    }))
+}
+
+/// A dialed connection that fails every read, write and flush once its certificate is
+/// revoked or, on a channel of other calls, its node removed, as the registry's sets hold
+/// it: no application byte passes after that. The seed of a join has no guard.
+struct PeerStream<S> {
+    inner: S,
+    guard: Option<Guard>,
+}
+
+struct Guard {
+    node: NodeId,
+    class: Class,
+    serial: String,
+    revoked: Arc<OnceLock<Revoked>>,
+}
+
+impl<S> PeerStream<S> {
+    fn check(&self) -> io::Result<()> {
+        let Some(guard) = &self.guard else {
+            return Ok(());
+        };
+        let Some(sets) = guard.revoked.get() else {
+            return Ok(());
+        };
+        // The serial first: the registry adds a removed node before its serials, so a
+        // serial seen revoked here comes with its node's removal.
+        let revoked = sets.serials.is_revoked(&guard.serial);
+        let removed = sets.nodes.is_revoked(&guard.node);
+        let cut = if guard.class == Class::Other {
+            revoked || removed
+        } else {
+            revoked && !removed
+        };
+        if cut {
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                format!("the certificate of controller {} is revoked", guard.node),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for PeerStream<S> {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        self.check()?;
+        Pin::new(&mut self.inner).poll_read(cx, buf)
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for PeerStream<S> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.check()?;
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_write_vectored(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> Poll<io::Result<usize>> {
+        self.check()?;
+        Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        self.inner.is_write_vectored()
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.check()?;
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
 }
 
 #[cfg(test)]
