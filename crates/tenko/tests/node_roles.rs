@@ -1,8 +1,9 @@
 //! The roles of a node against the real binary (OPS-01): the file's roles seed the stored
 //! set, a change through `PUT /nodes/{id}/roles` makes a supervised server stop with exit
 //! status 12 and the next start runs the stored set, an unsupervised server waits for a
-//! restart by hand, `--roles` pins the roles, and the probe role switched on at runtime is
-//! in the system status once the restart applies it.
+//! restart by hand, `--roles` pins the roles, the probe role switched on at runtime is
+//! in the system status once the restart applies it, and a kept fence for an older copy of
+//! the store keeps the dns and dhcp roles off until a start without it.
 //!
 //! The servers run without the variables a service manager passes on (`INVOCATION_ID`,
 //! `JOURNAL_STREAM`, `NOTIFY_SOCKET`), so that only `TENKO_SUPERVISED=1` decides whether a
@@ -232,5 +233,75 @@ fn the_probe_role_switched_on_at_runtime_is_in_the_status_after_the_restart() {
     let probes = api.get("/scans/probes").ok();
     assert_eq!(probes["items"][0]["node"], json!(id), "{probes}");
     assert_eq!(probes["items"][0]["in_process"], true, "{probes}");
+    server.stop().assert_code(0);
+}
+
+/// A controller that keeps a fence for an older copy of its store starts without its dns and
+/// dhcp roles and says why, while its API answers; once the fence file is gone (a forced step
+/// moves it aside, a rejoin empties the directory) the next start runs them again.
+#[test]
+fn a_kept_fence_for_an_older_copy_keeps_the_dns_and_dhcp_roles_off() {
+    use tenko_cluster::generation::FenceFile;
+
+    let dns = tenko_core::testing::free_port().release();
+    let mut node = Node::new().with_config(&format!(
+        "[dns]\nlisten = [\"127.0.0.1:{dns}\"]\nworkers = 1\n"
+    ));
+    let roles = ["--roles", "controller,dns,dhcp"];
+    let mut server = start(&mut node, false, &roles);
+    let mut api = Api::new(&node);
+    api.setup(&wait_for_setup_token(&server));
+    let cookie = api.cookie().map(str::to_owned);
+    for role in ["dns", "dhcp"] {
+        assert!(status_roles(&api).contains(&json!(role)), "{role}");
+    }
+    server.stop().assert_code(0);
+
+    // The fence a controller keeps when a leader found its store started from an older copy.
+    let fence = FenceFile {
+        kind: tenko_store::FenceReason::Reverted,
+        records: Vec::new(),
+        at: tenko_core::Timestamp::now(),
+        detail: None,
+    };
+    fence.save(&node.data_dir()).expect("keep the fence");
+    // A fenced controller is not ready (503), so only its ready line is awaited.
+    node.write_config();
+    let mut command = node.serve_command();
+    command.args(roles).env_remove("TENKO_SUPERVISED");
+    let mut server = Proc::spawn(command);
+    assert!(
+        server
+            .wait_stdout_line(serve_support::READY_TIMEOUT, |line| line
+                .contains(" ready at "))
+            .is_some(),
+        "{}",
+        server.diagnostics()
+    );
+    let mut api = Api::new(&node);
+    api.set_cookie(cookie.clone());
+    let status = api.get("/system/status").ok();
+    assert_eq!(status["store"]["quorum"]["state"], "fenced", "{status}");
+    assert_eq!(status["store"]["quorum"]["reason"], "reverted", "{status}");
+    assert_eq!(status["node"]["roles"], json!(["controller"]), "{status}");
+    let outcome = server.stop();
+    for role in ["dns", "dhcp"] {
+        outcome.assert_stderr_contains(&format!(
+            "this controller stopped writing (cluster.member.reverted), so the {role} role does \
+             not run"
+        ));
+    }
+
+    let kept = node
+        .data_dir()
+        .join(tenko_cluster::identity::NODE_DIR)
+        .join(tenko_cluster::generation::FENCE_FILE);
+    std::fs::remove_file(kept).expect("remove the fence");
+    let mut server = start(&mut node, false, &roles);
+    let mut api = Api::new(&node);
+    api.set_cookie(cookie);
+    for role in ["dns", "dhcp"] {
+        assert!(status_roles(&api).contains(&json!(role)), "{role}");
+    }
     server.stop().assert_code(0);
 }

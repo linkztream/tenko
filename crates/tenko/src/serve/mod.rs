@@ -22,6 +22,9 @@
 //! | 14 | `dns` | the `dns` role when the node runs it and the DNS module is on ([`dns`]): the index from the store, then the UDP and TCP listeners, the plain forwarder and the query log |
 //! | 15 | `dhcp` | the `dhcp` role when the node runs it and the DHCP module is on ([`dhcp`]): the configuration image and the lease table from the store, the lease committer, then the listeners of `[dhcp] listen`; the leader services `dhcp.expiry` and `dhcp.history.purge` |
 //!
+//! Neither role starts under a kept fence that stops them (`fence_stops_roles`), and such a
+//! fence set while the server runs stops both in place; the API and the store stay up.
+//!
 //! After the last step the leader supervisor ([`leader`]) starts the leader-only services
 //! (`tenko_core::cluster::LeaderService`) once this controller has taken office; on a single
 //! controller that is at once. The steps register their services in the
@@ -105,7 +108,7 @@ use tenko_core::{Coded, Role, RoleSet};
 use tenko_ipam::{IpamConfig, IpamService};
 use tenko_jobs::{EngineConfig, JobEngine, RunnerHandle};
 use tenko_store::{
-    Store,
+    FenceReason, QuorumState, Store,
     raft::{RaftStore, RaftStoreConfig, SmDurability, SnapshotPolicy},
 };
 use tenko_vault::{
@@ -510,6 +513,55 @@ fn status_roles(roles: RoleSet, dns_on: bool, dhcp_on: bool) -> Vec<String> {
     .collect()
 }
 
+/// Whether a fence of this controller stops its `dns` and `dhcp` roles: a store started from
+/// an older copy, or a history a newer generation superseded, must not answer clients. Every
+/// other fence keeps them serving from the local copy. No wildcard: a new reason is decided
+/// here before it builds.
+pub(crate) const fn fence_stops_roles(reason: FenceReason) -> bool {
+    match reason {
+        FenceReason::Reverted | FenceReason::Superseded => true,
+        FenceReason::Conflict
+        | FenceReason::MajorityAlive
+        | FenceReason::Diverged
+        | FenceReason::Unknown => false,
+    }
+}
+
+/// Resolves with the reason once the quorum state is a fence that stops the roles,
+/// including one set before the call; never while the watch is closed.
+async fn roles_fenced(mut quorum: watch::Receiver<QuorumState>) -> FenceReason {
+    loop {
+        if let QuorumState::Fenced { reason, .. } = *quorum.borrow_and_update()
+            && fence_stops_roles(reason)
+        {
+            return reason;
+        }
+        if quorum.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
+}
+
+/// Runs `run` to its end. When `roles` (a role runs) and the quorum state becomes a fence
+/// that stops them, `stop_roles` runs beside `run`, so a stop request is still served.
+async fn run_fenceable<T, S: Future<Output = ()>>(
+    run: impl Future<Output = T>,
+    quorum: Option<watch::Receiver<QuorumState>>,
+    roles: bool,
+    stop_roles: impl FnOnce(FenceReason) -> S,
+) -> T {
+    tokio::pin!(run);
+    tokio::select! {
+        result = &mut run => result,
+        reason = async {
+            match quorum {
+                Some(quorum) => roles_fenced(quorum).await,
+                None => std::future::pending().await,
+            }
+        }, if roles => tokio::join!(stop_roles(reason), run).1,
+    }
+}
+
 /// The runtime the server runs on, with `[runtime] workers` worker threads.
 ///
 /// # Errors
@@ -760,9 +812,8 @@ impl Running {
         }
     }
 
-    /// Stops the leader services, the runner and the background tasks, then closes the
-    /// store.
-    async fn stop(mut self) {
+    /// Stops the `dns` role, then the `dhcp` role: their listeners close.
+    async fn stop_roles(&mut self) {
         if let Some(role) = self.dns.take() {
             let began = Instant::now();
             role.stop().await;
@@ -773,6 +824,12 @@ impl Running {
             role.stop().await;
             tracing::info!(elapsed_ms = millis(began.elapsed()), "dhcp role stopped");
         }
+    }
+
+    /// Stops the leader services, the runner and the background tasks, then closes the
+    /// store.
+    async fn stop(mut self) {
+        self.stop_roles().await;
         if let Some(leader) = self.leader.take() {
             let began = Instant::now();
             leader.stop(RUNNER_STOP_TIMEOUT).await;
@@ -900,7 +957,18 @@ async fn serve(resolved: Resolved, shutdown: Shutdown, hooks: Hooks) -> Result<(
             stopping();
         }
     };
-    let result = server.run_until(notify_stopping).await;
+    // A fence that stops the roles stops them in place; the API and the store stay up.
+    let quorum = running.store.as_ref().map(RaftStore::quorum);
+    let roles = running.dns.is_some() || running.dhcp.is_some();
+    let held = &mut running;
+    let result = run_fenceable(server.run_until(notify_stopping), quorum, roles, |reason| {
+        tracing::error!(
+            code = reason.code(),
+            "this controller stopped writing: its dns and dhcp roles stop until a start without the fence"
+        );
+        held.stop_roles()
+    })
+    .await;
     let since = |requested: &std::sync::OnceLock<Instant>| {
         requested.get().map_or(0, |at| millis(at.elapsed()))
     };
@@ -1840,11 +1908,21 @@ async fn start(
 
     let lab_plain_http = tls.lab_plain_http;
     let https = tls.https;
+    // A fence kept from an earlier run (step `cluster`) that stops the roles keeps them off.
+    let fenced = store.fenced().filter(|reason| fence_stops_roles(*reason));
+    let fenced_off = |role: &str, runs: bool| {
+        fenced.filter(|_| runs).map(|reason| {
+            format!(
+                "this controller stopped writing ({}), so the {role} role does not run",
+                reason.code()
+            )
+        })
+    };
     // The dns role starts after the API (step `dns`); the API reaches it through the slot.
-    let dns_on = dns::runs(resolved, modules);
+    let dns_on = dns::runs(resolved, modules) && fenced.is_none();
     let dns_slot = tenko_api::routes::dns::DnsNodeSlot::default();
     // WP7.5: the dhcp role starts after the dns role (step `dhcp`), reached the same way.
-    let dhcp_on = dhcp::runs(resolved, modules);
+    let dhcp_on = dhcp::runs(resolved, modules) && fenced.is_none();
     let dhcp_slot = tenko_api::routes::dhcp::DhcpNodeSlot::default();
     let metrics_stop = running.stop.subscribe();
     // U1: the findings index follows the store from the start of the API.
@@ -2170,7 +2248,9 @@ async fn start(
     let dns_role = steps
         .run("dns", async {
             if !dns_on {
-                let why = if resolved.roles.contains(Role::Dns) {
+                let why = if let Some(why) = fenced_off("dns", dns::runs(resolved, modules)) {
+                    why
+                } else if resolved.roles.contains(Role::Dns) {
                     format!(
                         "the DNS module is off ({}), so the dns role does not run",
                         crate::modules::describe(modules, config.modules)
@@ -2214,7 +2294,9 @@ async fn start(
     let dhcp_role = steps
         .run("dhcp", async {
             if !dhcp_on {
-                let why = if resolved.roles.contains(Role::Dhcp) {
+                let why = if let Some(why) = fenced_off("dhcp", dhcp::runs(resolved, modules)) {
+                    why
+                } else if resolved.roles.contains(Role::Dhcp) {
                     format!(
                         "the DHCP module is off ({}), so the dhcp role does not run",
                         crate::modules::describe(modules, config.modules)
@@ -2992,5 +3074,80 @@ mod tests {
         let extra_padding =
             b"-----BEGIN CERTIFICATE-----\nAAEC\nAw===\n-----END CERTIFICATE-----\n";
         assert_eq!(pem_certificates(extra_padding), Vec::<Vec<u8>>::new());
+    }
+
+    /// Every fence reason, decided: an older copy and a superseded history stop the roles,
+    /// a conflict keeps them serving, and the others stay as they were (serving).
+    #[test]
+    fn roles_stop_on_reverted_and_superseded_only() {
+        let table = [
+            (FenceReason::Reverted, true),
+            (FenceReason::Superseded, true),
+            (FenceReason::Conflict, false),
+            (FenceReason::MajorityAlive, false),
+            (FenceReason::Diverged, false),
+            (FenceReason::Unknown, false),
+        ];
+        for (reason, stops) in table {
+            assert_eq!(fence_stops_roles(reason), stops, "{reason:?}");
+        }
+    }
+
+    /// The watcher resolves on a fence that stops the roles, set before or after it
+    /// subscribed, and not on a fence that keeps them.
+    #[test]
+    fn the_roles_watcher_waits_for_a_fence_that_stops_them() {
+        use futures::FutureExt as _;
+
+        let fenced = |reason| QuorumState::Fenced {
+            since: tenko_core::Timestamp::now(),
+            applied: tenko_core::Revision(1),
+            reason,
+        };
+        let (tx, rx) = watch::channel(QuorumState::Healthy);
+        let mut watcher = Box::pin(roles_fenced(rx));
+        assert_eq!((&mut watcher).now_or_never(), None);
+        tx.send_replace(fenced(FenceReason::Conflict));
+        assert_eq!((&mut watcher).now_or_never(), None);
+        tx.send_replace(fenced(FenceReason::Superseded));
+        assert_eq!(watcher.now_or_never(), Some(FenceReason::Superseded));
+
+        let (_tx, rx) = watch::channel(fenced(FenceReason::Reverted));
+        assert_eq!(roles_fenced(rx).now_or_never(), Some(FenceReason::Reverted));
+    }
+
+    /// While the server runs, a fence that stops the roles stops them, and the run still ends
+    /// when it is asked to; without a role running nothing is stopped.
+    #[tokio::test]
+    async fn a_fence_stops_the_running_roles_beside_the_run() {
+        use tokio::sync::oneshot;
+
+        for roles in [true, false] {
+            let (quorum, rx) = watch::channel(QuorumState::Healthy);
+            let (finish, finished) = oneshot::channel::<()>();
+            let (stopped, mut was_stopped) = oneshot::channel();
+            let run = tokio::spawn(run_fenceable(
+                async move { finished.await.is_ok() },
+                Some(rx),
+                roles,
+                |reason| async move {
+                    let _ = stopped.send(reason);
+                },
+            ));
+            quorum.send_replace(QuorumState::Fenced {
+                since: tenko_core::Timestamp::now(),
+                applied: tenko_core::Revision(1),
+                reason: FenceReason::Superseded,
+            });
+            if roles {
+                let reason = tokio::time::timeout(Duration::from_secs(10), &mut was_stopped).await;
+                assert_eq!(reason.expect("in time").ok(), Some(FenceReason::Superseded));
+            }
+            finish.send(()).expect("the run waits");
+            assert!(run.await.expect("the run ends"));
+            if !roles {
+                assert_eq!(was_stopped.await.ok(), None, "nothing to stop");
+            }
+        }
     }
 }

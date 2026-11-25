@@ -83,6 +83,10 @@ const ERRORS: &[&str] = &[
     tenko_store::StoreError::DISK_RESERVE,
     tenko_store::StoreError::STOPPED,
     tenko_store::api::DISK_UNKNOWN,
+    // A controller that stopped writing for good under a fence that also stops its dns and
+    // dhcp roles; a conflict keeps them serving and stays a warning.
+    tenko_store::FenceReason::Reverted.code(),
+    tenko_store::FenceReason::Superseded.code(),
     super::DNS_ROLE_NOT_SERVING,
     super::DHCP_ROLE_NOT_SERVING,
     super::DHCP_ROLE_STORE_REFUSED,
@@ -458,9 +462,21 @@ mod tests {
 
     #[test]
     fn severities_follow_the_code() {
+        use tenko_store::FenceReason as Fence;
+
         assert_eq!(severity_of("sys.ui.stub"), FindingSeverity::Info);
         assert_eq!(severity_of("dns.role.not_serving"), FindingSeverity::Error);
         assert_eq!(severity_of("dns.role.lagging"), FindingSeverity::Warning);
+        // The fences that stop the dns and dhcp roles are to act on; the others to review.
+        for (fence, severity) in [
+            (Fence::Reverted, FindingSeverity::Error),
+            (Fence::Superseded, FindingSeverity::Error),
+            (Fence::Conflict, FindingSeverity::Warning),
+            (Fence::MajorityAlive, FindingSeverity::Warning),
+            (Fence::Diverged, FindingSeverity::Warning),
+        ] {
+            assert_eq!(severity_of(fence.code()), severity, "{fence:?}");
+        }
         // Low disk space names its own severity.
         let disk = |severity: &str| StatusWarning {
             code: super::super::DISK_LOW.to_owned(),

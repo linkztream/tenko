@@ -928,6 +928,14 @@ impl ClusterLab {
         self.slots[index].binary = binary;
     }
 
+    /// Appends configuration text (whole tables) to one controller's file; takes effect at
+    /// its next [`ClusterLab::restart`].
+    pub fn add_config(&mut self, id: u64, text: &str) {
+        let index = self.slot_of(id);
+        let slot = &mut self.slots[index];
+        slot.node = slot.node.take().map(|node| node.with_config(text));
+    }
+
     /// Rejoin with an empty data directory: the member leaves the cluster
     /// ([`ClusterLab::remove`]), its directory is replaced by an empty one, and it joins
     /// again with a fresh token on the same ports. Returns its new node id once the

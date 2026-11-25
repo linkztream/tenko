@@ -120,6 +120,7 @@ Expected behavior under failure:
 |---|---|
 | One controller of three is lost | The cluster keeps its quorum. Configuration changes continue and `dns` and `dhcp` nodes are unaffected (OPS-03). |
 | Quorum is lost | Configuration changes are refused. `dns` and `dhcp` nodes keep answering and keep allocating and renewing leases from their local state (OPS-02). The isolated controller shows the state, keeps serving reads from its local copy, and queues changes as proposals for re-planning when quorum returns (OPS-26); multi-site ownership for sites that must keep writing while cut off comes in Phase 5 (OPS-27). |
+| A controller is fenced for an older copy of its store (`cluster.member.reverted`) or superseded by a newer generation (`cluster.superseded`) | It stops writing, and the `dns` and `dhcp` roles it runs in process stop and stay off across restarts until the operator's way out ([cluster.md](cluster.md), sections 12.3 and 12.11). Under every other fence they keep serving from its copy. |
 | A DHCP failover partner is lost | The surviving partner continues under the failover protocol's partner-down state (DHCP-12). |
 | The controllers and the partner are lost | The node serves from its own share, with lease times capped by the MCLT. |
 | A probe is lost | No new observations arrive from its segment. Serving is unaffected. |

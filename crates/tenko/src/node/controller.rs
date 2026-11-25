@@ -1096,8 +1096,9 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
                     .as_ref()
                     .map_or_else(String::new, |found| format!(". Found {found}"));
                 let node = layer.store().node_id();
-                let detail =
-                    fence_detail(reason, other.tip(), generation.lineage.tip(), node) + &found;
+                let detail = fence_detail(reason, other.tip(), generation.lineage.tip(), node)
+                    + fence_roles(*current)
+                    + &found;
                 state.set_notice(notice(reason.code(), detail, &forced));
             }
             _ => state.clear_notice(reason.code()),
@@ -1123,9 +1124,9 @@ async fn recovery_notices(layer: &Peers, state: &AppState) {
         state.set_notice(notice(
             codes::SUPERSEDED_PENDING,
             "controllers a forced step superseded are neither rejoined nor removed; any holder of \
-             the installation's CA key, these included, can stop this cluster's writes with a \
-             record of its own (a forced step on the side the operators choose lifts each stop, \
-             and a new CA ends it)"
+             the installation's CA key, these included, can stop this cluster's writes, and the \
+             dns and dhcp roles of the controllers it supersedes, with a record of its own (a \
+             forced step on the side the operators choose lifts each stop, and a new CA ends it)"
                 .to_owned(),
             &pending,
         ));
@@ -1190,6 +1191,19 @@ fn fence_detail(
          its host (docs/cluster.md section 12.11){claim}",
         reason.code()
     )
+}
+
+/// What a fence does to this controller's dns and dhcp roles, for its status warning. A
+/// fence of a reason this version does not know shows the code of a superseded one.
+fn fence_roles(current: tenko_store::FenceReason) -> &'static str {
+    if crate::serve::fence_stops_roles(current) {
+        ". Any dns and dhcp roles it runs are stopped until a start without the fence"
+    } else if current == tenko_store::FenceReason::Unknown {
+        ". This version does not know the reason of this fence, and any dns and dhcp roles it \
+         runs keep serving"
+    } else {
+        ""
+    }
 }
 
 /// The notices of generation records this controller refused or did not act on.
@@ -1461,6 +1475,20 @@ mod tests {
         assert!(!detail.contains("claims"), "{detail}");
         let detail = fence_detail(FenceReason::Diverged, None, None, NodeId(7));
         assert!(detail.contains("tenko cluster remove 7 --yes"), "{detail}");
+    }
+
+    /// A fence of an unknown reason shows a superseded fence's code, so its warning says
+    /// that the roles keep serving.
+    #[test]
+    fn an_unknown_fence_says_the_roles_keep_serving() {
+        use tenko_store::FenceReason;
+        assert_eq!(
+            fence_roles(FenceReason::Unknown),
+            ". This version does not know the reason of this fence, and any dns and dhcp roles \
+             it runs keep serving"
+        );
+        assert!(fence_roles(FenceReason::Superseded).contains("are stopped"));
+        assert_eq!(fence_roles(FenceReason::Conflict), "");
     }
 
     fn at(text: &str) -> Timestamp {

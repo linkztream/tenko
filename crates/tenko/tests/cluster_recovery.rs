@@ -93,17 +93,37 @@ fn refused_with(outcome: &Outcome, code: &str) {
 
 /// A stale survivor is forced only with `--accept-older`; it takes
 /// office when nobody answers its probe; two old controllers that return together fence at
-/// the authority's first contact, and stay fenced across a restart; `--undo` after the
+/// the authority's first contact, close their dns port, and stay fenced across a restart
+/// with the dns role off; `--undo` after the
 /// first start is refused; the fresher old controller forced in turn meets the first
 /// forced history as a sibling, which stops writing.
 #[test]
 #[ignore = "slow lab scenario; runner: ci.yml#cluster-lab"]
+#[allow(
+    clippy::too_many_lines,
+    reason = "the scenario reads best as one sequence"
+)]
 fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     let mut lab = lab(3);
     let leader = lab.leader();
     let stale = lab.followers()[0];
     let others: Vec<u64> = lab.ids().into_iter().filter(|id| *id != stale).collect();
     write(&lab, leader, 1).expect(201);
+    // The two that return as old controllers run the dns role from their next start, each on
+    // a port of its own.
+    let mut dns = Vec::new();
+    for id in &others {
+        let roles = json!({ "roles": ["controller", "dns"] });
+        lab.api(leader)
+            .put(&format!("/nodes/{id}/roles"), &roles)
+            .ok();
+        let port = tenko_core::testing::free_port().release();
+        lab.add_config(
+            *id,
+            &format!("[dns]\nlisten = [\"127.0.0.1:{port}\"]\nworkers = 1\n"),
+        );
+        dns.push(std::net::SocketAddr::from(([127, 0, 0, 1], port)));
+    }
 
     // The stale one is cut off while the others write on.
     lab.partition(&[stale], &others);
@@ -181,10 +201,30 @@ fn a_stale_survivor_is_forced_and_the_old_controllers_fence() {
     );
     let ready = lab.get(others[0], "/health/ready").expect("an answer");
     assert_eq!(ready.status, 503, "{}", ready.text);
+    // The fence stopped their dns role: the port refuses, and the role reports no service.
+    let refused = |address: &std::net::SocketAddr| {
+        std::net::TcpStream::connect(address)
+            .is_err_and(|error| error.kind() == std::io::ErrorKind::ConnectionRefused)
+    };
+    for (id, address) in others.iter().zip(&dns) {
+        lab.wait_for(
+            "the dns port of a superseded controller closed",
+            FENCE_LIMIT,
+            || refused(address),
+        );
+        let report = lab
+            .get(*id, &format!("/nodes/{id}/dns"))
+            .expect("an answer");
+        assert_ne!(report.json()["serving"], true, "{}", report.text);
+    }
     // A superseded controller restarted stays fenced.
     lab.stop(others[0]).assert_code(0);
     lab.restart(others[0]);
     wait_fenced(&lab, others[0], "superseded");
+    assert!(
+        refused(&dns[0]),
+        "the dns role stays off under the kept fence"
+    );
 
     // The fresher old controller is forced in turn (generation 2, parent generation
     // 0); the first forced history meets it as a sibling and stops writing.
