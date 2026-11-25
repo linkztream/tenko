@@ -1,15 +1,26 @@
 //! End-to-end tests of the exporter over the in-memory store, a loopback syslog receiver
 //! and files: every format, the outage with its alarm and catch-up, and a leader change.
 
-use std::{collections::BTreeSet, net::SocketAddr, path::Path, sync::Arc, time::Duration};
+use std::{
+    collections::BTreeSet,
+    net::SocketAddr,
+    path::Path,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
+use bytes::Bytes;
 use tenko_core::{
-    AuditSeq, Principal, SystemComponent, Timestamp,
+    AuditSeq, CounterKey, Principal, Revision, SystemComponent, TableName, Timestamp,
     audit::{AuditAction, AuditDraft, AuditRecord},
     cluster::{LEADER_EPOCH, LeaderService},
     testing::wait_until_async,
 };
-use tenko_store::{KeyRange, MemStore, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
+use tenko_store::{
+    ChangeStream, Committed, DerivedIndex, KeyRange, Leadership, MemStore, ReadConsistency,
+    ReadView, ReadViewExt, Store, StoreError, StoreStatus, Versioned, WatchFilter, WriteBatch,
+    tables,
+};
 use tokio::{io::AsyncReadExt, net::TcpListener, sync::mpsc, task::JoinHandle};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -112,7 +123,7 @@ fn file_sink(file: &str, format: ExportFormat, max_bytes: u64) -> Sink {
 
 /// Starts the exporter as the supervisor would, with the current epoch.
 fn start(
-    store: &Arc<MemStore>,
+    store: &Arc<impl Store + 'static>,
     dir: Option<&Path>,
     epoch: u64,
 ) -> (CancellationToken, JoinHandle<Result<(), String>>) {
@@ -817,4 +828,176 @@ async fn a_system_secret_as_client_key_fails_the_sink_without_a_read() {
             .all(|record| record.draft.action != CLIENT_KEY_ACTION),
         "a refused key is not recorded as used"
     );
+}
+
+/// The in-memory store with faults: the first write that records `write_fails` fails, and
+/// the first `cursor_read_fails` reads of a cursor fail (`usize::MAX`: every one).
+struct Faulty {
+    inner: Arc<MemStore>,
+    write_fails: Mutex<Option<AuditAction>>,
+    cursor_read_fails: usize,
+    /// Cursor reads that failed so far.
+    failed_reads: Arc<Mutex<usize>>,
+}
+
+impl Faulty {
+    fn new(
+        inner: &Arc<MemStore>,
+        write_fails: Option<AuditAction>,
+        cursor_read_fails: usize,
+    ) -> Self {
+        Self {
+            inner: Arc::clone(inner),
+            write_fails: Mutex::new(write_fails),
+            cursor_read_fails,
+            failed_reads: Arc::default(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Store for Faulty {
+    async fn propose(&self, batch: WriteBatch) -> Result<Committed, StoreError> {
+        let fails = self
+            .write_fails
+            .lock()
+            .expect("the fault")
+            .take_if(|action| batch.audit.iter().any(|draft| draft.action == *action))
+            .is_some();
+        if fails {
+            return Err(StoreError::Timeout);
+        }
+        self.inner.propose(batch).await
+    }
+
+    async fn read(&self, consistency: ReadConsistency) -> Result<Arc<dyn ReadView>, StoreError> {
+        Ok(Arc::new(FaultyView {
+            inner: self.inner.read(consistency).await?,
+            fails: self.cursor_read_fails,
+            failed: Arc::clone(&self.failed_reads),
+        }))
+    }
+
+    fn watch(
+        &self,
+        from: Option<Revision>,
+        filter: WatchFilter,
+    ) -> Result<ChangeStream, StoreError> {
+        self.inner.watch(from, filter)
+    }
+
+    fn register_index(&self, index: Arc<dyn DerivedIndex>) -> Result<(), StoreError> {
+        self.inner.register_index(index)
+    }
+
+    fn status(&self) -> StoreStatus {
+        self.inner.status()
+    }
+
+    fn leadership(&self) -> tokio::sync::watch::Receiver<Option<Leadership>> {
+        self.inner.leadership()
+    }
+}
+
+struct FaultyView {
+    inner: Arc<dyn ReadView>,
+    fails: usize,
+    failed: Arc<Mutex<usize>>,
+}
+
+impl ReadView for FaultyView {
+    fn revision(&self) -> Revision {
+        self.inner.revision()
+    }
+
+    fn get(&self, table: &TableName, key: &[u8]) -> Result<Option<Versioned>, StoreError> {
+        if table == CURSORS.name() {
+            let mut failed = self.failed.lock().expect("the count");
+            if *failed < self.fails {
+                *failed += 1;
+                return Err(StoreError::Timeout);
+            }
+        }
+        self.inner.get(table, key)
+    }
+
+    fn scan(
+        &self,
+        table: &TableName,
+        range: KeyRange,
+        limit: usize,
+        reverse: bool,
+    ) -> Result<Vec<(Bytes, Versioned)>, StoreError> {
+        self.inner.scan(table, range, limit, reverse)
+    }
+
+    fn counter(&self, counter: &CounterKey) -> Result<u64, StoreError> {
+        self.inner.counter(counter)
+    }
+}
+
+fn count(records: &[AuditRecord], action: &AuditAction) -> usize {
+    records
+        .iter()
+        .filter(|record| &record.draft.action == action)
+        .count()
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_alarm_whose_write_failed_is_recorded_on_the_next_pass_and_once() {
+    outage_with_a_failed_write(ALARM_ACTION).await;
+}
+
+/// A sink fails, raises the alarm and recovers while the first write that records `fails`
+/// fails; afterwards the log holds one alarm and one recovery.
+async fn outage_with_a_failed_write(fails: AuditAction) {
+    let dir = tempfile::tempdir().expect("dir");
+    // A directory in the file's place fails every open until it is removed.
+    let blocked = dir.path().join("blocked.jsonl");
+    std::fs::create_dir(&blocked).expect("blocks");
+    let store = Arc::new(MemStore::default());
+    write_records(&store, 3).await;
+    let sink = file_sink("blocked.jsonl", ExportFormat::Json, 1 << 20);
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![sink.clone()],
+            // Below the API's minimum: the alarm is due at the first failure.
+            alert_after_secs: 0,
+        },
+    )
+    .await;
+    let epoch = bump_epoch(&store).await;
+    let faulty = Arc::new(Faulty::new(&store, Some(fails), 0));
+    let (stop, task) = start(&faulty, Some(dir.path()), epoch);
+
+    wait_until_async("the alarm", async || {
+        cursor(&store, sink.id)
+            .await
+            .is_some_and(|cursor| cursor.alarmed)
+    })
+    .await;
+    // Twenty more failed passes at the longest pause; every caller runs on a paused clock.
+    tokio::time::sleep(tuning().retry_max * 20).await; // test-lint: allow sleep paused clock
+    assert_eq!(
+        count(&audit_records(&store).await, &ALARM_ACTION),
+        1,
+        "raised once"
+    );
+    std::fs::remove_dir(&blocked).expect("unblocks");
+    wait_until_async("the recovery", async || {
+        cursor(&store, sink.id)
+            .await
+            .is_some_and(|cursor| cursor.failing_since.is_none() && !cursor.alarmed)
+    })
+    .await;
+    stop.cancel();
+    assert_eq!(task.await.expect("joins"), Ok(()));
+    assert!(
+        faulty.write_fails.lock().expect("the fault").is_none(),
+        "the write failed once"
+    );
+    let records = audit_records(&store).await;
+    assert_eq!(count(&records, &ALARM_ACTION), 1);
+    assert_eq!(count(&records, &RECOVERED_ACTION), 1);
 }

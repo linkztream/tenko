@@ -608,7 +608,6 @@ impl Worker {
         });
         let alarm = !cursor.alarmed && cursor.alarm_due(now, self.alert_after);
         let draft = if alarm {
-            cursor.alarmed = true;
             tracing::error!(sink = %self.sink.name, code = error.kind.code(), "the audit export sink has been failing for {} s: alarm audit.export.failing", self.alert_after.as_secs());
             let since = cursor.failing_since.unwrap_or(now);
             Some(
@@ -701,6 +700,13 @@ impl Worker {
         let now = Timestamp::now();
         let mut row = progress.current.clone();
         row.updated_at = now;
+        // The alarm's mark rides with its record and reaches memory only from a written row,
+        // so a failed write leaves the alarm due for the next pass.
+        // shortcut: an alarm write that times out but commits is recorded again on the next
+        // pass; make the write conditional on the cursor's revision if duplicates matter.
+        row.alarmed |= draft
+            .as_ref()
+            .is_some_and(|draft| draft.action == ALARM_ACTION);
         if progress.unsaved > 0 || row.delivered != progress.stored.delivered {
             row.last_success_at = Some(now);
         }
