@@ -16,7 +16,8 @@
 //!   confirmation (the node id; without a terminal `--confirm <node>:<generation>`, with the
 //!   generation `--inspect` names, so that a script cannot pass one without reading it). On a controller that a competing forced history
 //!   stopped (a fence of its own), it is also how an operator chooses this side: the new
-//!   generation is above both, and `--revoke` takes the other side's signer out.
+//!   generation is above both, for the records the step counts (up to 2^32 above its own), and
+//!   `--revoke` takes the other side's signer out.
 //! - `--undo` puts the copy kept aside back, until the first start took office.
 //!
 //! # The offline step and its crash points
@@ -427,6 +428,12 @@ pub async fn run(args: &RecoverArgs) -> Result<Output, Failure> {
     force(&resolved, args, &facts, ordering, stdout).await
 }
 
+/// How far above its own generation a forced step counts the records it has seen. A
+/// generation counts forced steps, each one above the highest number it counted, so forced
+/// steps alone never take a history this far above a copy of it; counting a record further
+/// up could leave no number for the next step.
+const STEP_REACH: u64 = 1 << 32;
+
 /// What a closed store and the files beside it say, for the inspection and the step.
 struct Facts {
     copy: CopyFacts,
@@ -434,6 +441,9 @@ struct Facts {
     own: Option<generation::Signed>,
     /// The highest generation this copy has seen: its own or its fence's.
     seen: u64,
+    /// The highest generation a forced step here counts: its own, or its fence's below
+    /// [`STEP_REACH`] above its own.
+    counted: u64,
     /// What stopped this controller, when a fence is kept here.
     fence: Option<tenko_store::FenceReason>,
     /// When the store stopped on what a leader sent, and what it found.
@@ -463,13 +473,15 @@ impl Facts {
             .tip()
             .cloned();
         let fence = FenceFile::load(&resolved.data_dir).map_err(store_failure)?;
-        let fence_number = fence
-            .iter()
-            .flat_map(|fence| &fence.records)
-            .filter_map(|record| record.header().ok())
-            .map(|header| header.number)
-            .max()
-            .unwrap_or(0);
+        let fenced = || {
+            fence
+                .iter()
+                .flat_map(|fence| &fence.records)
+                .filter_map(|record| record.header().ok())
+                .map(|header| header.number)
+        };
+        let own_generation = own.as_ref().map_or(0, generation::Signed::number);
+        let reach = own_generation.saturating_add(STEP_REACH);
         let members = view
             .scan_typed(&tables::MEMBERS, KeyRange::all(), usize::MAX, false)
             .map_err(store_failure)?
@@ -503,10 +515,10 @@ impl Facts {
             address_map: resolved.config.cluster.peer_address_map.clone(),
             fence: fence.as_ref().map(|fence| fence.kind),
             found: fence.as_ref().and_then(|fence| fence.detail.clone()),
-            seen: own
-                .as_ref()
-                .map_or(0, generation::Signed::number)
-                .max(fence_number),
+            seen: fenced().fold(own_generation, u64::max),
+            counted: fenced()
+                .filter(|number| *number < reach)
+                .fold(own_generation, u64::max),
             copy: copy.facts.clone(),
             node,
             own,
@@ -518,11 +530,10 @@ impl Facts {
         self.own.as_ref().map_or(0, generation::Signed::number)
     }
 
-    /// The generation a forced step here creates: above every one this copy has seen.
-    /// Saturating: a record that claims the highest number must not keep a step from
-    /// being made.
+    /// The generation a forced step here creates: above every one this copy counts
+    /// ([`STEP_REACH`]). Saturating: a copy just below the highest number takes it.
     fn next(&self) -> u64 {
-        self.seen.saturating_add(1)
+        self.counted.saturating_add(1)
     }
 
     /// `tkfp1:<generation>:<record>:<last term>:<last index>:<revision>:<node>`.
@@ -632,8 +643,32 @@ impl Facts {
                 let _ = writeln!(text, "found            {found}");
             }
         }
-        {
-            let next = self.next();
+        self.describe_step(&mut text);
+        text
+    }
+
+    /// The inspection's lines on a forced step here: a record it does not count, and the
+    /// generation it creates or its refusal.
+    fn describe_step(&self, text: &mut String) {
+        let next = self.next();
+        if self.seen > self.counted {
+            let _ = writeln!(
+                text,
+                "not counted      generation {} is not below {}, the limit of what a forced step \
+                 here counts; it creates {next}, not above it, and a controller stopped as \
+                 superseded by that record stops the new generation whenever they meet, until \
+                 that controller is stopped and its data directory moved aside",
+                self.seen,
+                self.generation().saturating_add(STEP_REACH)
+            );
+        }
+        if self.generation() == u64::MAX {
+            let _ = writeln!(
+                text,
+                "a forced step    is refused here ({})",
+                codes::NO_GENERATION_LEFT
+            );
+        } else {
             let _ = writeln!(
                 text,
                 "a forced step    creates generation {next} here; without a terminal its \
@@ -641,7 +676,6 @@ impl Facts {
                  <node>:<generation>) after `--force` printed what it does"
             );
         }
-        text
     }
 }
 
@@ -883,11 +917,10 @@ fn force_checks(
             codes::NO_GENERATION_LEFT,
             exit::USAGE,
             "this copy's generation is the largest number already, so no forced step can go \
-             above it: a record at that number, which only a holder of the CA's key can make, \
-             stops this cluster until the CA is replaced; until then restore a backup from \
-             before it into empty data directories on every controller, or delete \
-             <data_dir>/node/generation-fence on every stopped controller (docs/cluster.md \
-             section 12.11); either lasts only until the key's holder sends the record again",
+             above it: force the copy of a controller at an earlier generation instead, if \
+             one is left, with every controller at this number stopped and its data directory \
+             moved aside; otherwise restore a backup from before this generation into empty \
+             data directories on every controller (docs/cluster.md section 12.11)",
         ));
     }
     if !fresher.is_empty() && !args.accept_older {
@@ -1318,14 +1351,20 @@ fn stopped_text(facts: &Facts) -> Option<String> {
         }
         _ => "that it supersedes this controller's history",
     };
+    let outcome = if facts.seen > facts.counted {
+        "does not count the other record, which lies beyond the limit of what it counts: the \
+         new generation is not above it, and a controller stopped as superseded by it stops \
+         the new one whenever they meet, until its data directory is moved aside"
+    } else {
+        "makes this copy the newer history; the other side stops writing when it meets it"
+    };
     Some(format!(
         "It was stopped by a record that claims {claim}.\n  \
          The other record claims: {}\n  \
          This copy holds:         {}\n\
-         A forced step here makes this copy the newer history; the other side stops writing \
-         when it meets it, and what that side wrote since its own step does not come here. The \
-         operators of both sides decide together: if both force their own side, both stop \
-         again when they meet.",
+         A forced step here {outcome}, and what that side wrote since its own step does not \
+         come here. The operators of both sides decide together: if both force their own \
+         side, both stop again when they meet.",
         facts
             .stopped_by
             .as_ref()
@@ -1791,6 +1830,7 @@ pub(crate) mod tests {
             node: NodeId(node),
             own: None,
             seen: 0,
+            counted: 0,
             fence: None,
             found: None,
             marked: BTreeSet::new(),
@@ -2191,12 +2231,60 @@ pub(crate) mod tests {
         );
     }
 
-    /// One record at the largest generation number, which only a holder of the CA's key can
-    /// make, stops the cluster until a new CA: the members keep it against the authority's
-    /// record of the same number, the authority meets it as a sibling and stops, and no
-    /// further forced step is left.
+    /// A forced step counts the records of its fence only below `STEP_REACH` above its own
+    /// generation, at generation 0 and after a step to 1; `seen` still names the highest.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn a_record_at_the_largest_number_stops_the_cluster_for_good() {
+    async fn next_ignores_fence_records_beyond_the_bound() {
+        async fn fenced(resolved: &Resolved, number: u64) -> Facts {
+            FenceFile {
+                kind: tenko_store::FenceReason::Superseded,
+                records: vec![competing(4242, number).record().clone()],
+                at: Timestamp::now(),
+                detail: None,
+            }
+            .save(&resolved.data_dir)
+            .expect("the stop");
+            let copy = inspect(&resolved.layout().store()).await.expect("copy");
+            Facts::read(resolved, &copy).expect("facts")
+        }
+        let root = TempDir::new("recover-reach");
+        let resolved = three_voter_copy(root.path(), false).await;
+        for (number, next) in [
+            (STEP_REACH - 1, STEP_REACH),
+            (STEP_REACH, 1),
+            (STEP_REACH + 1, 1),
+            (u64::MAX, 1),
+        ] {
+            let facts = fenced(&resolved, number).await;
+            assert_eq!((facts.seen, facts.next()), (number, next), "{number}");
+        }
+        let step = RecoverArgs {
+            confirm: Some("1:1".to_owned()),
+            ..args()
+        };
+        let facts = fenced(&resolved, u64::MAX).await;
+        let forced = force_with(&resolved, &step, &facts, Vec::new(), String::new(), &|_| {
+            None
+        });
+        assert!(forced.await.is_ok(), "the step to 1");
+        // Below the bound only relative to generation 1, and at that bound.
+        for (number, next) in [(STEP_REACH, STEP_REACH + 1), (STEP_REACH + 1, 2)] {
+            let facts = fenced(&resolved, number).await;
+            assert_eq!(
+                (facts.generation(), facts.seen, facts.next()),
+                (1, number, next),
+                "{number}"
+            );
+        }
+    }
+
+    /// A record at the largest generation number, signed by a controller of the cluster,
+    /// stops every member; the documented procedure lifts it. The forced step does not count
+    /// the record and makes generation 1; the members keep the record against it and hand it
+    /// back, so the authority stops when it meets one of them; a second step makes generation
+    /// 2, and with the members moved aside nothing is left that stops it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_forced_step_lifts_a_stop_by_a_record_at_the_largest_number() {
         use tenko_store::FenceReason;
         let root = TempDir::new("recover-largest");
         let resolved = three_voter_copy(root.path(), false).await;
@@ -2242,26 +2330,35 @@ pub(crate) mod tests {
         }
         .save(&resolved.data_dir)
         .expect("the stop");
-        let copy = inspect(&resolved.layout().store()).await.expect("copy");
-        let facts = Facts::read(&resolved, &copy).expect("facts");
-        drop(copy);
-        assert_eq!(facts.next(), u64::MAX);
-        let step = RecoverArgs {
-            confirm: Some(format!("1:{}", u64::MAX)),
-            ..args()
+        let step = |number: u64| {
+            let resolved = &resolved;
+            async move {
+                let copy = inspect(&resolved.layout().store()).await.expect("copy");
+                let facts = Facts::read(resolved, &copy).expect("facts");
+                drop(copy);
+                assert_eq!((facts.seen, facts.next()), (u64::MAX, number));
+                assert!(facts.describe().contains("not counted"), "the inspection");
+                let args = RecoverArgs {
+                    confirm: Some(format!("1:{number}")),
+                    ..args()
+                };
+                let forced =
+                    force_with(resolved, &args, &facts, Vec::new(), String::new(), &|_| {
+                        None
+                    });
+                assert!(forced.await.is_ok(), "the step to {number}");
+                let copy = inspect(&resolved.layout().store())
+                    .await
+                    .expect("the new store");
+                let authority = lineage(&copy);
+                assert_eq!(authority.number(), number);
+                assert!(!Dirs::new(resolved, number).fence.exists(), "unfenced");
+                authority
+            }
         };
-        let forced = force_with(&resolved, &step, &facts, Vec::new(), String::new(), &|_| {
-            None
-        });
-        assert!(forced.await.is_ok(), "a step above the record");
-        let copy = inspect(&resolved.layout().store())
-            .await
-            .expect("the new store");
-        let authority = lineage(&copy);
-        drop(copy);
-        assert_eq!(authority.number(), u64::MAX);
-        // The members keep the minted record against the authority's of the same number,
-        // and their refusals carry it back.
+        let authority = step(1).await;
+        // The members keep the minted record against the authority's below it, and their
+        // refusals carry it back.
         let pushed: Vec<_> = authority
             .records()
             .iter()
@@ -2279,14 +2376,12 @@ pub(crate) mod tests {
         }
         .save(&resolved.data_dir)
         .expect("the authority's stop");
-        let copy = inspect(&resolved.layout().store()).await.expect("copy");
-        let facts = Facts::read(&resolved, &copy).expect("facts");
-        drop(copy);
-        let refused = force_checks(&step, &facts, &[]).expect_err("no number left");
-        assert!(
-            format!("{refused:?}").contains(codes::NO_GENERATION_LEFT),
-            "{refused:?}"
-        );
+        // The authority had taken office; a second step lifts its stop the same way.
+        took_office(&resolved.data_dir).expect("office");
+        // Once the members are moved aside, the minted record is kept nowhere: the new
+        // history starts unfenced (checked in `step`) and the server starts.
+        step(2).await;
+        check_start(&resolved.data_dir, &resolved.layout().store()).expect("it starts");
     }
 
     /// The whole step: a store with this controller as the only voter and the record, the
@@ -2484,7 +2579,7 @@ pub(crate) mod tests {
     fn a_stopped_copy_shows_both_sides_and_recommends_none() {
         let mut copy = facts(1, 5, 100);
         copy.fence = Some(tenko_store::FenceReason::Conflict);
-        copy.seen = 7;
+        (copy.seen, copy.counted) = (7, 7);
         copy.stopped_by = Some(competing(2, 1));
         copy.own = Some(competing(1, 1));
         for marked in [true, false] {
@@ -2509,14 +2604,54 @@ pub(crate) mod tests {
         }
     }
 
-    /// The next generation saturates: a record claiming the largest number cannot make a
-    /// forced step fail, and a copy already at that number refuses a further one.
+    /// A record too far above this copy's generation is named as not counted, beside the
+    /// line of what stopped the copy, and the explanation of the stop says the step is not
+    /// above it; a record within reach changes neither text.
+    #[test]
+    fn the_inspect_text_names_a_record_it_does_not_count() {
+        let mut copy = facts(1, 5, 100);
+        copy.fence = Some(tenko_store::FenceReason::Superseded);
+        copy.stopped_by = Some(competing(2, u64::MAX));
+        copy.own = Some(competing(1, 3));
+        (copy.seen, copy.counted) = (u64::MAX, 3);
+        let text = copy.describe();
+        for line in [
+            "stopped          cluster.superseded (generation 18446744073709551615 of another \
+             history, forced on controller 2)",
+            "not counted      generation 18446744073709551615 is not below 4294967299, the \
+             limit of what a forced step here counts; it creates 4, not above it",
+            "a forced step    creates generation 4 here",
+        ] {
+            assert!(text.contains(line), "{line} in {text}");
+        }
+        let stop = stopped_text(&copy).expect("a text");
+        assert!(stop.contains("does not count the other record"), "{stop}");
+        // Near the largest number the limit is that number itself.
+        copy.own = Some(competing(1, u64::MAX - 10));
+        copy.counted = u64::MAX - 10;
+        let text = copy.describe();
+        assert!(
+            text.contains(
+                "generation 18446744073709551615 is not below 18446744073709551615, the limit of \
+                 what a forced step here counts; it creates 18446744073709551606, not above it"
+            ),
+            "{text}"
+        );
+        copy.own = Some(competing(1, 3));
+        (copy.seen, copy.counted) = (STEP_REACH + 2, STEP_REACH + 2);
+        assert!(!copy.describe().contains("not counted"));
+        let stop = stopped_text(&copy).expect("a text");
+        assert!(stop.contains("makes this copy the newer history"), "{stop}");
+    }
+
+    /// The next generation saturates: a copy that counts the largest number still names
+    /// one, and a copy already at that number refuses a further step.
     #[test]
     fn the_next_generation_saturates() {
         let mut copy = facts(1, 5, 100);
-        copy.seen = u64::MAX;
+        copy.counted = u64::MAX;
         assert_eq!(copy.next(), u64::MAX);
-        copy.seen = 3;
+        copy.counted = 3;
         assert_eq!(copy.next(), 4);
         // A copy that holds the largest number already takes no further step: it would
         // replace its own record under the same number.
@@ -2526,6 +2661,13 @@ pub(crate) mod tests {
             format!("{refused:?}").contains(codes::NO_GENERATION_LEFT),
             "{refused:?}"
         );
+        // The inspection says so instead of naming a generation the step would create.
+        let text = copy.describe();
+        assert!(
+            text.contains("a forced step    is refused here (cluster.recover.no_generation_left)")
+                && !text.contains("creates generation"),
+            "{text}"
+        );
     }
 
     /// `--inspect` names the generation a forced step creates; a refused confirmation and
@@ -2533,7 +2675,7 @@ pub(crate) mod tests {
     #[test]
     fn the_confirmation_is_read_never_handed_over() {
         let mut copy = facts(1, 5, 100);
-        copy.seen = 3;
+        (copy.seen, copy.counted) = (3, 3);
         copy.fence = Some(tenko_store::FenceReason::Superseded);
         let text = copy.describe();
         assert!(text.contains("creates generation 4"), "{text}");

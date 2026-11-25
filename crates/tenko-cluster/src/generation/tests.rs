@@ -616,17 +616,27 @@ impl Rng {
     }
 }
 
+/// How far above its own generation a forced step counts a record (`STEP_REACH` of
+/// `tenko cluster recover`).
+const REACH: u64 = 1 << 32;
+
 /// A forced step on `side`, as `tenko cluster recover --force` makes it: allowed on a copy
-/// with other voters, or on one another history stopped; the new generation is above every
-/// one it has seen; its other voters are superseded and marked.
+/// with other voters, or on one another history stopped, and below the largest number; the
+/// new generation is above its own and every record of its fence less than [`REACH`] above
+/// it; its other voters are superseded and marked.
 fn force(side: &mut Side, clock: &mut i128) {
-    if side.voters.len() == 1 && side.fence.is_none() {
+    let own = side.lineage.number();
+    if (side.voters.len() == 1 && side.fence.is_none()) || own == u64::MAX {
         return;
     }
-    let seen = side
-        .lineage
-        .number()
-        .max(side.fence.as_ref().map_or(0, |(_, fence)| fence.number()));
+    let counted = side
+        .fence
+        .iter()
+        .flat_map(|(_, fence)| fence.records())
+        .map(Signed::number)
+        .filter(|number| *number < own.saturating_add(REACH))
+        .fold(own, u64::max);
+    let next = counted.saturating_add(1);
     *clock += 1;
     let others: BTreeSet<NodeId> = side
         .voters
@@ -638,8 +648,8 @@ fn force(side: &mut Side, clock: &mut i128) {
         parent: side.lineage.tip().map(Signed::hash),
         superseded: others.iter().copied().collect(),
         at: Timestamp::from_unix_nanos(AT + *clock).expect("time"),
-        nonce: HexBytes([side.node.to_be_bytes(), (seen + 1).to_be_bytes()].concat()),
-        ..body(seen + 1, None, side.node)
+        nonce: HexBytes([side.node.to_be_bytes(), next.to_be_bytes()].concat()),
+        ..body(next, None, side.node)
     };
     let mut records = side.lineage.offer();
     records.push(sign(&side.leaf, &body));
@@ -676,17 +686,44 @@ enum Act {
     /// Two sides exchange their records: the cluster port grants that exchange to every
     /// controller certificate of the CA, revoked or not.
     Meet(usize, usize),
+    /// A side receives a record no forced step made, signed by another side's certificate:
+    /// numbered its own generation plus 0, `REACH - 1`, `REACH` or `REACH + 1`, or the
+    /// largest number (the second value modulo 5), a child of its own record below 5 and of
+    /// none from 5.
+    Forge(usize, usize),
 }
 
 /// Runs `acts` on `sides` and checks after each meeting: when two controllers that both
 /// write, of different histories, exchange their records, at least one stops writing, and
 /// each forced one shows the other's history (its fence, or the older history it saw).
+/// Until a record is forged, no generation exceeds the number of forced steps.
 fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
-    let mut clock = 0;
+    let (mut clock, mut steps, mut forged) = (0, 0, false);
     for (index, act) in acts.iter().enumerate() {
         let (a, b) = match *act {
             Act::Force(a) => {
                 force(&mut sides[a], &mut clock);
+                steps += 1;
+                assert!(
+                    forged || sides[a].lineage.number() <= steps,
+                    "a generation above the steps after {:?}",
+                    &acts[..=index]
+                );
+                continue;
+            }
+            Act::Forge(to, kind) => {
+                let own = sides[to].lineage.number();
+                let number = [0, REACH - 1, REACH, REACH + 1, u64::MAX][kind % 5];
+                let parent = sides[to]
+                    .lineage
+                    .tip()
+                    .map(Signed::hash)
+                    .filter(|_| kind < 5);
+                let signer = &sides[(to + 1) % sides.len()];
+                let body = body(own.saturating_add(number), parent, signer.node);
+                let record = sign(&signer.leaf, &body);
+                receive(&mut sides[to], &[record], &ca.root);
+                forged = true;
                 continue;
             }
             Act::Renew(who) => {
@@ -741,13 +778,15 @@ fn run(sides: &mut [Side], acts: &[Act], ca: &Ca) {
 /// The cluster's promise after any sequence of forced steps by any number of operators:
 /// two controllers that both believe they are the authority stop at least one of them when
 /// they exchange one call, and both show the other's history. Generated sequences of forced
-/// steps, renewals, revocations, superseded marks and meetings among two and three
-/// controllers of one cluster, plus written ones: two operators who each chose their own
-/// side after a conflict, and two forced sides that both renewed after the fork, one of them
-/// revoked by the other.
+/// steps, renewals, revocations, superseded marks, forged records and meetings among two and
+/// three controllers of one cluster, plus written ones: two operators who each chose their
+/// own side after a conflict, two forced sides that both renewed after the fork, one of them
+/// revoked by the other, and a cluster stopped by a record at the largest number, forced
+/// twice. After each generated sequence the documented procedure ends in an authority that
+/// writes.
 #[test]
 fn two_authorities_that_meet_never_both_go_on_writing() {
-    use Act::{Force, Mark, Meet, Renew, Revoke};
+    use Act::{Force, Forge, Mark, Meet, Renew, Revoke};
     let ca = ca();
     let sides = |count: u64| -> Vec<Side> {
         let voters: BTreeSet<NodeId> = (1..=count).map(NodeId).collect();
@@ -795,22 +834,58 @@ fn two_authorities_that_meet_never_both_go_on_writing() {
         ],
         &ca,
     );
+    let mut stopped = sides(3);
+    run(
+        &mut stopped,
+        &[
+            Forge(1, 4),
+            Forge(2, 4),
+            Forge(0, 4),
+            Force(0),
+            Meet(1, 0),
+            Force(0),
+            Forge(0, 1),
+            Force(0),
+        ],
+        &ca,
+    );
+    assert_eq!(
+        stopped[0].lineage.number(),
+        REACH + 2,
+        "+1, +1, then +REACH"
+    );
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
     for count in [2_u64, 3] {
         let n = usize::try_from(count).expect("small");
         for _ in 0..300 {
             let mut sides = sides(count);
             let acts: Vec<Act> = (0..=rng.next(16))
-                .map(|_| match rng.next(7) {
+                .map(|_| match rng.next(8) {
                     0 => Renew(rng.next(n)),
                     1 => Revoke(rng.next(n), rng.next(n)),
                     2 => Mark(rng.next(n), rng.next(n)),
                     3 => Force(rng.next(n)),
+                    4 => Forge(rng.next(n), rng.next(10)),
                     _ => Meet(rng.next(n), rng.next(n)),
                 })
                 .filter(|act| !matches!(act, Meet(a, b) if a == b))
                 .collect();
             run(&mut sides, &acts, &ca);
+            // The documented procedure: every other copy moved aside, a forced step on the
+            // newest one below the largest number writes, at most REACH above its own.
+            let newest = sides
+                .iter_mut()
+                .filter(|side| side.lineage.number() < u64::MAX)
+                .max_by_key(|side| side.lineage.number())
+                .expect("a copy below the largest number");
+            let own = newest.lineage.number();
+            newest.voters.insert(NodeId(0));
+            force(newest, &mut 0);
+            let number = newest.lineage.number();
+            assert!(
+                own < number && number <= own.saturating_add(REACH) && newest.writes(),
+                "{own} to {number} after {acts:?}"
+            );
         }
     }
 }

@@ -25,11 +25,12 @@
 //! needs nothing from the other side but the CA, so two forced histories that meet always
 //! stop each other, whatever either side renewed, revoked or superseded. The time a record
 //! carries is shown and never refused: no difference of clocks can make a receiver ignore a
-//! record. The cost, accepted by the owner: whoever holds the CA's key (anyone who once held
-//! a controller's secrets) can stop the cluster's writes with a record of their own, again
-//! and again; an operator lifts each stop with a forced step on the side they choose, and
-//! the cure is a new CA. A record does nothing but stop writes: it never makes a receiver
-//! follow, join, take a store or change its data.
+//! record. The cost, accepted by the owner: a record signed by any controller of the
+//! installation, present or past, or under a certificate minted with the CA's key, can stop
+//! the cluster's writes, again and again; an operator lifts each stop with a forced step on
+//! the side they choose, which counts only the records within reach of its own generation
+//! (`tenko cluster recover`). A record does nothing but stop writes: it never makes a
+//! receiver follow, join, take a store or change its data.
 //!
 //! - **Known** ([`Relation::Known`]): every record is in the receiver's own lineage, or the
 //!   newest one is older than the receiver's own. Nothing to do; the other side learns of
@@ -162,7 +163,7 @@ pub mod codes {
     /// `--force` on the copy of a controller that it holds as removed: it never starts.
     pub const REMOVED: &str = "cluster.recover.removed";
     /// `--force` on a copy whose own generation is the largest number already: no step can
-    /// go above it (a record minted with the CA's key took the numbers; a new CA ends that).
+    /// go above it (a forced step took the last number).
     pub const NO_GENERATION_LEFT: &str = "cluster.recover.no_generation_left";
     /// `--revoke` names a node that is not another controller with a record.
     pub const UNKNOWN_NODE: &str = "cluster.recover.unknown_node";
