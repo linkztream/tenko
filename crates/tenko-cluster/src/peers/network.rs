@@ -259,6 +259,13 @@ impl PeerNetwork {
         self.inner.local
     }
 
+    /// How many dials of Raft calls and the forced-step probe were refused (not part of the
+    /// API).
+    #[doc(hidden)]
+    pub fn exempt_refusals(&self) -> u64 {
+        self.inner.refusals[Class::Exempt as usize].load(Ordering::Relaxed)
+    }
+
     /// The deadlines.
     pub fn timings(&self) -> PeerTimings {
         self.inner.timings

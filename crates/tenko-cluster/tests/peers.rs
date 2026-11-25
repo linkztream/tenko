@@ -4154,42 +4154,12 @@ async fn a_renewed_certificate_of_the_node_dialed_passes() {
     lab.stop().await;
 }
 
-/// Every warning this test process logs from now on, as text.
-fn warnings() -> Arc<Mutex<Vec<u8>>> {
-    #[derive(Clone)]
-    struct Sink(Arc<Mutex<Vec<u8>>>);
-    impl std::io::Write for Sink {
-        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .extend_from_slice(bytes);
-            Ok(bytes.len())
-        }
-
-        fn flush(&mut self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-    let text = Arc::new(Mutex::new(Vec::new()));
-    let sink = Sink(Arc::clone(&text));
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::WARN)
-            .with_ansi(false)
-            .with_writer(move || sink.clone())
-            .finish(),
-    )
-    .expect("the only subscriber of this test process");
-    text
-}
-
 /// The removal of one of two voters needs the removed one's acknowledgment: no Raft call
 /// to it is refused, from its revocation in the store or in the registry's sets to the end
-/// of the removal.
+/// of the removal. The refusals are counted by this lab's transports, never read from the
+/// logs of a process that runs other tests.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_two_voter_removal_sees_no_refused_raft_call() {
-    let logged = warnings();
     let (lab, _) = two_voters().await;
     let leader = lab.leader().await;
     let target = lab
@@ -4197,20 +4167,12 @@ async fn a_two_voter_removal_sees_no_refused_raft_call() {
         .into_iter()
         .find(|member| member.node() != leader.node())
         .expect("the other voter");
-    leader
-        .peers
-        .remove(&system(), target.node(), false)
-        .await
-        .expect("the removal of one of two voters");
+    let removal = leader.peers.remove(&system(), target.node(), false).await;
+    let refused = |member: &Member| member.peers.network().exempt_refusals();
+    assert_eq!((refused(&leader), refused(&target)), (0, 0), "{removal:?}");
+    removal.expect("the removal of one of two voters");
     write_commits(&leader, 1).await;
-    let logged = String::from_utf8_lossy(&logged.lock().unwrap_or_else(PoisonError::into_inner))
-        .into_owned();
-    assert!(
-        !logged
-            .lines()
-            .any(|line| line.contains("certificate was refused") && line.contains("class=Exempt")),
-        "{logged}"
-    );
+    assert_eq!((refused(&leader), refused(&target)), (0, 0));
     lab.stop().await;
 }
 
