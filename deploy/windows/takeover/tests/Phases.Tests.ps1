@@ -68,7 +68,7 @@ Describe 'A whole run' {
     It 'calls on Windows exactly the blocks the finish is known to call, none that installs, removes, starts or restarts' {
         # A new remote call in the finish fails here until someone has decided that it belongs.
         @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique) | Should -Be @('ProtectDirectory', 'ReadComputers', 'ReadDhcpInDirectory', 'ReadDhcpService', 'ReadDirectoryZones', 'ReadDomain', 'ReadFeature', 'ReadHardening', 'ReadLocalAdmins', 'ReadMarker', 'ReadProgramFiles', 'ReadZones', 'RemoveAccount', 'RemoveBatchRight', 'RemoveExporter', 'WriteMarker')
-        foreach ($name in @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique)) { $script:TkRemote[$name].ToString() | Should -Not -Match '\b(Install|Uninstall|Add|Remove)-WindowsFeature\b|\b(Enable|Disable)-WindowsOptionalFeature\b|\b(Restart|Stop)-Computer\b|\bshutdown\b|\bdism\b' -Because $name }
+        foreach ($name in @($script:finishCalls | ForEach-Object { $_.Split('|')[1] } | Sort-Object -Unique)) { $script:TkRemote[$name].ToString() | Should -Not -Match '\b(Install|Uninstall|Add|Remove)-WindowsFeature\b|\b(Enable|Disable)-WindowsOptionalFeature\b|\b(Restart|Stop)-Computer\b|\bshutdown\b|\bdism\b|\b(Start|Set|Restart)-Service\b|\bAdd-DhcpServerInDC\b' -Because $name }
     }
 
     It 'refuses -Reverse after the finish with exit 1 and changes nothing' {
@@ -139,27 +139,44 @@ Describe 'A whole run' {
         Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
     }
 
-    It 'does not start the finish when Tenko refuses its first real release after the confirmation: nothing is recorded and -Reverse still works' {
+    It 'does not start the finish when Tenko answers its first real release after the confirmation with <status> <code>: nothing is recorded and -Reverse still works' -ForEach @(
+        @{ status = 403; code = 'auth.delegation.refused'; shown = '403 auth\.delegation\.refused, not opened to a takeover''s session by this node' }
+        @{ status = 429; code = 'dns.zone.flip.busy'; shown = '429 dns\.zone\.flip\.busy' }
+    ) {
         Install-FakeWorld
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $script:refused = $_
         Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run } {
-            $refusal = [System.Exception]::new("Tenko refused POST $Path with 403 auth.delegation.refused: refused")
-            $refusal.Data['tk.status'] = 403
-            $refusal.Data['tk.code'] = 'auth.delegation.refused'
+            $refusal = [System.Exception]::new("Tenko refused POST $Path with $($script:refused.status) $($script:refused.code): refused")
+            $refusal.Data['tk.status'] = $script:refused.status
+            $refusal.Data['tk.code'] = $script:refused.code
             throw $refusal
         }
         Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1
-        $script:lastError | Should -Match '^finish not started, nothing changed, -Reverse works: release of [^:]+: 403 auth\.delegation\.refused, not opened to a takeover''s session by this node$'
+        $script:lastError | Should -Match "^finish not started, nothing changed, -Reverse works: release of [^:]+: $shown$"
         @((Read-State).steps.Keys | Where-Object { $_ -like '6.*' }) | Should -BeNullOrEmpty
         Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
     }
 
-    It 'counts the finish as started when its first real release ends with no answer, and resumes it' {
+    It 'counts the finish as started when its first real release ends with <case>, and resumes it' -ForEach @(
+        @{ case = 'no answer'; status = 0 }
+        @{ case = '503, an unknown outcome'; status = 503 }
+    ) {
         Install-FakeWorld
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
         $script:timedOut = $false
-        Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run -and -not $script:timedOut } { $script:timedOut = $true; throw 'the request to Tenko timed out' }
-        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 2
+        $script:unknown = $status
+        Mock Invoke-FakeTenko -ParameterFilter { $Path -like '*/release' -and -not $Body.dry_run -and -not $script:timedOut } {
+            $script:timedOut = $true
+            if (-not $script:unknown) { throw 'the request to Tenko timed out' }
+            $failure = [System.Exception]::new("Tenko refused POST $Path with $($script:unknown) sys.store.timeout: no answer from the store")
+            $failure.Data['tk.status'] = $script:unknown
+            $failure.Data['tk.code'] = 'sys.store.timeout'
+            throw $failure
+        }
+        $out = @(Invoke-FakeRun -Answers @('c', 'corp.example.test') 6>&1)
+        $out[-1] | Should -Be 2
+        ($out -join "`n") | Should -Match 'The release of [^:]+ may have happened: the finish counts as started, -Reverse is refused\. Run the script again to resume the finish\.'
         (Read-State).steps['6.tenko'].state | Should -Be 'failed'
         Invoke-FakeRun -Reverse | Should -Be 1
         Invoke-FakeRun | Should -Be 0 -Because $script:lastError

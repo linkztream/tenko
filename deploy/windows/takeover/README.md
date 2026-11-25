@@ -232,13 +232,13 @@ Tenko before you run the script again.
 Before the finish records anything, it checks that Tenko admits what its steps ask: the
 release of each zone's frozen names as a dry run, which changes nothing; then the
 confirmation, where you type the domain's name; then its first change, the real release of
-the first zone, still before anything of the finish is recorded. When Tenko refuses the
-session (401, or 403 with `auth.delegation.refused`, `auth.step_up_required` or
-`auth.forbidden`), it has changed nothing: the sitting ends with exit 1, the message names
+the first zone, still before anything of the finish is recorded. When Tenko answers that
+release with any 4xx (a refused session with 401 or 403, a node busy with another flip or
+release with 429), it has changed nothing: the sitting ends with exit 1, the message names
 the zone and Tenko's code, nothing of the finish is recorded, and the takeover can still be
 reversed. A first release that fails otherwise, for example with no answer, may have
-happened, so the finish counts as started and a run without a parameter resumes it; a
-release done twice changes nothing the second time. The deletion of the mirrors, the
+happened, so the finish counts as started, the sitting says so, and a run without a
+parameter resumes it; a release done twice changes nothing the second time. The deletion of the mirrors, the
 finish's last call to Tenko, is not checked in advance: when Tenko refuses it after the rest
 is done, delete the run's mirrors in Tenko's interface and run the script again.
 
@@ -286,18 +286,17 @@ server `Restart-Service DHCPServer`, and check that the System log shows event 1
 (authorized) after the restart, not 1046.
 
 DNS goes back as ADR 0034 decides, from the controllers' current secondary copies of Tenko's
-zones, not from the exports of phase 2, which are older than the parallel period: on the PDC
-emulator turn each zone's secondary into a file-backed primary
-(`ConvertTo-DnsServerPrimaryZone -Name <zone> -ZoneFile <zone>.dns -Force`), make it
+zones, not from the exports of phase 2, which are older than the parallel period. On the PDC
+emulator, for each zone: turn its secondary into a file-backed primary, which cuts it loose
+from Tenko (`ConvertTo-DnsServerPrimaryZone -Name <zone> -ZoneFile <zone>.dns -Force`);
+compare in that copy the records that steer sign-in (the `_msdcs` zone, the SRV records, the
+apex NS and the controllers' own address records) with the zone's export of phase 2, as the
+scripted reverse does, and set back by hand any that differ; only then make it
 directory-integrated in its partition (`ConvertTo-DnsServerPrimaryZone -Name <zone>
 -ReplicationScope <scope> -Force`) and set its update setting back
-(`Set-DnsServerPrimaryZone -Name <zone> -DynamicUpdate Secure`); remove the other
-controllers' secondaries so that they load the directory copy; then make Tenko's zone a
-secondary or delete it. Before a controller's copy of a zone becomes authoritative again,
-compare the records that steer sign-in (the `_msdcs` zone, the SRV records, the apex NS and
-the controllers' own address records) with the zone's export of phase 2, as the scripted
-reverse does, and set back by hand any that differ. The exports of phase 2 are otherwise the
-last resort.
+(`Set-DnsServerPrimaryZone -Name <zone> -DynamicUpdate Secure`). Then remove the other
+controllers' secondaries so that they load the directory copy, and make Tenko's zone a
+secondary or delete it. The exports of phase 2 are otherwise the last resort.
 
 ### Removing the DHCP Server role yourself
 
