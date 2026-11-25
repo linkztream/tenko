@@ -47,7 +47,7 @@ const INACTIVE: &str =
 struct Lab {
     env: TestEnv,
     admin: RequestCtx,
-    service: MirrorService,
+    service: Arc<MirrorService>,
     id: MirrorId,
     pusher: RequestCtx,
     start: Timestamp,
@@ -113,9 +113,9 @@ impl Store for Gate {
     }
 }
 
-fn service_on(store: Arc<dyn Store>, env: &TestEnv) -> MirrorService {
+fn service_on(store: Arc<dyn Store>, env: &TestEnv) -> Arc<MirrorService> {
     let clock: Arc<dyn Clock> = env.clock.clone();
-    MirrorService::new(store, Arc::clone(&env.service)).with_clock(clock)
+    Arc::new(MirrorService::new(store, Arc::clone(&env.service)).with_clock(clock))
 }
 
 impl Lab {

@@ -75,7 +75,7 @@ pub use tenko_migrate::mirror::{
 use tenko_migrate::mirror::{
     MirrorError, MirrorService,
     body::{self, MAX_BODY_BYTES},
-    service::NewMirror,
+    service::{NewMirror, blocking},
 };
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -383,14 +383,6 @@ fn timed_out(error: &(dyn std::error::Error + 'static)) -> bool {
     false
 }
 
-/// Inflates, parses and checks a body that was read whole: work for a blocking thread, not
-/// the runtime's.
-async fn decoded(bytes: Bytes, gzip: bool) -> Result<MirrorSnapshot, MirrorError> {
-    tokio::task::spawn_blocking(move || body::decode(&bytes, gzip))
-        .await
-        .map_err(|error| MirrorError::Request(format!("the body was not decoded: {error}")))?
-}
-
 #[utoipa::path(
     put,
     path = "/migrate/mirrors/{id}/snapshot",
@@ -443,13 +435,16 @@ async fn push_mirror_snapshot(
     }
     // One push of the mirror in flight on this controller until this one ends, however it
     // ends. The body is read first, under its deadline, so that a slow body holds no other
-    // mirror's push; one decode at a time on this node, from the inflate to the write.
+    // mirror's push; one decode at a time on this node, from the inflate to the write. The
+    // decode runs on a blocking thread that owns both until it ends, however the request ends.
     let outcome = async {
-        let _in_flight = service.admit(id).await?;
+        let in_flight = service.admit(id).await?;
         let (bytes, gzip) = read_body(&headers, raw).await?;
-        let _decoding = service.decoding().await?;
-        let snapshot = decoded(bytes, gzip).await?;
-        service.push(&cx, id, snapshot).await
+        let guards = (in_flight, service.decoding().await?);
+        let (snapshot, _guards) = blocking(guards, move || body::decode(&bytes, gzip))
+            .await
+            .map_err(|error| MirrorError::Request(format!("the body was not decoded: {error}")))?;
+        service.push(&cx, id, snapshot?).await
     }
     .await;
     let error = match outcome {

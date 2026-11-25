@@ -131,12 +131,12 @@ struct Memory {
 /// it lives, the mirror's next push is refused, so that one token holds at most one body on
 /// a controller.
 #[derive(Debug)]
-pub struct InFlight<'a> {
-    service: &'a MirrorService,
+pub struct InFlight {
+    service: Arc<MirrorService>,
     id: MirrorId,
 }
 
-impl Drop for InFlight<'_> {
+impl Drop for InFlight {
     fn drop(&mut self) {
         if let Some(memory) = self.service.memory().get_mut(&self.id) {
             memory.in_flight = false;
@@ -385,7 +385,7 @@ pub struct MirrorService {
     auth: Arc<AuthService>,
     memory: Mutex<HashMap<MirrorId, Memory>>,
     clock: Arc<dyn Clock>,
-    decoding: tokio::sync::Semaphore,
+    decoding: Arc<tokio::sync::Semaphore>,
     /// The node's one decode of a stored snapshot ([`MirrorService::reading`]).
     reading: tokio::sync::Semaphore,
 }
@@ -416,6 +416,26 @@ fn is_conflict(error: &MirrorError) -> bool {
     matches!(error, MirrorError::Store(StoreError::PreconditionFailed(_)))
 }
 
+/// Runs `work` on a blocking thread that owns `guards` (a push's [`InFlight`] and its permit
+/// of [`MirrorService::decoding`]) until the work ends, and hands them back after its result:
+/// a caller that stops waiting, as a push whose connection drops, leaves no work on pushed
+/// data running or held without them.
+///
+/// # Errors
+///
+/// The work panicked.
+pub async fn blocking<G, T>(
+    guards: G,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<(T, G), tokio::task::JoinError>
+where
+    G: Send + 'static,
+    T: Send + 'static,
+{
+    // A tuple drops its fields in order: a result nobody takes is freed before the guards.
+    tokio::task::spawn_blocking(move || (work(), guards)).await
+}
+
 impl MirrorService {
     /// A service over `store`, minting the mirrors' credentials through `auth`, on the
     /// system clock.
@@ -425,7 +445,7 @@ impl MirrorService {
             auth,
             memory: Mutex::new(HashMap::new()),
             clock: Arc::new(SystemClock),
-            decoding: tokio::sync::Semaphore::new(1),
+            decoding: Arc::new(tokio::sync::Semaphore::new(1)),
             reading: tokio::sync::Semaphore::new(1),
         }
     }
@@ -997,15 +1017,16 @@ impl MirrorService {
     /// The node's one decode of a push body: the route takes it once the body is read, and
     /// holds it through the inflate, the decode and the write, so that the memory a decode
     /// may take (`body::DECODE_ALLOCATION_BOUND`) is taken once on a node, however many
-    /// mirrors and controllers push, and a body that arrives slowly holds no one else.
+    /// mirrors and controllers push, and a body that arrives slowly holds no one else. The
+    /// decode runs in [`blocking`], which owns it until the decode ends.
     ///
     /// # Errors
     ///
     /// [`MirrorError::Rate`] when another push held it for [`DECODE_WAIT_SECS`].
-    pub async fn decoding(&self) -> Result<tokio::sync::SemaphorePermit<'_>, MirrorError> {
+    pub async fn decoding(&self) -> Result<tokio::sync::OwnedSemaphorePermit, MirrorError> {
         tokio::time::timeout(
             Duration::from_secs(DECODE_WAIT_SECS),
-            self.decoding.acquire(),
+            Arc::clone(&self.decoding).acquire_owned(),
         )
         .await
         .ok()
@@ -1026,7 +1047,7 @@ impl MirrorService {
     ///
     /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Auth`],
     /// [`MirrorError::Rate`] (also while another push of the mirror is in flight).
-    pub async fn admit(&self, id: MirrorId) -> Result<InFlight<'_>, MirrorError> {
+    pub async fn admit(self: &Arc<Self>, id: MirrorId) -> Result<InFlight, MirrorError> {
         let view = self.view().await?;
         let (mirror, _) = Self::row(view.as_ref(), id)?;
         if !mirror.enabled {
@@ -1055,7 +1076,10 @@ impl MirrorService {
         }
         memory.admitted = Some(now);
         memory.in_flight = true;
-        Ok(InFlight { service: self, id })
+        Ok(InFlight {
+            service: Arc::clone(self),
+            id,
+        })
     }
 
     /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4) from the
