@@ -15,6 +15,7 @@
 //! - **Node (client).** [`client_config`] presents the node certificate and accepts a
 //!   server certificate only when it chains to the CA root the node received at enrollment
 //!   (a controller of another installation is refused) and carries the role `controller`.
+//!   Sessions are never resumed: every connection makes a full handshake.
 //!
 //! The controller tracks every accepted connection with a [`KillSwitch`] per node, so a
 //! revocation can close the connections of that node at once ([`NodeStream`]).
@@ -265,9 +266,8 @@ impl ClientCertVerifier for NodeClientVerifier {
     }
 }
 
-/// The server certificate check of a node: the certificate chains to the CA root of the
-/// node's enrollment and belongs to a controller. The host name the node dialed is not
-/// checked; the node identity in the certificate is.
+/// The server certificate check of a client of the cluster port: the certificate chains to
+/// the CA root of the node's enrollment, names a node and belongs to a controller.
 struct ControllerVerifier {
     roots: Arc<RootCertStore>,
     algorithms: WebPkiSupportedAlgorithms,
@@ -424,6 +424,8 @@ pub fn client_config(
         .with_custom_certificate_verifier(verifier)
         .with_client_cert_resolver(Arc::new(NodeCertResolver(material.certified_key())));
     config.alpn_protocols = vec![ALPN_H2.to_vec()];
+    // A resumed session skips the certificate checks: every connection runs them.
+    config.resumption = rustls::client::Resumption::disabled();
     Ok(Arc::new(config))
 }
 

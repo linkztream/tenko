@@ -8,8 +8,18 @@
 //! endpoint can be pinned (the seed of a join). An address map (`[cluster]
 //! peer_address_map`) then replaces an advertised endpoint by the one this controller dials
 //! (split-horizon setups and labs); a pinned endpoint is used as it is. Resolved endpoints
-//! are cached for a few seconds; a connection per endpoint is kept and re-dialed by tonic
-//! when it breaks.
+//! are cached for a few seconds; a connection per node, endpoint and [`Class`] is kept and
+//! re-dialed by tonic when it breaks.
+//!
+//! **The dialed node.** Every new connection (a re-dial included) checks, after the TLS
+//! handshake and before any request, that the certificate names the node dialed and that
+//! neither its serial nor, for a channel of [`Class::Other`], its node is revoked, as the
+//! registry's revocation sets and this controller's store hold them; a store that cannot be
+//! read refuses. A refusal is a dial failure: the peer counts as unreachable. A removed
+//! node is still reached, with a certificate that names it, by the Raft messages the peer
+//! layer lets through ([`PeerNetwork::set_refused`]) and the forced-step probe; every other
+//! call to it is refused before a channel is taken. The seed of a join, which names no node
+//! yet, is dialed through [`PeerNetwork::seed_client`].
 //!
 //! **Deadlines** derive from the Raft timers and the store timeouts ([`PeerTimings`]).
 //!
@@ -27,7 +37,10 @@
 use std::{
     collections::HashMap,
     fmt, io,
-    sync::{Arc, Mutex, OnceLock, PoisonError, RwLock},
+    sync::{
+        Arc, Mutex, OnceLock, PoisonError, RwLock, Weak,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -53,13 +66,14 @@ use tenko_store::{
     },
 };
 use tokio::{io::AsyncReadExt as _, net::TcpStream};
-use tokio_rustls::TlsConnector;
+use tokio_rustls::{TlsConnector, client::TlsStream};
 use tonic::{Request, Status, transport::Channel};
 
 use crate::{
     error::ClusterError,
     identity::split_host_port,
     model::tables,
+    mtls::{PeerIdentity, RevocationSet},
     proto::v1,
     server::{MAX_MESSAGE_BYTES, code_of},
     trace,
@@ -73,6 +87,8 @@ pub const MAX_APPEND_BYTES: usize = MAX_MESSAGE_BYTES - 2 * 1024 * 1024;
 const ENDPOINT_TTL: Duration = Duration::from_secs(5);
 /// The marker of the dialer's own failures: the request was never sent.
 const DIAL_FAILED: &str = "peer dial failed";
+/// The marker of a dial refused after the TLS handshake: something answered.
+pub(crate) const REFUSED: &str = "certificate refused";
 
 /// Deadlines of the peer transport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,12 +161,37 @@ struct Inner {
     pinned: RwLock<HashMap<NodeId, String>>,
     address_map: RwLock<HashMap<String, String>>,
     resolved: Mutex<HashMap<NodeId, (String, Instant)>>,
-    channels: Mutex<HashMap<String, Channel>>,
+    channels: Mutex<HashMap<(Expect, String), Channel>>,
     /// The nodes no Raft message goes to ([`PeerNetwork::set_refused`]).
     refused: OnceLock<Refused>,
     /// The generation of this controller's history on its calls
     /// ([`PeerNetwork::set_generation`]).
     generation: OnceLock<Box<dyn GenerationHook>>,
+    /// The registry's revocation sets ([`PeerNetwork::set_revocations`]).
+    revoked: OnceLock<Revoked>,
+    /// How many dials of each [`Class`] were refused, for the warning.
+    refusals: [AtomicU64; 2],
+}
+
+/// Which calls a channel carries, fixed by its call site: what a dial accepts from a
+/// removed node depends on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Class {
+    /// Append, vote and snapshot that [`PeerNetwork::set_refused`] lets through, and the
+    /// forced-step probe: they reach a removed node.
+    Exempt,
+    /// Every other call.
+    Other,
+}
+
+/// The node a channel expects at its endpoint and the calls it carries; `None` for the
+/// seed of a join.
+type Expect = Option<(NodeId, Class)>;
+
+/// The registry's revoked serials and revoked (removed) nodes.
+struct Revoked {
+    serials: Arc<RevocationSet>,
+    nodes: Arc<RevocationSet<NodeId>>,
 }
 
 /// What the generation of this controller's history adds to its calls and reads from a
@@ -199,6 +240,8 @@ impl PeerNetwork {
                 channels: Mutex::new(HashMap::new()),
                 refused: OnceLock::new(),
                 generation: OnceLock::new(),
+                revoked: OnceLock::new(),
+                refusals: [AtomicU64::new(0), AtomicU64::new(0)],
             }),
         }
     }
@@ -264,6 +307,16 @@ impl PeerNetwork {
     /// need. Set once.
     pub fn set_refused(&self, refused: impl Fn(NodeId) -> bool + Send + Sync + 'static) {
         let _ = self.inner.refused.set(Box::new(refused));
+    }
+
+    /// Hands over the registry's revoked serials and revoked nodes, which every dial checks
+    /// beside the store. Set once.
+    pub(crate) fn set_revocations(
+        &self,
+        serials: Arc<RevocationSet>,
+        nodes: Arc<RevocationSet<NodeId>>,
+    ) {
+        let _ = self.inner.revoked.set(Revoked { serials, nodes });
     }
 
     /// Sets the generation layer of the calls; set once.
@@ -355,14 +408,49 @@ impl PeerNetwork {
         Ok(endpoint)
     }
 
-    /// A connection to `endpoint`, dialed when there is none.
+    /// A connection to `node` at `endpoint`, dialed when there is none; refused for a removed
+    /// node.
     ///
     /// # Errors
     ///
     /// `cluster.peer.no_credentials` (503) before [`PeerNetwork::set_tls`], or
     /// `cluster.peer.unreachable` (503).
-    pub async fn channel(&self, endpoint: &str) -> Result<Channel, ClusterError> {
-        if let Some(channel) = lock(&self.inner.channels).get(endpoint) {
+    pub async fn channel(&self, node: NodeId, endpoint: &str) -> Result<Channel, ClusterError> {
+        self.open(Some((node, Class::Other)), endpoint).await
+    }
+
+    /// A connection to the seed of a join at `endpoint`, which names no node yet: its
+    /// certificate chains to the CA and belongs to a controller.
+    ///
+    /// # Errors
+    ///
+    /// As [`PeerNetwork::channel`].
+    pub async fn seed_channel(&self, endpoint: &str) -> Result<Channel, ClusterError> {
+        self.open(None, endpoint).await
+    }
+
+    async fn open(&self, expect: Expect, endpoint: &str) -> Result<Channel, ClusterError> {
+        let unreachable_at = |error: &dyn fmt::Display| {
+            ClusterError::new(
+                "cluster.peer.unreachable",
+                503,
+                format!("cannot reach the controller at {endpoint}: {error}"),
+            )
+            .with_param("endpoint", endpoint.to_owned())
+        };
+        if let Some((node, Class::Other)) = expect
+            && self
+                .inner
+                .revoked
+                .get()
+                .is_some_and(|set| set.nodes.is_revoked(&node))
+        {
+            let detail = format!("{DIAL_FAILED}: controller {node} was removed");
+            self.inner.refuse("removed", Class::Other, &detail);
+            return Err(unreachable_at(&detail));
+        }
+        let key = (expect, endpoint.to_owned());
+        if let Some(channel) = lock(&self.inner.channels).get(&key) {
             return Ok(channel.clone());
         }
         let config = self.inner.tls.load_full().ok_or_else(|| {
@@ -372,22 +460,20 @@ impl PeerNetwork {
                 "this controller has no certificate for its peers yet",
             )
         })?;
-        let channel = connect(endpoint, config, self.inner.timings.connect)
+        let check = expect.map(|(node, class)| Check {
+            network: Arc::downgrade(&self.inner),
+            node,
+            class,
+        });
+        let channel = connect(endpoint, config, self.inner.timings.connect, check)
             .await
-            .map_err(|error| {
-                ClusterError::new(
-                    "cluster.peer.unreachable",
-                    503,
-                    format!("cannot reach the controller at {endpoint}: {error}"),
-                )
-                .with_param("endpoint", endpoint.to_owned())
-            })?;
-        lock(&self.inner.channels).insert(endpoint.to_owned(), channel.clone());
+            .map_err(|error| unreachable_at(&causes(&error)))?;
+        lock(&self.inner.channels).insert(key, channel.clone());
         Ok(channel)
     }
 
-    fn drop_channel(&self, endpoint: &str) {
-        lock(&self.inner.channels).remove(endpoint);
+    fn drop_channel(&self, node: NodeId, class: Class, endpoint: &str) {
+        lock(&self.inner.channels).remove(&(Some((node, class)), endpoint.to_owned()));
     }
 
     /// A `Cluster` client for `node`.
@@ -399,24 +485,33 @@ impl PeerNetwork {
         &self,
         node: NodeId,
     ) -> Result<v1::cluster_client::ClusterClient<Channel>, ClusterError> {
-        let endpoint = self.endpoint(node, None).await?;
-        self.cluster_client_at(&endpoint).await
+        self.cluster_client_for(node, Class::Other, None).await
     }
 
-    /// A `Cluster` client for an endpoint.
+    /// A `Cluster` client for `node` (at `fallback` while no endpoint is known) over a
+    /// channel of `class`.
+    pub(crate) async fn cluster_client_for(
+        &self,
+        node: NodeId,
+        class: Class,
+        fallback: Option<&str>,
+    ) -> Result<v1::cluster_client::ClusterClient<Channel>, ClusterError> {
+        let endpoint = self.endpoint(node, fallback).await?;
+        Ok(cluster_client(
+            self.open(Some((node, class)), &endpoint).await?,
+        ))
+    }
+
+    /// A `Cluster` client for the seed of a join ([`PeerNetwork::seed_channel`]).
     ///
     /// # Errors
     ///
     /// As [`PeerNetwork::channel`].
-    pub async fn cluster_client_at(
+    pub async fn seed_client(
         &self,
         endpoint: &str,
     ) -> Result<v1::cluster_client::ClusterClient<Channel>, ClusterError> {
-        Ok(
-            v1::cluster_client::ClusterClient::new(self.channel(endpoint).await?)
-                .max_decoding_message_size(MAX_MESSAGE_BYTES)
-                .max_encoding_message_size(MAX_MESSAGE_BYTES),
-        )
+        Ok(cluster_client(self.seed_channel(endpoint).await?))
     }
 
     async fn raft_client(
@@ -437,7 +532,7 @@ impl PeerNetwork {
             ));
         }
         let endpoint = self.endpoint(node, Some(fallback)).await?;
-        let channel = self.channel(&endpoint).await?;
+        let channel = self.open(Some((node, Class::Exempt)), &endpoint).await?;
         Ok((
             endpoint,
             v1::raft_client::RaftClient::new(channel)
@@ -450,6 +545,7 @@ impl PeerNetwork {
     async fn deadline<T>(
         &self,
         target: NodeId,
+        class: Class,
         endpoint: &str,
         timeout: Duration,
         call: impl Future<Output = Result<tonic::Response<T>, Status>>,
@@ -473,12 +569,12 @@ impl PeerNetwork {
                 ) && code_of(&status).is_none()
                 {
                     // A transport failure: dial again next time.
-                    self.drop_channel(endpoint);
+                    self.drop_channel(target, class, endpoint);
                 }
                 Err(status)
             }
             Err(_) => {
-                self.drop_channel(endpoint);
+                self.drop_channel(target, class, endpoint);
                 Err(Status::deadline_exceeded(format!(
                     "no answer from {endpoint} within {} ms",
                     timeout.as_millis()
@@ -493,14 +589,20 @@ fn never_sent(status: &Status) -> bool {
     if status.code() != tonic::Code::Unavailable || code_of(status).is_some() {
         return false;
     }
-    let mut text = status.message().to_owned();
-    let mut cause: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(status);
+    let text = causes(status);
+    text.contains(DIAL_FAILED) || text.contains("error trying to connect")
+}
+
+/// The text of `error` and of its causes.
+fn causes(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut text = error.to_string();
+    let mut cause = error.source();
     while let Some(current) = cause {
         text.push_str(": ");
         text.push_str(&current.to_string());
         cause = current.source();
     }
-    text.contains(DIAL_FAILED) || text.contains("error trying to connect")
+    text
 }
 
 fn timed<T>(timeout: Duration, mut request: Request<T>) -> Request<T> {
@@ -563,6 +665,7 @@ impl PeerTransport for PeerNetwork {
         let response = self
             .deadline(
                 NodeId(target),
+                Class::Exempt,
                 &endpoint,
                 self.inner.timings.append,
                 client.append_entries(request),
@@ -602,6 +705,7 @@ impl PeerTransport for PeerNetwork {
         let response = self
             .deadline(
                 NodeId(target),
+                Class::Exempt,
                 &endpoint,
                 self.inner.timings.vote,
                 client.vote(request),
@@ -642,6 +746,7 @@ impl PeerTransport for PeerNetwork {
             let request = self.prepared(NodeId(target), self.inner.timings.snapshot, chunks);
             self.deadline(
                 NodeId(target),
+                Class::Exempt,
                 &endpoint,
                 self.inner.timings.snapshot,
                 client.install_snapshot(request),
@@ -792,10 +897,11 @@ impl LeaderLink for PeerNetwork {
             .endpoint(NodeId(target), None)
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        let mut client = self
-            .cluster_client_at(&endpoint)
-            .await
-            .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
+        let mut client = cluster_client(
+            self.channel(NodeId(target), &endpoint)
+                .await
+                .map_err(|error| ForwardError::Unreachable(error.to_string()))?,
+        );
         let (sign_in, account) = wire::sign_in_to(sign_in);
         let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "Propose", async {
             let mut request = self.prepared(
@@ -811,6 +917,7 @@ impl LeaderLink for PeerNetwork {
             trace::inject(&mut request);
             self.deadline(
                 NodeId(target),
+                Class::Other,
                 &endpoint,
                 self.inner.timings.forward,
                 client.propose(request),
@@ -838,10 +945,11 @@ impl LeaderLink for PeerNetwork {
             .endpoint(NodeId(target), None)
             .await
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        let mut client = self
-            .cluster_client_at(&endpoint)
-            .await
-            .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
+        let mut client = cluster_client(
+            self.channel(NodeId(target), &endpoint)
+                .await
+                .map_err(|error| ForwardError::Unreachable(error.to_string()))?,
+        );
         let answer = trace::rpc(Some(NodeId(target)), trace::CLUSTER, "ReadIndex", async {
             let mut request = self.prepared(
                 NodeId(target),
@@ -851,6 +959,7 @@ impl LeaderLink for PeerNetwork {
             trace::inject(&mut request);
             self.deadline(
                 NodeId(target),
+                Class::Other,
                 &endpoint,
                 self.inner.timings.read_index,
                 client.read_index(request),
@@ -905,11 +1014,20 @@ fn forward_error(status: &Status, queued_unknown: bool) -> ForwardError {
     }
 }
 
-/// Opens a gRPC channel to one endpoint over mutual TLS.
+/// A `Cluster` client over `channel`, with the message limits.
+fn cluster_client(channel: Channel) -> v1::cluster_client::ClusterClient<Channel> {
+    v1::cluster_client::ClusterClient::new(channel)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES)
+}
+
+/// Opens a gRPC channel to one endpoint over mutual TLS; every connection it dials passes
+/// `check`.
 async fn connect(
     target: &str,
     config: Arc<ClientConfig>,
     timeout: Duration,
+    check: Option<Check>,
 ) -> Result<Channel, tonic::transport::Error> {
     let target = target.to_owned();
     tonic::transport::Endpoint::from_static("http://tenko-peer.invalid")
@@ -918,16 +1036,90 @@ async fn connect(
         .keep_alive_timeout(Duration::from_secs(10))
         .keep_alive_while_idle(true)
         .connect_with_connector(tower::service_fn(move |_: tonic::transport::Uri| {
-            dial(target.clone(), Arc::clone(&config), timeout)
+            dial(target.clone(), Arc::clone(&config), timeout, check.clone())
         }))
         .await
+}
+
+/// What a dial expects of the certificate it is shown.
+#[derive(Clone)]
+struct Check {
+    network: Weak<Inner>,
+    node: NodeId,
+    class: Class,
+}
+
+impl Inner {
+    /// Logs a refused dial: the first of its class, then every 64th.
+    fn refuse(&self, reason: &str, class: Class, detail: &str) {
+        let count = self.refusals[class as usize].fetch_add(1, Ordering::Relaxed) + 1;
+        if count == 1 || count.is_multiple_of(64) {
+            tracing::warn!(
+                code = "cluster.peer.unreachable",
+                reason,
+                class = ?class,
+                refused = count,
+                "a peer's certificate was refused: {detail}"
+            );
+        }
+    }
+
+    /// Whether `peer` may answer a dial of `check`: the reason of a refusal, and its detail.
+    async fn admit(
+        &self,
+        check: &Check,
+        peer: &PeerIdentity,
+    ) -> Result<(), (&'static str, String)> {
+        let node = check.node;
+        if peer.node != node {
+            return Err((
+                "identity",
+                format!("the certificate names controller {}, not {node}", peer.node),
+            ));
+        }
+        let stored = async {
+            let view = self
+                .store
+                .get()
+                .and_then(WeakRaftStore::upgrade)?
+                .read(ReadConsistency::Local)
+                .await
+                .ok()?;
+            let removed = crate::registry::removed_at(view.as_ref(), node).ok()?;
+            let revoked = view.get_typed(&tables::REVOCATIONS, &peer.serial).ok()?;
+            Some((removed.is_some(), revoked.is_some()))
+        };
+        let Some((removed, revoked)) = stored.await else {
+            return Err((
+                "store",
+                "this controller's revocations cannot be read".to_owned(),
+            ));
+        };
+        let sets = self.revoked.get();
+        let removed = removed || sets.is_some_and(|set| set.nodes.is_revoked(&node));
+        let revoked = revoked || sets.is_some_and(|set| set.serials.is_revoked(&peer.serial));
+        if removed && check.class == Class::Other {
+            return Err(("removed", format!("controller {node} was removed")));
+        }
+        if revoked && !removed {
+            return Err((
+                "revoked",
+                format!(
+                    "certificate {} of controller {node} is revoked",
+                    peer.serial
+                ),
+            ));
+        }
+        Ok(())
+    }
 }
 
 async fn dial(
     target: String,
     config: Arc<ClientConfig>,
     timeout: Duration,
-) -> io::Result<hyper_util::rt::TokioIo<tokio_rustls::client::TlsStream<TcpStream>>> {
+    check: Option<Check>,
+) -> io::Result<hyper_util::rt::TokioIo<TlsStream<TcpStream>>> {
     let failed = |detail: String| io::Error::other(format!("{DIAL_FAILED}: {detail}"));
     let (host, port) = split_host_port(&target).map_err(|error| failed(error.to_string()))?;
     let tcp = tokio::time::timeout(timeout, TcpStream::connect((host.as_str(), port)))
@@ -944,6 +1136,24 @@ async fn dial(
     .map_err(|error| failed(format!("the TLS handshake with {target} failed: {error}")))?;
     if tls.get_ref().1.alpn_protocol() != Some(crate::mtls::ALPN_H2) {
         return Err(failed(format!("{target} did not agree on HTTP/2")));
+    }
+    let Some(check) = check else {
+        return Ok(hyper_util::rt::TokioIo::new(tls));
+    };
+    let network = check
+        .network
+        .upgrade()
+        .ok_or_else(|| failed("the transport is gone".to_owned()))?;
+    let peer = tls
+        .get_ref()
+        .1
+        .peer_certificates()
+        .and_then(|chain| chain.first())
+        .and_then(|leaf| PeerIdentity::from_der(leaf).ok())
+        .ok_or_else(|| failed(format!("{target} presented no node certificate")))?;
+    if let Err((reason, detail)) = network.admit(&check, &peer).await {
+        network.refuse(reason, check.class, &format!("{target}: {detail}"));
+        return Err(failed(format!("{target}: {REFUSED}: {detail}")));
     }
     Ok(hyper_util::rt::TokioIo::new(tls))
 }

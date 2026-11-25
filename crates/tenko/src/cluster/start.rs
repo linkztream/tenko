@@ -550,40 +550,17 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
         // alone now may be part of a majority that elects a moment later (a power outage
         // ends for everybody at once). Only a live majority ends the probe early.
         for old in &notice.old {
-            let Ok(endpoint) = peers.network().endpoint(old.node, Some(&old.address)).await else {
-                continue;
-            };
-            let call = async {
-                let mut client = peers.network().cluster_client_at(&endpoint).await.ok()?;
-                let mut request = tonic::Request::new(tenko_cluster::proto::v1::MembersRequest {});
-                if let Some(value) = claim.as_deref().and_then(|text| text.parse().ok()) {
-                    request
-                        .metadata_mut()
-                        .insert(tenko_cluster::generation::GENERATION_METADATA, value);
-                }
-                Some(client.members(request).await)
-            };
+            let call = peers.probe_members(old.node, &old.address, claim.as_deref());
             match tokio::time::timeout(PROBE_CALL, call).await {
                 Ok(Some(Ok(response))) => {
-                    answers.insert(old.node, answer_of(&response.into_inner()));
+                    answers.insert(old.node, answer_of(&response));
                 }
                 Ok(Some(Err(status))) => {
                     // A refusal that carries another forced history is evidence of it: this
                     // controller does not take office beside it (`--undo` lets it meet that
                     // history as a plain member). Its records are read, never acted on here.
-                    let rival = peers.competing(&status);
                     if let Some(code) = tenko_cluster::server::code_of(&status) {
-                        let answer = match rival {
-                            Ok(Some(rival)) => Answer::Alive(format!("another history: {rival}")),
-                            Ok(None) if code == tenko_cluster::generation::codes::SUPERSEDED => {
-                                Answer::Alone("superseded already".to_owned())
-                            }
-                            Ok(None) => Answer::Unreadable(format!("refused with {code}")),
-                            Err(error) => Answer::Unreadable(format!(
-                                "its records could not be checked here: {}",
-                                error.code()
-                            )),
-                        };
+                        let answer = refused(code, status.message(), peers.competing(&status));
                         answers.insert(old.node, answer);
                     }
                 }
@@ -602,14 +579,7 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
         peers.refuse_office().await;
         return;
     }
-    let live: Vec<String> = answers
-        .iter()
-        .filter_map(|(node, answer)| match answer {
-            Answer::Alive(state) => Some(format!("{node} ({state})")),
-            Answer::Unreadable(state) => Some(format!("{node} ({state}, undecided)")),
-            Answer::Alone(_) => None,
-        })
-        .collect();
+    let live = keeping_out(&answers);
     if !live.is_empty() && !notice.despite_majority {
         tracing::error!(
             code = tenko_cluster::generation::codes::MAJORITY_ALIVE,
@@ -641,6 +611,39 @@ async fn probe_after_recover(resolved: &Resolved, peers: &Peers, notice: &recove
          the superseded controllers stop writing when the record reaches them",
         notice.generation
     );
+}
+
+/// How a coded refusal of an old voter reads, with `rival`, the other forced history its
+/// records name, if any.
+fn refused(
+    code: &str,
+    message: &str,
+    rival: Result<Option<String>, tenko_cluster::error::ClusterError>,
+) -> Answer {
+    match rival {
+        Ok(Some(rival)) => Answer::Alive(format!("another history: {rival}")),
+        Ok(None) if code == tenko_cluster::generation::codes::SUPERSEDED => {
+            Answer::Alone("superseded already".to_owned())
+        }
+        Ok(None) => Answer::Unreadable(format!("refused with {code}: {message}")),
+        Err(error) => Answer::Unreadable(format!(
+            "its records could not be checked here: {}",
+            error.code()
+        )),
+    }
+}
+
+/// The old voters whose answers keep this controller out of office: a live cluster, or an
+/// answer that cannot be read. Silence and a voter alone keep nobody out.
+fn keeping_out(answers: &BTreeMap<NodeId, Answer>) -> Vec<String> {
+    answers
+        .iter()
+        .filter_map(|(node, answer)| match answer {
+            Answer::Alive(state) => Some(format!("{node} ({state})")),
+            Answer::Unreadable(state) => Some(format!("{node} ({state}, undecided)")),
+            Answer::Alone(_) => None,
+        })
+        .collect()
 }
 
 /// How long one probe call may take.
@@ -686,6 +689,36 @@ mod tests {
     use tenko_cluster::proto::v1::MembersResponse;
 
     use super::*;
+
+    /// A controller that answers in an old voter's place with a certificate of another node
+    /// keeps the forced controller out of office, alone or beside a live cluster; only
+    /// silence lets it take office.
+    #[test]
+    fn a_refused_certificate_keeps_the_forced_controller_out_of_office() {
+        let reason = "the certificate names controller 4, not 2";
+        let refused = refused("cluster.peer.unreachable", reason, Ok(None));
+        let healthy = answer_of(&MembersResponse {
+            quorum: "healthy".to_owned(),
+            ..MembersResponse::default()
+        });
+        assert!(keeping_out(&BTreeMap::new()).is_empty(), "all silent");
+        assert_eq!(
+            keeping_out(&BTreeMap::from([(NodeId(2), refused.clone())])),
+            [format!(
+                "2 (refused with cluster.peer.unreachable: {reason}, undecided)"
+            )],
+            "one refused, the others silent"
+        );
+        assert_eq!(
+            keeping_out(&BTreeMap::from([
+                (NodeId(2), refused),
+                (NodeId(3), healthy)
+            ]))
+            .len(),
+            2,
+            "one refused, one healthy"
+        );
+    }
 
     /// The start paths of the identity states: a controller that never joined, or one
     /// restored on a host without its identity, starts single with the vault's certificate;

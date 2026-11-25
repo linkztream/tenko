@@ -760,7 +760,7 @@ async fn the_raft_service_refuses_probes_and_foreign_controllers() {
         tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, &key).expect("config"),
     );
     let channel = network
-        .channel(&lab.first.addr.to_string())
+        .seed_channel(&lab.first.addr.to_string())
         .await
         .expect("a probe reaches the port");
     let mut raft = v1::raft_client::RaftClient::new(channel);
@@ -884,7 +884,7 @@ async fn the_raft_service_refuses_a_revoked_controller_without_a_record() {
             .expect("config"),
     );
     let channel = network
-        .channel(&second.addr.to_string())
+        .seed_channel(&second.addr.to_string())
         .await
         .expect("the certificate passes the handshake");
     let refused = v1::raft_client::RaftClient::new(channel)
@@ -911,7 +911,7 @@ async fn raft_vote_refusal(
     network.set_tls(
         tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, key).expect("config"),
     );
-    let Ok(channel) = network.channel(&addr.to_string()).await else {
+    let Ok(channel) = network.seed_channel(&addr.to_string()).await else {
         return None;
     };
     match v1::raft_client::RaftClient::new(channel)
@@ -1107,7 +1107,7 @@ async fn call_path(
             .expect("config"),
     );
     let channel = network
-        .channel(&member.addr.to_string())
+        .seed_channel(&member.addr.to_string())
         .await
         .expect("the handshake passes");
     let mut grpc = tonic::client::Grpc::new(channel);
@@ -1324,7 +1324,7 @@ async fn key_transfer_forwarded_changes_and_step_down() {
         tenko_cluster::mtls::client_config(lab.ca.root_der(), chain, &key).expect("config"),
     );
     let mut client = network
-        .cluster_client_at(&lab.first.addr.to_string())
+        .seed_client(&lab.first.addr.to_string())
         .await
         .expect("channel");
     let request = v1::TransferKekRequest {
@@ -1887,7 +1887,7 @@ async fn calls_refused(
             tenko_cluster::mtls::client_config(lab.ca.root_der(), identity.0.clone(), &identity.1)
                 .expect("config"),
         );
-        network.channel(&member.addr.to_string()).await.ok()
+        network.seed_channel(&member.addr.to_string()).await.ok()
     };
     let refusal = |what: &str, result: Result<(), tonic::Status>| match result {
         Ok(()) => panic!(
@@ -1978,7 +1978,7 @@ async fn cluster_calls(
             .expect("config"),
     );
     let channel = network
-        .channel(&member.addr.to_string())
+        .seed_channel(&member.addr.to_string())
         .await
         .expect("the handshake passes");
     let code = |result: Result<(), tonic::Status>| {
@@ -2599,7 +2599,7 @@ async fn every_call(
             .expect("config"),
     );
     let channel = network
-        .channel(&member.addr.to_string())
+        .seed_channel(&member.addr.to_string())
         .await
         .expect("the handshake passes");
     macro_rules! request {
@@ -2734,7 +2734,7 @@ async fn members_with(
             .expect("config"),
     );
     let channel = network
-        .channel(&member.addr.to_string())
+        .seed_channel(&member.addr.to_string())
         .await
         .expect("the handshake passes");
     let mut request = tonic::Request::new(v1::MembersRequest {});
@@ -3730,7 +3730,7 @@ async fn a_controller_cannot_renew_through_the_node_service() {
         .expect("config"),
     );
     let channel = network
-        .channel(&leader.addr.to_string())
+        .seed_channel(&leader.addr.to_string())
         .await
         .expect("the handshake passes");
     let (_, csr) = generate_csr().expect("csr");
@@ -3739,5 +3739,672 @@ async fn a_controller_cannot_renew_through_the_node_service() {
         .await
         .expect_err("a controller");
     assert_eq!(code_of(&refused), Some("cluster.node.controller_renewal"));
+    lab.stop().await;
+}
+
+// ---------------------------------------------------------------------------------------
+// The dialing side: the certificate must name the node dialed and must not be revoked.
+
+/// A TCP relay at a fixed address whose backend a test switches; a switch ends the
+/// connections relayed so far: another holder of the address.
+struct Relay {
+    addr: SocketAddr,
+    backend: watch::Sender<SocketAddr>,
+}
+
+impl Relay {
+    async fn to(backend: SocketAddr) -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("address");
+        let (backend, chosen) = watch::channel(backend);
+        tokio::spawn(async move {
+            while let Ok((mut inbound, _)) = listener.accept().await {
+                let mut chosen = chosen.clone();
+                let to = *chosen.borrow_and_update();
+                tokio::spawn(async move {
+                    let Ok(mut outbound) = tokio::net::TcpStream::connect(to).await else {
+                        return;
+                    };
+                    tokio::select! {
+                        _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound) => {}
+                        _ = chosen.changed() => {}
+                    }
+                });
+            }
+        });
+        Self { addr, backend }
+    }
+}
+
+/// A second cluster port of `member` that presents `identity` instead of its own
+/// certificate: what a holder of that key answers in the member's place.
+async fn impostor(lab: &Lab, member: &Member, identity: &Identity) -> SocketAddr {
+    let listener = ClusterListener::bind(&["127.0.0.1:0".parse().expect("address")])
+        .await
+        .expect("bind");
+    let addr = listener.local_addrs()[0];
+    let resolver = Arc::new(TlsResolver::default());
+    resolver.set(Some(
+        TlsMaterial::from_der(identity.0.clone(), &identity.1, CertSource::Inline)
+            .expect("material"),
+    ));
+    drop(
+        listener
+            .serve_port(
+                Port {
+                    ca_root: lab.ca.root_der().clone(),
+                    resolver,
+                    revocations: member.registry.revocations(),
+                    sessions: Arc::clone(member.registry.sessions()),
+                    nodes: NodeServices::ready(&tenko_cluster::server::ClusterService::new(
+                        Arc::clone(&member.registry),
+                        Arc::new(tenko_cluster::probe::DiscardProbes),
+                    )),
+                    peers: Some(member.peers.clone()),
+                },
+                member.stop.subscribe(),
+                || {},
+            )
+            .expect("serve"),
+    );
+    addr
+}
+
+/// Revokes the certificate of `identity` without removing its node `node`, as the
+/// retirement of a vault key does, through `member`'s store. Returns its serial.
+async fn revoke_certificate(member: &Member, node: NodeId, identity: &Identity) -> String {
+    let info = tenko_cluster::ca::CertInfo::from_der(&identity.0[0]).expect("info");
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(
+            &tenko_cluster::model::tables::REVOCATIONS,
+            &info.serial,
+            &tenko_cluster::model::Revocation {
+                node,
+                revoked_at: tenko_core::Timestamp::now(),
+                not_after: info.not_after,
+                controller: true,
+            },
+        )
+        .expect("row");
+    member.store.propose(batch).await.expect("the revocation");
+    info.serial
+}
+
+/// The detail of the refusal of a `Cluster` channel from `from` to `node`; `None` when the
+/// channel opens (or was open).
+async fn dial_refusal(from: &Member, node: NodeId) -> Option<String> {
+    let refused = from.peers.network().cluster_client(node).await.err()?;
+    assert_eq!(refused.code(), "cluster.peer.unreachable", "{refused}");
+    Some(refused.detail().to_owned())
+}
+
+/// Drops the channels `member` keeps: its next calls dial anew.
+fn redial(lab: &Lab, member: &Member) {
+    member.peers.network().set_tls(
+        tenko_cluster::mtls::client_config(
+            lab.ca.root_der(),
+            member.identity.0.clone(),
+            &member.identity.1,
+        )
+        .expect("config"),
+    );
+}
+
+/// A forwarded write and a read index from `from` to `node`.
+async fn forwards(
+    from: &Member,
+    node: NodeId,
+) -> (
+    Result<Committed, tenko_store::raft::network::ForwardError>,
+    Result<tenko_store::raft::network::ReadIndex, tenko_store::raft::network::ForwardError>,
+) {
+    use tenko_store::raft::network::LeaderLink as _;
+    let network = from.peers.network();
+    let write = network
+        .forward_propose(
+            from.node().0,
+            node.0,
+            prost::bytes::Bytes::from_static(b"never sent"),
+            None,
+        )
+        .await;
+    let read = network.forward_read_index(from.node().0, node.0).await;
+    (write, read)
+}
+
+/// The certificate of another controller of the installation, in the place of the node
+/// dialed, is refused on every call: Raft, `Cluster` calls and forwards find the node
+/// unreachable, which fences nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_peer_dial_refuses_a_certificate_of_another_controller() {
+    use tenko_store::raft::network::ForwardError;
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let others: Vec<Arc<Member>> = lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != leader.node())
+        .collect();
+    let (target, other) = (&others[0], &others[1]);
+    leader
+        .peers
+        .network()
+        .pin(target.node(), other.addr.to_string());
+    let refused = dial_refusal(&leader, target.node())
+        .await
+        .expect("another controller's certificate in the target's place");
+    assert!(
+        refused.contains(&format!(
+            "names controller {}, not {}",
+            other.node(),
+            target.node()
+        )),
+        "{refused}"
+    );
+    let vote = sends_raft(&leader, target).await.expect_err("no vote");
+    assert!(vote.contains("names controller"), "{vote}");
+    let (write, read) = forwards(&leader, target.node()).await;
+    assert!(
+        matches!(write, Err(ForwardError::Unreachable(_))),
+        "{write:?}"
+    );
+    assert!(
+        matches!(read, Err(ForwardError::Unreachable(_))),
+        "{read:?}"
+    );
+    assert!(still_writes(&leader).await, "a refusal fences nothing");
+    lab.stop().await;
+}
+
+/// A revoked certificate of the node dialed is refused, whether the store holds the
+/// revocation or only the registry's set does, while the node keeps its record; its own
+/// certificate still passes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_peer_dial_refuses_a_revoked_certificate_of_its_target() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let target = lab.follower().await;
+    let stray = stray_certificate(&lab, target.node());
+    let at = impostor(&lab, &target, &stray).await;
+    // Transports that read the leader's store and have no registry sets.
+    let stored = || {
+        let network = PeerNetwork::new(leader.node(), PeerTimings::default());
+        network.set_tls(
+            tenko_cluster::mtls::client_config(
+                lab.ca.root_der(),
+                leader.identity.0.clone(),
+                &leader.identity.1,
+            )
+            .expect("config"),
+        );
+        network.attach(&leader.store);
+        network.pin(target.node(), at.to_string());
+        network
+    };
+    stored()
+        .cluster_client(target.node())
+        .await
+        .expect("a certificate of the node that is not revoked");
+    let serial = revoke_certificate(&leader, target.node(), &stray).await;
+    let refused = stored()
+        .cluster_client(target.node())
+        .await
+        .expect_err("revoked in the store");
+    assert_eq!(refused.code(), "cluster.peer.unreachable");
+    assert!(refused.detail().contains("is revoked"), "{refused}");
+
+    // Revoked in the registry's set only.
+    wait_until_async("the revocation in the leader's set", async || {
+        leader.registry.is_revoked_serial(&serial)
+    })
+    .await;
+    let other = stray_certificate(&lab, target.node());
+    let at = impostor(&lab, &target, &other).await;
+    leader
+        .registry
+        .revocations()
+        .insert([tenko_cluster::ca::CertInfo::from_der(&other.0[0])
+            .expect("info")
+            .serial]);
+    leader.peers.network().pin(target.node(), at.to_string());
+    let detail = dial_refusal(&leader, target.node())
+        .await
+        .expect("revoked in the set");
+    assert!(detail.contains("is revoked"), "{detail}");
+    leader
+        .peers
+        .network()
+        .pin(target.node(), target.addr.to_string());
+    assert_eq!(
+        dial_refusal(&leader, target.node()).await,
+        None,
+        "the node is not removed: its own certificate passes"
+    );
+    lab.stop().await;
+}
+
+/// A dial that expects a node and cannot read this controller's store is refused; the seed
+/// of a join, which expects none, is not.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dial_whose_store_cannot_be_read_is_refused() {
+    let lab = Lab::first(&no_change).await;
+    let first = &lab.first;
+    let config = tenko_cluster::mtls::client_config(
+        lab.ca.root_der(),
+        first.identity.0.clone(),
+        &first.identity.1,
+    )
+    .expect("config");
+    let unattached = PeerNetwork::new(NodeId(77), PeerTimings::default());
+    unattached.set_tls(Arc::clone(&config));
+    let stopped = PeerNetwork::new(NodeId(77), PeerTimings::default());
+    stopped.set_tls(config);
+    let store = RaftStore::open_temp(store_config(77, &no_change))
+        .await
+        .expect("store");
+    stopped.attach(&store);
+    let _ = store.shutdown().await;
+    for network in [&unattached, &stopped] {
+        let refused = network
+            .channel(NodeId(1), &first.addr.to_string())
+            .await
+            .expect_err("no store to read");
+        assert_eq!(refused.code(), "cluster.peer.unreachable");
+        assert!(refused.detail().contains("cannot be read"), "{refused}");
+    }
+    unattached
+        .seed_channel(&first.addr.to_string())
+        .await
+        .expect("the seed of a join");
+    lab.stop().await;
+}
+
+/// The cached channel of one node never serves another at the same endpoint: a controller
+/// that answers at an address another controller used before is reached as itself, and the
+/// one that left is refused there.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_endpoint_serves_another_node_only_by_its_own_channel() {
+    let lab = Lab::three(&no_change).await;
+    let leader = lab.leader().await;
+    let others: Vec<Arc<Member>> = lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != leader.node())
+        .collect();
+    let (gone, new) = (&others[0], &others[1]);
+    let relay = Relay::to(gone.addr).await;
+    let network = leader.peers.network();
+    network.pin(gone.node(), relay.addr.to_string());
+    network.pin(new.node(), relay.addr.to_string());
+    let mut client = network
+        .cluster_client(gone.node())
+        .await
+        .expect("the controller at the address");
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect("answers");
+    relay.backend.send_replace(new.addr);
+    let mut client = network
+        .cluster_client(new.node())
+        .await
+        .expect("the controller now at the address");
+    client
+        .members(v1::MembersRequest {})
+        .await
+        .expect("answers as itself");
+    redial(&lab, &leader);
+    let refused = dial_refusal(&leader, gone.node())
+        .await
+        .expect("the controller that left the address");
+    assert!(
+        refused.contains(&format!("names controller {}", new.node())),
+        "{refused}"
+    );
+    lab.stop().await;
+}
+
+/// A renewed certificate of the node dialed passes, and so does the one it renewed while
+/// it lasts: a renewal revokes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_renewed_certificate_of_the_node_dialed_passes() {
+    // Twenty-day certificates are due for renewal at once.
+    let lab = Lab::three_with(
+        &no_change,
+        CaPolicy {
+            node_validity_days: 20,
+            ..CaPolicy::default()
+        },
+    )
+    .await;
+    let leader = lab.leader().await;
+    let target = lab.follower().await;
+    let running = tenko_cluster::ca::CertInfo::from_der(&target.identity.0[0]).expect("info");
+    let (key, csr) = generate_csr().expect("csr");
+    let renewed = lab
+        .first
+        .registry
+        .renew(
+            target.node(),
+            &running.serial,
+            &csr,
+            tenko_core::Timestamp::now(),
+        )
+        .await
+        .expect("a renewal");
+    let at = impostor(&lab, &target, &(renewed.chain, key)).await;
+    leader.peers.network().pin(target.node(), at.to_string());
+    assert_eq!(dial_refusal(&leader, target.node()).await, None, "renewed");
+    leader
+        .peers
+        .network()
+        .pin(target.node(), target.addr.to_string());
+    assert_eq!(
+        dial_refusal(&leader, target.node()).await,
+        None,
+        "renewed from"
+    );
+    lab.stop().await;
+}
+
+/// Every warning this test process logs from now on, as text.
+fn warnings() -> Arc<Mutex<Vec<u8>>> {
+    #[derive(Clone)]
+    struct Sink(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let text = Arc::new(Mutex::new(Vec::new()));
+    let sink = Sink(Arc::clone(&text));
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::WARN)
+            .with_ansi(false)
+            .with_writer(move || sink.clone())
+            .finish(),
+    )
+    .expect("the only subscriber of this test process");
+    text
+}
+
+/// The removal of one of two voters needs the removed one's acknowledgment: no Raft call
+/// to it is refused, from its revocation in the store or in the registry's sets to the end
+/// of the removal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_two_voter_removal_sees_no_refused_raft_call() {
+    let logged = warnings();
+    let (lab, _) = two_voters().await;
+    let leader = lab.leader().await;
+    let target = lab
+        .members()
+        .into_iter()
+        .find(|member| member.node() != leader.node())
+        .expect("the other voter");
+    leader
+        .peers
+        .remove(&system(), target.node(), false)
+        .await
+        .expect("the removal of one of two voters");
+    write_commits(&leader, 1).await;
+    let logged = String::from_utf8_lossy(&logged.lock().unwrap_or_else(PoisonError::into_inner))
+        .into_owned();
+    assert!(
+        !logged
+            .lines()
+            .any(|line| line.contains("certificate was refused") && line.contains("class=Exempt")),
+        "{logged}"
+    );
+    lab.stop().await;
+}
+
+/// A forced step on the first of two controllers that each run alone: its record, the mark
+/// of the old voter, whose member record stays, and the old voter's revocation (it has no
+/// node record). With `bookkeeping` both run with their registries, as in production.
+/// Returns the lab, the forced controller and the old voter.
+async fn forced_step(bookkeeping: bool) -> (Lab, Arc<Member>, Arc<Member>) {
+    use tenko_cluster::{
+        generation::{GENERATION, SUPERSEDED, SupersededMark},
+        model::{MemberRecord, Revocation, tables},
+    };
+    let ca_store = Arc::new(tenko_store::mem::MemStore::default());
+    let ca_vault = tenko_vault::MemVault::with_store(Arc::clone(&ca_store));
+    let ca = Arc::new(
+        InternalCa::load_or_init(ca_store.as_ref(), &ca_vault, &system(), CaPolicy::default())
+            .await
+            .expect("CA"),
+    );
+    let mut sides = Vec::new();
+    for node in [1_u64, 1001] {
+        let issued = ca
+            .issue_node_cert_with_key_for(
+                NodeId(node),
+                [Role::Controller].into_iter().collect(),
+                tenko_core::Timestamp::now(),
+            )
+            .expect("certificate");
+        let store = RaftStore::open_temp(store_config(node, &|config| config.bootstrap = true))
+            .await
+            .expect("store");
+        let reference = certificate_ref(&issued.info);
+        let side = Arc::new(
+            start_member(
+                store,
+                &ca,
+                issued.chain,
+                &issued.key,
+                Arc::new(FixedIdentity(reference)),
+                bookkeeping,
+            )
+            .await,
+        );
+        side.peers.attach_ca_root(ca.root_der().clone());
+        wait_until_async("the controller writes on its own", async || {
+            still_writes(&side).await
+        })
+        .await;
+        sides.push(side);
+    }
+    let lab = Lab {
+        members: Mutex::new(sides.clone()),
+        ca: Arc::clone(&ca),
+        first: Arc::clone(&sides[0]),
+    };
+    let (first, old) = (Arc::clone(&sides[0]), Arc::clone(&sides[1]));
+    let node = old.node();
+    let info = tenko_cluster::ca::CertInfo::from_der(&old.identity.0[0]).expect("info");
+    let forced = record(1, None, first.node(), &[node], &first.identity);
+    let mut batch = WriteBatch::for_request(&system());
+    batch
+        .put_typed(&GENERATION, &1_u64, &forced)
+        .expect("record");
+    batch
+        .put_typed(
+            &SUPERSEDED,
+            &node.0,
+            &SupersededMark {
+                generation: 1,
+                record: forced.hash(),
+            },
+        )
+        .expect("mark");
+    batch
+        .put_typed(
+            &tables::MEMBERS,
+            &node.0,
+            &MemberRecord {
+                node,
+                address: old.addr.to_string(),
+                version: "0.0.1".to_owned(),
+                data_format: 2,
+                joined_at: tenko_core::Timestamp::now(),
+                protocol_majors: Vec::new(),
+                raft_wire: None,
+                formats: Vec::new(),
+            },
+        )
+        .expect("member record");
+    batch
+        .put_typed(
+            &tables::REVOCATIONS,
+            &info.serial,
+            &Revocation {
+                node,
+                revoked_at: tenko_core::Timestamp::now(),
+                not_after: info.not_after,
+                controller: true,
+            },
+        )
+        .expect("revocation");
+    first.store.propose(batch).await.expect("the forced step");
+    first.peers.load_generation().await.expect("generation");
+    (lab, first, old)
+}
+
+/// The probe of a forced step's first start, which runs before the registry is attached,
+/// reaches a removed old voter, and only with a certificate that names it; every other call
+/// to it is refused, also after the probe opened its channel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_probe_alone_reaches_a_removed_old_voter() {
+    use tenko_store::raft::network::{ForwardError, LeaderLink as _};
+    let (lab, first, old) = forced_step(false).await;
+    let node = old.node();
+    let removed = async || {
+        let refused = first
+            .peers
+            .network()
+            .cluster_client(node)
+            .await
+            .expect_err("a removed controller gets no other call");
+        assert_eq!(refused.code(), "cluster.peer.unreachable");
+        assert!(refused.detail().contains("was removed"), "{refused}");
+    };
+    removed().await;
+    let read = first
+        .peers
+        .network()
+        .forward_read_index(first.node().0, node.0)
+        .await;
+    assert!(
+        matches!(read, Err(ForwardError::Unreachable(_))),
+        "{read:?}"
+    );
+    let answer = first
+        .peers
+        .probe_members(node, &old.addr.to_string(), None)
+        .await;
+    // The old voter answers itself: its own copy does not know the forced controller.
+    let Some(Err(status)) = &answer else {
+        panic!("the probe reaches a removed old voter: {answer:?}");
+    };
+    assert_eq!(code_of(status), Some("cluster.node.unknown"), "{status:?}");
+    removed().await;
+    // Another controller's certificate in the removed old voter's place.
+    first.peers.network().pin(node, first.addr.to_string());
+    let answer = first
+        .peers
+        .probe_members(node, &old.addr.to_string(), None)
+        .await;
+    let Some(Err(status)) = &answer else {
+        panic!("another controller in the old voter's place: {answer:?}");
+    };
+    assert!(
+        status
+            .message()
+            .contains(&format!("names controller {}, not {node}", first.node())),
+        "{status:?}"
+    );
+    lab.stop().await;
+}
+
+/// A controller that a forced step superseded and revoked, still running on its own copy,
+/// stops writing when it calls the forced controller, whose registry keeps it from being
+/// called: no connection to it is even made.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_revoked_superseded_controller_fences_when_it_calls_the_forced_one() {
+    let (lab, first, old) = forced_step(true).await;
+    let node = old.node();
+    wait_until_async("the removal in the forced controller's set", async || {
+        first.registry.is_revoked_node(node)
+    })
+    .await;
+    // Nothing listens there: only a refusal before the connection names the removal.
+    first
+        .peers
+        .network()
+        .pin(node, format!("127.0.0.1:{}", free_port().release()));
+    let refused = first
+        .peers
+        .network()
+        .cluster_client(node)
+        .await
+        .expect_err("a removed controller gets no call");
+    assert!(refused.detail().contains("was removed"), "{refused}");
+    let refused = sends_raft(&old, &first)
+        .await
+        .expect_err("the forced controller takes only the exchange of records");
+    assert!(refused.contains("cluster.peer.revoked"), "{refused}");
+    wait_until_async("the old controller fenced", async || {
+        old.peers.generation().fence.is_some()
+    })
+    .await;
+    assert!(!still_writes(&old).await);
+    lab.stop().await;
+}
+
+/// The hosts of old voters that rejoined under new node ids at the same addresses still
+/// answer the probe of a forced step on a stale copy: the certificate there names another
+/// node, and that refusal is an answer whose code keeps the forced controller out of office,
+/// never silence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_probe_hears_a_controller_that_answers_in_an_old_voters_place() {
+    let lab = Lab::three(&no_change).await;
+    let prober = Arc::clone(&lab.first);
+    for (old, live) in lab
+        .members()
+        .into_iter()
+        .filter(|member| member.node() != prober.node())
+        .enumerate()
+    {
+        let old = NodeId(2001 + u64::try_from(old).expect("small"));
+        let answer = prober
+            .peers
+            .probe_members(old, &live.addr.to_string(), None)
+            .await;
+        let Some(Err(status)) = &answer else {
+            panic!(
+                "controller {} answered in {old}'s place: {answer:?}",
+                live.node()
+            );
+        };
+        let code = code_of(status).expect("a coded answer");
+        assert_ne!(code, tenko_cluster::generation::codes::SUPERSEDED);
+        assert_eq!(
+            prober.peers.competing(status).expect("no records"),
+            None,
+            "{status:?}"
+        );
+        // The reason alone: the log line that names the old voter shows it.
+        assert_eq!(
+            status.message(),
+            format!(
+                "the certificate names controller {}, not {old}",
+                live.node()
+            ),
+            "{status:?}"
+        );
+    }
     lab.stop().await;
 }

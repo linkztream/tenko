@@ -225,7 +225,7 @@ async fn client(
         .await
         .map_err(|error| error.detail().to_owned())?;
     let channel = network
-        .channel(&endpoint)
+        .channel(node, &endpoint)
         .await
         .map_err(|error| error.detail().to_owned())?;
     Ok(v1::metrics_client::MetricsClient::new(channel).max_decoding_message_size(MAX_ANSWER_BYTES))

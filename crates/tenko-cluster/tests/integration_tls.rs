@@ -248,6 +248,65 @@ async fn tls_1_2_only_when_allowed_and_never_resumed() {
     }
 }
 
+/// The transport's client resumes no TLS session, even from a server that hands out
+/// tickets, so every connection runs the certificate checks; the same configuration with a
+/// session cache does resume.
+#[tokio::test]
+async fn the_cluster_client_resumes_no_tls_session() {
+    let env = Env::new().await;
+    let issued = env
+        .internal
+        .issue_node_cert_with_key_for(
+            NodeId(2),
+            [tenko_core::Role::Controller].into_iter().collect(),
+            Timestamp::now(),
+        )
+        .expect("controller certificate");
+    let resolver = Arc::new(TlsResolver::default());
+    resolver.set(Some(
+        tenko_cluster::ca::TlsMaterial::from_der(
+            issued.chain.clone(),
+            &issued.key,
+            tenko_cluster::ca::CertSource::Inline,
+        )
+        .expect("material"),
+    ));
+    let mut server = rustls::ServerConfig::builder_with_provider(provider())
+        .with_protocol_versions(TLS13)
+        .expect("versions")
+        .with_no_client_auth()
+        .with_cert_resolver(resolver);
+    server.alpn_protocols = vec![b"h2".to_vec()];
+    let server = Arc::new(server);
+    let config =
+        tenko_cluster::mtls::client_config(env.internal.root_der(), issued.chain, &issued.key)
+            .expect("client config");
+    let mut caching = ClientConfig::clone(&*config);
+    caching.resumption = Resumption::store(Arc::new(ClientSessionMemoryCache::new(8)));
+    for (config, second) in [
+        (config, HandshakeKind::Full),
+        (Arc::new(caching), HandshakeKind::Resumed),
+    ] {
+        let mut kinds = Vec::new();
+        for _ in 0..2 {
+            let mut client: Connection = ClientConnection::new(
+                Arc::clone(&config),
+                ServerName::try_from(HOST).expect("name"),
+            )
+            .expect("client")
+            .into();
+            let mut connection: Connection = ServerConnection::new(Arc::clone(&server))
+                .expect("server")
+                .into();
+            handshake(&mut client, &mut connection).expect("handshake");
+            // The tickets follow the handshake.
+            shuttle(&mut connection, &mut client).expect("tickets");
+            kinds.push(connection.handshake_kind());
+        }
+        assert_eq!(kinds, [Some(HandshakeKind::Full), Some(second)]);
+    }
+}
+
 /// Records the certificate authorities the server names, and presents nothing.
 #[derive(Debug, Default)]
 struct Hints(Mutex<Vec<Vec<u8>>>);

@@ -350,7 +350,7 @@ pub async fn run(args: &JoinArgs) -> Result<Output, Failure> {
     let mut seed = None;
     let mut last = String::from("the enrollment named no cluster endpoint");
     for endpoint in &seeds {
-        match network.cluster_client_at(endpoint).await {
+        match network.seed_client(endpoint).await {
             Ok(client) => {
                 seed = Some((endpoint.clone(), client));
                 break;

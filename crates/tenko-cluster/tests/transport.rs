@@ -39,6 +39,30 @@ use tokio::{sync::watch, task::JoinHandle};
 
 const WAIT: Duration = Duration::from_secs(20);
 
+/// A controller's transport with `credentials` over an empty store of its own, which its
+/// dials read for revocations; the store lives as long as the caller keeps it.
+async fn dialer(
+    credentials: &Credentials,
+) -> (
+    tenko_cluster::peers::PeerNetwork,
+    tenko_store::raft::RaftStore,
+) {
+    let network = tenko_cluster::peers::PeerNetwork::new(
+        credentials.identity.node,
+        tenko_cluster::peers::PeerTimings::default(),
+    );
+    network.set_tls(credentials.client_config().expect("client configuration"));
+    let mut config = tenko_store::raft::RaftStoreConfig::for_conformance(
+        &tenko_store::testing::ConformanceConfig::default(),
+    );
+    config.node_id = credentials.identity.node;
+    let store = tenko_store::raft::RaftStore::open_temp(config)
+        .await
+        .expect("store");
+    network.attach(&store);
+    (network, store)
+}
+
 /// Records every batch it gets.
 #[derive(Default)]
 struct RecordingSink {
@@ -1108,10 +1132,7 @@ impl tenko_cluster::metrics::MetricsSource for FixedSample {
 
 #[tokio::test]
 async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
-    use tenko_cluster::{
-        metrics::{EncodedSample, PeerReply, SAMPLE_ENCODING, fetch},
-        peers::{PeerNetwork, PeerTimings},
-    };
+    use tenko_cluster::metrics::{EncodedSample, PeerReply, SAMPLE_ENCODING, fetch};
 
     let controller = Controller::start().await;
     let dir = tempfile::tempdir().expect("dir");
@@ -1125,8 +1146,7 @@ async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
         .enroll_with(dir.path(), "controller-2", &token, vec![1])
         .await
         .expect("a controller enrolls");
-    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
-    network.set_tls(credentials.client_config().expect("client configuration"));
+    let (network, _store) = dialer(&credentials).await;
     network.pin(NodeId(1), controller.addr.to_string());
     let deadline = Duration::from_millis(500);
 
@@ -1191,9 +1211,8 @@ impl tenko_cluster::metrics::MetricsSource for WithHistory {
 /// not read it.
 #[tokio::test]
 async fn metrics_history_answers_a_controller_and_an_older_source_is_unsupported() {
-    use tenko_cluster::{
-        metrics::{EncodedHistory, EncodedSample, HistoryReply, SAMPLE_ENCODING, fetch_history},
-        peers::{PeerNetwork, PeerTimings},
+    use tenko_cluster::metrics::{
+        EncodedHistory, EncodedSample, HistoryReply, SAMPLE_ENCODING, fetch_history,
     };
 
     let controller = Controller::start().await;
@@ -1208,8 +1227,7 @@ async fn metrics_history_answers_a_controller_and_an_older_source_is_unsupported
         .enroll_with(dir.path(), "controller-2", &token, vec![1])
         .await
         .expect("a controller enrolls");
-    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
-    network.set_tls(credentials.client_config().expect("client configuration"));
+    let (network, _store) = dialer(&credentials).await;
     network.pin(NodeId(1), controller.addr.to_string());
     // Each call below is answered at once; the limit only bounds a call that never is.
     let deadline = Duration::from_secs(30);
@@ -1259,8 +1277,7 @@ async fn metrics_history_answers_a_controller_and_an_older_source_is_unsupported
         .enroll_with(other.path(), "controller-3", &token, vec![1])
         .await
         .expect("a controller enrolls");
-    let network = PeerNetwork::new(credentials.identity.node, PeerTimings::default());
-    network.set_tls(credentials.client_config().expect("client configuration"));
+    let (network, _store) = dialer(&credentials).await;
     network.pin(NodeId(1), second.addr.to_string());
     assert_eq!(
         fetch_history(&network, NodeId(1), deadline).await,

@@ -429,7 +429,7 @@ pub struct NodeRegistry {
     config: RegistryConfig,
     jobs: OnceLock<JobEngine>,
     revoked: Arc<RevocationSet>,
-    revoked_nodes: RevocationSet<NodeId>,
+    revoked_nodes: Arc<RevocationSet<NodeId>>,
     sessions: Arc<Sessions>,
     listening: ArcSwap<Vec<SocketAddr>>,
     listener_wanted: Notify,
@@ -478,7 +478,7 @@ impl NodeRegistry {
             config,
             jobs: OnceLock::new(),
             revoked,
-            revoked_nodes: RevocationSet::default(),
+            revoked_nodes: Arc::default(),
             sessions,
             listening: ArcSwap::from_pointee(Vec::new()),
             listener_wanted: Notify::new(),
@@ -563,6 +563,11 @@ impl NodeRegistry {
     /// The revoked serials the TLS verifier checks.
     pub fn revocations(&self) -> Arc<RevocationSet> {
         Arc::clone(&self.revoked)
+    }
+
+    /// The revoked nodes ([`Self::is_revoked_node`]) that the dialing side checks.
+    pub(crate) fn revoked_node_set(&self) -> Arc<RevocationSet<NodeId>> {
+        Arc::clone(&self.revoked_nodes)
     }
 
     /// The live sessions.

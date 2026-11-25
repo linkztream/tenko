@@ -411,6 +411,8 @@ impl Peers {
     /// Hands over the node registry (the `nodes` start step): joins, membership changes
     /// and key transfers need it.
     pub fn attach_registry(&self, registry: Arc<NodeRegistry>) {
+        self.network()
+            .set_revocations(registry.revocations(), registry.revoked_node_set());
         let _ = self.inner.registry.set(registry);
         let peers = Arc::downgrade(&self.inner);
         self.network().set_refused(move |node| {
@@ -418,6 +420,49 @@ impl Peers {
                 .upgrade()
                 .is_some_and(|inner| Peers { inner }.refuses(node))
         });
+    }
+
+    /// The `Members` answer of old voter `node` (at `address` while no endpoint is known),
+    /// asked for the forced-step probe speaking for `claim`; `None` when nothing answered.
+    /// A removed old voter is asked too: every answer it can give keeps this controller out
+    /// of office or counts as silence. A certificate refused after the handshake is a coded
+    /// refusal that gives the reason alone: something answered there.
+    pub async fn probe_members(
+        &self,
+        node: NodeId,
+        address: &str,
+        claim: Option<&str>,
+    ) -> Option<Result<v1::MembersResponse, Status>> {
+        let mut client = match self
+            .network()
+            .cluster_client_for(node, network::Class::Exempt, Some(address))
+            .await
+        {
+            Ok(client) => client,
+            Err(error) => {
+                // Without the marker nothing answered; the dial's own reason comes last.
+                let (_, reason) = error
+                    .detail()
+                    .rsplit_once(&format!("{}: ", network::REFUSED))?;
+                return Some(Err(status_of(&ClusterError::new(
+                    "cluster.peer.unreachable",
+                    503,
+                    reason,
+                ))));
+            }
+        };
+        let mut request = tonic::Request::new(v1::MembersRequest {});
+        if let Some(value) = claim.and_then(|text| text.parse().ok()) {
+            request
+                .metadata_mut()
+                .insert(crate::generation::GENERATION_METADATA, value);
+        }
+        Some(
+            client
+                .members(request)
+                .await
+                .map(tonic::Response::into_inner),
+        )
     }
 
     /// The voters a joining learner takes its first copy from: those its join answer names,
