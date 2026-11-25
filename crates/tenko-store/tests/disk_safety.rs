@@ -328,13 +328,13 @@ async fn a_forwarded_replay_of_a_committed_write_appends_nothing() {
     keyed.idempotency = Some(IdempotencyKey::new("disk-safety-forwarded").expect("a key"));
     let encoded = tenko_core::codec::to_cbor(&keyed).expect("encoded");
     let first = store
-        .accept_forwarded(encoded.clone(), None)
+        .accept_forwarded(encoded.clone(), None, &[])
         .await
         .expect("the forwarded write");
     free_space(&store, inside_the_margin(&store), Pressure::Margin).await;
     let last = store.raft().metrics().borrow().last_log_index;
     let replayed = store
-        .accept_forwarded(encoded, None)
+        .accept_forwarded(encoded, None, &[])
         .await
         .expect("its forwarded retry");
     assert!(replayed.replayed, "answered from the idempotency record");
@@ -396,7 +396,7 @@ async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
     let refused = follower.propose(put(2)).await.expect_err("unmarked growth");
     assert_eq!(refused.code(), StoreError::DISK_RESERVE);
     let older = leader
-        .accept_forwarded(to_cbor(&completed(b, 3)).expect("encoded"), None)
+        .accept_forwarded(to_cbor(&completed(b, 3)).expect("encoded"), None, &[])
         .await
         .expect_err("a sign-in from a peer that sends no mark");
     assert!(
@@ -429,7 +429,11 @@ async fn a_forwarded_sign_in_keeps_its_mark_below_the_leaders_margin() {
     let mut nobody = completed(b, 53);
     nobody.principal = Principal::system(SystemComponent::Auth);
     let nobody = leader
-        .accept_forwarded(to_cbor(&nobody).expect("encoded"), Some(SignIn::Completed))
+        .accept_forwarded(
+            to_cbor(&nobody).expect("encoded"),
+            Some(SignIn::Completed),
+            &[],
+        )
         .await
         .expect_err("a forwarded completed sign-in with no user");
     assert!(

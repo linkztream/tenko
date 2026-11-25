@@ -131,7 +131,7 @@ use std::{
 use bytes::Bytes;
 use openraft::{BasicNode, ServerState, error::Fatal, storage::RaftLogStorage as _};
 use tenko_core::{
-    NodeId, Revision,
+    NodeId, Revision, TableName,
     audit::Digest,
     codec::{from_cbor_exact, to_cbor},
 };
@@ -156,9 +156,9 @@ use self::{
     types::{LogId, ProposedBatch, Raft, RaftNodeId, Snapshot, SnapshotFile, SnapshotMeta, Vote},
 };
 use crate::api::{
-    ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, Pressure,
-    QuorumState, ReadConsistency, ReadView, SignIn, Store, StoreError, StoreRole, StoreSafety,
-    StoreStatus, WatchFilter, WriteBatch,
+    ChangeStream, CoalescerConfig, Committed, DerivedIndex, FenceReason, Leadership, Mutation,
+    Pressure, QuorumState, ReadConsistency, ReadView, SignIn, Store, StoreError, StoreRole,
+    StoreSafety, StoreStatus, WatchFilter, WriteBatch,
 };
 
 /// openraft 0.9 as the store uses it: a peer transport (`tenko-cluster`) takes the wire
@@ -1198,21 +1198,23 @@ impl RaftStore {
     /// Serves a write a follower forwarded (the leader side of
     /// [`network::LeaderLink::forward_propose`]): checks that this node leads, decodes and
     /// validates the batch, and proposes it like a local write. `sign_in` is the mark the
-    /// follower sent beside it (`None` from a peer that sends none).
+    /// follower sent beside it (`None` from a peer that sends none). A batch that puts or
+    /// deletes in a table of `refused` is refused; this node's own proposals are not checked.
     ///
     /// # Errors
     ///
     /// [`ForwardError::NotLeader`] when another node leads (nothing was queued),
     /// [`ForwardError::NoAnswer`] when the entry did not apply in time, or the store's error
-    /// for the batch.
+    /// for the batch ([`StoreError::ReservedTable`] for a table of `refused`).
     pub async fn accept_forwarded(
         &self,
         batch: Bytes,
         sign_in: Option<SignIn>,
+        refused: &[TableName],
     ) -> Result<Committed, ForwardError> {
         let span = propose_span(batch.len());
         let result = self
-            .accept_queued(batch, sign_in)
+            .accept_queued(batch, sign_in, refused)
             .instrument(span.clone())
             .await;
         if !matches!(result, Err(ForwardError::NotLeader { .. })) {
@@ -1237,6 +1239,7 @@ impl RaftStore {
         &self,
         batch: Bytes,
         sign_in: Option<SignIn>,
+        refused: &[TableName],
     ) -> Result<Committed, ForwardError> {
         let inner = &self.inner;
         inner.check_running().map_err(ForwardError::Store)?;
@@ -1255,6 +1258,18 @@ impl RaftStore {
         decoded
             .validate(inner.config.coalescer.max_batch_bytes)
             .map_err(ForwardError::Store)?;
+        if let Some(table) = decoded
+            .mutations
+            .iter()
+            .find_map(|mutation| match mutation {
+                Mutation::Put { table, .. } | Mutation::Delete { table, .. } => {
+                    refused.contains(table).then(|| table.clone())
+                }
+                Mutation::Bump { .. } => None,
+            })
+        {
+            return Err(ForwardError::Store(StoreError::ReservedTable { table }));
+        }
         let fingerprint = match &decoded.idempotency {
             Some(_) => Some(decoded.fingerprint().map_err(ForwardError::Store)?),
             None => None,

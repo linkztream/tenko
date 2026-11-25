@@ -9,6 +9,7 @@ use tonic::{Request, Response, Status};
 
 use crate::{
     error::ClusterError,
+    generation::{GENERATION, SUPERSEDED},
     peers::PeerService,
     proto::v1,
     server::{authenticated, peer_of, status_of},
@@ -57,10 +58,13 @@ impl v1::cluster_server::Cluster for PeerService {
             let body = request.into_inner();
             wire::check(&body.wire, BATCH_WIRE).map_err(|error| status_of(&error))?;
             let sign_in = wire::sign_in_from(body.sign_in, &body.account);
+            // Only a forced step writes the generation tables, by a local proposal on its own
+            // store; no controller forwards a write of them.
+            let refused = [GENERATION.name().clone(), SUPERSEDED.name().clone()];
             match self
                 .peers
                 .store()
-                .accept_forwarded(body.batch.into(), sign_in)
+                .accept_forwarded(body.batch.into(), sign_in, &refused)
                 .await
             {
                 Ok(committed) => Ok(Response::new(v1::ProposeResponse {

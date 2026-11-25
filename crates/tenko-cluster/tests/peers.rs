@@ -655,8 +655,9 @@ tenko_store::follower_conformance_tests!(|config: ConformanceConfig| async move 
 });
 
 /// Two controllers join the first: learners first, then three voters at once (one voter
-/// and one caught-up learner wait for the second learner); everything replicates and the
-/// members agree on the state digest.
+/// and one caught-up learner wait for the second learner); everything replicates, a
+/// follower's write is forwarded except to the generation tables, and the members agree on
+/// the state digest.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn controllers_join_as_learners_and_become_three_voters() {
     let lab = Lab::first(&no_change).await;
@@ -715,6 +716,23 @@ async fn controllers_join_as_learners_and_become_three_voters() {
         .propose(batch)
         .await
         .expect("forwarded write");
+    // Only a forced step writes the generation tables, on its own store: the leader refuses
+    // a forwarded write of either.
+    for table in [
+        tenko_cluster::generation::GENERATION.name(),
+        tenko_cluster::generation::SUPERSEDED.name(),
+    ] {
+        let mut batch = WriteBatch::new(
+            tenko_core::Principal::system(SystemComponent::Cluster),
+            tenko_core::Timestamp::now(),
+        );
+        batch.delete(table.clone(), prost::bytes::Bytes::from_static(b"k"));
+        let refused = follower.store.propose(batch).await.expect_err("refused");
+        assert!(
+            matches!(&refused, StoreError::ReservedTable { table: named } if named == table),
+            "{refused:?}"
+        );
+    }
     let report = lab.first.peers.digests(None).await.expect("digests");
     assert!(report.agree, "{report:?}");
     assert!(report.revision >= committed.revision);

@@ -681,7 +681,7 @@ impl LeaderLink for InProcessNetwork {
         let store = self
             .target(from, target)
             .map_err(|error| ForwardError::Unreachable(error.to_string()))?;
-        store.accept_forwarded(batch, sign_in).await
+        store.accept_forwarded(batch, sign_in, &[]).await
     }
 
     async fn forward_read_index(

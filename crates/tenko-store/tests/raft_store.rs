@@ -26,7 +26,7 @@ use tenko_store::{
     WatchFilter, WriteBatch,
     raft::{
         RaftStore, RaftStoreConfig, SmDurability, SnapshotPolicy,
-        network::InProcessNetwork,
+        network::{ForwardError, InProcessNetwork},
         openraft,
         types::{BatchOutcome, Proposal, ProposedBatch, StoredMembership, Vote},
     },
@@ -1712,4 +1712,36 @@ async fn a_fenced_store_refuses_writes_and_keeps_reads() {
         rows(view.as_ref()).get(&key(1)),
         Some(&Bytes::from_static(b"kept"))
     );
+}
+
+/// A forwarded batch neither puts nor deletes in a table it is refused, after the checks
+/// every batch passes; a forwarded write of another table and this node's own proposals of
+/// the same changes are taken.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_forwarded_batch_cannot_write_the_refused_tables() {
+    const GUARDED: TableName = TableName::from_static("ipam.raft_test_guarded");
+    let dir = TestDir::new("forward-refused");
+    let store = RaftStore::open(config(&dir.node(1))).await.expect("open");
+    let refused = [GUARDED];
+    let forward = |batch: &WriteBatch| {
+        store.accept_forwarded(to_cbor(batch).expect("encoded"), None, &refused)
+    };
+    let (mut put_guarded, mut delete_guarded, mut other) = (batch(), batch(), batch());
+    put_guarded.put(GUARDED, key(1), Bytes::from_static(b"value"));
+    delete_guarded.delete(GUARDED, key(1));
+    other.put(ROWS, key(1), Bytes::from_static(b"value"));
+    for refused in [&put_guarded, &delete_guarded] {
+        let outcome = forward(refused).await;
+        assert!(
+            matches!(
+                &outcome,
+                Err(ForwardError::Store(StoreError::ReservedTable { table })) if *table == GUARDED
+            ),
+            "{outcome:?}"
+        );
+    }
+    forward(&other).await.expect("another table");
+    store.propose(put_guarded).await.expect("a local put");
+    store.propose(delete_guarded).await.expect("a local delete");
+    store.shutdown().await.expect("shutdown");
 }
