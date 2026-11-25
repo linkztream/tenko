@@ -9189,7 +9189,12 @@ export interface components {
             client?: components["schemas"]["ClientKey"] | null;
             /** @description The client's last transaction time. */
             cltt: components["schemas"]["Timestamp"];
-            /** @description The DDNS outcome. */
+            /**
+             * @description The DDNS outcome, from the worker's record of the address (`dhcp.ddns_names`): the
+             *     forward name written last, the PTR, the last refusal or failure. After a new client
+             *     takes the address, the names can be the last client's until the worker has removed
+             *     them.
+             */
             ddns?: components["schemas"]["DdnsState"];
             ddns_policy?: components["schemas"]["DdnsPolicy"] | null;
             duid?: components["schemas"]["Duid"] | null;
@@ -17296,7 +17301,12 @@ export interface components {
                 client?: components["schemas"]["ClientKey"] | null;
                 /** @description The client's last transaction time. */
                 cltt: components["schemas"]["Timestamp"];
-                /** @description The DDNS outcome. */
+                /**
+                 * @description The DDNS outcome, from the worker's record of the address (`dhcp.ddns_names`): the
+                 *     forward name written last, the PTR, the last refusal or failure. After a new client
+                 *     takes the address, the names can be the last client's until the worker has removed
+                 *     them.
+                 */
                 ddns?: components["schemas"]["DdnsState"];
                 ddns_policy?: components["schemas"]["DdnsPolicy"] | null;
                 duid?: components["schemas"]["Duid"] | null;
