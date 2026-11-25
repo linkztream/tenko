@@ -2,8 +2,9 @@
 //! cursor, the TGL-21 policy, and the warnings for `/system/status`.
 //!
 //! A sink is `failing` while its last attempt failed, `alarm` once that lasted the
-//! settings' `alert_after_secs`, and `behind` when records wait and its cursor has not
-//! moved for as long (the exporter does not run, for example). The warning
+//! settings' `alert_after_secs` or when its stored cursor cannot be decoded, and `behind`
+//! when records wait and its cursor has not moved for as long (the exporter does not run,
+//! for example). The warning
 //! `audit.export.failing` names every sink in `alarm` or `behind`; the warning
 //! `audit.export.required` shows while TGL-21 requires an export and no sink is enabled.
 
@@ -18,7 +19,7 @@ use tenko_store::{KeyRange, ReadView, ReadViewExt, StoreError, tables};
 use utoipa::ToSchema;
 
 use super::{
-    error::{FAILING, REQUIRED},
+    error::{FAILING, FailureKind, REQUIRED},
     model::{
         AuditExportSettings, CURSORS, CheckpointMark, ExportCursor, SETTINGS, START, Sink,
         SinkFailure,
@@ -40,7 +41,8 @@ pub enum SinkState {
     Behind,
     /// The last attempt failed.
     Failing,
-    /// The sink has failed for at least the alarm delay (`audit.export.failing`).
+    /// The sink has failed for at least the alarm delay (`audit.export.failing`), or its
+    /// stored cursor cannot be decoded (`audit.export.cursor`).
     Alarm,
 }
 
@@ -293,10 +295,31 @@ pub fn read_view(view: &dyn ReadView, now: Timestamp) -> Result<AuditExportView,
     let policy = ExportPolicy::of(toggle(view)?, &settings);
     let mut sinks = Vec::with_capacity(settings.sinks.len());
     for sink in &settings.sinks {
-        let cursor = view
-            .get_typed(&CURSORS, &sink.id)?
-            .map(|(cursor, _)| cursor);
-        let status = sink_status(sink, cursor.as_ref(), store_head, now, alert_after);
+        let status = match view.get_typed(&CURSORS, &sink.id) {
+            Ok(cursor) => sink_status(
+                sink,
+                cursor.map(|c| c.0).as_ref(),
+                store_head,
+                now,
+                alert_after,
+            ),
+            // The exporter does not export this sink; the other sinks read as before.
+            Err(StoreError::Codec(error)) => {
+                let mut status = sink_status(sink, None, store_head, now, alert_after);
+                if sink.enabled {
+                    status.state = SinkState::Alarm;
+                }
+                status.last_error = Some(SinkFailure {
+                    code: FailureKind::Cursor.code().to_owned(),
+                    detail: format!(
+                        "the stored cursor cannot be decoded ({error}); remove the sink and add it again in the same change, or add the new sink under another name first; the new sink gets the whole audit log"
+                    ),
+                    at: now,
+                });
+                status
+            }
+            Err(error) => return Err(error),
+        };
         sinks.push(SinkView {
             sink: sink.clone(),
             status,

@@ -28,6 +28,8 @@ pub enum FailureKind {
     ClientKey,
     /// The sink's configuration cannot be used on this controller.
     Config,
+    /// The sink's stored cursor cannot be decoded, so the sink exports nothing.
+    Cursor,
 }
 
 impl FailureKind {
@@ -41,6 +43,7 @@ impl FailureKind {
             Self::File => "audit.export.file",
             Self::ClientKey => "audit.export.client_key",
             Self::Config => "audit.export.config",
+            Self::Cursor => "audit.export.cursor",
         }
     }
 }

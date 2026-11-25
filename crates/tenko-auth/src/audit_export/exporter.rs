@@ -339,13 +339,37 @@ impl From<Ended> for Break {
 
 impl Worker {
     async fn run(mut self, stop: CancellationToken) -> Ended {
-        let now = Timestamp::now();
-        let stored = match self.read_cursor().await {
-            Ok(cursor) => cursor.unwrap_or_else(|| ExportCursor::start(now)),
-            Err(error) => {
-                tracing::warn!(sink = %self.sink.name, %error, "reading the cursor of the audit export sink failed");
-                ExportCursor::start(now)
+        // A read error is not "no cursor": the start would send the whole log again and its
+        // save would replace a cursor further on. Nothing is sent or saved until a read answers.
+        let mut pause = self.tuning.retry_min;
+        // Whether the last failure logged was a cursor that does not decode: one line per kind.
+        let mut logged: Option<bool> = None;
+        let stored = loop {
+            match self.read_cursor().await {
+                Ok(cursor) => {
+                    if logged.is_some() {
+                        tracing::info!(sink = %self.sink.name, "the cursor of the audit export sink was read; the export starts");
+                    }
+                    break cursor.unwrap_or_else(|| ExportCursor::start(Timestamp::now()));
+                }
+                Err(error) => {
+                    let undecodable = matches!(error, StoreError::Codec(_));
+                    if logged != Some(undecodable) {
+                        logged = Some(undecodable);
+                        if undecodable {
+                            // Removing the sink deletes the row without reading it.
+                            tracing::error!(sink = %self.sink.name, %error, "the stored cursor of the audit export sink cannot be decoded, so the sink exports nothing; remove the sink in the audit export settings and add it again in the same change, or add the new sink under another name first; the new sink gets the whole audit log");
+                        } else {
+                            tracing::warn!(sink = %self.sink.name, %error, "reading the cursor of the audit export sink failed; trying again");
+                        }
+                    }
+                }
             }
+            tokio::select! {
+                () = stop.cancelled() => return Ended::Stopped,
+                () = tokio::time::sleep(pause) => {}
+            }
+            pause = (pause * 2).min(self.tuning.retry_max);
         };
         let mut progress = Progress {
             current: stored.clone(),

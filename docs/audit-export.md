@@ -123,6 +123,8 @@ A sink fails when its host does not resolve, the connection is refused or times 
 
 When a sink has failed for `alert_after_secs` (5 minutes by default, 10 seconds to one day), the exporter raises the alarm **`audit.export.failing`**: an audit record `sys.audit_export.failing` naming the sink and the code; when the sink works again, `sys.audit_export.recovered`. Both are records of the chain and reach the sink once it works.
 
+The worker reads the sink's cursor before it sends anything. While that read fails, it tries again with the same pause and sends and writes nothing, so a store error never makes a sink receive the log again from record 1. A cursor that cannot be decoded stops the sink's export: the worker logs an error, and the sink shows as `alarm` with the code `audit.export.cursor` while the other sinks show as usual. Its status shows `delivered` 0 and the whole log as `lag`, although the sink did receive records. Remove that sink and add it again in the same change, or add the new sink under another name first (while TGL-21 requires an export, a change that leaves no confirming sink is refused): the removal deletes its cursor, and the added sink gets the whole log again from its beginning.
+
 Every controller computes the status of every sink from the cursors, so the status is the same wherever it is read:
 
 | State | Meaning |
@@ -132,7 +134,7 @@ Every controller computes the status of every sink from the cursors, so the stat
 | `ok` | Current, or catching up |
 | `behind` | Records wait and the cursor has not moved for `alert_after_secs` (the exporter does not run, for example while no controller leads) |
 | `failing` | The last attempt failed |
-| `alarm` | Failing for at least `alert_after_secs` |
+| `alarm` | Failing for at least `alert_after_secs`, or its stored cursor cannot be decoded (`last_error.code` is `audit.export.cursor`) |
 
 `/system/status` on every controller shows the warning `audit.export.failing` while a sink is in `alarm` or `behind` (params `sinks`, `count`, `since`, and `required`, true when TGL-21 requires an export and no enabled sink works), and the warning `audit.export.required` while TGL-21 requires an export and no sink that confirms delivery is enabled (`params.reason` is `no_sink`) or none delivers within the alarm delay (`not_delivering`; see [7](#7-tgl-21)). The auditor role reads these warnings in `/system/status`. A warning that appears or goes is also a `system` event of kind `audit.export.warning` (params `code`, `active`). Every change of a cursor is a `system` event too, because the tables `sys.audit_export*` map to that topic.
 
@@ -200,7 +202,7 @@ Error codes:
 | `audit.export.not_found` | 404 | No sink has the id of a test (param `sink`) |
 | `audit.export.failing` | | The alarm and status warning of a sink in `alarm` or `behind` |
 
-Failure codes in a sink's `last_error` and a test result: `audit.export.resolve`, `audit.export.connect`, `audit.export.tls`, `audit.export.send`, `audit.export.file`, `audit.export.client_key`, `audit.export.config` (a file sink on a controller without an export directory, or a record that cannot be encoded).
+Failure codes in a sink's `last_error` and a test result: `audit.export.resolve`, `audit.export.connect`, `audit.export.tls`, `audit.export.send`, `audit.export.file`, `audit.export.client_key`, `audit.export.config` (a file sink on a controller without an export directory, or a record that cannot be encoded), and in the status only `audit.export.cursor` (the sink's stored cursor cannot be decoded).
 
 ## 11. Limits and open items
 

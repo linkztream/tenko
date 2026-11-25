@@ -12,7 +12,7 @@ use std::{
 use bytes::Bytes;
 use tenko_core::{
     AuditSeq, CounterKey, Principal, Revision, SystemComponent, TableName, Timestamp,
-    audit::{AuditAction, AuditDraft, AuditRecord},
+    audit::{AuditAction, AuditDraft, AuditRecord, ChainHead},
     cluster::{LEADER_EPOCH, LeaderService},
     testing::wait_until_async,
 };
@@ -1000,4 +1000,136 @@ async fn outage_with_a_failed_write(fails: AuditAction) {
     let records = audit_records(&store).await;
     assert_eq!(count(&records, &ALARM_ACTION), 1);
     assert_eq!(count(&records, &RECOVERED_ACTION), 1);
+}
+
+/// Stores a cursor for `sink` at record `seq` of the log.
+async fn store_cursor_at(store: &MemStore, sink: Uuid, seq: u64) {
+    let record = audit_records(store)
+        .await
+        .into_iter()
+        .find(|record| record.seq.0 == seq)
+        .expect("the record");
+    let mut stored = ExportCursor::start(Timestamp::now());
+    stored.delivered = ChainHead {
+        seq: record.seq,
+        hash: record.hash,
+    };
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+    batch.put_typed(&CURSORS, &sink, &stored).expect("encodes");
+    store.propose(batch).await.expect("commits");
+}
+
+#[tokio::test]
+async fn a_failed_cursor_read_is_tried_again_and_the_sink_gets_only_what_follows_the_cursor() {
+    let dir = tempfile::tempdir().expect("dir");
+    let store = Arc::new(MemStore::default());
+    write_records(&store, 10).await;
+    let sink = file_sink("resumed.jsonl", ExportFormat::Json, 1 << 20);
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![sink.clone()],
+            alert_after_secs: 300,
+        },
+    )
+    .await;
+    store_cursor_at(&store, sink.id, 10).await;
+    write_records(&store, 3).await;
+    let epoch = bump_epoch(&store).await;
+    let faulty = Arc::new(Faulty::new(&store, None, 1));
+    let (stop, task) = start(&faulty, Some(dir.path()), epoch);
+
+    wait_until_async("the export", async || {
+        cursor(&store, sink.id)
+            .await
+            .is_some_and(|cursor| cursor.delivered.seq.0 >= 13)
+    })
+    .await;
+    stop.cancel();
+    assert_eq!(task.await.expect("joins"), Ok(()));
+    assert_eq!(*faulty.failed_reads.lock().expect("the count"), 1);
+    let text = std::fs::read_to_string(dir.path().join("resumed.jsonl")).expect("reads");
+    let report = verify_lines(text.as_bytes(), None).expect("reads");
+    assert!(report.intact, "{report:?}");
+    assert_eq!(
+        report.first,
+        Some(AuditSeq(11)),
+        "nothing before the cursor"
+    );
+}
+
+#[tokio::test]
+async fn while_the_cursor_cannot_be_read_nothing_is_written_and_the_worker_stops_on_request() {
+    let store = Arc::new(MemStore::default());
+    write_records(&store, 10).await;
+    // No export directory: a sink that got this far would fail and record the failure.
+    let sink = file_sink("unread.jsonl", ExportFormat::Json, 1 << 20);
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![sink.clone()],
+            alert_after_secs: 300,
+        },
+    )
+    .await;
+    store_cursor_at(&store, sink.id, 10).await;
+    let before = cursor(&store, sink.id).await;
+    let epoch = bump_epoch(&store).await;
+    let faulty = Arc::new(Faulty::new(&store, None, usize::MAX));
+    let (stop, task) = start(&faulty, None, epoch);
+
+    wait_until_async("the read tried again", async || {
+        *faulty.failed_reads.lock().expect("the count") >= 3
+    })
+    .await;
+    stop.cancel();
+    let ended = tokio::time::timeout(Duration::from_secs(20), task)
+        .await
+        .expect("the worker stops while it waits for its cursor");
+    assert_eq!(ended.expect("joins"), Ok(()));
+    assert_eq!(cursor(&store, sink.id).await, before);
+}
+
+/// The status read that the settings page and the status warnings share.
+#[tokio::test]
+async fn a_cursor_that_does_not_decode_puts_its_sink_in_alarm_and_the_others_read_as_before() {
+    let store = Arc::new(MemStore::default());
+    write_records(&store, 3).await;
+    let bad = file_sink("bad.jsonl", ExportFormat::Json, 1 << 20);
+    let good = file_sink("good.jsonl", ExportFormat::Json, 1 << 20);
+    store_settings(
+        &store,
+        &AuditExportSettings {
+            sinks: vec![bad.clone(), good.clone()],
+            alert_after_secs: 300,
+        },
+    )
+    .await;
+    store_cursor_at(&store, good.id, 3).await;
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+    batch.put(
+        CURSORS.name().clone(),
+        CURSORS.key(&bad.id),
+        &b"not a cursor"[..],
+    );
+    store.propose(batch).await.expect("commits");
+
+    let view = store.read(ReadConsistency::Local).await.expect("reads");
+    let status = read_view(view.as_ref(), Timestamp::now()).expect("the view reads");
+    assert_eq!(status.sinks[0].status.state, SinkState::Alarm);
+    assert_eq!(
+        status.sinks[0]
+            .status
+            .last_error
+            .as_ref()
+            .map(|e| e.code.as_str()),
+        Some("audit.export.cursor")
+    );
+    assert_eq!(status.sinks[1].status.state, SinkState::Ok);
+    assert_eq!(status.sinks[1].status.delivered.seq, AuditSeq(3));
+    assert_eq!(status.warnings[0].code, "audit.export.failing");
+    assert_eq!(
+        status.warnings[0].params.get("sinks").map(String::as_str),
+        Some("bad.jsonl")
+    );
 }
