@@ -45,12 +45,9 @@ const RESERVED: &str = "2001:db8:180::50";
 /// The documentation MAC (RFC 7042) of the dual-stack client.
 const DUAL_MAC: [u8; 6] = [0x00, 0x00, 0x5e, 0x00, 0x53, 0x42];
 
+/// A port below the ephemeral ranges, held on IPv4 loopback until released, for an IPv6 loopback bind.
 fn udp6_port() -> u16 {
-    UdpSocket::bind("[::1]:0")
-        .expect("bind")
-        .local_addr()
-        .expect("address")
-        .port()
+    free_port().release()
 }
 
 /// A DUID-LL (RFC 8415 section 11.4) of a documentation MAC.

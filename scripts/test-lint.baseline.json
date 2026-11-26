@@ -976,7 +976,6 @@
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp6.rs","scope":"dora4","text":"set_read_timeout Duration::from_millis(300)"},
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp6.rs","scope":"exchange","text":"Instant::now() + Duration::from_millis(300)"},
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp6.rs","scope":"new","text":"set_read_timeout Duration::from_millis(300)"},
-    {"rule":"port","file":"crates/tenko/tests/acceptance_dhcp6.rs","scope":"udp6_port","text":"bind(\"[::1]:0\")"},
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp_ddns.rs","scope":"exchange","text":"Instant::now() + Duration::from_millis(300)"},
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp_ddns.rs","scope":"new","text":"set_read_timeout Duration::from_millis(300)"},
     {"rule":"deadline","file":"crates/tenko/tests/acceptance_dhcp_ddns.rs","scope":"udp","text":"set_read_timeout Duration::from_secs(3)"},
