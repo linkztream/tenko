@@ -1,20 +1,21 @@
 //! The takeover runs (ADR 0038, `tenko_core::migrate::run`): the one check of a delegated
-//! session's request and the read of a run.
+//! session's request, the read of a run, and a person's close of a run.
 
 use std::net::IpAddr;
 
 use tenko_core::{
-    Authenticated, DelegationId, ObjectRef, Principal, Timestamp,
+    Authenticated, DelegationId, ObjectRef, Principal, RequestCtx, Timestamp,
     audit::AuditDraft,
     auth::Delegated,
     migrate::{
+        audit::RUN_CLOSE,
         codes,
         plan::TakeoverPlan,
         run::RunRecord,
-        tables::{RUN_PLANS, RUNS},
+        tables::{MIRRORS, RUN_DOMAINS, RUN_PLANS, RUNS},
     },
 };
-use tenko_store::ReadViewExt;
+use tenko_store::{ReadViewExt, WriteBatch};
 
 use super::AuthService;
 use crate::{
@@ -138,5 +139,54 @@ impl AuthService {
         let (run, _) = view.get_typed(&RUNS, &id)?.ok_or(NO_RUN)?;
         let (plan, _) = view.get_typed(&RUN_PLANS, &id)?.ok_or(NO_RUN)?;
         Ok((run, plan))
+    }
+
+    /// `POST /migrate/runs/{id}/close`: a person ends the run `id`, whose takeover is done or
+    /// abandoned. Its three rows and the delegated sessions of its sittings are deleted in one
+    /// batch, so that its domain takes a new run with any plan. A session of a sitting the run
+    /// no longer lists reaches nothing but its own sign-out, as every session without a run.
+    /// The caller has checked the person's right and fresh sign-in.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::NoObject`] (`migrate.run.not_found`), [`AuthError::RunBusy`] while a
+    /// mirror of the run exists, [`AuthError::Conflict`] when a sitting joined meanwhile, or a
+    /// store error.
+    pub async fn close_run(&self, ctx: &RequestCtx, id: DelegationId) -> Result<(), AuthError> {
+        let view = self.view().await?;
+        let (run, revision) = view.get_typed(&RUNS, &id)?.ok_or(NO_RUN)?;
+        let mut mirrors = Vec::new();
+        for entry in &run.mirrors {
+            if view.get_typed(&MIRRORS, &entry.mirror)?.is_some() {
+                mirrors.push(entry.mirror.to_string());
+            }
+        }
+        if !mirrors.is_empty() {
+            return Err(AuthError::RunBusy {
+                mirrors: mirrors.join(","),
+            });
+        }
+        let mut sessions = Vec::new();
+        for sitting in &run.sittings {
+            sessions.extend(Self::load_session(
+                view.as_ref(),
+                sitting.approved_by,
+                sitting.session,
+            )?);
+        }
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.expect_typed(&RUNS, &id, Some(revision));
+        batch.delete_typed(&RUNS, &id);
+        batch.delete_typed(&RUN_PLANS, &id);
+        batch.delete_typed(&RUN_DOMAINS, &run.domain.as_str().to_owned());
+        Self::stage_revoke(&mut batch, &sessions);
+        batch.audit(
+            Self::audit(RUN_CLOSE, Vec::new(), ctx)
+                .with_context("run", id.to_string())
+                .with_context("domain", run.domain.as_str())
+                .with_context("sessions", sessions.len().to_string()),
+        );
+        self.commit(batch).await?;
+        Ok(())
     }
 }

@@ -203,6 +203,12 @@ pub enum AuthError {
         /// The open run.
         run: tenko_core::DelegationId,
     },
+    /// A takeover run still has a mirror: a person deletes it before closing the run.
+    #[error("the run still has mirrors; delete them first")]
+    RunBusy {
+        /// The mirrors, comma-separated.
+        mirrors: String,
+    },
     /// An approval of a takeover script was refused (ADR 0038).
     #[error("{0}")]
     Approval(crate::approval::Refusal),
@@ -303,6 +309,7 @@ impl Coded for AuthError {
             Self::DelegationRefused { .. } => "auth.delegation.refused",
             Self::NoObject { code } => code,
             Self::RunPlan { .. } => tenko_core::migrate::codes::RUN_PLAN,
+            Self::RunBusy { .. } => tenko_core::migrate::codes::RUN_BUSY,
             Self::Approval(refusal) => refusal.code(),
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
@@ -347,7 +354,8 @@ impl Coded for AuthError {
             | Self::ServiceAccountNoLogin
             | Self::PreferenceLimit { .. }
             | Self::TokenLimit { .. }
-            | Self::RunPlan { .. } => 409,
+            | Self::RunPlan { .. }
+            | Self::RunBusy { .. } => 409,
             Self::PreferenceTooLarge { .. } => 413,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
@@ -373,6 +381,7 @@ impl Coded for AuthError {
                 BTreeMap::from([("reason", (*reason).to_owned())])
             }
             Self::RunPlan { run } => BTreeMap::from([("run", run.to_string())]),
+            Self::RunBusy { mirrors } => BTreeMap::from([("mirrors", mirrors.clone())]),
             Self::TokenLimit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),

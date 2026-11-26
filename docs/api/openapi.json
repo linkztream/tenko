@@ -25821,6 +25821,97 @@
         }
       }
     },
+    "/api/v1/migrate/runs/{id}/close": {
+      "post": {
+        "tags": [
+          "migrate"
+        ],
+        "summary": "Close a takeover run",
+        "description": "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists. Audited as `migrate.run.close`.",
+        "operationId": "close_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Closed"
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such open run (`migrate.run.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A mirror of the run exists; `params.mirrors` names them (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "No authentication service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
     "/api/v1/migrate/takeovers": {
       "get": {
         "tags": [

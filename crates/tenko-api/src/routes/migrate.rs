@@ -28,6 +28,7 @@
 //! | `GET /migrate/takeovers` | `migrate.read` | List takeover records |
 //! | `GET /migrate/takeovers/{id}` | `migrate.read` | Get a takeover record |
 //! | `GET /migrate/runs/{id}` | `migrate.read`; a delegated session its own run only | Get a takeover run with its plan |
+//! | `POST /migrate/runs/{id}/close` | `migrate.write`, a fresh session | Close a takeover run |
 //!
 //! `{cidr}` is the scope's network with its length in one path segment, the slash
 //! percent-encoded (`192.0.2.0%2F24`).
@@ -1084,6 +1085,44 @@ async fn get_run(
     Ok(Json(RunView { run, plan }).into_response())
 }
 
+#[utoipa::path(
+    post,
+    path = "/migrate/runs/{id}/close",
+    tag = "migrate",
+    operation_id = "close_run",
+    summary = "Close a takeover run",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists. Audited as `migrate.run.close`.",
+    params(("id" = String, Path, description = "Run identifier (UUID)")),
+    security(("session" = [])),
+    responses(
+        (status = 204, description = "Closed"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such open run (`migrate.run.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A mirror of the run exists; `params.mirrors` names them (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "No authentication service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn close_run(
+    State(app): State<AppState>,
+    auth: Option<Extension<Arc<AuthService>>>,
+    Ctx(cx): Ctx,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    app.authorize(
+        &cx.principal,
+        Action::Delete,
+        &anywhere(ObjectKind::Takeover),
+    )?;
+    let id = parse_id::<DelegationId>("id", &id)?;
+    super::needs_a_fresh_session(auth.clone(), &cx, "/migrate/runs/{id}/close").await?;
+    runs_of(auth, "POST", "/migrate/runs/{id}/close")?
+        .close_run(&cx, id)
+        .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // ---------------------------------------------------------------------------------------
 // Findings
 
@@ -1174,6 +1213,7 @@ fn scope_and_takeover_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(list_takeovers))
         .routes(routes!(get_takeover))
         .routes(routes!(get_run))
+        .routes(routes!(close_run))
 }
 
 #[cfg(test)]

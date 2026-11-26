@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 468, "every operation of the document");
+    assert_eq!(all.len(), 469, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -119,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        108,
+        109,
         "the session-only operations"
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        468 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        469 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -526,7 +526,7 @@ async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
     let routes = routed(&app).await;
     assert_eq!(
         routes.len(),
-        472,
+        473,
         "every route of the router: decide whether a delegated session reaches a new one \
          (tenko_auth::delegation::TAKEOVER) and count it here"
     );
@@ -1201,4 +1201,79 @@ async fn the_fresh_guard_refuses_a_delegated_session_whatever_the_table_says() {
         .expect_err("refused");
     assert_eq!(refused.coded_error().code, "auth.delegation.refused");
     assert_eq!(refused.coded_error().status, 403);
+}
+
+/// A person closes a run: refused while a mirror of the run exists, then its rows and its
+/// sittings' sessions are gone, and the domain takes a new run with another plan.
+#[tokio::test]
+async fn a_person_closes_a_run_once_its_mirrors_are_gone() {
+    use tenko_core::migrate::tables::{RUN_DOMAINS, RUN_PLANS};
+    use tenko_store::ReadViewExt as _;
+    let (env, admin, app) = served().await;
+    let session = delegated(&env, &admin, SCRIPT).await;
+    let bearer = Bearer(session.secret.expose());
+    let created = send(
+        &app,
+        from(SCRIPT, "POST", "/migrate/mirrors", bearer, Some(DHCP1)),
+    )
+    .await;
+    created.assert_status(201);
+    let mirror = created.body["mirror"]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let close = format!("/migrate/runs/{}/close", session.delegation);
+    let busy = send(&app, from(SCRIPT, "POST", &close, Cookie(&admin), None)).await;
+    busy.assert_problem(409, "migrate.run.busy");
+    assert_eq!(busy.body["params"]["mirrors"], mirror);
+    let path = format!("/migrate/mirrors/{mirror}");
+    send(&app, from(SCRIPT, "DELETE", &path, Cookie(&admin), None))
+        .await
+        .assert_status(204);
+    send(&app, from(SCRIPT, "POST", &close, Cookie(&admin), None))
+        .await
+        .assert_status(204);
+    let read = format!("/migrate/runs/{}", session.delegation);
+    send(&app, from(SCRIPT, "GET", &read, Cookie(&admin), None))
+        .await
+        .assert_problem(404, "migrate.run.not_found");
+    let logout = from(
+        SCRIPT,
+        "POST",
+        "/auth/logout",
+        Bearer(session.secret.expose()),
+        None,
+    );
+    let ended = send(&app, logout).await;
+    assert!(refused_as_unauthenticated(&ended), "{}", ended.text);
+    let script = Script::default();
+    let (ticket, body) = requested(&env, &script, &other_plan(), "192.0.2.11").await;
+    let code = json!({ "code": script.code(&body, ticket.id) }).to_string();
+    let approve = format!("/auth/approvals/{}/approve", ticket.id);
+    let approved = send(
+        &app,
+        from(SCRIPT, "POST", &approve, Cookie(&admin), Some(&code)),
+    )
+    .await;
+    approved.assert_status(200);
+    assert!(approved.body.get("run").is_none(), "{}", approved.text);
+    let view = env
+        .store
+        .read(tenko_store::ReadConsistency::Local)
+        .await
+        .expect("a view");
+    let domain = tenko_auth::testing::approval::plan()["domain"]
+        .as_str()
+        .expect("a domain")
+        .to_owned();
+    let plan = view
+        .get_typed(&RUN_PLANS, &session.delegation)
+        .expect("read");
+    assert!(plan.is_none(), "the run's plan row is deleted");
+    let domain = view.get_typed(&RUN_DOMAINS, &domain).expect("read");
+    assert!(domain.is_none(), "the run's domain row is deleted");
+    let next = collected(&env, &script, &ticket, "192.0.2.11")
+        .await
+        .expect("a new run");
+    assert_ne!(next.delegation, session.delegation);
 }
