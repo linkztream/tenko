@@ -2650,13 +2650,13 @@ export interface paths {
         };
         /**
          * List DNS zones
-         * @description Scope: `dns.read`. Zones by name, with the served serial and the RRsets per origin.
+         * @description Scope: `dns.read`. Zones by name, with the served serial and the RRsets per origin. A takeover script's delegated session (ADR 0038) lists the zones its run created only.
          */
         get: operations["list_dns_zones"];
         put?: never;
         /**
          * Create a DNS zone
-         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix).
+         * @description Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix). A takeover script's delegated session (ADR 0038) creates only an unserved secondary zone of its plan (`served` false: it refreshes from the PDC emulator and answers nothing until a flip to primary serves it), with exactly the body `{"name": <a zone of the plan>, "kind": "secondary", "catalog": false, "soa": {"mname": "<node_name>.<domain>", "rname": "hostmaster.<domain>"}, "source": {"primaries": [{"address": <the PDC emulator's first address>}]}}` while the plan's operations hold `secondary_zones`.
          */
         post: operations["create_dns_zone"];
         delete?: never;
@@ -2681,7 +2681,7 @@ export interface paths {
         post?: never;
         /**
          * Delete a DNS zone and its records
-         * @description Scope: `dns.write`. The zone, its RRsets and its journal go; a zone larger than one batch loses its row first and the rest right after.
+         * @description Scope: `dns.write`. The zone, its RRsets and its journal go; a zone larger than one batch loses its row first and the rest right after. A takeover script's delegated session (ADR 0038) deletes only an unserved zone its run created: another zone answers 404 as a missing one, a served zone of its run 403, and the delete runs at the revision the server read, so that an `If-Match` that differs, or a change in between, answers 412.
          */
         delete: operations["delete_dns_zone"];
         options?: never;
@@ -4104,7 +4104,7 @@ export interface paths {
         put?: never;
         /**
          * Close a takeover run
-         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists. Audited as `migrate.run.close`.
+         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists, or an unserved zone the run created (a served one is what the run produced and does not count). Audited as `migrate.run.close`.
          */
         post: operations["close_run"];
         delete?: never;
@@ -39857,7 +39857,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys` */
+            /** @description The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `plan` for any other body */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -39985,7 +39985,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `dns.write` */
+            /** @description The principal lacks the scope `dns.write`; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `served` for a served zone */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -46455,7 +46455,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description A mirror of the run exists; `params.mirrors` names them (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`) */
+            /** @description A mirror of the run or an unserved zone it created exists; `params.mirrors` names the mirrors and `params.zones` the zones, comma-separated (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`) */
             409: {
                 headers: {
                     [name: string]: unknown;

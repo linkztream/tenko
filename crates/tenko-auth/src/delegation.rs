@@ -73,6 +73,9 @@ pub enum Object {
     /// A takeover run (`migrate.runs`): the session's own only, else 404
     /// `migrate.run.not_found`.
     Run,
+    /// A DNS zone (`dns.zones`) the run created (its `created` stamp names the run), else 404
+    /// `dns.zone.not_found`.
+    Zone,
 }
 
 /// One operation of the allow-list: the method and the route template below the API base, as
@@ -90,9 +93,11 @@ pub struct Entry {
     pub objects: &'static [(&'static str, Object)],
 }
 
-/// The operations a takeover run's delegated session reaches. The reads of its zones, mirrors
-/// and jobs, and the operations of the run's phases join with their plan checks and the run's
-/// stages; the flip and the takeover only after the window started.
+/// The operations a takeover run's delegated session reaches. The list of zones holds the
+/// run's zones only, a zone it creates is an unserved secondary of its plan, and it deletes an
+/// unserved zone of its run only (each handler's rule). The reads of its mirrors and jobs, and
+/// the operations of the run's later phases join with their plan checks and the run's stages;
+/// the flip and the takeover only after the window started.
 pub const TAKEOVER: &[Entry] = &[
     Entry {
         method: "GET",
@@ -123,6 +128,24 @@ pub const TAKEOVER: &[Entry] = &[
         route: "/migrate/runs/{id}",
         condition: Condition::Always,
         objects: &[("id", Object::Run)],
+    },
+    Entry {
+        method: "GET",
+        route: "/dns/zones",
+        condition: Condition::Always,
+        objects: &[],
+    },
+    Entry {
+        method: "POST",
+        route: "/dns/zones",
+        condition: Condition::Always,
+        objects: &[],
+    },
+    Entry {
+        method: "DELETE",
+        route: "/dns/zones/{id}",
+        condition: Condition::Always,
+        objects: &[("id", Object::Zone)],
     },
 ];
 

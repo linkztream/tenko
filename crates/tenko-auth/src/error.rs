@@ -183,8 +183,9 @@ pub enum AuthError {
     /// A delegated session (ADR 0038) was refused; `reason` says why: `unlisted` (an
     /// operation outside its allow-list), `condition` (outside the operation's condition),
     /// `run` (its run is not open), `plan` (a body outside its run's plan), `taken` (the
-    /// plan's server has its mirror), `person` (an operation of the person's own account) or
-    /// `fresh` (an operation that needs a recent sign-in).
+    /// plan's server has its mirror), `served` (a served zone it may not delete), `person` (an
+    /// operation of the person's own account) or `fresh` (an operation that needs a recent
+    /// sign-in).
     #[error("a delegated session may not do this ({reason})")]
     DelegationRefused {
         /// Why.
@@ -203,11 +204,14 @@ pub enum AuthError {
         /// The open run.
         run: tenko_core::DelegationId,
     },
-    /// A takeover run still has a mirror: a person deletes it before closing the run.
-    #[error("the run still has mirrors; delete them first")]
+    /// A takeover run still has a mirror or an unserved zone: a person deletes them before
+    /// closing the run.
+    #[error("the run still has mirrors or unserved zones; delete them first")]
     RunBusy {
         /// The mirrors, comma-separated.
         mirrors: String,
+        /// The names of the unserved zones, comma-separated.
+        zones: String,
     },
     /// An approval of a takeover script was refused (ADR 0038).
     #[error("{0}")]
@@ -381,7 +385,9 @@ impl Coded for AuthError {
                 BTreeMap::from([("reason", (*reason).to_owned())])
             }
             Self::RunPlan { run } => BTreeMap::from([("run", run.to_string())]),
-            Self::RunBusy { mirrors } => BTreeMap::from([("mirrors", mirrors.clone())]),
+            Self::RunBusy { mirrors, zones } => {
+                BTreeMap::from([("mirrors", mirrors.clone()), ("zones", zones.clone())])
+            }
             Self::TokenLimit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),

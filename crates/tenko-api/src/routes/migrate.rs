@@ -1091,7 +1091,7 @@ async fn get_run(
     tag = "migrate",
     operation_id = "close_run",
     summary = "Close a takeover run",
-    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists. Audited as `migrate.run.close`.",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists, or an unserved zone the run created (a served one is what the run produced and does not count). Audited as `migrate.run.close`.",
     params(("id" = String, Path, description = "Run identifier (UUID)")),
     security(("session" = [])),
     responses(
@@ -1100,7 +1100,7 @@ async fn get_run(
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such open run (`migrate.run.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "A mirror of the run exists; `params.mirrors` names them (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "A mirror of the run or an unserved zone it created exists; `params.mirrors` names the mirrors and `params.zones` the zones, comma-separated (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 501, description = "No authentication service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

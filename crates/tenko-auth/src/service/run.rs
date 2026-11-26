@@ -7,6 +7,7 @@ use tenko_core::{
     Authenticated, DelegationId, ObjectRef, Principal, RequestCtx, Timestamp,
     audit::AuditDraft,
     auth::Delegated,
+    dns::{ZoneId, tables::ZONES},
     migrate::{
         audit::RUN_CLOSE,
         codes,
@@ -15,7 +16,7 @@ use tenko_core::{
         tables::{MIRRORS, RUN_DOMAINS, RUN_PLANS, RUNS},
     },
 };
-use tenko_store::{ReadViewExt, WriteBatch};
+use tenko_store::{KeyRange, ReadViewExt, WriteBatch};
 
 use super::AuthService;
 use crate::{
@@ -27,6 +28,12 @@ use crate::{
 /// The answer for a run that does not exist and, to a delegated session, for another run.
 const NO_RUN: AuthError = AuthError::NoObject {
     code: codes::RUN_NOT_FOUND,
+};
+
+/// The answer for a zone that does not exist and, to a delegated session, for a zone its run
+/// did not create.
+const NO_ZONE: AuthError = AuthError::NoObject {
+    code: tenko_core::dns::codes::ZONE_NOT_FOUND,
 };
 
 /// A refusal of the check with the outcome its audit record names.
@@ -112,19 +119,35 @@ impl AuthService {
         if !sign_out && view.get_typed(&RUNS, &delegated.id)?.is_none() {
             return refused("run");
         }
-        for (name, Object::Run) in entry.objects {
-            let id = params
+        for (name, object) in entry.objects {
+            let value = params
                 .iter()
                 .find(|(key, _)| key == name)
-                .and_then(|(_, value)| value.parse::<DelegationId>().ok());
-            if id == Some(delegated.id) {
-                continue;
-            }
-            let found = match id {
-                Some(id) if view.get_typed(&RUNS, &id)?.is_some() => "outside_run",
-                _ => "missing",
+                .map_or("", |(_, value)| *value);
+            // The object's run: `None` when it is missing, `Some(None)` when it has none.
+            let (owner, error) = match object {
+                Object::Run => (
+                    match value.parse::<DelegationId>() {
+                        Ok(id) => view.get_typed(&RUNS, &id)?.map(|_| Some(id)),
+                        Err(_) => None,
+                    },
+                    NO_RUN,
+                ),
+                Object::Zone => (
+                    match value.parse::<ZoneId>() {
+                        Ok(id) => view
+                            .get_typed(&ZONES, &id)?
+                            .map(|(zone, _)| zone.created.by.delegation()),
+                        Err(_) => None,
+                    },
+                    NO_ZONE,
+                ),
             };
-            return Ok(Err((NO_RUN, found)));
+            match owner {
+                Some(run) if run == Some(delegated.id) => {}
+                Some(_) => return Ok(Err((error, "outside_run"))),
+                None => return Ok(Err((error, "missing"))),
+            }
         }
         Ok(Ok(()))
     }
@@ -150,8 +173,8 @@ impl AuthService {
     /// # Errors
     ///
     /// [`AuthError::NoObject`] (`migrate.run.not_found`), [`AuthError::RunBusy`] while a
-    /// mirror of the run exists, [`AuthError::Conflict`] when a sitting joined meanwhile, or a
-    /// store error.
+    /// mirror of the run or an unserved zone it created exists, [`AuthError::Conflict`] when a
+    /// sitting joined meanwhile, or a store error.
     pub async fn close_run(&self, ctx: &RequestCtx, id: DelegationId) -> Result<(), AuthError> {
         let view = self.view().await?;
         let (run, revision) = view.get_typed(&RUNS, &id)?.ok_or(NO_RUN)?;
@@ -161,9 +184,17 @@ impl AuthService {
                 mirrors.push(entry.mirror.to_string());
             }
         }
-        if !mirrors.is_empty() {
+        // A served zone of the run is what the run produced; an unserved one is its copy.
+        let zones: Vec<String> = view
+            .scan_typed(&ZONES, KeyRange::all(), usize::MAX, false)?
+            .into_iter()
+            .filter(|(_, zone, _)| !zone.served && zone.created.by.delegation() == Some(id))
+            .map(|(_, zone, _)| zone.name.as_str().to_owned())
+            .collect();
+        if !mirrors.is_empty() || !zones.is_empty() {
             return Err(AuthError::RunBusy {
                 mirrors: mirrors.join(","),
+                zones: zones.join(","),
             });
         }
         let mut sessions = Vec::new();

@@ -600,8 +600,8 @@ pub mod codes {
     pub const RUN_PLAN: &str = "migrate.run.plan";
     /// No such takeover run, or for a delegated session one outside its own run (404).
     pub const RUN_NOT_FOUND: &str = "migrate.run.not_found";
-    /// The run still has a mirror, which a person deletes before closing it (409). Params:
-    /// `mirrors`.
+    /// The run still has a mirror or an unserved zone, which a person deletes before closing it
+    /// (409). Params: `mirrors`, `zones`.
     pub const RUN_BUSY: &str = "migrate.run.busy";
 
     /// Every code of the module, for the contracts document and its test.

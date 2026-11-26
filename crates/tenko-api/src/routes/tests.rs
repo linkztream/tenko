@@ -1277,3 +1277,5 @@ async fn a_person_closes_a_run_once_its_mirrors_are_gone() {
         .expect("a new run");
     assert_ne!(next.delegation, session.delegation);
 }
+
+mod zones;

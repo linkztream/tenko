@@ -10,9 +10,15 @@
 //! answer them. The primaries of a secondary zone are checked against the egress policy of
 //! server-side fetches (`tenko_core::egress`, `[dns] egress_allow`): the server opens the
 //! transfers to them.
+//!
+//! A takeover script's delegated session (ADR 0038) lists the zones its run created, creates
+//! only its plan's zones, each an unserved secondary of the PDC emulator ([`Zone::served`]),
+//! and deletes only an unserved zone of its run.
+
+use std::sync::Arc;
 
 use axum::{
-    Json,
+    Extension, Json,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -22,10 +28,11 @@ use tenko_auth::authz::anywhere;
 use tenko_core::{
     Action, ObjectKind, ObjectRef, RequestCtx, Revision, Timestamp,
     dns::{
-        DnsError, JournalEntry, KeyName, ScopeName, SecondarySource, TransferPolicy, Zone, ZoneId,
-        codes,
+        DnsError, DnsName, JournalEntry, KeyName, ScopeName, SecondarySource, TransferPolicy, Zone,
+        ZoneId, codes,
     },
     egress::EgressPolicy,
+    migrate::plan::{PlanOperation, TakeoverPlan},
 };
 use tenko_dns::zone::{NewZone, ZoneChange, ZoneRow, ZoneService, journal};
 use tenko_store::ReadViewExt as _;
@@ -134,7 +141,7 @@ pub(crate) fn zone_item(
     tag = "dns",
     operation_id = "list_dns_zones",
     summary = "List DNS zones",
-    description = "Scope: `dns.read`. Zones by name, with the served serial and the RRsets per origin.",
+    description = "Scope: `dns.read`. Zones by name, with the served serial and the RRsets per origin. A takeover script's delegated session (ADR 0038) lists the zones its run created only.",
     params(PageParams),
     responses(
         (status = 200, description = "A page of zones by name", body = Page<ZoneItem>),
@@ -155,7 +162,11 @@ pub(super) async fn list_dns_zones(
     let scope = CursorScope::new("dns.zones");
     let after: Option<(String, ZoneId)> = page.cursor(scope)?;
     let view = page.read(service.store().as_ref()).await?;
-    let rows = ZoneService::zones(view.as_ref())?;
+    // ADR 0038: a takeover script's delegated session lists the zones its run created.
+    let run = cx.principal.delegation();
+    let rows = ZoneService::zones(view.as_ref())?
+        .into_iter()
+        .filter(|row| run.is_none() || row.zone.created.by.delegation() == run);
     let mut items = Vec::new();
     let mut next = None;
     for row in rows {
@@ -180,13 +191,13 @@ pub(super) async fn list_dns_zones(
     tag = "dns",
     operation_id = "create_dns_zone",
     summary = "Create a DNS zone",
-    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix).",
+    description = "Scope: `dns.write`. A primary or RPZ zone gets the apex SOA (from `soa` and the first serial of the policy) and the NS set of `name_servers` in every scope; a secondary zone is filled by zone transfers from its `source`; a stub or forward zone is a row only. A TSIG key named in `source.primaries[].key` or `transfer.notify[].key` needs `dns.keys` and must exist; a primary's address passes the egress policy of server-side fetches (no loopback, link-local, multicast, unspecified or metadata service address unless `[dns] egress_allow` lists its prefix). A takeover script's delegated session (ADR 0038) creates only an unserved secondary zone of its plan (`served` false: it refreshes from the PDC emulator and answers nothing until a flip to primary serves it), with exactly the body `{\"name\": <a zone of the plan>, \"kind\": \"secondary\", \"catalog\": false, \"soa\": {\"mname\": \"<node_name>.<domain>\", \"rname\": \"hostmaster.<domain>\"}, \"source\": {\"primaries\": [{\"address\": <the PDC emulator's first address>}]}}` while the plan's operations hold `secondary_zones`.",
     request_body(content = ZoneCreate, content_type = "application/json"),
     responses(
         (status = 201, description = "The zone, with its SOA and NS set; the `ETag` is its revision", body = ZoneItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`), or the settings are invalid (`dns.zone.invalid`; `source.primaries` for an address the egress policy refuses)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`, or names a TSIG key without `dns.keys`; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `plan` for any other body", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "A named TSIG key does not exist (`dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A zone of this name exists (`dns.zone.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
@@ -196,9 +207,20 @@ pub(super) async fn create_dns_zone(
     Ctx(cx): Ctx,
     zones: Zones,
     Egress(policy): Egress,
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     ApiJson(body): ApiJson<ZoneCreate>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Zone))?;
+    // ADR 0038: a takeover script's delegated session creates its plan's unserved copies only.
+    let delegated = cx.principal.delegation().is_some();
+    if delegated {
+        let refused =
+            || ApiError::from(tenko_auth::AuthError::DelegationRefused { reason: "plan" });
+        let plan = auth.ok_or_else(refused)?.delegation_plan(&cx).await?;
+        if run_zone(&plan, &body.name).as_ref() != Some(&body) {
+            return Err(refused());
+        }
+    }
     let service = zones.get()?;
     check_key_references(
         &app,
@@ -221,27 +243,27 @@ pub(super) async fn create_dns_zone(
             });
         tenko_dns::dnssec::profile_default(hardened, &body.name, body.kind)
     };
-    let written = service
-        .create(
-            &cx,
-            NewZone {
-                name: body.name,
-                kind: body.kind,
-                tenant: body.tenant,
-                scopes: body.scopes,
-                serial: body.serial.unwrap_or_default(),
-                soa: body.soa,
-                name_servers: body.name_servers,
-                transfer: body.transfer.unwrap_or_default(),
-                update: body.update.unwrap_or_default(),
-                dnssec,
-                source: body.source,
-                description: body.description,
-                reverse_of: None,
-                catalog: body.catalog,
-            },
-        )
-        .await?;
+    let new = NewZone {
+        name: body.name,
+        kind: body.kind,
+        tenant: body.tenant,
+        scopes: body.scopes,
+        serial: body.serial.unwrap_or_default(),
+        soa: body.soa,
+        name_servers: body.name_servers,
+        transfer: body.transfer.unwrap_or_default(),
+        update: body.update.unwrap_or_default(),
+        dnssec,
+        source: body.source,
+        description: body.description,
+        reverse_of: None,
+        catalog: body.catalog,
+    };
+    let written = if delegated {
+        service.create_unserved(&cx, new).await?
+    } else {
+        service.create(&cx, new).await?
+    };
     let view = service.view(Some(written.revision)).await?;
     let row = ZoneService::zone(view.as_ref(), written.zone.id)?;
     let revision = row.revision;
@@ -356,7 +378,7 @@ pub(super) async fn update_dns_zone(
     tag = "dns",
     operation_id = "delete_dns_zone",
     summary = "Delete a DNS zone and its records",
-    description = "Scope: `dns.write`. The zone, its RRsets and its journal go; a zone larger than one batch loses its row first and the rest right after.",
+    description = "Scope: `dns.write`. The zone, its RRsets and its journal go; a zone larger than one batch loses its row first and the rest right after. A takeover script's delegated session (ADR 0038) deletes only an unserved zone its run created: another zone answers 404 as a missing one, a served zone of its run 403, and the delete runs at the revision the server read, so that an `If-Match` that differs, or a change in between, answers 412.",
     params(
         ("id" = String, Path, description = "Zone identifier (UUID)"),
         ("If-Match" = Option<String>, Header, description = "The revision the client read; a stale revision is refused with 412")
@@ -365,7 +387,7 @@ pub(super) async fn update_dns_zone(
         (status = 204, description = "The zone is gone"),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `served` for a served zone", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A view names the zone (`dns.view.in_use`, parameter `by`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 412, description = "The zone changed since it was read (`If-Match`)", body = ProblemDetails, content_type = "application/problem+json")
@@ -381,9 +403,41 @@ pub(super) async fn delete_dns_zone(
     let id = parse_id::<ZoneId>(&id)?;
     app.authorize(&cx.principal, Action::Delete, &ObjectRef::from(id))?;
     let service = zones.get()?;
-    let expect = if_match(&headers)?;
+    let mut expect = if_match(&headers)?;
+    // ADR 0038: a delegated session deletes an unserved zone only, at the revision read here.
+    if cx.principal.delegation().is_some() {
+        let view = service.view(None).await?;
+        let row = ZoneService::zone(view.as_ref(), id)?;
+        if row.zone.served {
+            return Err(tenko_auth::AuthError::DelegationRefused { reason: "served" }.into());
+        }
+        tenko_dns::zone::check_expect(expect, row.revision)?;
+        expect = Some(row.revision);
+    }
     service.delete(&cx, id, expect).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
+}
+
+/// The body of the zone `name` of a takeover plan: a secondary of the PDC emulator's first
+/// address, the node under the domain as its SOA's primary name; `None` for a name the plan
+/// does not list or a plan without secondary zones.
+fn run_zone(plan: &TakeoverPlan, name: &DnsName) -> Option<ZoneCreate> {
+    let pdc = plan.controllers.iter().find(|controller| controller.pdc)?;
+    if !plan.zones.contains(name) || !plan.operations.contains(&PlanOperation::SecondaryZones) {
+        return None;
+    }
+    let domain = plan.domain.as_str();
+    serde_json::from_value(serde_json::json!({
+        "name": name,
+        "kind": "secondary",
+        "catalog": false,
+        "soa": {
+            "mname": format!("{}.{domain}", plan.node_name.as_str()),
+            "rname": format!("hostmaster.{domain}"),
+        },
+        "source": { "primaries": [{ "address": pdc.addresses.first()? }] },
+    }))
+    .ok()
 }
 
 /// One serial step of a zone scope.

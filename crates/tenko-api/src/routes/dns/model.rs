@@ -84,7 +84,7 @@ pub struct OriginCount {
 }
 
 /// `POST /dns/zones`.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct ZoneCreate {
     /// The apex.
     pub name: DnsName,
