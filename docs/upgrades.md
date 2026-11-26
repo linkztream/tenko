@@ -697,6 +697,17 @@ the zone service, stamped as a takeover run's create stamps it, and the test fin
 unserved after the start. No earlier fixture holds a zone; that a zone written before format 8 reads as
 served is a unit test of `tenko-core`.
 
+A fixture holds key material, and it holds it on purpose. `fixture-kek.hex` is the
+key-encryption key of the fixture, in plain text. The store holds the vault rows that a
+controller writes at its first start, sealed under that key, among them the private key of
+the internal certificate authority that the node made for itself. These keys were generated
+for the fixture alone, no installation ever used them, and they protect nothing outside the
+fixture, so reading them gives access to nothing. They are kept because the compatibility
+test must show that the key rows of a real data directory survive an upgrade and still
+open. This is the only key material that the repository holds on purpose. A fixture never
+holds a key, token or certificate issued to or by anything real, and a new fixture adds no
+kind of key material that the earlier ones did not hold.
+
 The rules for fixtures:
 
 - The fixture of format N is written once, by the binary that introduces format N, and then
