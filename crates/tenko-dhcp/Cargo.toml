@@ -61,10 +61,19 @@ tempfile = { workspace = true }
 tenko-core = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["raft", "testing", "test-hooks"] }
 
-# The no-allocation test is its own harness: the counting allocator counts every thread, and
-# libtest's main thread allocates right after it has spawned the test thread.
+# The no-allocation tests are their own harness (`tests/harness`): the counting allocator
+# counts every thread, and libtest's main thread allocates right after it has spawned the
+# test thread.
 [[test]]
 name = "alloc"
+harness = false
+
+[[test]]
+name = "alloc6"
+harness = false
+
+[[test]]
+name = "lease_alloc"
 harness = false
 
 [lints]

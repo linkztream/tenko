@@ -5,9 +5,11 @@
 //! hand-off of the change to the lease store must not allocate. The first section proves
 //! that the counter sees an allocation.
 //!
-//! The allocator counts every thread of the process, so the file has one test.
+//! The allocator counts every thread of the process, so the file has one test and the
+//! binary is its own harness (`harness = false` in Cargo.toml, `tests/harness`).
 
 mod engine6_world;
+mod harness;
 
 use std::{alloc::System, hint::black_box};
 
@@ -79,7 +81,13 @@ fn read_all(bytes: &[u8]) -> usize {
     sum
 }
 
-#[test]
+fn main() {
+    harness::run(
+        "the_dhcpv6_path_allocates_nothing_from_the_parse_to_the_hand_off",
+        the_dhcpv6_path_allocates_nothing_from_the_parse_to_the_hand_off,
+    );
+}
+
 fn the_dhcpv6_path_allocates_nothing_from_the_parse_to_the_hand_off() {
     // The counter bites.
     let (allocations, _, _) = measure(4, || {

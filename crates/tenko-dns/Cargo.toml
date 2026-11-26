@@ -89,5 +89,9 @@ time = { workspace = true }
 name = "alloc"
 harness = false
 
+[[test]]
+name = "dnssec_alloc"
+harness = false
+
 [lints]
 workspace = true

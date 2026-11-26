@@ -3,8 +3,10 @@
 //! table through its shared handle, the offer hold and the refusal gate allocate nothing.
 //! The counting allocator wraps the system allocator as in `tests/alloc.rs`; the first
 //! section proves that it sees an allocation. The allocator counts every thread of the
-//! process, so the file has one test and no runtime.
+//! process, so the file has one test and no runtime, and the binary is its own harness
+//! (`harness = false` in Cargo.toml, `tests/harness`).
 
+mod harness;
 mod lease_support;
 
 use std::{alloc::System, hint::black_box, sync::Arc, time::Duration};
@@ -39,7 +41,13 @@ fn measure(rounds: usize, mut f: impl FnMut()) -> (usize, usize, usize) {
     )
 }
 
-#[test]
+fn main() {
+    harness::run(
+        "the_lease_path_does_not_allocate",
+        the_lease_path_does_not_allocate,
+    );
+}
+
 fn the_lease_path_does_not_allocate() {
     // The counter sees an allocation.
     let mut sink = Vec::new();

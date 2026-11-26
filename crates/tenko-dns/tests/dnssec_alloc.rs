@@ -8,7 +8,9 @@
 //! sees an allocation.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
-//! the measured sections one after another.
+//! the measured sections one after another, and the binary is its own harness (`harness =
+//! false` in Cargo.toml), for the reason `tests/alloc.rs` gives. The runtime that signs the
+//! zone is dropped, its threads with it, before anything is measured.
 
 use std::{alloc::System, hint::black_box, sync::Arc, time::Instant};
 
@@ -243,7 +245,44 @@ fn signed_answers_do_not_allocate(denial: Denial) {
     );
 }
 
-#[test]
+const TEST_NAME: &str = "signed_answers_do_not_allocate_with_nsec_or_nsec3";
+
+/// Flags of libtest that take a value, which is not a name filter.
+const VALUED_FLAGS: [&str; 5] = ["--format", "--test-threads", "--color", "--skip", "-Z"];
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--list") {
+        if !args.iter().any(|arg| arg == "--ignored") {
+            println!("{TEST_NAME}: test");
+        }
+        return;
+    }
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut after_valued = false;
+    let mut filters = Vec::new();
+    for arg in &args {
+        if after_valued {
+            after_valued = false;
+        } else if arg.starts_with('-') {
+            after_valued = VALUED_FLAGS.contains(&arg.as_str());
+        } else {
+            filters.push(arg.as_str());
+        }
+    }
+    let selected = filters.is_empty()
+        || filters.iter().any(|filter| {
+            (exact && *filter == TEST_NAME) || (!exact && TEST_NAME.contains(filter))
+        });
+    if !selected {
+        println!("\nrunning 0 tests\n\ntest result: ok. 0 passed; 1 filtered out\n");
+        return;
+    }
+    println!("\nrunning 1 test");
+    signed_answers_do_not_allocate_with_nsec_or_nsec3();
+    println!("test {TEST_NAME} ... ok\n\ntest result: ok. 1 passed; 0 failed\n");
+}
+
 fn signed_answers_do_not_allocate_with_nsec_or_nsec3() {
     let (allocations, _, _) = measure(10, || {
         let v: Vec<u8> = black_box(Vec::with_capacity(64));
