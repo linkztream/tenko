@@ -46,7 +46,7 @@ d. **Two additive IR fields.** The exporter reads the server-level DNS settings 
 - An exporter for any other server pushes the same envelope under its own kind label; nothing in the core assumes Windows.
 - The cost is a mapping written in PowerShell beside the Rust adapters, held to the fixture by the exporter's tests (R146), and a yearly token replacement, made visible fourteen days ahead (WT-Q11).
 - Data format 6: a format 5 binary refuses a data directory this version wrote; a return to the previous release needs the pre-migration copy (`docs/upgrades.md`).
-- Risks R138 (the mirror lags at the switch), R145 (the token leaks) and R146 (the mapping drifts) are those of the plan; the takeover waits for the push that shows the source's scope inactive, a forged snapshot changes only what a person later prepares or takes over behind the diff and the acknowledgments, and the fixture is the contract.
+- Risks R138 (the mirror lags at the switch), R145 (the token leaks) and R146 (the mapping drifts) are those of the plan; the takeover waits for the push that shows the source's scope inactive, a forged snapshot changes only what a person later prepares or takes over behind the diff and the acknowledgments (amended 2026-11-26: a takeover run's delegated session also prepares its plan's scopes from the latest snapshot without a person's review, as Tenko's own scopes switched off, which serve nothing until a person's takeover behind the diff and the acknowledgments), and the fixture is the contract.
 
 ## Alternatives considered
 

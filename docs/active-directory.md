@@ -632,7 +632,7 @@ This part follows section 17 of [dhcp.md](dhcp.md), the home cut-over, step for 
 | `DynamicUpdates` Always | `enabled`, `client_may_update_a = false`: the server writes A and PTR |
 | `DynamicUpdates` OnClientRequest | `enabled`, `client_may_update_a = true`: the client writes its A record and the server the PTR |
 | `DynamicUpdates` Never | not `enabled` |
-| `UpdateDnsRRForOlderClients` | `legacy_clients` |
+| `UpdateDnsRRForOlderClients`, or `NameProtection` true | `legacy_clients`: Windows registers the names of clients that send no FQDN option under name protection too |
 | `DisableDnsPtrRRUpdate` | `reverse = false` |
 
 Windows keeps its DNS credential for DHCP in the server, and its password is not carried; Tenko's DHCP writes through the zone service and needs none (TGL-29). During a coexistence period, a Windows DHCP server that registers names for its clients in the secure-only zones should do so with a dedicated user account set as its DNS credential (`Set-DhcpServerDnsCredential`), Microsoft's guidance for DHCP on a controller with secure-only zones: without one it registers as the controller's computer account, which is privileged and would own every name it writes. Names it writes as a member of DnsUpdateProxy stay without an owner, so the client can take them over later. The forward zone is the scope's domain name (option 15), which is `corp.example.test`. A zone takes DHCP updates by the zone's `update.dhcp`: unset follows the profile (Home yes, Standard no, [dhcp.md](dhcp.md) section 13.1).
