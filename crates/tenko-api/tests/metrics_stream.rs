@@ -61,18 +61,33 @@ struct Reader {
     task: JoinHandle<()>,
 }
 
-async fn open(addr: SocketAddr, topics: &str) -> Reader {
+/// Opens stream number `index` on `topics`.
+async fn open(addr: SocketAddr, topics: &str, index: usize) -> Reader {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let request = format!(
         "GET /api/v1/events?topics={topics} HTTP/1.1\r\nHost: ddi.example.test\r\nAccept: text/event-stream\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).await.expect("write");
     let mut head = Vec::new();
+    let started = Instant::now();
     timeout(WAIT, async {
         while !head.windows(13).any(|window| window == b": connected\n\n") {
             let mut chunk = [0_u8; 4096];
-            let n = stream.read(&mut chunk).await.expect("read");
-            assert!(n > 0, "closed: {}", String::from_utf8_lossy(&head));
+            // Which stream, after how long and after how much of the answer, so that a reset
+            // tells a refused connection from a stream ended part way.
+            let n = stream.read(&mut chunk).await.unwrap_or_else(|error| {
+                panic!(
+                    "read of stream {index} on {topics} after {:?} and {} octets: {error}: {}",
+                    started.elapsed(),
+                    head.len(),
+                    String::from_utf8_lossy(&head)
+                )
+            });
+            assert!(
+                n > 0,
+                "stream {index} on {topics} closed: {}",
+                String::from_utf8_lossy(&head)
+            );
             head.extend_from_slice(&chunk[..n]);
         }
     })
@@ -147,8 +162,8 @@ fn cpu_ms() -> Option<f64> {
 /// Opens [`STREAMS`] streams on `topics`.
 async fn open_all(addr: SocketAddr, topics: &str) -> Vec<Reader> {
     let mut readers = Vec::with_capacity(STREAMS);
-    for _ in 0..STREAMS {
-        readers.push(open(addr, topics).await);
+    for index in 0..STREAMS {
+        readers.push(open(addr, topics, index).await);
     }
     readers
 }
