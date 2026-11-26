@@ -21,7 +21,7 @@
 //! a password, deletes a credential or ends sessions. The one listed operation behind a recent
 //! sign-in, the creation of a mirror (which mints the mirror's token), is held to
 //! [`WithinApproval`](Condition::WithinApproval) instead: within five minutes of the approval
-//! on Tenko's clock.
+//! on Tenko's clock. So are the pairing and the deletion of a run's mirror.
 //!
 //! It lives at most [`LIFETIME`] from the approval (or the profile's absolute lifetime, if
 //! shorter) and [`IDLE`] since its last recorded request (or the profile's idle lifetime, if
@@ -37,7 +37,12 @@
 use std::time::Duration;
 
 use ipnet::IpNet;
-use tenko_core::{Timestamp, auth::Delegated, clock::stands_before, migrate::plan::TakeoverPlan};
+use tenko_core::{
+    MirrorId, Timestamp,
+    auth::Delegated,
+    clock::stands_before,
+    migrate::{plan::TakeoverPlan, run::RunRecord},
+};
 
 use crate::service::FRESH_AUTHENTICATION;
 
@@ -45,7 +50,7 @@ use crate::service::FRESH_AUTHENTICATION;
 pub const LIFETIME: Duration = Duration::from_secs(8 * 3_600);
 /// The idle limit of a delegated session under every profile.
 pub const IDLE: Duration = Duration::from_secs(15 * 60);
-/// How long after the approval a delegated session may create a mirror.
+/// How long after the approval a delegated session may create, pair or delete a mirror.
 pub const MIRROR_WINDOW: Duration = FRESH_AUTHENTICATION;
 
 /// When a listed operation is open to a delegated session.
@@ -76,6 +81,10 @@ pub enum Object {
     /// A DNS zone (`dns.zones`) the run created (its `created` stamp names the run), else 404
     /// `dns.zone.not_found`.
     Zone,
+    /// A mirror (`migrate.mirrors`) the run created (its `created` stamp names the run), else
+    /// 404 `migrate.mirror.not_found`. A deletion reaches only a mirror made before the
+    /// session's approval, else 403 `condition`: a sitting never deletes what it made itself.
+    Mirror,
 }
 
 /// One operation of the allow-list: the method and the route template below the API base, as
@@ -95,9 +104,10 @@ pub struct Entry {
 
 /// The operations a takeover run's delegated session reaches. The list of zones holds the
 /// run's zones only, a zone it creates is an unserved secondary of its plan, and it deletes an
-/// unserved zone of its run only (each handler's rule). The reads of its mirrors and jobs, and
-/// the operations of the run's later phases join with their plan checks and the run's stages;
-/// the flip and the takeover only after the window started.
+/// unserved zone of its run only (each handler's rule). It reads its run's mirrors, pairs its
+/// two mirrors with each other and deletes them, and nothing else of a mirror. The reads of its
+/// jobs and the operations of the run's later phases join with their plan checks and the run's
+/// stages; the flip and the takeover only after the window started.
 pub const TAKEOVER: &[Entry] = &[
     Entry {
         method: "GET",
@@ -147,6 +157,24 @@ pub const TAKEOVER: &[Entry] = &[
         condition: Condition::Always,
         objects: &[("id", Object::Zone)],
     },
+    Entry {
+        method: "GET",
+        route: "/migrate/mirrors/{id}",
+        condition: Condition::Always,
+        objects: &[("id", Object::Mirror)],
+    },
+    Entry {
+        method: "PATCH",
+        route: "/migrate/mirrors/{id}",
+        condition: Condition::WithinApproval,
+        objects: &[("id", Object::Mirror)],
+    },
+    Entry {
+        method: "DELETE",
+        route: "/migrate/mirrors/{id}",
+        condition: Condition::WithinApproval,
+        objects: &[("id", Object::Mirror)],
+    },
 ];
 
 /// The entry of `method` on `route` (the template below the API base), if [`TAKEOVER`] lists
@@ -183,6 +211,16 @@ pub fn mirror_in_plan(
         && matches!(source_prefixes, [only] if only.parse::<IpNet>().is_ok_and(|net| net == host))
 }
 
+/// The partner a run's mirror `id` may be paired with: the run's other mirror, in a plan of
+/// exactly two DHCP servers (paired whether or not they share a failover relationship).
+pub fn run_partner(plan: &TakeoverPlan, run: &RunRecord, id: MirrorId) -> Option<MirrorId> {
+    match (plan.dhcp_servers.len(), run.mirrors.as_slice()) {
+        (2, [one, other]) if one.mirror == id => Some(other.mirror),
+        (2, [one, other]) if other.mirror == id => Some(one.mirror),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use tenko_core::{ApprovalId, DelegationId};
@@ -211,6 +249,16 @@ mod tests {
         assert!(admits(&session, "GET", "/system/ca-root", at(1_000)));
         assert!(admits(&session, "POST", "/auth/logout", at(30_000)));
         assert!(admits(&session, "GET", "/migrate/runs/{id}", at(30_000)));
+        assert!(admits(&session, "GET", "/migrate/mirrors/{id}", at(30_000)));
+        for method in ["PATCH", "DELETE"] {
+            assert!(admits(&session, method, "/migrate/mirrors/{id}", at(1_300)));
+            assert!(!admits(
+                &session,
+                method,
+                "/migrate/mirrors/{id}",
+                at(1_301)
+            ));
+        }
         for (method, route) in [
             ("GET", "/auth/session"),
             ("POST", "/auth/tokens"),
@@ -222,12 +270,47 @@ mod tests {
             ("POST", "/migrate/mirrors/{id}/scopes/{cidr}/takeover"),
             ("GET", "/migrate/runs"),
             ("POST", "/migrate/runs/{id}/close"),
+            ("POST", "/migrate/mirrors/{id}/token"),
         ] {
             assert!(
                 !admits(&session, method, route, at(1_000)),
                 "{method} {route}"
             );
         }
+    }
+
+    #[test]
+    fn a_mirror_pairs_with_the_runs_other_mirror_in_a_two_server_plan_only() {
+        let plan: TakeoverPlan =
+            serde_json::from_value(crate::testing::approval::plan()).expect("a plan");
+        let [one, other, outside] = [(); 3].map(|()| MirrorId::generate());
+        let mut run = RunRecord {
+            id: DelegationId::generate(),
+            domain: plan.domain.clone(),
+            created_at: at(1_000),
+            sittings: Vec::new(),
+            mirrors: Vec::new(),
+        };
+        for (server, mirror) in plan.dhcp_servers.iter().zip([one, other]) {
+            run.mirrors.push(tenko_core::migrate::run::RunMirror {
+                server: server.name.clone(),
+                mirror,
+            });
+        }
+        assert_eq!(run_partner(&plan, &run, one), Some(other));
+        assert_eq!(run_partner(&plan, &run, other), Some(one));
+        assert_eq!(run_partner(&plan, &run, outside), None);
+        for servers in [1, 3] {
+            let mut other_size = plan.clone();
+            other_size.dhcp_servers = vec![plan.dhcp_servers[0].clone(); servers];
+            assert_eq!(
+                run_partner(&other_size, &run, one),
+                None,
+                "{servers} servers"
+            );
+        }
+        run.mirrors.truncate(1);
+        assert_eq!(run_partner(&plan, &run, one), None);
     }
 
     #[test]

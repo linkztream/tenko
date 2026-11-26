@@ -13,10 +13,10 @@
 //! |---|---|---|
 //! | `PUT /migrate/mirrors/{id}/snapshot` | the mirror's own token (`mirror:<id>`) | Push a snapshot |
 //! | `GET /migrate/mirrors` | `migrate.read` | List mirrors |
-//! | `POST /migrate/mirrors` | `migrate.write`, a session | Create a mirror, its service account and its token |
-//! | `GET /migrate/mirrors/{id}` | `migrate.read` | Get a mirror |
-//! | `PATCH /migrate/mirrors/{id}` | `migrate.write`, a session | Change a mirror |
-//! | `DELETE /migrate/mirrors/{id}` | `migrate.write`, a session | Delete a mirror with its account and token |
+//! | `POST /migrate/mirrors` | `migrate.write`, a fresh session; a delegated session one per plan server | Create a mirror, its service account and its token |
+//! | `GET /migrate/mirrors/{id}` | `migrate.read`; a delegated session its run's mirrors only | Get a mirror |
+//! | `PATCH /migrate/mirrors/{id}` | `migrate.write`, a session; a delegated session pairs its run's two mirrors | Change a mirror |
+//! | `DELETE /migrate/mirrors/{id}` | `migrate.write`, a session; a delegated session its run's mirrors of an earlier sitting | Delete a mirror with its account and token |
 //! | `POST /migrate/mirrors/{id}/token` | an administrator's session | Replace the token; shown once |
 //! | `GET /migrate/mirrors/{id}/snapshot` | `migrate.read` | The latest snapshot as stored |
 //! | `GET /migrate/mirrors/{id}/losses` | `migrate.read` | The loss report with the acknowledgments |
@@ -259,6 +259,11 @@ fn mirror_op(
     let id = parse_id::<MirrorId>("id", raw)?;
     app.authorize(&cx.principal, action, &mirror_object(id))?;
     Ok((id, service(mirrors, method, path)?))
+}
+
+/// The refusal of a delegated session's body outside its plan (ADR 0038).
+fn plan_refused() -> ApiError {
+    tenko_auth::AuthError::DelegationRefused { reason: "plan" }.into()
 }
 
 /// A 400 `sys.invalid_request` for a malformed path segment.
@@ -527,14 +532,14 @@ async fn list_mirrors(
     tag = "migrate",
     operation_id = "create_mirror",
     summary = "Create a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix, and with neither `interval_secs` nor `token_expires_in_days`. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.",
     request_body(content = MirrorCreate, content_type = "application/json"),
     security(("session" = [])),
     responses(
         (status = 201, description = "The mirror and its token", body = MirrorCreated),
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan, `taken` for a server whose mirror of the run exists", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan or a body that names an interval or a token lifetime, `taken` for a server whose mirror of the run exists", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The installation holds 32 mirrors (`migrate.mirror.limit`), or an account of the service account's name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -547,28 +552,38 @@ async fn create_mirror(
     ApiJson(body): ApiJson<MirrorCreate>,
 ) -> Result<Response, ApiError> {
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Mirror))?;
-    // ADR 0038: a takeover script's delegated session creates only the mirrors of its plan.
+    // Every field is named: a new one is decided for a delegated session before it builds.
+    let MirrorCreate {
+        name,
+        kind,
+        interval_secs,
+        token_expires_in_days,
+        source_prefixes,
+    } = body;
+    // ADR 0038: a takeover script's delegated session creates only the mirrors of its plan,
+    // with the server's interval and token lifetime.
     if cx.principal.delegation().is_some() {
-        let refused =
-            || ApiError::from(tenko_auth::AuthError::DelegationRefused { reason: "plan" });
-        let plan = auth.ok_or_else(refused)?.delegation_plan(&cx).await?;
-        if !tenko_auth::delegation::mirror_in_plan(
-            &plan,
-            &body.name,
-            body.kind.as_str(),
-            &body.source_prefixes,
-        ) {
-            return Err(refused());
+        let plan = auth.ok_or_else(plan_refused)?.delegation_plan(&cx).await?;
+        if interval_secs.is_some()
+            || token_expires_in_days.is_some()
+            || !tenko_auth::delegation::mirror_in_plan(
+                &plan,
+                &name,
+                kind.as_str(),
+                &source_prefixes,
+            )
+        {
+            return Err(plan_refused());
         }
     }
     let service = service(mirrors, "POST", "/migrate/mirrors")?;
     let new = NewMirror {
-        name: body.name,
-        kind: body.kind,
-        interval_secs: body.interval_secs,
+        name,
+        kind,
+        interval_secs,
         token: MirrorTokenTerms {
-            expires_in_days: body.token_expires_in_days,
-            source_prefixes: body.source_prefixes,
+            expires_in_days: token_expires_in_days,
+            source_prefixes,
         },
     };
     Ok(created(service.create(&cx, new).await?, &ca_root))
@@ -580,14 +595,14 @@ async fn create_mirror(
     tag = "migrate",
     operation_id = "get_mirror",
     summary = "Get a mirrored source",
-    description = "Scope: `migrate.read`. The mirror with its freshness; a `mirror:` token does not reach it (a stolen token gives neither data nor reach).",
+    description = "Scope: `migrate.read`. The mirror with its freshness; a `mirror:` token does not reach it (a stolen token gives neither data nor reach). A takeover script's delegated session (ADR 0038) reads only a mirror its run created; any other id answers 404, whether or not such a mirror exists.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     responses(
         (status = 200, description = "The mirror", body = MirrorItem),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `migrate.read`; a delegated session whose run is not open (`auth.delegation.refused`, `params.reason` `run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn get_mirror(
@@ -614,7 +629,7 @@ async fn get_mirror(
     tag = "migrate",
     operation_id = "update_mirror",
     summary = "Change a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes.",
+    description = "Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes. A takeover script's delegated session (ADR 0038) pairs a mirror its run created with the run's other mirror, within five minutes of its approval and in a plan of two DHCP servers, with the body `{\"partner\": <id>}` alone; any other id answers 404, whether or not such a mirror exists.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     request_body(content = MirrorPatch, content_type = "application/json"),
     security(("session" = [])),
@@ -622,14 +637,15 @@ async fn get_mirror(
         (status = 200, description = "The mirror after the change", body = MirrorItem),
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for any other body", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "A mirror of the new name exists (`migrate.mirror.exists`), the pairing is refused: the mirror itself, a mirror that does not exist, or a mirror already paired with another (`migrate.mirror.partner`, `params.reason`), or the row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn update_mirror(
     State(app): State<AppState>,
     mirrors: Mirrors,
+    auth: Option<Extension<Arc<tenko_auth::AuthService>>>,
     Ctx(cx): Ctx,
     Path(id): Path<String>,
     ApiJson(body): ApiJson<MirrorPatch>,
@@ -642,6 +658,18 @@ async fn update_mirror(
         Action::Update,
         ("PATCH", "/migrate/mirrors/{id}"),
     )?;
+    // ADR 0038: a delegated session pairs its run's two mirrors, and changes nothing else.
+    if let Some(run) = cx.principal.delegation() {
+        let (record, plan) = auth.ok_or_else(plan_refused)?.run(run).await?;
+        let pair =
+            tenko_auth::delegation::run_partner(&plan, &record, id).map(|partner| MirrorPatch {
+                partner: Some(Some(partner)),
+                ..MirrorPatch::default()
+            });
+        if pair.as_ref() != Some(&body) {
+            return Err(plan_refused());
+        }
+    }
     Ok(Json(service.update(&cx, id, body).await?).into_response())
 }
 
@@ -651,15 +679,15 @@ async fn update_mirror(
     tag = "migrate",
     operation_id = "delete_mirror",
     summary = "Delete a mirrored source",
-    description = "Scope: `migrate.write`, an interactive session. Deletes the mirror, its snapshot and its loss acknowledgments, and with them its service account and token; the takeover records stay. Audited as `migrate.mirror.delete`.",
+    description = "Scope: `migrate.write`, an interactive session. Deletes the mirror, its snapshot and its loss acknowledgments, and with them its service account and token; the takeover records stay. Audited as `migrate.mirror.delete`. A takeover script's delegated session (ADR 0038) deletes a mirror its run created in an earlier sitting, within five minutes of its approval; any other id answers 404, whether or not such a mirror exists.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     security(("session" = [])),
     responses(
         (status = 204, description = "Deleted"),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval or for a mirror made in this sitting, `run` without an open run", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The row changed under every attempt (`migrate.mirror.conflict`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

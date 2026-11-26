@@ -113,7 +113,7 @@ pub struct SnapshotCounts {
 }
 
 /// `PATCH /migrate/mirrors/{id}`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct MirrorPatch {
     /// A new name; the service account keeps the name it was created with.
     #[serde(default, skip_serializing_if = "Option::is_none")]

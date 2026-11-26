@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 
 use tenko_core::{
-    Authenticated, DelegationId, ObjectRef, Principal, RequestCtx, Timestamp,
+    Authenticated, DelegationId, MirrorId, ObjectRef, Principal, RequestCtx, Timestamp,
     audit::AuditDraft,
     auth::Delegated,
     dns::{ZoneId, tables::ZONES},
@@ -36,6 +36,12 @@ const NO_ZONE: AuthError = AuthError::NoObject {
     code: tenko_core::dns::codes::ZONE_NOT_FOUND,
 };
 
+/// The answer for a mirror that does not exist and, to a delegated session, for a mirror its run
+/// did not create.
+const NO_MIRROR: AuthError = AuthError::NoObject {
+    code: codes::MIRROR_NOT_FOUND,
+};
+
 /// A refusal of the check with the outcome its audit record names.
 type Refusal = (AuthError, &'static str);
 
@@ -48,7 +54,8 @@ impl AuthService {
     /// whose condition does not hold (`condition`), and any request of a session whose run is
     /// not open (`run`) but its own sign-out. Then every object a path parameter names must
     /// exist and be the run's: a missing object and an object of another run answer the same
-    /// 404, and only the audit record says which (`found`: `missing` or `outside_run`).
+    /// 404, and only the audit record says which (`found`: `missing` or `outside_run`). A
+    /// mirror of the run that this sitting made is not deleted by it (`condition`).
     ///
     /// Every refusal is audited as `auth.delegation.refuse`, at most once a minute per session
     /// and outcome, the two of a missing object counting as one: the pace is kept in this
@@ -142,6 +149,22 @@ impl AuthService {
                     },
                     NO_ZONE,
                 ),
+                Object::Mirror => {
+                    let row = match value.parse::<MirrorId>() {
+                        Ok(id) => view.get_typed(&MIRRORS, &id)?.map(|(mirror, _)| mirror),
+                        Err(_) => None,
+                    };
+                    let owner = row.as_ref().map(|mirror| mirror.created.by.delegation());
+                    // A sitting deletes only what an earlier one made: never a mirror whose token
+                    // it may hold, nor one made again after a deletion.
+                    if method == "DELETE"
+                        && owner == Some(Some(delegated.id))
+                        && row.is_some_and(|mirror| mirror.created.at >= delegated.approved_at)
+                    {
+                        return refused("condition");
+                    }
+                    (owner, NO_MIRROR)
+                }
             };
             match owner {
                 Some(run) if run == Some(delegated.id) => {}

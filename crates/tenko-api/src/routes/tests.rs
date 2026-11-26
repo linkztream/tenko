@@ -694,9 +694,16 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
         json!({ "name": name, "kind": "windows-dhcp", "source_prefixes": [prefix] }).to_string()
     };
     let mirrors = "/migrate/mirrors";
+    let with = |field: &str| {
+        let mut body: Value = serde_json::from_str(DHCP1).expect("JSON");
+        body[field] = json!(1);
+        body.to_string()
+    };
     for outside in [
         mirror("dhcp9.corp.example.test", "192.0.2.30/32"),
         mirror("dhcp1.corp.example.test", "192.0.2.0/24"),
+        with("interval_secs"),
+        with("token_expires_in_days"),
     ] {
         let reply = send(
             &app,
@@ -706,12 +713,14 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
         assert_refused(&reply, "plan");
     }
     let inside = mirror("dhcp1.corp.example.test", "192.0.2.30/32");
-    send(
+    let created = send(
         &app,
         from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&inside)),
     )
-    .await
-    .assert_status(201);
+    .await;
+    created.assert_status(201);
+    let stamp = &created.body["mirror"]["created"]["by"]["delegation"];
+    assert_eq!(*stamp, collected.body["delegation"]);
     // One mirror per server: a second one for the same server, in any case, is refused.
     let again = mirror("DHCP1.corp.example.test", "192.0.2.30/32");
     let reply = send(
@@ -721,32 +730,7 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     .await;
     assert_refused(&reply, "taken");
     // Six minutes after the approval, on Tenko's clock, the mirror creation is closed.
-    let view = env
-        .store
-        .read(tenko_store::ReadConsistency::Local)
-        .await
-        .expect("a view");
-    let hash = tenko_auth::secret::hash_secret(&secret);
-    let (record, _) =
-        tenko_store::ReadViewExt::get_typed(view.as_ref(), &tenko_auth::model::SESSIONS, &hash)
-            .expect("read")
-            .expect("the session");
-    let approved_at = |at: Timestamp| {
-        let mut record = record.clone();
-        record.delegation.as_mut().expect("delegated").approved_at = at;
-        let mut batch = tenko_store::WriteBatch::new(
-            tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
-            Timestamp::now(),
-        );
-        batch
-            .put_typed(&tenko_auth::model::SESSIONS, &hash, &record)
-            .expect("encode");
-        env.store.propose(batch)
-    };
-    let six_minutes_ago = Timestamp::now()
-        .checked_sub(Duration::from_secs(360))
-        .expect("a time");
-    approved_at(six_minutes_ago).await.expect("commit");
+    approve_at(&env, &secret, six_minutes_ago()).await;
     let second = mirror("dhcp2.corp.example.test", "192.0.2.30/32");
     let reply = send(
         &app,
@@ -755,7 +739,7 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     .await;
     assert_refused(&reply, "condition");
     // Within the window again: one mirror per DHCP server of the plan, two in all.
-    approved_at(Timestamp::now()).await.expect("commit");
+    approve_at(&env, &secret, Timestamp::now()).await;
     send(
         &app,
         from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&second)),
@@ -768,6 +752,34 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     )
     .await;
     assert_refused(&reply, "taken");
+}
+
+/// Moves the approval of the delegated session `secret` to `at` on its session record.
+async fn approve_at(env: &TestEnv, secret: &str, at: Timestamp) {
+    use tenko_auth::model::SESSIONS;
+    let view = env
+        .store
+        .read(tenko_store::ReadConsistency::Local)
+        .await
+        .expect("a view");
+    let hash = tenko_auth::secret::hash_secret(secret);
+    let (mut record, _) = tenko_store::ReadViewExt::get_typed(view.as_ref(), &SESSIONS, &hash)
+        .expect("read")
+        .expect("the session");
+    record.delegation.as_mut().expect("delegated").approved_at = at;
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        Timestamp::now(),
+    );
+    batch.put_typed(&SESSIONS, &hash, &record).expect("encode");
+    env.store.propose(batch).await.expect("commit");
+}
+
+/// Six minutes ago: past the five minutes after an approval.
+fn six_minutes_ago() -> Timestamp {
+    Timestamp::now()
+        .checked_sub(Duration::from_secs(360))
+        .expect("a time")
 }
 
 /// The two public operations of the approval are bounded: a request body above 64 KiB and a
@@ -1278,4 +1290,5 @@ async fn a_person_closes_a_run_once_its_mirrors_are_gone() {
     assert_ne!(next.delegation, session.delegation);
 }
 
+mod mirrors;
 mod zones;

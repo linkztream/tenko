@@ -3872,7 +3872,7 @@ export interface paths {
         put?: never;
         /**
          * Create a mirrored source
-         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.
+         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A takeover script's delegated session (ADR 0038) creates one within five minutes of its approval instead, only for a DHCP server of its plan (the mirror named for the server, kind `windows-dhcp`) with the mirror host's address as its one source prefix, and with neither `interval_secs` nor `token_expires_in_days`. Creates the mirror, the service account `mirror-<id>` with no grants, and one scoped token whose only scope is `mirror:<id>`, bound to `source_prefixes` when given, shown once with the fingerprint of the certificate authority root the exporter pins. The token expires within TGL-05 (WT-Q11). A source prefix is at least a /16 (IPv4) or a /48 (IPv6); under Hardened at least one is required. An installation holds at most 32 mirrors. Audited as `migrate.mirror.create`.
          */
         post: operations["create_mirror"];
         delete?: never;
@@ -3890,21 +3890,21 @@ export interface paths {
         };
         /**
          * Get a mirrored source
-         * @description Scope: `migrate.read`. The mirror with its freshness; a `mirror:` token does not reach it (a stolen token gives neither data nor reach).
+         * @description Scope: `migrate.read`. The mirror with its freshness; a `mirror:` token does not reach it (a stolen token gives neither data nor reach). A takeover script's delegated session (ADR 0038) reads only a mirror its run created; any other id answers 404, whether or not such a mirror exists.
          */
         get: operations["get_mirror"];
         put?: never;
         post?: never;
         /**
          * Delete a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. Deletes the mirror, its snapshot and its loss acknowledgments, and with them its service account and token; the takeover records stay. Audited as `migrate.mirror.delete`.
+         * @description Scope: `migrate.write`, an interactive session. Deletes the mirror, its snapshot and its loss acknowledgments, and with them its service account and token; the takeover records stay. Audited as `migrate.mirror.delete`. A takeover script's delegated session (ADR 0038) deletes a mirror its run created in an earlier sitting, within five minutes of its approval; any other id answers 404, whether or not such a mirror exists.
          */
         delete: operations["delete_mirror"];
         options?: never;
         head?: never;
         /**
          * Change a mirrored source
-         * @description Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes.
+         * @description Scope: `migrate.write`, an interactive session. The name (the service account keeps its own), whether pushes are accepted, the expected interval, and the partner: the other mirror of a pair of DHCP servers, set on both mirrors at once (`null` takes the pair apart on both). Audited as `migrate.mirror.update`, naming both mirrors when the pair changes. A takeover script's delegated session (ADR 0038) pairs a mirror its run created with the run's other mirror, within five minutes of its approval and in a plan of two DHCP servers, with the body `{"partner": <id>}` alone; any other id answers 404, whether or not such a mirror exists.
          */
         patch: operations["update_mirror"];
         trace?: never;
@@ -45411,7 +45411,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan, `taken` for a server whose mirror of the run exists */
+            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan or a body that names an interval or a token lifetime, `taken` for a server whose mirror of the run exists */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45470,7 +45470,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.read` */
+            /** @description The principal lacks the scope `migrate.read`; a delegated session whose run is not open (`auth.delegation.refused`, `params.reason` `run`) */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45479,7 +45479,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such mirror (`migrate.mirror.not_found`) */
+            /** @description No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -45527,7 +45527,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            /** @description The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval or for a mirror made in this sitting, `run` without an open run */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45536,7 +45536,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such mirror (`migrate.mirror.not_found`) */
+            /** @description No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -45599,7 +45599,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            /** @description The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for any other body */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45608,7 +45608,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such mirror (`migrate.mirror.not_found`) */
+            /** @description No such mirror, or for a delegated session not one its run created (`migrate.mirror.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
