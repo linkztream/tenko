@@ -293,4 +293,5 @@ async fn a_port_in_use_fails_the_start() {
             .await
             .is_err()
     );
+    let _ = &taken;
 }

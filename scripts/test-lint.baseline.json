@@ -592,7 +592,6 @@
     {"rule":"is-err","file":"crates/tenko-dns/tests/server.rs","scope":"a_port_in_use_fails_the_start","text":"assert!(Server::start_authoritative(empty, handle, Hooks::default()) .await .is_err())"},
     {"rule":"is-err","file":"crates/tenko-dns/tests/server.rs","scope":"a_port_in_use_fails_the_start","text":"assert!(Server::start_authoritative(empty.clone(), handle.clone(), Hooks::default()) .await .is_err())"},
     {"rule":"is-err","file":"crates/tenko-dns/tests/server.rs","scope":"a_port_in_use_fails_the_start","text":"assert!(result.is_err())"},
-    {"rule":"port","file":"crates/tenko-dns/tests/server.rs","scope":"a_port_in_use_fails_the_start","text":"bind(\"127.0.0.1:0\")"},
     {"rule":"deadline","file":"crates/tenko-dns/tests/tls.rs","scope":"a_doh_body_that_never_completes_ends_at_the_request_deadline","text":"request_timeout Duration::from_millis(300)"},
     {"rule":"deadline","file":"crates/tenko-dns/tests/tls.rs","scope":"a_doh_body_that_never_completes_ends_at_the_request_deadline","text":"timeout Duration::from_secs(5)"},
     {"rule":"deadline","file":"crates/tenko-dns/tests/tls.rs","scope":"closed","text":"Instant::now() + Duration::from_secs(3)"},
