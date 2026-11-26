@@ -209,7 +209,6 @@
     {"rule":"sleep","file":"crates/tenko-cluster/tests/tls_service.rs","scope":"watcher_warns_once_per_expiry_state_change","text":"tokio::time::sleep(Duration::from_millis(200))","count":3},
     {"rule":"deadline","file":"crates/tenko-cluster/tests/transport.rs","scope":"metrics_snapshot_answers_the_newest_sample_to_a_controller","text":"deadline Duration::from_millis(500)"},
     {"rule":"duration","file":"crates/tenko-cluster/tests/transport.rs","scope":"metrics_snapshot_answers_the_newest_sample_to_a_controller","text":"assert!(started.elapsed() < Duration::from_secs(2))"},
-    {"rule":"port","file":"crates/tenko-cluster/tests/transport.rs","scope":"metrics_snapshot_answers_the_newest_sample_to_a_controller","text":"bind(\"127.0.0.1:0\")"},
     {"rule":"sleep","file":"crates/tenko-cluster/tests/transport.rs","scope":"a_node_renews_and_moves_to_its_new_certificate","text":"tokio::time::sleep(Duration::from_millis(1100))"},
     {"rule":"sleep","file":"crates/tenko-cluster/tests/transport.rs","scope":"open_streams_end_once_the_node_record_is_gone","text":"tokio::time::sleep(Duration::from_millis(50))"},
     {"rule":"is-err","file":"crates/tenko-connect-hass/src/lib.rs","scope":"cursors_continue_after_an_external_id","text":"assert!(cursor_after(Some(&Cursor(\"x\".to_owned()))).is_err())"},

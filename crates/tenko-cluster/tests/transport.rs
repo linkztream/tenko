@@ -1182,6 +1182,7 @@ async fn metrics_snapshot_answers_the_newest_sample_to_a_controller() {
         PeerReply::Failed(_)
     ));
     assert!(started.elapsed() < Duration::from_secs(2));
+    let _ = &silent;
 }
 
 // WP18.0: the history of a controller's dashboard figures.
