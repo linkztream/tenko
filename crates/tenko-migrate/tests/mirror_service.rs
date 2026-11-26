@@ -525,6 +525,49 @@ async fn losses_are_acknowledged_as_read_until_they_change() {
     assert_eq!(lab.audit("migrate.mirror.losses_ack").await, 1);
 }
 
+/// Every key of a report at the bound of loss entries, and the last key 800,000 times more,
+/// acknowledged twice (the second pass also checks an acknowledgment of every entry): each
+/// key is looked up once, so the two end well within 10 s, where a search of the report per
+/// key (some 1.6 x 10^10 comparisons) takes about a minute in a test build.
+#[tokio::test]
+async fn an_ack_names_every_key_of_a_full_report() {
+    let lab = Lab::new().await;
+    let mut snapshot = fixture(1);
+    let loss = snapshot.losses.entries[0].clone();
+    snapshot.losses.entries = (0..MAX_LOSSES)
+        .map(|n| {
+            let mut entry = loss.clone();
+            entry.location.column = Some(format!("Name=Policy {n:05}"));
+            entry
+        })
+        .collect();
+    lab.push(0, snapshot).await.expect("pushed");
+    let mut keys: Vec<String> = lab
+        .service
+        .losses(lab.id)
+        .await
+        .expect("losses")
+        .entries
+        .into_iter()
+        .map(|item| item.key)
+        .collect();
+    let last = keys.last().expect("a key").clone();
+    keys.extend(std::iter::repeat_n(last, 800_000));
+    let started = std::time::Instant::now();
+    for _ in 0..2 {
+        let (acks, _) = lab
+            .service
+            .ack(&lab.admin, lab.id, 1, &keys)
+            .await
+            .expect("acked");
+        assert_eq!(acks.len(), MAX_LOSSES);
+    }
+    let took = started.elapsed();
+    println!("two acknowledgments of {} keys: {took:?}", keys.len());
+    assert!(took < Duration::from_secs(30), "{took:?}");
+    assert_eq!(lab.service.get(lab.id).await.expect("item").losses_open, 0);
+}
+
 #[tokio::test]
 async fn the_fixture_against_an_empty_tenko_is_all_to_create() {
     let lab = Lab::new().await;

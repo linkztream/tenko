@@ -1414,21 +1414,21 @@ impl MirrorService {
             return Err(MirrorError::Request("name at least one entry".to_owned()));
         }
         let summary = self.summary_of(&snapshot)?;
+        // Reversed, so that the first entry of a key wins, as a stored report may repeat one.
+        let known: HashMap<&str, &Vec<u8>> = (summary.losses.iter().rev())
+            .map(|(key, hash, _)| (key.as_str(), hash))
+            .collect();
         let mut acks: BTreeMap<&str, LossAck> = BTreeMap::new();
         for key in keys {
-            let (_, hash, _) = summary
-                .losses
-                .iter()
-                .find(|(known, ..)| known == key)
-                .ok_or_else(|| {
-                    MirrorError::Request("a key names no entry of the snapshot".to_owned())
-                })?;
+            let hash = known.get(key.as_str()).ok_or_else(|| {
+                MirrorError::Request("a key names no entry of the snapshot".to_owned())
+            })?;
             acks.insert(
                 key,
                 LossAck {
                     mirror: id,
                     key: key.clone(),
-                    entry_hash: HexBytes(hash.clone()),
+                    entry_hash: HexBytes((*hash).clone()),
                     by,
                     at: self.now(),
                 },
@@ -1437,7 +1437,7 @@ impl MirrorService {
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(&tables::SNAPSHOTS, &id, Some(revision));
         for key in Self::acks(view.as_ref(), id)?.into_keys() {
-            if !summary.losses.iter().any(|(known, ..)| *known == key) {
+            if !known.contains_key(key.as_str()) {
                 batch.delete_typed(&tables::LOSS_ACKS, &(id, key));
             }
         }

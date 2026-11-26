@@ -85,6 +85,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - A mirror push holds its mirror's place and the node's one decode until its body's decode has ended, also when its request ends first, by a dropped connection or otherwise: the decode runs on a blocking thread that owns both. Meanwhile the mirror's next push is answered 429 `migrate.mirror.rate` and another mirror's push waits for the decode as for any other, so the decodes of a node stay within their bound (`docs/MIGRATION.md` section "Windows DHCP").
 - The diff of a mirrored scope reads IPAM's interfaces 1,024 at a time and keeps only those that hold a client identifier a reservation of the scope names, so its memory no longer grows with the number of interfaces IPAM holds.
 - A mirror push hashes and summarizes its snapshot within its decode, and encodes the snapshot it stores on a blocking thread that owns the mirror's place and the node's one decode, as the decode does: the hashing, the summary and the encode no longer run on the server's request threads, and a push whose request ends while its snapshot is encoded holds both until the encode has ended.
+- An acknowledgment of a mirror's losses (`POST /api/v1/migrate/mirrors/{id}/losses/ack`) looks each key up once in a map of the report it answers, so its cost grows with the number of keys and entries, not with their product.
 
 ## [0.0.12-rc.7] - 2026-11-20
 
