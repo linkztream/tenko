@@ -64,6 +64,8 @@ tenko-core = { workspace = true, features = ["testing"] }
 tenko-jobs = { workspace = true, features = ["testing"] }
 tenko-store = { workspace = true, features = ["testing"] }
 tenko-vault = { workspace = true, features = ["testing"] }
+# The paused clock of the refusal linger test.
+tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true }
 
 [lints]

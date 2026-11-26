@@ -646,6 +646,75 @@ async fn a_controller_of_another_installation_is_refused() {
     assert_eq!(foreign.sink.batches().len(), 0);
 }
 
+/// A node whose data is still unread when the controller refuses its certificate reads the
+/// refusal: the controller closes after the alert without resetting the connection. The
+/// test refuses eight connections, and every attempt must end cleanly with the alert: without
+/// the fix a reset destroys the refusal on every attempt on Windows but only on some on Linux,
+/// so one attempt would let a regression pass about half the time there.
+#[tokio::test]
+async fn a_refusal_reaches_a_node_whose_data_is_still_unread() {
+    let home = Controller::start().await;
+    let foreign = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let mut credentials = home.enroll(dir.path(), "probe-dmz").await;
+    credentials.ca_root = foreign.registry.ca().root_der().clone();
+    let config = credentials.client_config().expect("client config");
+    for attempt in 0..8 {
+        let refusal = refused_with_unread_data(foreign.addr, &config).await;
+        assert_eq!(
+            client::classify_transport(&refusal).1.code,
+            "cluster.tls.refused",
+            "attempt {attempt}: {refusal}"
+        );
+    }
+    assert_eq!(foreign.sink.batches().len(), 0);
+}
+
+/// Completes the handshake with `config` at `addr` by hand, sends the last flight and 32 KiB
+/// of data in one write, and reads the connection to its end: the TLS error it carried.
+async fn refused_with_unread_data(
+    addr: SocketAddr,
+    config: &Arc<rustls::ClientConfig>,
+) -> rustls::Error {
+    use std::io::Write as _;
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    let name = tenko_cluster::mtls::server_name(&addr.ip().to_string());
+    let mut tls = rustls::ClientConnection::new(Arc::clone(config), name).expect("client");
+    let mut tcp = tokio::net::TcpStream::connect(addr).await.expect("connect");
+    let mut wire = Vec::new();
+    let mut buf = vec![0u8; 16 * 1024];
+    loop {
+        while tls.wants_write() {
+            tls.write_tls(&mut wire).expect("encode");
+        }
+        if !tls.is_handshaking() {
+            break;
+        }
+        tcp.write_all(&wire).await.expect("send");
+        wire.clear();
+        let read = tcp.read(&mut buf).await.expect("receive");
+        assert!(read > 0, "the controller closed during the handshake");
+        tls.read_tls(&mut &buf[..read]).expect("buffer");
+        tls.process_new_packets()
+            .expect("the controller's certificate");
+    }
+    // The last handshake flight and the first data leave in one write, which the loopback
+    // interface delivers at once; the controller refuses the certificate before it has
+    // read all of the data, so data is still unread when it closes.
+    tls.writer().write_all(&vec![0; 32 * 1024]).expect("data");
+    while tls.wants_write() {
+        tls.write_tls(&mut wire).expect("encode");
+    }
+    tcp.write_all(&wire).await.expect("send");
+    let mut answer = Vec::new();
+    tokio::time::timeout(Duration::from_secs(30), tcp.read_to_end(&mut answer))
+        .await
+        .expect("the controller closes")
+        .expect("a clean end of stream, not a reset");
+    tls.read_tls(&mut answer.as_slice()).expect("buffer");
+    tls.process_new_packets().expect_err("the refusal")
+}
+
 #[tokio::test]
 #[allow(clippy::too_many_lines, reason = "one scenario over every refusal")]
 async fn tokens_are_single_use_expire_and_limit_the_roles() {

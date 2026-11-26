@@ -26,7 +26,9 @@
 //! attached at once ([`ClusterListener::serve`], [`ClusterListener::serve_port`]).
 //!
 //! At most [`MAX_HANDSHAKES`] TLS handshakes run at once per listener; a connection
-//! beyond that is closed at once.
+//! beyond that is closed at once. A connection refused in its handshake keeps its place
+//! until it is closed: after the alert the controller ends its side and reads what the
+//! peer still sends, until the peer closes or [`REFUSAL_LINGER`] passes.
 
 use std::{
     collections::HashMap,
@@ -42,6 +44,7 @@ use futures::future::BoxFuture;
 use rustls::{ServerConfig, pki_types::CertificateDer, server::ResolvesServerCert};
 use tenko_core::{NodeId, Timestamp};
 use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::{Semaphore, mpsc, watch},
     task::JoinHandle,
@@ -73,6 +76,9 @@ pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const STOP_GRACE: Duration = Duration::from_secs(5);
 /// TLS handshakes in progress at once per listener.
 pub const MAX_HANDSHAKES: usize = 128;
+/// How long a connection refused in its TLS handshake is read after the refusal, so the
+/// alert reaches the peer before the close: closing with unread data resets the connection.
+pub const REFUSAL_LINGER: Duration = Duration::from_secs(2);
 
 /// A gRPC status for a coded error, with the code in [`ERROR_CODE_METADATA`].
 pub fn status_of(error: &ClusterError) -> Status {
@@ -711,12 +717,14 @@ async fn accept_loop(
         let local = tcp.local_addr().ok();
         tokio::spawn(async move {
             let _ = tcp.set_nodelay(true);
-            let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, acceptor.accept(tcp)).await;
-            drop(permit);
+            let accept = acceptor.accept(tcp).into_fallible();
+            let handshake = tokio::time::timeout(HANDSHAKE_TIMEOUT, accept).await;
             let tls = match handshake {
                 Ok(Ok(tls)) => tls,
-                Ok(Err(error)) => {
+                // The permit stays held until the refused connection is closed.
+                Ok(Err((error, tcp))) => {
                     tracing::info!(%remote, %error, "refused a connection on the cluster port");
+                    close_refused(tcp).await;
                     return;
                 }
                 Err(_) => {
@@ -724,6 +732,7 @@ async fn accept_loop(
                     return;
                 }
             };
+            drop(permit);
             let identity = tls
                 .get_ref()
                 .1
@@ -748,6 +757,17 @@ async fn accept_loop(
             let _ = tx.send(Ok(NodeStream::new(tls, peer))).await;
         });
     }
+}
+
+/// Closes a connection after its refusal (the alert is written): ends the write side, then
+/// reads and discards until the peer closes or [`REFUSAL_LINGER`] passes.
+async fn close_refused<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S) {
+    let _ = stream.shutdown().await;
+    let mut discard = [0u8; 1024];
+    let _ = tokio::time::timeout(REFUSAL_LINGER, async {
+        while stream.read(&mut discard).await.is_ok_and(|read| read > 0) {}
+    })
+    .await;
 }
 
 /// Runs the decoding and the checks the services of the cluster port apply to a request
@@ -859,6 +879,34 @@ mod tests {
         proto::v1,
         version,
     };
+
+    /// A refused peer sees the controller's side end at once and, if it keeps sending, is
+    /// cut when the full linger has passed.
+    #[tokio::test(start_paused = true)]
+    async fn a_refused_peer_that_keeps_sending_is_cut() {
+        use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+        let start = tokio::time::Instant::now();
+        let (controller, mut peer) = tokio::io::duplex(4096);
+        let closing = tokio::spawn(async move {
+            super::close_refused(controller).await;
+            tokio::time::Instant::now()
+        });
+        let mut end = [0u8; 1];
+        assert_eq!(peer.read(&mut end).await.expect("the end of stream"), 0);
+        assert_eq!(start.elapsed(), std::time::Duration::ZERO);
+        let sent = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                if peer.write_all(&[0; 512]).await.is_err() {
+                    return;
+                }
+                tokio::time::sleep(super::REFUSAL_LINGER / 8).await;
+            }
+        })
+        .await;
+        assert!(sent.is_ok(), "the peer is still connected");
+        let cut = closing.await.expect("closed");
+        assert_eq!(cut - start, super::REFUSAL_LINGER);
+    }
 
     /// A certificate of node 1001 with the role `probe`, as a caller presents it.
     fn peer_certificate() -> Vec<u8> {
