@@ -4041,8 +4041,8 @@ async fn a_dial_whose_store_cannot_be_read_is_refused() {
 }
 
 /// A connection open when its certificate is revoked carries no further call: the next
-/// one fails, a forward on the cached channel dials again and is refused as unreachable,
-/// and a new channel is refused.
+/// one fails, a forward on the cached channel fails as unreachable or as unanswered, and
+/// a new channel is refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_revocation_stops_an_open_channel_at_once() {
     use tenko_store::raft::network::ForwardError;
@@ -4071,10 +4071,14 @@ async fn a_revocation_stops_an_open_channel_at_once() {
         .members(v1::MembersRequest {})
         .await
         .expect_err("the open connection carries no further call");
-    // Never `NoAnswer`: the dial marks its refusal, so nothing counts as sent.
+    // The cut can meet the forward before it is sent (the dial is refused: `Unreachable`)
+    // or while it is sent (the call is canceled: `NoAnswer`); it never succeeds.
     let (write, _) = forwards(&leader, target.node()).await;
     assert!(
-        matches!(write, Err(ForwardError::Unreachable(_))),
+        matches!(
+            write,
+            Err(ForwardError::Unreachable(_) | ForwardError::NoAnswer(_))
+        ),
         "a forward on the cached channel: {write:?}"
     );
     let refused = dial_refusal(&leader, target.node())
