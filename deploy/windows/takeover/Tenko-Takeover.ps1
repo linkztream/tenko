@@ -2194,7 +2194,6 @@ function Get-TkPlan {
     $scopes = @($Readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.cidr } | Select-Object -Unique)
     $relationship = @($Readings.dhcp | ForEach-Object { $_.failover } | ForEach-Object { $_.name } | Select-Object -Unique)
     $operations = @('mirrors', 'secondary_zones')
-    if (@($Readings.forwarders).Count -gt 0) { $operations += 'forwarding_rules' }
     $operations += 'update_policy'
     if (@($Readings.zones | Where-Object { $_.update -eq 'Secure' }).Count -gt 0) { $operations += 'kerberos_adopt' }
     $operations += 'prepare', 'flip', 'takeover', 'release'
@@ -2235,7 +2234,8 @@ function Show-TkChangeList {
     foreach ($zone in $Readings.zones) { $lines += "  every controller, at the DNS window: $($zone.name) becomes a secondary of Tenko (made directory-integrated again, its update setting $($zone.update) restored)" }
     foreach ($server in $Readings.dhcp) { $lines += "  $($server.name), at the DHCP window: the DHCP Server service stopped and disabled, its authorization removed (authorized and started again)" }
     $lines += '  after the parallel period, the finish: the exporter, its accounts, the zone objects and the mirrors removed, the DHCP Server role left installed (no scripted way back)'
-    $lines += 'Changes on Tenko: the mirrors, the secondary zones (not served), the forwarding rules (inactive), the prepare, then at the windows the flip and the takeover (each reverted).'
+    $lines += 'Changes on Tenko: the mirrors, the secondary zones (not served), the prepare, then at the windows the flip and the takeover (each reverted).'
+    if (@($Readings.forwarders | Where-Object { $_.zone -ne '.' }).Count -gt 0) { $lines += 'Conditional forwarders: this release copies none to Tenko; the controllers keep theirs.' }
     if (@($Readings.warnings).Count -gt 0) { $lines += 'Warnings:'; foreach ($w in $Readings.warnings) { $lines += "  - $w" } }
     $minimum = @($Readings.dhcp | ForEach-Object { $_.scopes } | ForEach-Object { $_.lease_secs } | Measure-Object -Minimum).Minimum
     if ($minimum) { $lines += "Clients move to Tenko within seven eighths of the lease time: $([math]::Round($minimum * 7 / 8 / 3600, 1)) hours for the shortest scope." }
@@ -2304,7 +2304,7 @@ function Get-TkRandomSecret {
 function Get-TkZoneId {
     # Tenko's id of a plan zone, found by name among the zones it lists.
     param([string]$Name)
-    $page = Invoke-Tenko -Method GET -Path "/dns/zones?name=$Name"
+    $page = Invoke-Tenko -Method GET -Path '/dns/zones'
     foreach ($item in @(Get-TkField $page 'items')) {
         if ([string](Get-TkField $item 'name') -eq $Name -and [string](Get-TkField $item 'id') -cmatch $script:TkUuidPattern) { return [string]$item.id }
     }
@@ -2580,15 +2580,13 @@ function Get-TkPhase2 {
         }
         @{ Name = 'tenko-zones'
             Do = {
+                # The one body Tenko takes from the run: an unserved secondary of the PDC emulator.
+                $soa = [ordered]@{ mname = "$($State.Data.tenko.node).$($r.domain)"; rname = "hostmaster.$($r.domain)" }
+                $primary = ($r.controllers | Where-Object { $_.pdc } | Select-Object -First 1).addresses[0]
                 foreach ($zone in $r.zones) {
                     if (-not (Get-TkZoneId $zone.name)) {
-                        [void](Invoke-Tenko -Method POST -Path '/dns/zones' -Body ([ordered]@{ name = $zone.name; kind = 'secondary'; catalog = $false; served = $false; primaries = @([ordered]@{ address = ($r.controllers | Where-Object { $_.pdc } | Select-Object -First 1).addresses[0] }) }))
+                        [void](Invoke-Tenko -Method POST -Path '/dns/zones' -Body ([ordered]@{ name = $zone.name; kind = 'secondary'; catalog = $false; soa = $soa; source = [ordered]@{ primaries = @([ordered]@{ address = $primary }) } }))
                     }
-                    [void](Invoke-Tenko -Method POST -Path "/dns/zones/$(Get-TkZoneId $zone.name)/transfer")
-                }
-                foreach ($forwarder in $r.forwarders) {
-                    if ($forwarder.zone -eq '.') { continue }
-                    [void](Invoke-Tenko -Method POST -Path '/dns/forwarders' -Body ([ordered]@{ suffix = $forwarder.zone; upstreams = @($forwarder.servers | ForEach-Object { [ordered]@{ address = $_ } }); enabled = $false }) -Expect @(200, 201, 409))
                 }
             }
             Undo = {

@@ -1,0 +1,1 @@
+{"name":"corp.example.test","kind":"secondary","catalog":false,"soa":{"mname":"tenko.corp.example.test","rname":"hostmaster.corp.example.test"},"source":{"primaries":[{"address":"192.0.2.11"}]}}

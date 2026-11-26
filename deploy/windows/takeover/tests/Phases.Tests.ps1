@@ -43,6 +43,13 @@ Describe 'A whole run' {
         $script:beforeFinish = [System.IO.File]::ReadAllBytes((Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'))
     }
 
+    It 'creates each plan zone with the one body Tenko takes from a run, and asks for no forwarding rules' {
+        # The same file as crates/tenko-api/src/routes/fixtures/zone-create.json.
+        $fixture = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures/zone-create.json') -Raw).Trim()
+        @($script:world.tzones.Values | Where-Object { $_.name -eq 'corp.example.test' })[0].body | Should -BeExactly $fixture
+        (Read-State).plan.operations | Should -Not -Contain 'forwarding_rules'
+    }
+
     It 'finishes in the second sitting after the confirmation, without starting the DHCP Server service or reading a stopped server' {
         $script:world.calls.Clear()
         Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 0 -Because $script:lastError

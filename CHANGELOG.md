@@ -40,6 +40,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - The gauges `tenko_dhcp_ddns_queue` and `tenko_dhcp_ddns_oldest_seconds` are absent on a controller whose DDNS worker has stopped, so a controller that no longer leads stops showing its last queue, on `/metrics` and in the start page's cluster figure (`docs/observability.md`).
 - The gauge `tenko_dhcp_ddns_queue` counts the leases waiting for their retry after a failed name update too, as `tenko_dhcp_ddns_oldest_seconds` does, so a store outage shows as waiting leases (`docs/observability.md`).
 - Data format 8: a DNS zone records whether it is served (`served`). A zone written before reads as served, so nothing is rewritten. A binary of format 7 would ignore the field and answer for an unserved zone, so it refuses a directory of format 8. The first start of this version copies the store to `upgrade-backups/` and raises the format; a return to 0.0.12-rc.7 or earlier needs that copy (`docs/upgrades.md`).
+- The Windows takeover script creates each zone of its run with the one body Tenko takes from a run (a secondary of the PDC emulator, unserved) and asks for no transfer of it, since a new secondary zone is due at once. It creates no forwarding rule and its plan asks for none: the controllers keep their conditional forwarders, and the change list says so.
 
 ### Fixed
 

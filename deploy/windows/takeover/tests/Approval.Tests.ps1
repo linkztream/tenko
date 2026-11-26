@@ -23,6 +23,13 @@ Describe 'The vector' {
             $a | Should -Be $b -Because "the two vectors differ; the newer is ${newer}: make them one"
         }
     }
+
+    It 'of a run''s zone is the server''s own body' -Skip:(-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot '../../../../crates/tenko-api/src/routes/fixtures/zone-create.json'))) {
+        # Runner: a tree that holds the server's fixture (it lands with the server's zone rule).
+        $mine = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'fixtures/zone-create.json') -Raw) -replace "`r", ''
+        $server = (Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../../../crates/tenko-api/src/routes/fixtures/zone-create.json') -Raw) -replace "`r", ''
+        $mine | Should -BeExactly $server
+    }
 }
 
 Describe 'The code' {
@@ -127,5 +134,22 @@ Describe 'The request' {
         $plan = Get-TkPlan -Readings $readings -NodeName 'tenko'
         $plan.operations | Should -Not -Contain 'kerberos_adopt'
         $plan.Contains('kerberos') | Should -BeFalse
+    }
+
+    It 'names the conditional forwarders it read and asks for no forwarding rules, which the change list says' {
+        $readings = [ordered]@{
+            domain = 'corp.example.test'; forest_root = 'corp.example.test'; pdc = 'dc1.corp.example.test'
+            controllers = @([ordered]@{ name = 'dc1.corp.example.test'; addresses = @('192.0.2.11'); pdc = $true })
+            zones = @([ordered]@{ name = 'corp.example.test'; update = 'NonsecureAndSecure' })
+            forwarders = @([ordered]@{ zone = '.'; servers = @('198.51.100.53') }, [ordered]@{ zone = 'example.org'; servers = @('198.51.100.54') })
+            dhcp = @(); mirror_host = [ordered]@{ name = 'srv1.corp.example.test'; address = '192.0.2.30'; tools = $true }
+            kds = $true; dns_credential = 'keep'; computers = 'CN=Computers'; members = @(); warnings = @()
+        }
+        $plan = Get-TkPlan -Readings $readings -NodeName 'tenko'
+        @($plan.forwarders | ForEach-Object { $_.zone }) | Should -Be @('.', 'example.org')
+        $plan.operations | Should -Not -Contain 'forwarding_rules'
+        $lines = @(Show-TkChangeList -Readings $readings -NodeName 'tenko' 6>&1 | ForEach-Object { [string]$_.MessageData })
+        $lines | Should -Contain 'Changes on Tenko: the mirrors, the secondary zones (not served), the prepare, then at the windows the flip and the takeover (each reverted).'
+        $lines | Should -Contain 'Conditional forwarders: this release copies none to Tenko; the controllers keep theirs.'
     }
 }

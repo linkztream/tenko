@@ -439,11 +439,9 @@ function Invoke-FakeTenko {
             if ($w.completeThenFail -and -not $w.completeFailedOnce) { $w.completeFailedOnce = $true; throw 'the connection to Tenko failed: injected after the completion' }
             return [ordered]@{}
         }
-        '^GET /dns/zones$' {
-            $name = ($query -replace '^name=', '')
-            return [ordered]@{ items = @($w.tzones.Values | Where-Object { $_.name -eq $name }) }
-        }
-        '^POST /dns/zones$' { $id = [guid]::NewGuid().ToString(); $w.tzones[$id] = [ordered]@{ id = $id; name = $Body.name; kind = 'secondary'; served = $Body.served }; return $w.tzones[$id] }
+        # Tenko lists every zone of the run; a zone keeps the body that created it.
+        '^GET /dns/zones$' { return [ordered]@{ items = @($w.tzones.Values) } }
+        '^POST /dns/zones$' { $id = [guid]::NewGuid().ToString(); $w.tzones[$id] = [ordered]@{ id = $id; name = $Body.name; kind = 'secondary'; served = $false; body = [System.Text.Encoding]::UTF8.GetString((ConvertTo-TkJsonByte $Body)) }; return $w.tzones[$id] }
         '^GET /dns/zones/[^/]+/records$' {
             $zone = $w.tzones[$Path.Split('/')[3]].name
             $items = @($w.records[$zone] | ForEach-Object { [ordered]@{ name = $(if ($_.Name -eq '@') { $zone } else { "$($_.Name).$zone" }); type = $_.Type; data = $_.Data } })
