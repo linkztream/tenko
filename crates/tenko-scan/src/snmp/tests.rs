@@ -574,9 +574,9 @@ async fn a_request_that_goes_unanswered_mid_poll_times_out_too() {
 
 #[tokio::test]
 async fn a_closed_port_ends_in_a_timeout() {
+    // A bound socket that never replies: another process cannot take its port.
     let socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
     let closed: SocketAddr = socket.local_addr().expect("address");
-    drop(socket);
     let error = poll(
         closed,
         &credentials_for("sha1-auth"),
@@ -587,6 +587,7 @@ async fn a_closed_port_ends_in_a_timeout() {
     .await
     .expect_err("nothing listens");
     assert_eq!(error.code(), "scan.snmp.timeout", "{error}");
+    let _ = &socket;
 }
 
 #[tokio::test]

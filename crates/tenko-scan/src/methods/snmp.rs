@@ -588,11 +588,10 @@ mod tests {
         config.user = "sha256-priv".to_owned();
         config.auth_password = Some(SecretText::new(AUTH_PASSWORD));
         config.privacy_password = Some(SecretText::new(PRIV_PASSWORD));
+        // A bound socket that never replies: another process cannot take its port.
+        let silent = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
         let unreachable = SnmpDevice {
-            port: {
-                let socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind");
-                socket.local_addr().expect("addr").port()
-            },
+            port: silent.local_addr().expect("addr").port(),
             ..config.clone()
         };
         let method = SnmpPoll::new(vec![config], Duration::from_millis(500), 1, false);
@@ -642,6 +641,7 @@ mod tests {
         let output = method.run(&ctx).await.expect("run");
         assert!(!output.covered_all);
         assert!(output.notes[0].contains("scan.snmp"), "{:?}", output.notes);
+        let _ = &silent;
     }
 
     fn credentials_error(device: &SnmpDevice) -> String {
