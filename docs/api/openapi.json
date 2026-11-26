@@ -25508,7 +25508,7 @@
           "migrate"
         ],
         "summary": "Push a snapshot of a mirrored source",
-        "description": "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once and answers `changed: true`; changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. The first push a token makes binds the mirror to the server its `source.server` names, and a push naming another is refused until the token is replaced. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
+        "description": "The one operation the mirror's own token (`mirror:<id>`) reaches, and the only one it reaches; no other token and no session pushes. The body is the envelope `MirrorSnapshot` (`format` 1), at most 8 MiB on the wire (`Content-Encoding: gzip` allowed, 32 MiB inflated), at most 102,000 list items, 1,000 scopes, 10,000 reservations and 20,000 leases (a refusal names the count), every text one line without a control character or a format character that hides or reorders text, with a `sequence` above the last one accepted from this token and at most one push per 10 s per mirror (`Retry-After` says when the next one is admitted). A token bound to source prefixes is refused like an unknown token from any other address, and under Hardened so is a mirror token without prefixes. The body is read whole first, within the server's deadline for request bodies (408 `sys.body_timeout`), so that a body that arrives slowly holds no other push; a node then decodes one push at a time; a push that waits 2 s for that is answered 429 as well, and so is a push of a mirror while another push of it is in flight on the node. A push whose token is replaced while its body arrives is refused 401. A push whose configuration (everything but the leases, their loss entries, the sequence and the time) changed answers `changed: true` and writes the snapshot, the mirror and the audit record `migrate.mirror.push` at once while the mirror's reserve lasts: 30 in a row, and one more for every ten minutes since (`changes_left`); past it, or while the node's clock guard holds its clock, the push is held, and the first push after the refill whose configuration still differs is written (`held_change_due` on the controller that holds it); changed leases alone are written at most every ten minutes without an audit record (the mirror's `stored_sequence` and `stored_at` say which push the stored leases are from); otherwise the mirror's freshness is written at most every half of its stale threshold. The first push a token makes binds the mirror to the server its `source.server` names, and a push naming another is refused until the token is replaced. A refused push is audited as `migrate.mirror.refuse` at most once a minute per mirror and nothing of it is stored; a refused sequence names the last accepted one in `params.last`.",
         "operationId": "push_mirror_snapshot",
         "parameters": [
           {
@@ -64075,11 +64075,38 @@
                 ],
                 "description": "The SHA-256 fingerprint of this installation's certificate authority root, which the\nexporter pins; set by the API while it serves a certificate of the internal authority."
               },
+              "change_held": {
+                "type": "boolean",
+                "description": "Whether this controller holds a changed configuration that is not stored yet."
+              },
+              "change_reserve": {
+                "type": "integer",
+                "format": "int32",
+                "description": "How many changed configurations a full reserve stores at once (`CHANGE_RESERVE`).",
+                "minimum": 0
+              },
+              "changes_left": {
+                "type": "integer",
+                "format": "int32",
+                "description": "How many changed configurations can be stored at once now, of `change_reserve`; one\nmore every ten minutes.",
+                "minimum": 0
+              },
               "counts": {
                 "oneOf": [
                   {
                     "$ref": "#/components/schemas/SnapshotCounts",
                     "description": "The counts of the stored snapshot: scopes, reservations, leases."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "held_change_due": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/Timestamp",
+                    "description": "When the changed configuration this controller holds is stored at the earliest: by\nthe first push from then on whose configuration still differs. None when it holds\nnone, and while the node's clock guard holds its clock, which has to be trusted first."
                   },
                   {
                     "type": "null"
@@ -72070,11 +72097,38 @@
                       ],
                       "description": "The SHA-256 fingerprint of this installation's certificate authority root, which the\nexporter pins; set by the API while it serves a certificate of the internal authority."
                     },
+                    "change_held": {
+                      "type": "boolean",
+                      "description": "Whether this controller holds a changed configuration that is not stored yet."
+                    },
+                    "change_reserve": {
+                      "type": "integer",
+                      "format": "int32",
+                      "description": "How many changed configurations a full reserve stores at once (`CHANGE_RESERVE`).",
+                      "minimum": 0
+                    },
+                    "changes_left": {
+                      "type": "integer",
+                      "format": "int32",
+                      "description": "How many changed configurations can be stored at once now, of `change_reserve`; one\nmore every ten minutes.",
+                      "minimum": 0
+                    },
                     "counts": {
                       "oneOf": [
                         {
                           "$ref": "#/components/schemas/SnapshotCounts",
                           "description": "The counts of the stored snapshot: scopes, reservations, leases."
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "held_change_due": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/Timestamp",
+                          "description": "When the changed configuration this controller holds is stored at the earliest: by\nthe first push from then on whose configuration still differs. None when it holds\nnone, and while the node's clock guard holds its clock, which has to be trusted first."
                         },
                         {
                           "type": "null"

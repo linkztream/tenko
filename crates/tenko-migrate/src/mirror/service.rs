@@ -367,6 +367,9 @@ pub struct Finding {
 pub struct NewestLeases {
     /// The push's sequence.
     pub sequence: u64,
+    /// The SHA-256 of the push's configuration, as [`Mirror::last_hash`]: another one is a
+    /// change this controller holds until a push stores it.
+    pub hash: Vec<u8>,
     /// When the source read them, by its own clock.
     pub taken_at: Timestamp,
     /// When this controller accepted the push.
@@ -378,8 +381,9 @@ pub struct NewestLeases {
 }
 
 impl NewestLeases {
-    /// The lease side of an envelope accepted at `received`; the rest is dropped.
-    fn of(envelope: MirrorSnapshot, received: Timestamp) -> Self {
+    /// The lease side of an envelope accepted at `received` with its configuration's `hash`;
+    /// the rest is dropped.
+    fn of(envelope: MirrorSnapshot, received: Timestamp, hash: Vec<u8>) -> Self {
         let (losses, _): (Vec<LossEntry>, Vec<LossEntry>) = envelope
             .losses
             .entries
@@ -387,6 +391,7 @@ impl NewestLeases {
             .partition(|entry| entry.code == losses::LEASE_STATE);
         Self {
             sequence: envelope.sequence,
+            hash,
             taken_at: envelope.taken_at,
             received,
             leases: envelope.dhcp.leases,
@@ -598,14 +603,30 @@ impl MirrorService {
             None => 0,
         };
         let token = AuthService::scoped_token(view, mirror.account, mirror.token)?;
+        let stored_sequence = summary.as_ref().map(|summary| summary.sequence);
+        // A held change is this controller's newest push, newer than the stored one.
+        let change_held = self.newest(mirror.id, mirror.token).is_some_and(|newest| {
+            Some(newest.sequence) > stored_sequence
+                && mirror
+                    .last_hash
+                    .as_ref()
+                    .is_none_or(|stored| stored.0 != newest.hash)
+        });
+        // A held clock stores no change, so no time can be given until it is trusted.
+        let held_change_due = (change_held && tenko_core::clock::trusted_now().is_ok())
+            .then(|| mirror.change_due(now));
         Ok(MirrorItem {
+            changes_left: mirror.changes_left(now),
+            change_reserve: tenko_core::migrate::CHANGE_RESERVE,
+            change_held,
+            held_change_due,
             age_secs: mirror
                 .last_push
                 .map(|at| now.saturating_since(at).as_secs()),
             stale: mirror.is_stale(now),
             token_expires_at: token.as_ref().and_then(|token| token.expires_at),
             source_prefixes: token.map(|token| token.source_prefixes).unwrap_or_default(),
-            stored_sequence: summary.as_ref().map(|summary| summary.sequence),
+            stored_sequence,
             counts: summary.as_ref().map(|summary| summary.counts),
             source: summary.as_ref().map(|summary| summary.source.clone()),
             scopes: summary
@@ -1247,7 +1268,7 @@ impl MirrorService {
                 .unwrap_or(now);
             let newest = snapshot
                 .take()
-                .map(|envelope| (Arc::new(NewestLeases::of(envelope, now)), until));
+                .map(|envelope| (Arc::new(NewestLeases::of(envelope, now, hash)), until));
             let mut memory = self.memory();
             let memory = memory.entry(id).or_default();
             if memory.token != Some(mirror.token) {

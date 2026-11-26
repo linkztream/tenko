@@ -350,6 +350,22 @@ fn describe_mirror(mirror: &Value) -> String {
                 field(mirror, "stored_at")
             ),
         ),
+        (
+            "changes left",
+            format!(
+                "{} of {}",
+                field(mirror, "changes_left"),
+                field(mirror, "change_reserve")
+            ),
+        ),
+        (
+            "change due",
+            if mirror.get("held_change_due").is_none() && mirror["change_held"] == true {
+                "held until the clock is trusted".to_owned()
+            } else {
+                field(mirror, "held_change_due")
+            },
+        ),
         ("token expires", field(mirror, "token_expires_at")),
         ("pushes from", sources(mirror)),
         ("open losses", field(mirror, "losses_open")),
@@ -691,6 +707,10 @@ mod tests {
             "source_prefixes": ["192.0.2.10/32", "198.51.100.0/24"],
             "stale": false,
             "losses_open": 3,
+            "changes_left": 2,
+            "change_reserve": 30,
+            "change_held": true,
+            "held_change_due": "2026-11-20T08:10:00Z",
             "counts": { "scopes": 1, "reservations": 30, "leases": 60, "losses": 4 },
         });
         let text = describe_mirror(&mirror);
@@ -706,6 +726,20 @@ mod tests {
         assert_eq!(sources(&json!({})), "anywhere");
         assert!(text.contains("interval       60 s"), "{text}");
         assert!(text.contains("last push      -"), "{text}");
+        assert!(text.contains("changes left   2 of 30"), "{text}");
+        assert!(
+            text.contains("change due     2026-11-20T08:10:00Z"),
+            "{text}"
+        );
+        let held = describe_mirror(&json!({ "change_held": true }));
+        assert!(
+            held.contains("change due     held until the clock is trusted"),
+            "{held}"
+        );
+        assert!(
+            describe_mirror(&json!({})).contains("change due     -"),
+            "nothing held"
+        );
         assert!(
             text.contains("1 scopes, 30 reservations, 60 leases, 4 losses"),
             "{text}"

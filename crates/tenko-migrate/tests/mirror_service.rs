@@ -465,6 +465,13 @@ async fn a_held_clock_stores_no_configuration_and_the_leases_carry_none() {
         // Its leases are due too, but they would carry the new configuration unaudited.
         assert!(push_to(&lab, &lab.service, 600, churned).await);
         assert_eq!(stored(&lab).await, (1, 1));
+        let item = lab.service.get(lab.id).await.expect("the item");
+        assert!(item.change_held, "the change is held");
+        assert_eq!(
+            item.held_change_due, None,
+            "no time while the clock is held"
+        );
+        assert_eq!(item.change_reserve, tenko_core::migrate::CHANGE_RESERVE);
         // The lease floor holds as before.
         let mut leases = fixture(3);
         leases.dhcp.leases.truncate(10);
@@ -542,8 +549,48 @@ async fn an_absurd_reserve_time_holds_every_change_and_the_mirror_still_answers(
 
     push_to(&lab, &lab.service, 10, inactive(2)).await;
     assert_eq!(stored(&lab).await, (1, 1), "held, never an overflow");
-    lab.service.get(lab.id).await.expect("the item");
-    assert_eq!(lab.service.list().await.expect("the list").len(), 1);
+    let item = lab.service.get(lab.id).await.expect("the item");
+    assert_eq!(item.changes_left, 0);
+    assert!(item.held_change_due.is_some_and(|due| due > lab.env.now()));
+    let list = lab.service.list().await.expect("the list");
+    assert_eq!(list.iter().map(|item| item.changes_left).sum::<u32>(), 0);
+}
+
+#[tokio::test]
+async fn a_held_change_is_shown_with_its_due_time_until_a_push_stores_it() {
+    let lab = Lab::new().await;
+    let at = |secs: u64| lab.start.checked_add(Duration::from_secs(secs));
+    let shown = |service: Arc<MirrorService>| async move {
+        let item = service.get(lab.id).await.expect("item");
+        (item.changes_left, item.held_change_due)
+    };
+    lab.at(0);
+    assert_eq!(shown(Arc::clone(&lab.service)).await, (30, None));
+    for sequence in 1..=30 {
+        push_to(&lab, &lab.service, (sequence - 1) * 10, turn(sequence)).await;
+    }
+    push_to(&lab, &lab.service, 590, turn(31)).await;
+    assert_eq!(shown(Arc::clone(&lab.service)).await, (0, at(600)));
+    let newest = lab
+        .service
+        .newest(lab.id, lab.pusher_token())
+        .expect("held");
+    assert_eq!(newest.hash, content_hashes(&turn(31)).expect("hashes").0);
+    // Another controller reads the same reserve and holds no change of its own.
+    let other = service_on(lab.env.store.clone(), &lab.env);
+    assert_eq!(shown(Arc::clone(&other)).await, (0, None));
+    // A third configuration stored there: the older held push here no longer waits.
+    let mut third = fixture(33);
+    third.losses.entries[0].detail.push_str(" (changed)");
+    push_to(&lab, &other, 600, third.clone()).await;
+    assert_eq!(stored(&lab).await, (33, 31));
+    assert_eq!(shown(Arc::clone(&lab.service)).await, (0, None));
+    // A newer push of the stored configuration holds nothing.
+    third.sequence = 34;
+    assert!(!push_to(&lab, &other, 610, third).await);
+    assert_eq!(shown(Arc::clone(&other)).await, (0, None));
+    lab.at(1_200);
+    assert_eq!(shown(other).await, (1, None));
 }
 
 #[tokio::test]

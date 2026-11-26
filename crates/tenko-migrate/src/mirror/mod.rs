@@ -54,6 +54,21 @@ pub struct MirrorItem {
     /// push, which may be older than the last one (`last_sequence`) by up to ten minutes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_sequence: Option<u64>,
+    /// How many changed configurations can be stored at once now, of `change_reserve`; one
+    /// more every ten minutes.
+    #[serde(default)]
+    pub changes_left: u32,
+    /// How many changed configurations a full reserve stores at once (`CHANGE_RESERVE`).
+    #[serde(default)]
+    pub change_reserve: u32,
+    /// Whether this controller holds a changed configuration that is not stored yet.
+    #[serde(default)]
+    pub change_held: bool,
+    /// When the changed configuration this controller holds is stored at the earliest: by
+    /// the first push from then on whose configuration still differs. None when it holds
+    /// none, and while the node's clock guard holds its clock, which has to be trusted first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub held_change_due: Option<tenko_core::Timestamp>,
     /// The counts of the stored snapshot: scopes, reservations, leases.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub counts: Option<SnapshotCounts>,
