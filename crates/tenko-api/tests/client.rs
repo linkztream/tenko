@@ -971,17 +971,20 @@ async fn text_answers_are_returned_as_text() {
     .await;
     let client = stub.client();
     assert_eq!(
-        client.get_text("/export/prefixes.csv").await.expect("csv"),
+        client.get_text("/exports/prefixes.csv").await.expect("csv"),
         csv
     );
     let error = client
-        .get_text("/export/prefixes.csv")
+        .get_text("/exports/prefixes.csv")
         .await
         .expect_err("not UTF-8");
     assert!(matches!(error, ClientError::Decode(_)), "{error:?}");
 
     let requests = stub.requests().await;
-    assert_eq!(requests[0].line, "GET /api/v1/export/prefixes.csv HTTP/1.1");
+    assert_eq!(
+        requests[0].line,
+        "GET /api/v1/exports/prefixes.csv HTTP/1.1"
+    );
     assert_eq!(requests[0].header("accept"), Some("*/*"));
 }
 

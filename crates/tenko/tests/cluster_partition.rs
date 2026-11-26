@@ -13,7 +13,7 @@ mod serve_support;
 use cluster_support::scenarios::{SplitOptions, split_two_against_one};
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_split_two_against_one_queues_on_the_minority_and_settles_after_the_heal() {
     let split = split_two_against_one(SplitOptions::default());
     println!(

@@ -48,7 +48,7 @@ fn writes_commit(lab: &ClusterLab, target: u64, what: &str) -> u64 {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn mixed_versions_needs_a_second_binary() {
     let Some(old) = std::env::var_os(OLD_BIN).map(PathBuf::from) else {
         println!(

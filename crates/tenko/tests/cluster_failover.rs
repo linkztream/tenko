@@ -17,7 +17,7 @@ use cluster_support::{
 };
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn the_leader_is_killed_under_load() {
     let summary = leader_killed_under_load();
     println!(
@@ -32,7 +32,7 @@ fn the_leader_is_killed_under_load() {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_follower_is_killed_under_load() {
     let mut lab = ClusterLab::start(3);
     let leader = lab.leader();
@@ -85,7 +85,7 @@ fn a_follower_is_killed_under_load() {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn every_controller_restarts_with_its_data() {
     let mut lab = ClusterLab::start(3);
     let leader = lab.leader();

@@ -27,7 +27,7 @@ fn mib(bytes: u64) -> f64 {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_member_rejoins_with_an_empty_data_directory() {
     let mut lab = ClusterLab::start(3);
     let leader = lab.leader();
@@ -87,7 +87,7 @@ fn a_member_rejoins_with_an_empty_data_directory() {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_dead_voter_is_replaced() {
     let mut lab = ClusterLab::start_with(
         3,
@@ -140,7 +140,7 @@ fn a_dead_voter_is_replaced() {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_revoked_controller_leaves_and_cannot_come_back() {
     let mut lab = ClusterLab::start(3);
     let leader = lab.leader();
@@ -258,7 +258,7 @@ fn runs_cut_off(lab: &mut ClusterLab, id: u64) {
 /// there and learns that it was revoked: the installation's first revocation reaches every
 /// controller, whose revocation lists were empty until then.
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_probe_revoked_through_another_controller_is_cut_off() {
     let mut lab = ClusterLab::start(3);
     let follower = lab.followers()[0];
@@ -295,7 +295,7 @@ fn a_probe_revoked_through_another_controller_is_cut_off() {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn the_leader_steps_down_under_load() {
     let lab = ClusterLab::start(3);
     let leader = lab.leader();

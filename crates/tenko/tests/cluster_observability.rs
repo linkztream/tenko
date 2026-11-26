@@ -58,7 +58,7 @@ fn complete_snapshot(snapshot: &Value, ids: &BTreeSet<u64>) -> bool {
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn the_metrics_topic_of_a_follower_shows_every_controller_and_the_sum() {
     let lab = ClusterLab::start(3);
     let follower = lab.followers()[0];
@@ -135,7 +135,7 @@ fn descends_from(span: &Span, ancestor: &Span, by_id: &HashMap<Vec<u8>, &Span>) 
 }
 
 #[test]
-#[ignore = "slow lab scenario, nightly"]
+#[ignore = "slow lab scenario, weekly"]
 fn a_write_through_a_follower_is_one_trace_across_controllers() {
     let receiver = Receiver::start();
     let lab = ClusterLab::start_with(
