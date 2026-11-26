@@ -454,7 +454,6 @@ function Invoke-FakeTenko {
         '^POST /dns/zones/([^/]+)/flip$' { $w.tzones[$Matches[1]].kind = $Body.to; return [ordered]@{} }
         '^DELETE /dns/zones/(.+)$' { $w.tzones.Remove($Matches[1]); return $null }
         '^(POST|PATCH) /dns/' { return [ordered]@{} }
-        '^GET /migrate/runs/[^/]+/heartbeat$' { return [ordered]@{} }
         '^GET /migrate/runs/' { return [ordered]@{ window = $w.window } }
         '^PUT /migrate/runs/' { return [ordered]@{} }
         '^GET /migrate/takeovers$' {

@@ -489,6 +489,16 @@ Describe 'The DHCP servers of the domain' {
 Describe 'The objects of the run' {
     BeforeEach { Install-FakeWorld }
 
+    It 'sends the plan of its first sitting value for value in the next one, read back from the state file' {
+        # Tenko joins a sitting to the open run of its domain only for an equal plan.
+        $script:sentPlans = [System.Collections.ArrayList]::new()
+        Mock Request-TkApproval { [void]$script:sentPlans.Add([System.Text.Encoding]::UTF8.GetString((ConvertTo-TkJsonByte $Plan))); $script:TkConn.Pinned = ('ab' * 32); '0190d1c2-0000-7000-8000-00000000b001' }
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 0 -Because $script:lastError
+        $script:sentPlans.Count | Should -Be 2
+        $script:sentPlans[1] | Should -BeExactly $script:sentPlans[0]
+    }
+
     It 'an account of the run''s name that this run did not create is refused and survives the reverse' {
         $script:world.accounts['tenko-mirror'] = 'S-1-5-21-1000-2000-3000-999'
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1

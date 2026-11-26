@@ -120,6 +120,17 @@ Describe 'The answer' {
     It 'names a refusal of the delegated session as such' {
         $server.answer = Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.delegation.refused","status":403,"detail":"outside the allow-list"}'
         { Invoke-Tenko -Method POST -Path '/dns/zones' -Body ([ordered]@{ name = 'corp.example.test' }) } | Should -Throw "*auth.delegation.refused*does not open POST /dns/zones to a takeover's session*"
+        $server.answer = Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.delegation.refused","status":403,"detail":"outside the allow-list","params":{"reason":"unlisted"}}'
+        { Invoke-Tenko -Method POST -Path '/dns/zones' -Body ([ordered]@{ name = 'corp.example.test' }) } | Should -Throw "*does not open POST /dns/zones to a takeover's session*"
+    }
+
+    It 'says that a step open only after a fresh approval needs a new sitting' {
+        $server.answer = Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.delegation.refused","status":403,"detail":"a delegated session may not do this (condition)","params":{"reason":"condition"}}'
+        { Invoke-Tenko -Method POST -Path '/migrate/mirrors' -Body ([ordered]@{ name = 'dhcp1' }) } | Should -Throw "*within five minutes of the sitting's approval: run the script again for a new approval*"
+        $server.answer = Get-TestAnswer -Status 403 -Type 'application/problem+json' -Body '{"code":"auth.delegation.refused","status":403,"detail":"a delegated session may not do this (taken)","params":{"reason":"taken"}}'
+        $failure = $null
+        try { [void](Invoke-Tenko -Method POST -Path '/migrate/mirrors' -Body ([ordered]@{ name = 'dhcp1' })) } catch { $failure = $_.Exception.Message }
+        $failure | Should -BeLike '*may not do this (taken)' -Because 'another reason adds no hint'
     }
 
     It 'reads the CA root as PEM only where asked' {

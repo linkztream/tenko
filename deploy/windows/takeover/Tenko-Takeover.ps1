@@ -876,7 +876,11 @@ function Invoke-TkCall {
     if ($null -ne $Body) { $bytes = ConvertTo-TkJsonByte $Body }
     $answer = Invoke-TkHttp -Method $Method -Path "/api/v1$Path" -Body $bytes
     if ($Expect -notcontains $answer.Status) {
-        $hint = $(if ($answer.Code -eq 'auth.delegation.refused') { " (this node's release does not open $Method $Path to a takeover's session: the takeover cannot go on with it)" } else { '' })
+        $reason = Get-TkField (Get-TkField $answer.Json 'params') 'reason'
+        $hint = $(if ($answer.Code -ne 'auth.delegation.refused') { '' }
+            elseif ($reason -eq 'condition') { " (this step is open to a takeover's session only within five minutes of the sitting's approval: run the script again for a new approval)" }
+            elseif ($null -eq $reason -or $reason -eq 'unlisted') { " (this node's release does not open $Method $Path to a takeover's session: the takeover cannot go on with it)" }
+            else { '' })
         $failure = [System.Exception]::new("Tenko refused $Method $Path with $($answer.Status) $($answer.Code): $($answer.Detail)$hint")
         $failure.Data['tk.status'] = [int]$answer.Status
         $failure.Data['tk.code'] = [string]$answer.Code
@@ -2671,7 +2675,6 @@ function Confirm-TkWindow {
         $run = Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)"
         $window = Get-TkField $run 'window'
         if ($null -ne $window) { break }
-        [void](Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)/heartbeat")
         Write-TkNote 'Waiting for the window to be started on the run page (Ctrl+C ends the script with nothing changed; run it again later).'
         Start-Sleep -Seconds 30
     }
