@@ -679,7 +679,7 @@ format with the current binary and finds its objects. A fixture is the directory
 |---|---|
 | `store/` | The closed store written by a binary whose format is N, with its marker |
 | `fixture-kek.hex` | The key-encryption key of the fixture, made for it and protecting nothing else |
-| `expected.json` | The format, the version that wrote it, and the objects the test must find (prefixes, addresses, hosts, VLANs) |
+| `expected.json` | The format, the version that wrote it, and the objects the test must find (prefixes, addresses, hosts, VLANs; from format 8 on the DNS zones, each with whether it is served) |
 
 For every fixture the test copies it to a fresh node, runs `tenko upgrade check --json` (the
 verdict is `current` for the current format and `migration_needed` for an earlier one),
@@ -687,6 +687,15 @@ starts the server, signs in, lists the objects through the API and compares them
 `expected.json`, asks `/system/updates` for the format, stops the server, and checks that a
 migrated start left a copy in `upgrade-backups` and that the marker names the current
 format.
+
+The test's nodes run the `controller` and `dns` roles, so that the zone routes answer. The
+generator writes the objects through the API on a node in the mode of the earlier fixtures
+(reverse proxy). From format 8 on that node has no integration listener
+(`[integrations] listen = []`), so the fixture holds no integration certificate; after the
+node stops, the generator creates one unserved secondary zone in the closed store through
+the zone service, stamped as a takeover run's create stamps it, and the test finds it
+unserved after the start. No earlier fixture holds a zone; that a zone written before format 8 reads as
+served is a unit test of `tenko-core`.
 
 The rules for fixtures:
 
