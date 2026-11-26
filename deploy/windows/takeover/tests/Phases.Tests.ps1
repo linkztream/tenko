@@ -227,7 +227,7 @@ Describe 'A failure at a step' {
         @{ step = '2.gpo'; block = 'NewGpo' }
         @{ step = '2.tenko-zones'; route = '^POST /dns/zones$' }
         @{ step = '2.tenko-pair'; route = 'prepare$' }
-        @{ step = '3.review'; route = '^GET /migrate/runs/' }
+        @{ step = '3.review'; route = '^GET /migrate/runs/'; skip = 1 }
         @{ step = '4.configuration'; block = 'ReadDhcpConfiguration' }
         @{ step = '4.replicate'; block = 'Replicate' }
         @{ step = '4.tenko-flip'; route = 'flip$' }
@@ -240,11 +240,12 @@ Describe 'A failure at a step' {
     ) {
         Install-FakeWorld
         if ($_.ContainsKey('block')) { $script:world.failAt = $_.block } else { $script:world.failRoute = $_.route }
+        if ($_.ContainsKey('skip')) { $script:world.failSkip = $_.skip }
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
         $state = Read-State
         $state.steps[$step].state | Should -Be 'failed'
         $state.steps[$step].error | Should -Match 'injected'
-        # A new process: the mirrors' tokens are gone, and the exporter step makes them anew.
+        # A new process: the mirrors' tokens are gone, and the mirrors step makes them anew.
         # A sitting that starts the DNS window confirms it; the DHCP window asks its choice.
         $resume = $(if ($step -like '5.*') { @('c', 'Continue') } else { @('c', 'corp.example.test', 'Continue') })
         Invoke-FakeRun -Answers $resume | Should -Be 3 -Because $script:lastError
@@ -268,6 +269,95 @@ Describe 'A failure at a step' {
         Invoke-FakeRun -Reverse | Should -Be 1
         (Read-State).steps[$step].state | Should -Be 'failed'
         Invoke-FakeRun | Should -Be 0 -Because $script:lastError
+    }
+}
+
+Describe 'The run''s mirrors' {
+    BeforeEach { Install-FakeWorld }
+
+    It 'are made and paired first after the collect, and made anew and paired by a resume before the exporter holds their tokens' {
+        $script:world.failAt = 'InstallExporter'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:world.atMirror | Should -Be $script:world.atCollect -Because 'no call to Windows and no question stands between the collect and the mirrors'
+        $calls = @($script:world.calls)
+        $calls.IndexOf('tenko|pair') | Should -BeLessThan $calls.IndexOf('dc1|ExportDhcp')
+        $first = @($script:world.mirrors.Keys)
+        $script:world.calls.Clear()
+        Invoke-FakeRun -Answers @('c', 'corp.example.test', 'Continue') | Should -Be 3 -Because $script:lastError
+        $script:world.atMirror | Should -Be $script:world.atCollect
+        $now = @($script:world.mirrors.Keys)
+        $now | Should -HaveCount 2
+        $now | Where-Object { $first -contains $_ } | Should -BeNullOrEmpty
+        $calls = @($script:world.calls)
+        $calls.IndexOf('tenko|pair') | Should -BeLessThan $calls.IndexOf('srv1|InstallExporter')
+        $script:world.pairBody | Should -BeExactly "{`"partner`":`"$($now[1])`"}"
+        $script:world.mirrors[$now[0]].partner | Should -Be $now[1]
+    }
+
+    It 'of one DHCP server are not paired' {
+        $script:world.authorized = [System.Collections.ArrayList]@('dc1')
+        $script:world.failAt = 'ExportDhcp'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        @($script:world.mirrors.Keys) | Should -HaveCount 1
+        $script:world.calls | Should -Not -Contain 'tenko|pair'
+    }
+
+    It 'are deleted first by a reverse of phase 2, before any call to Windows after the collect' {
+        $script:world.failAt = 'NewGpo'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+        $script:world.atMirror | Should -Be $script:world.atCollect
+        @($script:world.mirrors.Keys) | Should -BeNullOrEmpty
+    }
+
+    It 'that a lost create answer left are deleted by the run''s own list, on a resume and on a reverse' {
+        $script:world.loseCreate = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $lost = @($script:world.mirrors.Keys)[0]
+        @((Read-State).mirrors.Values) | Should -Not -Contain $lost
+        Invoke-FakeRun -Answers @('c', 'corp.example.test', 'Continue') | Should -Be 3 -Because $script:lastError
+        $script:world.tenkoCalls | Should -Contain "DELETE /migrate/mirrors/$lost"
+        @($script:world.mirrors.Keys) | Should -HaveCount 2
+        Install-FakeWorld
+        $script:world.loseCreate = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+        @($script:world.mirrors.Keys) | Should -BeNullOrEmpty
+    }
+
+    It 'are waited for no longer than the limit, and the failure names the limit, the server and the exporter''s log' {
+        $script:world.noPush = $true
+        $script:TkPushWaitSec = 0
+        # Without the limit the wait polls on, and the step fails with this error instead.
+        $script:polls = 0
+        Mock Start-Sleep { if (++$script:polls -gt 3) { throw 'polled past the limit' } }
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        (Read-State).steps['2.tenko-pair'].error | Should -BeExactly 'the exporter of dc1.corp.example.test has not pushed within 0 minutes; see its log in Program Files\Tenko\takeover\mirror\dc1\state on srv1.corp.example.test and its mirror page'
+    }
+
+    It 'are made anew and the exporter installed again with them when a reverse stops at the exporter and the run goes on (phase 2 <phase2> before the reverse)' -ForEach @(
+        @{ phase2 = 'failed'; route = 'prepare$'; skip = 0 }
+        @{ phase2 = 'done'; route = '^GET /migrate/runs/'; skip = 1 }
+    ) {
+        $script:world.failRoute = $route
+        $script:world.failSkip = $skip
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        # A failure at the review leaves phase 2 done; its reverse comes first.
+        if ($phase2 -eq 'done') { Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError }
+        $script:world.failAt = 'RemoveExporter'
+        Invoke-FakeRun -Reverse | Should -Be 2
+        @($script:world.mirrors.Keys) | Should -BeNullOrEmpty
+        (Read-State).phases['2'] | Should -Be 'failed'
+        Invoke-FakeRun -Answers @('c', 'corp.example.test', 'Continue') | Should -Be 3 -Because $script:lastError
+        @($script:world.mirrors.Keys) | Should -HaveCount 2
+        @($script:world.exported.Values) | Should -Be @($script:world.mirrors.Keys)
+    }
+
+    It 'listed by the run under an id of another form get no DELETE' {
+        $script:world.runMirrors['dc1.corp.example.test'] = [ordered]@{ server = 'dc1.corp.example.test'; mirror = '../x' }
+        $script:world.failAt = 'ExportDhcp'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        @($script:world.tenkoCalls | Where-Object { $_ -like 'DELETE *' }) | Should -BeNullOrEmpty
     }
 }
 

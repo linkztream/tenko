@@ -35,7 +35,7 @@ Describe 'The code' {
 
     It 'invokes only its own step blocks and, on the mirror host, the installer it copied' {
         $targets = @($commands | Where-Object { $_.InvocationOperator -ne 'Unknown' -and $null -eq $_.GetCommandName() } | ForEach-Object { $_.CommandElements[0].Extent.Text } | Sort-Object -Unique)
-        $targets | Should -Be @('$ExporterPath', '$installer', '$step.Do', '$step.Undo') -Because 'a dot-sourced exporter is the file whose digest was checked'
+        $targets | Should -Be @('$ExporterPath', '$installer', '$step.Again', '$step.Do', '$step.Undo') -Because 'a dot-sourced exporter is the file whose digest was checked'
     }
 
     It 'opens every session with Kerberos, to a host name, and never with CredSSP or Negotiate' {

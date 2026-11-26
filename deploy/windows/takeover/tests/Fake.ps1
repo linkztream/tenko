@@ -113,6 +113,10 @@ function Get-FakeWorld {
         failAt = ''; failOn = ''; failed = $false; acks = 3
         # Tenko
         mirrors = [ordered]@{}; tzones = [ordered]@{}; jobs = [ordered]@{}; window = $null; scopesOn = $false
+        # The run's list of mirrors by server; a create may commit and lose its answer
+        # (loseCreate); an exporter may never push (noPush); where the logs stood at the
+        # collect and at the sitting's first mirror call; the mirror each server's exporter holds.
+        runMirrors = [ordered]@{}; loseCreate = $false; noPush = $false; pairBody = ''; atCollect = ''; atMirror = ''; exported = [ordered]@{}
         tenkoCalls = [System.Collections.ArrayList]@()
         failRoute = ''; failSkip = 0; tenkoFailed = $false
         badMirror = $false; badToken = $false; fingerprint = ''
@@ -227,6 +231,7 @@ function Invoke-FakeRemote {
             foreach ($key in $keys) { if ($have -notcontains $key) { throw "A parameter cannot be found that matches parameter name '$key'." } }
             if (-not ($a[6] -is [securestring])) { throw 'the token reached the installer as something else than a SecureString' }
             if ($w.tasks -notcontains $a[7]) { [void]$w.tasks.Add($a[7]) }
+            $w.exported[$a[9]] = $a[2]
             $w.batchRight = $true
             @{ Pending = $false; Stored = $true }
         }
@@ -390,22 +395,30 @@ function Invoke-FakeTenko {
     param([string]$Method, [string]$Path, [object]$Body)
     $w = $script:world
     [void]$w.tenkoCalls.Add("$Method $Path")
+    if ($Path -like '/migrate/mirrors*' -and -not $w.atMirror) { $w.atMirror = "$($w.calls.Count)/$($w.answers.Count)" }
     if ($w.failRoute -and "$Method $Path" -match $w.failRoute -and -not $w.tenkoFailed -and $w.failSkip-- -le 0) { $w.tenkoFailed = $true; throw "Tenko refused $Method $Path with 503 injected" }
     $route = "$Method $($Path -replace '\?.*$', '')"
     $query = $(if ($Path -match '\?(.*)$') { $Matches[1] } else { '' })
     switch -Regex ($route) {
         '^POST /migrate/mirrors$' {
             $id = [guid]::NewGuid().ToString()
-            $w.mirrors[$id] = [ordered]@{ id = $id; name = $Body.name; last_sequence = 1 }
+            $w.mirrors[$id] = [ordered]@{ id = $id; name = $Body.name; last_sequence = $(if (-not $w.noPush) { 1 }) }
+            $w.runMirrors[$Body.name] = [ordered]@{ server = $Body.name; mirror = $id }
+            [void]$w.calls.Add('tenko|mirror')
+            if ($w.loseCreate) { $w.loseCreate = $false; throw 'the connection to Tenko failed: injected after the create' }
             return [ordered]@{ mirror = [ordered]@{ id = $(if ($w.badMirror) { 'not-an-id' } else { $id }); token = 'token-record-id' }; token = (ConvertTo-FakeSecure $(if ($w.badToken) { 'oops' } else { 'tnkc_' + ('a' * 40) })); ca_fingerprint = $w.fingerprint }
         }
         '^DELETE /migrate/mirrors/(.+)$' { $w.mirrors.Remove($Matches[1]); return $null }
-        '^PATCH /migrate/mirrors/' { return [ordered]@{} }
+        '^PATCH /migrate/mirrors/([^/]+)$' {
+            $w.mirrors[$Matches[1]].partner = $Body.partner
+            $w.pairBody = [System.Text.Encoding]::UTF8.GetString((ConvertTo-TkJsonByte $Body))
+            [void]$w.calls.Add('tenko|pair'); return [ordered]@{}
+        }
         '^GET /migrate/mirrors/[^/]+/snapshot$' {
             $exporter = Join-Path (Join-Path (Join-Path (Join-Path $PSScriptRoot '..') '..') 'mirror') 'Tenko-DhcpMirror.ps1'
             return (Get-TkMappedSnapshot -Raw $w.raw -Server ($w.mirrors[$Path.Split('/')[3]].name) -ExporterPath $exporter)
         }
-        '^GET /migrate/mirrors/[^/]+$' { return [ordered]@{ last_sequence = 1 } }
+        '^GET /migrate/mirrors/([^/]+)$' { return [ordered]@{ last_sequence = (Get-TkField $w.mirrors[$Matches[1]] 'last_sequence') } }
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/revert$' {
             $w.reverts++
             if ($w.revertFailAt -eq $w.reverts) { throw "Tenko refused $Method $Path with 503 injected" }
@@ -452,7 +465,7 @@ function Invoke-FakeTenko {
         '^POST /dns/zones/([^/]+)/flip$' { $w.tzones[$Matches[1]].kind = $Body.to; return [ordered]@{} }
         '^DELETE /dns/zones/(.+)$' { $w.tzones.Remove($Matches[1]); return $null }
         '^(POST|PATCH) /dns/' { return [ordered]@{} }
-        '^GET /migrate/runs/' { return [ordered]@{ window = $w.window } }
+        '^GET /migrate/runs/' { return [ordered]@{ window = $w.window; mirrors = @($w.runMirrors.Values) } }
         '^PUT /migrate/runs/' { return [ordered]@{} }
         '^GET /migrate/takeovers$' {
             # One item per takeover job with its scope's ACK counter (acksByScope, the world's
@@ -502,6 +515,7 @@ function Install-FakeWorld {
     $script:TkOffline = $false
     $script:TkPending = @()
     $script:TkPasswordChangeSec = 600
+    $script:TkPushWaitSec = 600
     Mock Assert-TkHost { }
     Mock Get-TkTokenSid { @("$($script:FakeSid)-1105", "$($script:FakeSid)-512", "S-1-5-32-544") }
     # The test drive belongs to the test's own account: the state tree is trusted here, and
@@ -524,7 +538,8 @@ function Install-FakeWorld {
         $script:TkConn.Host = 'tenko.corp.example.test'; $script:TkConn.Port = 8443; $script:TkConn.Address = [System.Net.IPAddress]::Parse('192.0.2.53')
     }
     Mock Test-TkReachable { -not $script:world.unreachable }
-    Mock Request-TkApproval { $script:TkConn.Pinned = ('ab' * 32); '0190d1c2-0000-7000-8000-00000000b001' }
+    # The collect: where the Windows log and the queued answers stand, against the first mirror call.
+    Mock Request-TkApproval { $script:TkConn.Pinned = ('ab' * 32); $script:world.atCollect = "$($script:world.calls.Count)/$($script:world.answers.Count)"; $script:world.atMirror = ''; '0190d1c2-0000-7000-8000-00000000b001' }
     Mock Test-TkServedRoot { }
     Mock Close-TkSession { }
     Mock Invoke-TkCall { Invoke-FakeTenko -Method $Method -Path $Path -Body $Body }

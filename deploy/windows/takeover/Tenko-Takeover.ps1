@@ -82,6 +82,7 @@ $script:TkWindowHoldSec = 900              # the DNS window's confirmation stand
 $script:TkPasswordChangeSec = 600          # Tenko changes its account's password within 10 minutes
 $script:TkMinLeaseSec = 3600               # a scope under an hour refuses the DHCP window
 $script:TkPollSec = 5
+$script:TkPushWaitSec = 600                # phase 2 waits 10 minutes for the exporter's first pushes
 $script:TkReplicaWaitSec = 300             # a controller's replica shows an authorization change within 5 minutes
 $script:TkResumeTries = 3                  # calls to turn Tenko's scopes on again before the run stops
 $script:TkGpoName = 'Tenko takeover: DNS client registration off'
@@ -2252,7 +2253,8 @@ function Invoke-TkStepList {
     foreach ($step in $Steps) {
         $key = "$Phase.$($step.Name)"
         $record = Get-TkField $State.Data.steps $key
-        if ($null -ne $record -and $record.state -eq 'done') { continue }
+        # A done step runs again while its Again block says so.
+        if ($null -ne $record -and $record.state -eq 'done' -and -not ($step.ContainsKey('Again') -and (& $step.Again))) { continue }
         $State.Data.steps[$key] = [ordered]@{ state = 'running'; at = [datetime]::UtcNow.ToString('o') }
         Save-TkState $State
         try {
@@ -2275,6 +2277,11 @@ function Invoke-TkStepList {
 function Undo-TkStepList {
     param([hashtable]$State, [string]$Phase, [object[]]$Steps)
     [array]::Reverse($Steps)
+    # A reverse that stops leaves the phase to resume or to reverse, never to pass.
+    $State.Data.phases[$Phase] = 'failed'
+    Save-TkState $State
+    # Steps marked UndoFirst are reversed before the rest; a refusal there stops the reverse.
+    $Steps = @($Steps | Where-Object { $_.ContainsKey('UndoFirst') }) + @($Steps | Where-Object { -not $_.ContainsKey('UndoFirst') })
     foreach ($step in $Steps) {
         $key = "$Phase.$($step.Name)"
         $record = Get-TkField $State.Data.steps $key
@@ -2341,13 +2348,26 @@ function Assert-TkSid {
     return $Sid
 }
 
+function Get-TkRunMirror {
+    # The run's mirrors as Tenko lists them, by server, each id of its exact form. They serve the
+    # deletes alone, so that a create whose answer was lost holds no server.
+    param([hashtable]$State)
+    $listed = @{}
+    if ($script:TkOffline) { return $listed }
+    foreach ($entry in @(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)") 'mirrors')) {
+        $id = [string](Get-TkField $entry 'mirror')
+        if ($id -cmatch $script:TkUuidPattern) { $listed[[string](Get-TkField $entry 'server')] = $id }
+    }
+    return $listed
+}
+
 function Get-TkMirrorToken {
     # The mirror of a DHCP server and its token, which lives in this process only: a mirror
     # whose token an earlier sitting held is made anew, within five minutes of the approval.
-    param([hashtable]$State, [System.Collections.IDictionary]$Server)
+    # The run's own list names the mirror of a create whose answer was lost.
+    param([hashtable]$State, [System.Collections.IDictionary]$Server, [string]$Listed)
     $r = $State.Data.readings
-    $old = Get-TkField $State.Data.mirrors $Server.name
-    if ($old) { [void](Invoke-Tenko -Method DELETE -Path "/migrate/mirrors/$old" -Expect @(200, 204, 404)) }
+    foreach ($old in @(@((Get-TkField $State.Data.mirrors $Server.name), $Listed) | Where-Object { $_ } | Select-Object -Unique)) { [void](Invoke-Tenko -Method DELETE -Path "/migrate/mirrors/$old" -Expect @(200, 204, 404)) }
     $created = Invoke-Tenko -Method POST -Path '/migrate/mirrors' -Body ([ordered]@{ name = $Server.name; kind = 'windows-dhcp'; source_prefixes = @("$($r.mirror_host.address)/32") })
     $id = [string](Get-TkField (Get-TkField $created 'mirror') 'id')
     $token = Get-TkField $created 'token'
@@ -2469,9 +2489,21 @@ function Get-TkPhase2 {
     $installerFile = $Payloads.installer
     $steps = @(
         @{ Name = 'mirrors'
-            # First, within five minutes of the approval: the creation mints the tokens.
-            Do = { foreach ($server in $r.dhcp) { if (-not $script:TkTokens.ContainsKey($server.name)) { Get-TkMirrorToken -State $State -Server $server } } }
-            Undo = { foreach ($id in @($State.Data.mirrors.Values)) { [void](Invoke-Tenko -Method DELETE -Path "/migrate/mirrors/$id" -Expect @(200, 204, 404)) }; $State.Data.mirrors = [ordered]@{} }
+            # First, within five minutes of the approval: the creation mints the tokens and the
+            # pair is set. Made anew in every sitting until the exporter holds the tokens, and
+            # reversed first, while the approval is fresh.
+            Again = { $installed = Get-TkField $State.Data.steps '2.exporter'; $null -eq $installed -or $installed.state -ne 'done' }
+            UndoFirst = $true
+            Do = {
+                $listed = Get-TkRunMirror -State $State
+                foreach ($server in $r.dhcp) { if (-not $script:TkTokens.ContainsKey($server.name)) { Get-TkMirrorToken -State $State -Server $server -Listed $listed[$server.name] } }
+                $ids = @($State.Data.mirrors.Values)
+                if ($ids.Count -eq 2) { [void](Invoke-Tenko -Method PATCH -Path "/migrate/mirrors/$($ids[0])" -Body ([ordered]@{ partner = $ids[1] })) }
+            }
+            Undo = {
+                foreach ($id in @(@($State.Data.mirrors.Values) + @((Get-TkRunMirror -State $State).Values) | Select-Object -Unique)) { [void](Invoke-Tenko -Method DELETE -Path "/migrate/mirrors/$id" -Expect @(200, 204, 404)) }
+                $State.Data.mirrors = [ordered]@{}
+            }
         }
         @{ Name = 'backups'
             Do = {
@@ -2497,6 +2529,8 @@ function Get-TkPhase2 {
             Undo = { if (-not $r.mirror_host.tools) { [void](Invoke-TkRemote -Server $mirrorHost -Name SetFeature -Arguments @('RSAT-DHCP', $false)) } }
         }
         @{ Name = 'exporter'
+            # Installed again whenever this sitting minted tokens: a stopped reverse deleted the mirrors.
+            Again = { $script:TkTokens.Count -gt 0 }
             Do = {
                 Assert-TkInstallerContract -Path $installerFile.Path
                 $payloadDir = Protect-TkRemoteDirectory -Server $mirrorHost -Below @('takeover', 'payload')
@@ -2509,7 +2543,6 @@ function Get-TkPhase2 {
                 }
                 foreach ($server in $r.dhcp) {
                     $short = $server.name.Split('.')[0]
-                    if (-not $script:TkTokens.ContainsKey($server.name)) { Get-TkMirrorToken -State $State -Server $server }
                     $result = Invoke-TkRemote -Server $mirrorHost -Name InstallExporter -Arguments @($payloadDir, $url, $State.Data.mirrors[$server.name], $State.Data.tenko.fingerprint, $account, $credential, $script:TkTokens[$server.name], "Tenko DHCP mirror $short", "$mirrorDir\$short", $server.name, $installerFile.Sha256) | Select-Object -Last 1
                     if ($result.Pending -or -not $result.Stored) { throw "the exporter's first run for $($server.name) did not store its token (token.pending left or no token.dpapi)" }
                 }
@@ -2595,12 +2628,13 @@ function Get-TkPhase2 {
         }
         @{ Name = 'tenko-pair'
             Do = {
-                $ids = @($State.Data.mirrors.Values)
-                if ($ids.Count -eq 2) {
-                    [void](Invoke-Tenko -Method PATCH -Path "/migrate/mirrors/$($ids[0])" -Body ([ordered]@{ partner = $ids[1] }))
-                }
-                foreach ($id in $ids) {
-                    while ($null -eq (Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id") 'last_sequence')) { Start-Sleep -Seconds $script:TkPollSec }
+                $wait = [System.Diagnostics.Stopwatch]::StartNew()
+                foreach ($name in @($State.Data.mirrors.Keys)) {
+                    $id = $State.Data.mirrors[$name]
+                    while ($null -eq (Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id") 'last_sequence')) {
+                        if ($wait.Elapsed.TotalSeconds -ge $script:TkPushWaitSec) { throw "the exporter of $name has not pushed within $($script:TkPushWaitSec / 60) minutes; see its log in Program Files\Tenko\takeover\mirror\$($name.Split('.')[0])\state on $mirrorHost and its mirror page" }
+                        Start-Sleep -Seconds $script:TkPollSec
+                    }
                 }
                 foreach ($server in $r.dhcp) {
                     foreach ($scope in $server.scopes) {
