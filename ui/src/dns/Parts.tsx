@@ -9,7 +9,7 @@ import { ErrorNotice, Notice } from "../components/Notice";
 import { session } from "../auth/session";
 import { t } from "../i18n";
 import type { Origin, Zone, ZoneKind } from "./api";
-import { isReverse, servedNow, type CheckCode } from "./model";
+import { isReverse, type CheckCode } from "./model";
 
 /** The server has no DNS service yet (501, WP4.2 builds it). */
 export function notBuilt(err: unknown): boolean {
@@ -85,8 +85,8 @@ export function checkMessage(code: CheckCode): string {
   return t(`dns.check.${code}`);
 }
 
-/** The kind of a zone with its serving state: stub zones go through the forwarder, secondary zones are not served yet. */
-export function ZoneChips(props: { zone: Pick<Zone, "kind" | "name" | "reverse_of"> }) {
+/** The kind of a zone with its serving state: stub zones go through the forwarder, an unserved zone (a takeover run's copy) answers nothing. */
+export function ZoneChips(props: { zone: Pick<Zone, "kind" | "name" | "reverse_of" | "served"> }) {
   return (
     <span class="dns-chips">
       <span class="tag" data-testid="zone-kind" data-kind={props.zone.kind}>
@@ -102,7 +102,8 @@ export function ZoneChips(props: { zone: Pick<Zone, "kind" | "name" | "reverse_o
           {t("dns.zone.stub")}
         </span>
       </Show>
-      <Show when={!servedNow(props.zone.kind)}>
+      {/* An older node omits `served`: its zones are served. */}
+      <Show when={props.zone.served === false}>
         <span class="tag discrepancy" data-testid="zone-not-served" title={t("dns.zone.not_served_hint")}>
           {t("dns.zone.not_served")}
         </span>

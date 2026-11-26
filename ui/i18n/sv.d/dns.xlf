@@ -211,11 +211,11 @@
         <segment><source>Reverse</source><target>Omvänd</target></segment>
       </unit>
       <unit id="dns.zone.not_served">
-        <notes><note category="description">Tag of a secondary zone, which Phase 2 does not serve yet (transfers in come with WP6.1).</note></notes>
-        <segment><source>Not served yet</source><target>Tillhandahålls inte än</target></segment>
+        <notes><note category="description">Tag of a zone Tenko holds a copy of and does not serve (a takeover run creates it). The hint: Tenko answers nothing for it until the DNS window of its takeover serves it, or a flip to primary serves it at once; deleting it drops the copy; a takeover run is not closed while it holds one.</note></notes>
+        <segment><source>Not served</source><target>Tillhandahålls inte</target></segment>
       </unit>
       <unit id="dns.zone.not_served_hint">
-        <segment><source>Tenko keeps this zone but does not answer for it yet: transfers in come in a later slice.</source><target>Tenko sparar zonen men svarar inte för den än: överföringar in kommer i en senare etapp.</target></segment>
+        <segment><source>Tenko holds a copy of this zone and answers nothing for it. The DNS window of its takeover serves it, and a flip to primary serves it at once. Delete it to drop the copy. A takeover run is not closed while it holds one.</source><target>Tenko har en kopia av zonen men besvarar inga frågor för den. Övertagandets DNS-fönster tillhandahåller den, och Gör till primär tillhandahåller den direkt. Ta bort den för att släppa kopian. En övertagandekörning stängs inte medan den har en sådan kopia.</target></segment>
       </unit>
       <unit id="dns.zone.serial">
         <segment><source>Serial {serial}</source><target>Serienummer {serial}</target></segment>

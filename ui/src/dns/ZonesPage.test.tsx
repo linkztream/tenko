@@ -45,10 +45,17 @@ describe("the zone list", () => {
     expect(within(example).getByTestId("zone-origins").dataset.key).toBe("ipam,manual");
     expect(within(row("dns-zones", "2.0.192.in-addr.arpa")).getByTestId("zone-reverse")).toBeTruthy();
     expect(within(row("dns-zones", "lab.example.test")).getByTestId("zone-not-served")).toBeTruthy();
-    // A stub zone is answered through the forwarder (WP5.1): its own chip, not "not served yet".
+    // A stub zone is answered through the forwarder (WP5.1): its own chip, not "not served".
     expect(within(row("dns-zones", "corp.example.test")).queryByTestId("zone-not-served")).toBeNull();
     expect(within(row("dns-zones", "corp.example.test")).getByTestId("zone-stub")).toBeTruthy();
     expect(await axeViolations(view.container)).toEqual([]);
+  });
+
+  it("marks only an unserved zone, not every secondary", async () => {
+    dnsState().zones.find((zone) => zone.name === "lab.example.test")!.served = true;
+    open();
+    await loaded();
+    expect(within(row("dns-zones", "lab.example.test")).queryByTestId("zone-not-served")).toBeNull();
   });
 
   it("asks for the origin mix when the server does not report it", async () => {
@@ -80,7 +87,7 @@ describe("the zone list", () => {
     open();
     await loaded();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("Zoner");
-    expect(within(row("dns-zones", "lab.example.test")).getByTestId("zone-not-served").textContent).toBe("Tillhandahålls inte än");
+    expect(within(row("dns-zones", "lab.example.test")).getByTestId("zone-not-served").textContent).toBe("Tillhandahålls inte");
   });
 });
 

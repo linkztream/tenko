@@ -326,16 +326,9 @@ export function isOwned(origin: Origin): boolean {
 // ---------------------------------------------------------------------------------
 // Zones
 
-/** The kinds a Phase 2 node does not serve yet (transfers in come with WP6.1). */
-const NOT_SERVED: readonly ZoneKind[] = ["secondary"];
-
 /** Whether a zone kind takes the servers to ask in `source` (transfers, stub zones, forward zones). */
 export function hasSource(kind: ZoneKind): boolean {
   return kind === "secondary" || kind === "stub" || kind === "forward";
-}
-
-export function servedNow(kind: ZoneKind): boolean {
-  return !NOT_SERVED.includes(kind);
 }
 
 /** Whether a zone is a reverse zone (by its name or its IPAM prefix). */

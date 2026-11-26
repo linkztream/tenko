@@ -213,6 +213,7 @@ function newZone(
     soa_serial: soaSerial,
     soa: { mname: `ns1.${name}`, rname: `hostmaster.${name}`, refresh: 3600, retry: 900, expire: 1_209_600, minimum: 300, ttl: 3600 },
     source: null,
+    served: true,
     transfer: { allow: [], notify: [], require_tsig: false, xot: false },
     dnssec: { mode: "off" },
     rrsets: 0,
@@ -255,6 +256,7 @@ export function seedDns(ctx: DnsContext): DnsState {
     serial: "counter",
     soaSerial: 7,
     revision,
+    served: false,
     source: { primaries: [{ address: "198.51.100.53", port: 53, key: "xfr.example.test", tls_name: null, xot: false }] },
   });
   const corp = newZone(ctx, {
