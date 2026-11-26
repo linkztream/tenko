@@ -646,6 +646,26 @@ async fn a_controller_of_another_installation_is_refused() {
     assert_eq!(foreign.sink.batches().len(), 0);
 }
 
+/// A node whose certificate the controller refuses learns it when it connects, before it
+/// makes a call: the connection fails with the refusal.
+#[tokio::test]
+async fn a_refused_node_fails_to_connect_with_the_refusal() {
+    let home = Controller::start().await;
+    let foreign = Controller::start().await;
+    let dir = tempfile::tempdir().expect("dir");
+    let mut credentials = home.enroll(dir.path(), "probe-dmz").await;
+    credentials.ca_root = foreign.registry.ca().root_der().clone();
+    let config = credentials.client_config().expect("client config");
+    let refused = client::connect(&foreign.addr.to_string(), config)
+        .await
+        .expect_err("the controller refuses the node's certificate");
+    assert_eq!(
+        client::classify_transport(&refused).1.code,
+        "cluster.tls.refused",
+        "{refused}"
+    );
+}
+
 /// A node whose data is still unread when the controller refuses its certificate reads the
 /// refusal: the controller closes after the alert without resetting the connection. The
 /// test refuses eight connections, and every attempt must end cleanly with the alert: without

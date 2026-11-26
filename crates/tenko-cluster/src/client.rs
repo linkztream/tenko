@@ -307,12 +307,24 @@ async fn dial(
             io::Error::new(io::ErrorKind::TimedOut, format!("{target} did not answer"))
         })??;
     let _ = tcp.set_nodelay(true);
-    let tls = tokio::time::timeout(
-        CONNECT_TIMEOUT,
-        TlsConnector::from(config).connect(crate::mtls::server_name(&host), tcp),
-    )
+    let tls = tokio::time::timeout(CONNECT_TIMEOUT, async {
+        let mut tls = TlsConnector::from(config)
+            .connect(crate::mtls::server_name(&host), tcp)
+            .await?;
+        // The controller checks this node's certificate after the node's side of the
+        // handshake is done: wait for its first record (the HTTP/2 settings it sends at
+        // once, or the refusal), so a refusal fails here with its alert. The data stays
+        // buffered for HTTP/2.
+        tokio::io::AsyncBufReadExt::fill_buf(&mut tls).await?;
+        Ok::<_, io::Error>(tls)
+    })
     .await
-    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "the TLS handshake timed out"))??;
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            "the TLS handshake or the controller's first answer timed out",
+        )
+    })??;
     if tls.get_ref().1.alpn_protocol() != Some(crate::mtls::ALPN_H2) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
