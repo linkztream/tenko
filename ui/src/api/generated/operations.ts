@@ -300,6 +300,8 @@ export const apiOperations = [
   { id: "get_mirror_snapshot", method: "get", path: "/api/v1/migrate/mirrors/{id}/snapshot", tags: ["migrate"], summary: "Get the latest snapshot of a mirrored source" },
   { id: "push_mirror_snapshot", method: "put", path: "/api/v1/migrate/mirrors/{id}/snapshot", tags: ["migrate"], summary: "Push a snapshot of a mirrored source" },
   { id: "replace_mirror_token", method: "post", path: "/api/v1/migrate/mirrors/{id}/token", tags: ["migrate"], summary: "Replace the token of a mirrored source" },
+  { id: "get_run", method: "get", path: "/api/v1/migrate/runs/{id}", tags: ["migrate"], summary: "Get a takeover run" },
+  { id: "close_run", method: "post", path: "/api/v1/migrate/runs/{id}/close", tags: ["migrate"], summary: "Close a takeover run" },
   { id: "list_takeovers", method: "get", path: "/api/v1/migrate/takeovers", tags: ["migrate"], summary: "List takeover records" },
   { id: "get_takeover", method: "get", path: "/api/v1/migrate/takeovers/{id}", tags: ["migrate"], summary: "Get a takeover record" },
   { id: "create_move", method: "post", path: "/api/v1/moves", tags: ["moves"], summary: "Preview or start a move to another network" },

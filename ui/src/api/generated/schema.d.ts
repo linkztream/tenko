@@ -496,7 +496,7 @@ export interface paths {
         put?: never;
         /**
          * Approve a takeover script's request
-         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. Audited as `auth.approval.approve` with the run.
+         * @description An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. When the domain has an open run (`run` in the answer and in the lookup's), the approval joins it at the collect, and its plan must equal the run's. Audited as `auth.approval.approve` with the run.
          */
         post: operations["approve_approval"];
         delete?: never;
@@ -516,7 +516,7 @@ export interface paths {
         put?: never;
         /**
          * Collect the delegated session of an approved request
-         * @description No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.
+         * @description No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, for its run only (`delegation`, the run's id: the domain's open run, which the sitting joins with an equal plan, or the run the collect creates, audited as `migrate.run.join` or `migrate.run.create`), is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.
          */
         post: operations["collect_approval"];
         delete?: never;
@@ -4073,6 +4073,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/migrate/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a takeover run
+         * @description Scope: `migrate.read`. An open run of a takeover script (ADR 0038): its sittings, its mirrors and its plan. A run's delegated session reads its own run only; any other id answers 404, whether or not such a run exists.
+         */
+        get: operations["get_run"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/runs/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a takeover run
+         * @description Scope: `migrate.write`, an interactive session that signed in within five minutes. A person decides that the run is over, done or abandoned: its record and plan are deleted and the delegated sessions of its sittings end, so that its domain takes a new run, with any plan. Refused while a mirror of the run exists. Audited as `migrate.run.close`.
+         */
+        post: operations["close_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/migrate/takeovers": {
         parameters: {
             query?: never;
@@ -6988,6 +7028,7 @@ export interface components {
              *     labeled as reported, as text.
              */
             reported: components["schemas"]["ApprovalClient"];
+            run?: components["schemas"]["RunSummary"] | null;
             /** @description The source address of the request. */
             source: string;
             /** @description `pending`, `approved`, `denied`, `consumed` or `expired`. */
@@ -8906,7 +8947,7 @@ export interface components {
         DelegatedSession: {
             /**
              * Format: uuid
-             * @description The run it acts for.
+             * @description The run it acts for: the same in every sitting of the run.
              */
             delegation: string;
             /**
@@ -22045,16 +22086,67 @@ export interface components {
             /** @description The job (`GET /jobs/{id}` shows its progress). */
             job: components["schemas"]["JobId"];
         };
+        /** @description A mirror of a run, with the plan's DHCP server it is named for. */
+        RunMirror: {
+            /**
+             * Format: uuid
+             * @description The mirror.
+             */
+            mirror: string;
+            /** @description The DHCP server. */
+            server: string;
+        };
         /**
          * @description How a run ended.
          * @enum {string}
          */
         RunOutcome: "succeeded" | "failed";
+        /** @description An open run (`migrate.runs`). */
+        RunRecord: {
+            /**
+             * Format: date-time
+             * @description When its first sitting was collected, on the collecting controller's clock.
+             */
+            created_at: string;
+            /** @description The plan's domain. */
+            domain: string;
+            /**
+             * Format: uuid
+             * @description The run's id: the delegation of every sitting's session.
+             */
+            id: string;
+            /** @description The mirrors its sessions created: at most one per DHCP server of the plan. */
+            mirrors?: components["schemas"]["RunMirror"][];
+            /** @description Its sittings, oldest first, at most [`MAX_SITTINGS`]. */
+            sittings: components["schemas"]["Sitting"][];
+        };
+        /** @description The open run an approval would join, as the person reads it before approving. */
+        RunSummary: {
+            /**
+             * Format: date-time
+             * @description When its first sitting was collected.
+             */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The run's id.
+             */
+            id: string;
+            /** @description The source address of its newest sitting. */
+            last_source?: string | null;
+            /** @description How many sittings it keeps. */
+            sittings: number;
+        };
         /**
          * @description What started a run.
          * @enum {string}
          */
         RunTrigger: "schedule" | "manual";
+        /** @description `GET /migrate/runs/{id}`: an open takeover run with its plan. */
+        RunView: components["schemas"]["RunRecord"] & {
+            /** @description The plan as its first sitting's approval fixed it. */
+            plan: components["schemas"]["TakeoverPlan"];
+        };
         /**
          * @description `[scan.arp_sweep]`: an active ARP sweep over raw sockets (SCAN-04). Disabled by
          *     default; needs `CAP_NET_RAW` on Linux and `active`.
@@ -23468,6 +23560,36 @@ export interface components {
             /** @description Replaces the tags. */
             tags?: components["schemas"]["Tag"][] | null;
         };
+        /** @description One sitting of a run: an approval and the delegated session collected for it. */
+        Sitting: {
+            /**
+             * Format: uuid
+             * @description The approval.
+             */
+            approval: string;
+            /**
+             * Format: date-time
+             * @description When it was approved.
+             */
+            approved_at: string;
+            /**
+             * Format: uuid
+             * @description The person who approved it.
+             */
+            approved_by: string;
+            /**
+             * Format: date-time
+             * @description When the script collected it.
+             */
+            collected_at: string;
+            /**
+             * Format: uuid
+             * @description The delegated session.
+             */
+            session: string;
+            /** @description The approval's source address, the only one the session is accepted from. */
+            source: string;
+        };
         /** @description One item a takeover skipped, with the reason (section 2.8). */
         SkippedItem: {
             /** @description The stable reason code, one of [`codes::SKIP_CODES`]. */
@@ -24431,7 +24553,15 @@ export interface components {
             /** @description Where it ended. */
             state: components["schemas"]["TakeoverState"];
         };
-        /** @description The plan of a run, as the script sends it with the approval request. */
+        /**
+         * @description The plan of a run, as the script sends it with the approval request.
+         *
+         *     It is stored until its run is closed (`migrate.run_plans`), and these types refuse unknown
+         *     fields. A field added later therefore carries `#[serde(default)]` and raises the data
+         *     format with an empty migration (`crates/tenko/src/upgrade/migrations/mod.rs`,
+         *     `docs/upgrades.md` section 4.2), so that an older binary refuses the data directory instead
+         *     of failing on a stored plan that holds the field.
+         */
         TakeoverPlan: {
             /** @description The domain controllers, exactly one of them the PDC emulator. */
             controllers: components["schemas"]["PlanController"][];
@@ -29261,7 +29391,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The approval was decided before (`auth.approval.consumed`) */
+            /** @description The approval was decided before (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -29360,7 +29490,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The person has not decided yet (`auth.approval.pending`), or it was collected before (`auth.approval.consumed`) */
+            /** @description The person has not decided yet (`auth.approval.pending`), or it was collected before or its run changed meanwhile (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`) */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -45274,7 +45404,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`) */
+            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan, `taken` for a server whose mirror of the run exists */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -46186,6 +46316,149 @@ export interface operations {
             };
             /** @description The row changed under every attempt (`migrate.mirror.conflict`) */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    get_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identifier (UUID): the `delegation` of the collect */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session or token */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.read`; a delegated session whose run is not open (`auth.delegation.refused`, `params.reason` `run`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such open run, or for a delegated session not its own (`migrate.run.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No authentication service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    close_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identifier (UUID) */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Closed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such open run (`migrate.run.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A mirror of the run exists; `params.mirrors` names them (`migrate.run.busy`); or a sitting joined meanwhile (`auth.conflict`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No authentication service (`sys.not_implemented`) */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };

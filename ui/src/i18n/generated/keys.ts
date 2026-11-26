@@ -397,6 +397,7 @@ export type MessageKey =
   | "audit.action.auth.client_cert.present"
   | "audit.action.auth.client_cert.renew"
   | "audit.action.auth.client_cert.revoke"
+  | "audit.action.auth.delegation.refuse"
   | "audit.action.auth.directory.revoke"
   | "audit.action.auth.grant.create"
   | "audit.action.auth.grant.revoke"
@@ -673,6 +674,9 @@ export type MessageKey =
   | "audit.action.migrate.mirror.refuse"
   | "audit.action.migrate.mirror.token"
   | "audit.action.migrate.mirror.update"
+  | "audit.action.migrate.run.close"
+  | "audit.action.migrate.run.create"
+  | "audit.action.migrate.run.join"
   | "audit.action.nodes.roles"
   | "audit.action.scan.config.offer"
   | "audit.action.scan.config.update"
@@ -10811,6 +10815,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.auth.client_cert.present",
   "audit.action.auth.client_cert.renew",
   "audit.action.auth.client_cert.revoke",
+  "audit.action.auth.delegation.refuse",
   "audit.action.auth.directory.revoke",
   "audit.action.auth.grant.create",
   "audit.action.auth.grant.revoke",
@@ -11087,6 +11092,9 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.migrate.mirror.refuse",
   "audit.action.migrate.mirror.token",
   "audit.action.migrate.mirror.update",
+  "audit.action.migrate.run.close",
+  "audit.action.migrate.run.create",
+  "audit.action.migrate.run.join",
   "audit.action.nodes.roles",
   "audit.action.scan.config.offer",
   "audit.action.scan.config.update",
