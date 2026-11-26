@@ -142,6 +142,52 @@ pub(crate) fn scope_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<(S
         .ok_or_else(|| scope_not_found(prefix))
 }
 
+/// Stages the scope of `prefix` at its revision with `cx` as its last change: a change of an
+/// exclusion range is a change of the scope.
+fn stamp_scope(
+    view: &dyn ReadView,
+    batch: &mut WriteBatch,
+    cx: &RequestCtx,
+    prefix: PrefixId,
+) -> ConfigResult<()> {
+    let (mut scope, revision) = scope_of(view, prefix)?;
+    scope.updated = stamp(cx);
+    batch.expect_typed(&SCOPES, &prefix, Some(revision));
+    batch.put_typed(&SCOPES, &prefix, &scope)?;
+    Ok(())
+}
+
+/// Stages the new exclusion range `first`-`last` of the scope of `cidr_row` with its audit
+/// record.
+fn stage_exclusion(
+    batch: &mut WriteBatch,
+    cx: &RequestCtx,
+    cidr_row: &Prefix,
+    (first, last): (IpAddr, IpAddr),
+    id: ExclusionId,
+    description: Option<String>,
+) -> ConfigResult<ExclusionRange> {
+    let exclusion = ExclusionRange {
+        id,
+        scope: cidr_row.id,
+        first,
+        last,
+        description,
+        created: stamp(cx),
+    };
+    exclusion.validate(cidr_row)?;
+    let key = (cidr_row.id, id);
+    batch.expect_typed(&EXCLUSIONS, &key, None);
+    batch.put_typed(&EXCLUSIONS, &key, &exclusion)?;
+    batch.audit(
+        AuditDraft::success(audit::EXCLUSION_CREATE, vec![scope_object(cidr_row.id)])
+            .with_source_ip(cx.source_ip)
+            .with_context("exclusion", id.to_string())
+            .with_context("range", format!("{first}-{last}")),
+    );
+    Ok(exclusion)
+}
+
 /// Checks that the shared network exists and stages the expectation of its version.
 pub(crate) fn expect_shared_network(
     view: &dyn ReadView,
@@ -360,6 +406,23 @@ impl ConfigService {
         cx: &RequestCtx,
         new: NewScope,
     ) -> ConfigResult<(Scope, Written)> {
+        self.create_scope_with(cx, new, &[]).await
+    }
+
+    /// Creates the scope of a prefix with its exclusion ranges (`first`, `last`) in one
+    /// batch: the checks and audit records of [`ConfigService::create_scope`] and of
+    /// [`ConfigService::create_exclusion`] for each range, so that the scope never exists
+    /// without them.
+    ///
+    /// # Errors
+    ///
+    /// The codes of [`ConfigService::create_scope`] and `dhcp.exclusion.invalid`.
+    pub async fn create_scope_with(
+        &self,
+        cx: &RequestCtx,
+        new: NewScope,
+        exclusions: &[(IpAddr, IpAddr)],
+    ) -> ConfigResult<(Scope, Written)> {
         self.execute_write(cx, |view| {
             let (prefix, prefix_revision) = live_prefix(view, new.prefix)?;
             if view.get_typed(&SCOPES, &new.prefix)?.is_some() {
@@ -404,6 +467,16 @@ impl ConfigService {
                     .with_source_ip(cx.source_ip)
                     .with_context("cidr", prefix.cidr.to_string()),
             );
+            for &range in exclusions {
+                stage_exclusion(
+                    &mut batch,
+                    cx,
+                    &prefix,
+                    range,
+                    ExclusionId::generate(),
+                    None,
+                )?;
+            }
             Ok(Planned::write(
                 scope.clone(),
                 batch,
@@ -585,7 +658,7 @@ impl ConfigService {
         Ok(rows)
     }
 
-    /// Adds an exclusion range to a scope.
+    /// Adds an exclusion range to a scope, which records the change on the scope.
     ///
     /// # Errors
     ///
@@ -600,27 +673,12 @@ impl ConfigService {
     ) -> ConfigResult<(ExclusionRange, Written)> {
         let id = ExclusionId::generate();
         self.execute_write(cx, |view| {
-            let (_, scope_revision) = scope_of(view, prefix)?;
-            let (cidr_row, _) = live_prefix(view, prefix)?;
-            let exclusion = ExclusionRange {
-                id,
-                scope: prefix,
-                first,
-                last,
-                description: text(description.as_deref()),
-                created: stamp(cx),
-            };
-            exclusion.validate(&cidr_row)?;
             let mut batch = WriteBatch::for_request(cx);
-            batch.expect_typed(&SCOPES, &prefix, Some(scope_revision));
-            batch.expect_typed(&EXCLUSIONS, &(prefix, id), None);
-            batch.put_typed(&EXCLUSIONS, &(prefix, id), &exclusion)?;
-            batch.audit(
-                AuditDraft::success(audit::EXCLUSION_CREATE, vec![scope_object(prefix)])
-                    .with_source_ip(cx.source_ip)
-                    .with_context("exclusion", id.to_string())
-                    .with_context("range", format!("{first}-{last}")),
-            );
+            stamp_scope(view, &mut batch, cx, prefix)?;
+            let (cidr_row, _) = live_prefix(view, prefix)?;
+            let description = text(description.as_deref());
+            let exclusion =
+                stage_exclusion(&mut batch, cx, &cidr_row, (first, last), id, description)?;
             Ok(Planned::write(
                 exclusion.clone(),
                 batch,
@@ -634,7 +692,7 @@ impl ConfigService {
         .await
     }
 
-    /// Deletes an exclusion range.
+    /// Deletes an exclusion range, which records the change on its scope.
     ///
     /// # Errors
     ///
@@ -649,13 +707,13 @@ impl ConfigService {
     ) -> ConfigResult<Written> {
         let ((), written) = self
             .execute_write(cx, |view| {
-                scope_of(view, prefix)?;
+                let mut batch = WriteBatch::for_request(cx);
+                stamp_scope(view, &mut batch, cx, prefix)?;
                 let (exclusion, revision) =
                     view.get_typed(&EXCLUSIONS, &(prefix, id))?.ok_or_else(|| {
                         ConfigError::not_found(codes::EXCLUSION_NOT_FOUND, "exclusion range", id)
                     })?;
                 check_expect(expect, revision)?;
-                let mut batch = WriteBatch::for_request(cx);
                 batch.expect_typed(&EXCLUSIONS, &(prefix, id), Some(revision));
                 batch.delete_typed(&EXCLUSIONS, &(prefix, id));
                 batch.audit(

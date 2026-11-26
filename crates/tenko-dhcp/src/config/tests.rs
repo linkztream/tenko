@@ -186,6 +186,66 @@ async fn a_scope_serves_a_network_once_and_not_a_supernet() {
     assert!(error.is("ipam.not_found"), "{error:?}");
 }
 
+/// A scope and its exclusions are one write: one revision holds them with an audit record
+/// each, and an exclusion outside the prefix leaves neither.
+#[tokio::test]
+async fn a_scope_and_its_exclusions_are_written_in_one_batch() {
+    let world = world().await;
+    let ranges = [
+        (ip("192.0.2.120"), ip("192.0.2.129")),
+        (ip("192.0.2.140"), ip("192.0.2.140")),
+    ];
+    let outside = [ranges[0], (ip("192.0.2.250"), ip("198.51.100.1"))];
+    let error = world
+        .service
+        .create_scope_with(&cx(), new_scope(world.prefix), &outside)
+        .await
+        .expect_err("outside the prefix");
+    assert!(error.is(codes::EXCLUSION_INVALID), "{error:?}");
+    let view = world.service.view(None).await.expect("view");
+    assert!(
+        view.get_typed(&SCOPES, &world.prefix)
+            .expect("read")
+            .is_none()
+    );
+    let (_, written) = world
+        .service
+        .create_scope_with(&cx(), new_scope(world.prefix), &ranges)
+        .await
+        .expect("created");
+    let view = world
+        .service
+        .view(Some(written.revision))
+        .await
+        .expect("view");
+    let found: Vec<_> = ConfigService::exclusions(view.as_ref(), world.prefix)
+        .expect("exclusions")
+        .into_iter()
+        .map(|row| ((row.exclusion.first, row.exclusion.last), row.revision))
+        .collect();
+    assert_eq!(found, ranges.map(|range| (range, written.revision)));
+    let audited = view
+        .scan_typed(
+            &tenko_store::tables::AUDIT,
+            tenko_store::KeyRange::all(),
+            usize::MAX,
+            false,
+        )
+        .expect("audit")
+        .into_iter()
+        .filter(|(_, record, _)| record.revision == written.revision)
+        .map(|(_, record, _)| record.draft.action.as_str().to_owned())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        audited,
+        [
+            "dhcp.scope.create",
+            "dhcp.exclusion.create",
+            "dhcp.exclusion.create"
+        ]
+    );
+}
+
 #[tokio::test]
 async fn ipam_refuses_to_delete_a_prefix_a_scope_serves() {
     let store = store();
@@ -854,6 +914,16 @@ async fn hardened_refuses_replace_at_the_write() {
         .await
         .expect_err("replace under Hardened");
     refused(&error, "ddns.conflict");
+    let view = world.service.view(None).await.expect("view");
+    let error = world
+        .service
+        .refuse_replace(view.as_ref(), Some(&replace), "ddns")
+        .expect_err("replace under Hardened, before a write");
+    refused(&error, "ddns.conflict");
+    world
+        .service
+        .refuse_replace(view.as_ref(), Some(&protect), "ddns")
+        .expect("protect");
     world
         .service
         .create_scope(

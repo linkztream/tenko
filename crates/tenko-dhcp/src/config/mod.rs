@@ -130,8 +130,13 @@ impl ConfigService {
     }
 
     /// Refuses DDNS settings of `replace` that a write carries while the profile keeps name
-    /// protection; `field` names the settings in the request.
-    pub(crate) fn refuse_replace(
+    /// protection; `field` names the settings in the request. A caller checks them with it
+    /// before its first write.
+    ///
+    /// # Errors
+    ///
+    /// `dhcp.ddns.invalid` (field `<field>.conflict`).
+    pub fn refuse_replace(
         &self,
         view: &dyn ReadView,
         ddns: Option<&tenko_core::dhcp::DdnsPolicy>,
