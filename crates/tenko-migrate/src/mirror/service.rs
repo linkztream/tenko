@@ -7,7 +7,11 @@
 //!
 //! - a changed configuration (everything but the leases, their loss entries, the sequence and
 //!   the time; a scope that turned inactive among it) writes the snapshot, the row and
-//!   `migrate.mirror.push` at once;
+//!   `migrate.mirror.push` at once while the row's reserve of [`CHANGE_RESERVE`](tenko_core::migrate::CHANGE_RESERVE) writes,
+//!   refilled by one every [`LEASES_WRITE_SECS`], lasts ([`Mirror::spend_change`]) and the
+//!   node's clock guard trusts its clock; a changed push without either is held as the
+//!   newest, and the first push after the refill whose configuration still differs is
+//!   written;
 //! - changed leases alone write the snapshot and the row at most every
 //!   [`LEASES_WRITE_SECS`], without an audit record; the stored leases are from
 //!   [`Mirror::stored_at`], and a prepare or a takeover takes the newest leases from a push made
@@ -732,6 +736,7 @@ impl MirrorService {
             leases_hash: None,
             last_push: None,
             last_change: None,
+            change_reserve_full_at: None,
             stored_at: None,
             server: None,
             partner: None,
@@ -1009,8 +1014,9 @@ impl MirrorService {
                 .await?;
             mirror.token = token.info.id;
             mirror.last_sequence = None;
-            // The new token binds the mirror anew with its first push.
+            // The new token binds the mirror anew with its first push, with a full reserve.
             mirror.server = None;
+            mirror.change_reserve_full_at = None;
             mirror.updated = Stamp::new(ctx.now, ctx.principal.clone());
             batch.expect_typed(&tables::MIRRORS, &id, Some(revision));
             batch.put_typed(&tables::MIRRORS, &id, &mirror)?;
@@ -1112,7 +1118,8 @@ impl MirrorService {
     /// Accepts a decoded push of `id` (plan section 2.1, rule 6; section 2.4) from the
     /// mirror's current token, as each attempt reads it, with a sequence above the last
     /// accepted one of that token. A changed configuration writes the snapshot, the row and
-    /// `migrate.mirror.push` at once; changed leases alone write the snapshot and the row at
+    /// `migrate.mirror.push` at once while the mirror's reserve lasts, and answers `changed`
+    /// either way; changed leases alone write the snapshot and the row at
     /// most every [`LEASES_WRITE_SECS`]; otherwise the row is written at most every
     /// [`Mirror::freshness_write_secs`]. The envelope is held in memory as the newest either
     /// way. The push holds `guards` (its [`InFlight`] and its permit of the node's decode)
@@ -1172,19 +1179,25 @@ impl MirrorService {
                 .last_hash
                 .as_ref()
                 .is_none_or(|stored| stored.0 != hash);
+            // A clock this node's guard holds would store a reserve's full time far ahead.
+            let spent = (changed && tenko_core::clock::trusted_now().is_ok())
+                .then(|| mirror.spend_change(now))
+                .flatten();
             let leases_due = mirror
                 .leases_hash
                 .as_ref()
                 .is_none_or(|stored| stored.0 != leases_hash)
                 && since(mirror.stored_at) >= u64::from(LEASES_WRITE_SECS);
-            let stored = changed || leases_due;
+            // A held configuration does not ride along with the leases.
+            let stored = spent.is_some() || (!changed && leases_due);
             if stored || bind || since(mirror.last_push) >= mirror.freshness_write_secs() {
                 mirror.last_sequence = Some(sequence);
                 mirror.last_push = Some(now);
                 let mut batch = WriteBatch::for_request(ctx);
                 batch.expect_typed(&tables::MIRRORS, &id, Some(revision));
-                if changed {
+                if spent.is_some() {
                     mirror.last_change = Some(now);
+                    mirror.change_reserve_full_at = spent;
                     batch.audit(summary.audited(ctx, id, &hash));
                 }
                 if bind {

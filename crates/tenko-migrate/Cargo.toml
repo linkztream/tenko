@@ -34,6 +34,8 @@ proptest = { workspace = true }
 # The counting allocator of tests/decode_alloc.rs (the bound of what decoding allocates).
 stats_alloc = { workspace = true }
 tenko-auth = { workspace = true, features = ["testing"] }
+# The held clock of tests/mirror_service.rs (`tenko_core::clock::testing`).
+tenko-core = { workspace = true, features = ["testing"] }
 
 # The allocation test is its own harness: the counting allocator counts every thread.
 [[test]]

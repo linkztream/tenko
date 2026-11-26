@@ -63834,6 +63834,17 @@
             "$ref": "#/components/schemas/UserId",
             "description": "The service account `mirror-<id>` that owns the token; it holds no grants."
           },
+          "change_reserve_full_at": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "When the reserve of configuration writes is full again ([`CHANGE_RESERVE`]); none\nis full. Written only with a stored configuration, and cleared with the token."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "created": {
             "$ref": "#/components/schemas/Stamp",
             "description": "Creation."
@@ -63860,7 +63871,7 @@
             "oneOf": [
               {
                 "$ref": "#/components/schemas/Timestamp",
-                "description": "When the configuration last changed."
+                "description": "When a changed configuration was last stored."
               },
               {
                 "type": "null"
@@ -84746,7 +84757,7 @@
           },
           "received": {
             "$ref": "#/components/schemas/Timestamp",
-            "description": "When the push was accepted, by the node's clock: the leases are from then, and may be\nup to [`LEASES_WRITE_SECS`] older than the newest push."
+            "description": "When the push was accepted, by the node's clock: the configuration and the leases are\nfrom then, and while the controllers' clocks agree may be up to [`LEASES_WRITE_SECS`]\nand one interval older than the newest push."
           },
           "sequence": {
             "type": "integer",

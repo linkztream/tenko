@@ -316,6 +316,236 @@ async fn changed_leases_alone_are_written_every_ten_minutes_without_an_audit_rec
     assert_eq!(item.counts.map(|counts| counts.leases), Some(57));
 }
 
+// ---------------------------------------------------------------------------------------
+// The reserve of configuration writes (ADR 0033 decision 6)
+
+/// A push of `snapshot` straight to `service` at `secs`: the floor between two pushes is
+/// each controller's own, and the reserve is the row's.
+async fn push_to(lab: &Lab, service: &MirrorService, secs: u64, snapshot: MirrorSnapshot) -> bool {
+    lab.at(secs);
+    let accepted = service
+        .push(&lab.pusher, lab.id, decoded(snapshot), ())
+        .await;
+    accepted.expect("accepted").changed
+}
+
+/// Two configurations in turn, by the parity of the sequence.
+fn turn(sequence: u64) -> MirrorSnapshot {
+    if sequence.is_multiple_of(2) {
+        fixture(sequence)
+    } else {
+        inactive(sequence)
+    }
+}
+
+async fn stored(lab: &Lab) -> (u64, usize) {
+    let sequence = lab.service.snapshot(lab.id).await.expect("row").sequence;
+    (sequence, lab.audit("migrate.mirror.push").await)
+}
+
+#[tokio::test]
+async fn thirty_changes_are_stored_at_once_then_one_per_ten_minutes_on_every_controller() {
+    let lab = Lab::new().await;
+    for sequence in 1..=30 {
+        push_to(&lab, &lab.service, (sequence - 1) * 10, turn(sequence)).await;
+    }
+    assert_eq!(
+        stored(&lab).await,
+        (30, 30),
+        "an honest burst, stored at once"
+    );
+    let revision = lab.revision();
+    assert!(
+        push_to(&lab, &lab.service, 300, turn(31)).await,
+        "answered as changed"
+    );
+    assert_eq!(
+        lab.revision(),
+        revision,
+        "the 31st is held: nothing written"
+    );
+    // Another controller over the same store, or a restart, reads the spent reserve.
+    let other = service_on(lab.env.store.clone(), &lab.env);
+    push_to(&lab, &other, 599, turn(33)).await;
+    assert_eq!(stored(&lab).await, (30, 30));
+    push_to(&lab, &other, 600, turn(35)).await;
+    assert_eq!(
+        stored(&lab).await,
+        (35, 31),
+        "one write back after ten minutes"
+    );
+    push_to(&lab, &lab.service, 610, turn(36)).await;
+    assert_eq!(stored(&lab).await, (35, 31));
+
+    // A new token starts with a full reserve.
+    let (_, token) = lab
+        .service
+        .replace_token(&lab.admin, lab.id, &MirrorTokenTerms::default())
+        .await
+        .expect("token");
+    let pusher = lab
+        .env
+        .ctx_for(&Credentials::Bearer(token.token.expose().to_owned()))
+        .await
+        .expect("the new token");
+    lab.at(620);
+    lab.service
+        .push(&pusher, lab.id, decoded(turn(2)), ())
+        .await
+        .expect("accepted");
+    assert_eq!(stored(&lab).await, (2, 32));
+}
+
+#[tokio::test]
+async fn a_hostile_exporter_alternating_two_configurations_for_a_day_stores_at_most_the_bound() {
+    let lab = Lab::new().await;
+    let configurations = [fixture(0), inactive(0)];
+    let mut first_hour = 0;
+    for step in 0..=8_640_u64 {
+        let mut snapshot = configurations[usize::from(!step.is_multiple_of(2))].clone();
+        snapshot.sequence = step + 1;
+        push_to(&lab, &lab.service, step * 10, snapshot).await;
+        if step == 360 {
+            first_hour = lab.audit("migrate.mirror.push").await;
+        }
+    }
+    let day = lab.audit("migrate.mirror.push").await;
+    // At most 30 + 6 in the first hour and 30 + 144 in a day.
+    assert!(first_hour <= 36 && day <= 174, "{first_hour} and {day}");
+    assert!(day >= 170, "{day}: the reserve refills one per ten minutes");
+}
+
+/// A controller's clock that stands a fixed time ahead of the environment's.
+#[derive(Debug)]
+struct Ahead(Arc<MockClock>, Duration);
+
+impl Clock for Ahead {
+    fn now(&self) -> Timestamp {
+        self.0.now().checked_add(self.1).expect("time")
+    }
+}
+
+/// Why a stored time ahead of a controller's clock holds rather than refills: with one
+/// controller's clock ahead, two configurations pushed in turn to the two controllers every
+/// 5 s for an hour, in either order, are stored at most one more reserve than the clocks in
+/// step allow, and no more than one per ten minutes of the spread.
+#[tokio::test]
+async fn a_controller_whose_clock_is_ahead_spends_at_most_one_more_reserve() {
+    for ahead in [300, 900, 86_400_u64] {
+        for ahead_first in [true, false] {
+            let lab = Lab::new().await;
+            let skewed =
+                MirrorService::new(lab.env.store.clone(), Arc::clone(&lab.env.service)).with_clock(
+                    Arc::new(Ahead(lab.env.clock.clone(), Duration::from_secs(ahead))),
+                );
+            for step in 0..720_u64 {
+                let service = if step.is_multiple_of(2) == ahead_first {
+                    &skewed
+                } else {
+                    lab.service.as_ref()
+                };
+                push_to(&lab, service, step * 5, turn(step + 1)).await;
+            }
+            let written = lab.audit("migrate.mirror.push").await;
+            let bound = 36 + usize::try_from(ahead.div_ceil(600).min(30)).expect("small");
+            assert!(written <= bound, "{written} stored, {ahead} s ahead");
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_held_clock_stores_no_configuration_and_the_leases_carry_none() {
+    let lab = Lab::new().await;
+    push_to(&lab, &lab.service, 0, fixture(1)).await;
+    let mut churned = inactive(2);
+    churned.dhcp.leases.truncate(10);
+    assert_ne!(churned.dhcp.leases.len(), fixture(0).dhcp.leases.len());
+    {
+        let _held = tenko_core::clock::testing::hold_jump(3_600_000, lab.env.now());
+        // Its leases are due too, but they would carry the new configuration unaudited.
+        assert!(push_to(&lab, &lab.service, 600, churned).await);
+        assert_eq!(stored(&lab).await, (1, 1));
+        // The lease floor holds as before.
+        let mut leases = fixture(3);
+        leases.dhcp.leases.truncate(10);
+        assert!(!push_to(&lab, &lab.service, 610, leases).await);
+        assert_eq!(
+            stored(&lab).await,
+            (3, 1),
+            "the leases alone, without a record"
+        );
+    }
+    assert!(push_to(&lab, &lab.service, 620, inactive(4)).await);
+    assert_eq!(
+        stored(&lab).await,
+        (4, 2),
+        "stored once the clock is trusted"
+    );
+}
+
+#[tokio::test]
+async fn with_the_reserve_spent_changed_leases_alone_are_written_every_ten_minutes() {
+    let lab = Lab::new().await;
+    for sequence in 1..=31 {
+        push_to(&lab, &lab.service, (sequence - 1) * 10, turn(sequence)).await;
+    }
+    assert_eq!(stored(&lab).await, (30, 30));
+    // The stored configuration again, with other leases: the lease floor of the row.
+    let leases = |sequence: u64| {
+        let mut snapshot = turn(30);
+        snapshot.sequence = sequence;
+        snapshot
+            .dhcp
+            .leases
+            .truncate(usize::try_from(sequence).expect("small"));
+        snapshot
+    };
+    let revision = lab.revision();
+    lab.at(380);
+    lab.service
+        .push(&lab.pusher, lab.id, decoded(leases(32)), ())
+        .await
+        .expect("accepted");
+    assert_eq!(
+        lab.revision(),
+        revision.saturating_add(1),
+        "the freshness only"
+    );
+    lab.at(890);
+    lab.service
+        .push(&lab.pusher, lab.id, decoded(leases(33)), ())
+        .await
+        .expect("accepted");
+    assert_eq!(stored(&lab).await, (33, 30), "the leases, ten minutes on");
+}
+
+#[tokio::test]
+async fn an_absurd_reserve_time_holds_every_change_and_the_mirror_still_answers() {
+    let lab = Lab::new().await;
+    push_to(&lab, &lab.service, 0, fixture(1)).await;
+    let view = lab
+        .env
+        .store
+        .read(ReadConsistency::Local)
+        .await
+        .expect("view");
+    let (mut row, _) = view
+        .get_typed(&tables::MIRRORS, &lab.id)
+        .expect("read")
+        .expect("row");
+    row.change_reserve_full_at = Some("9999-12-31T23:59:59Z".parse().expect("time"));
+    let mut batch = WriteBatch::for_request(&lab.admin);
+    batch
+        .put_typed(&tables::MIRRORS, &lab.id, &row)
+        .expect("row");
+    lab.env.store.propose(batch).await.expect("committed");
+
+    push_to(&lab, &lab.service, 10, inactive(2)).await;
+    assert_eq!(stored(&lab).await, (1, 1), "held, never an overflow");
+    lab.service.get(lab.id).await.expect("the item");
+    assert_eq!(lab.service.list().await.expect("the list").len(), 1);
+}
+
 #[tokio::test]
 async fn replays_floods_and_disabled_mirrors_are_refused_and_audited_once_a_minute() {
     let lab = Lab::new().await;

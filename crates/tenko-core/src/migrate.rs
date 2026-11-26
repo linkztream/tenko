@@ -22,7 +22,7 @@
 //! These are contracts (WP14.0). WP14.1 builds the push, the freshness, the losses and the
 //! diff on them; WP14.2 the prepare, the takeover and the flip.
 
-use std::fmt;
+use std::{fmt, time::Duration};
 
 use ipnet::IpNet;
 use serde::{Deserialize, Serialize};
@@ -71,9 +71,14 @@ pub const LEASE_BATCH: usize = 1_000;
 pub const TOKEN_EXPIRING_DAYS: u32 = 14;
 
 /// A snapshot whose configuration is unchanged but whose leases changed is written at most
-/// this often, in seconds (section 2.4); the controller that received it holds the newest
-/// envelope in memory meanwhile.
+/// this often, in seconds (section 2.4), and a mirror's reserve of configuration writes
+/// gains one this often; one value for both keeps the stored leases at most this old. The
+/// controller that received a push holds its newest envelope in memory meanwhile.
 pub const LEASES_WRITE_SECS: u32 = 600;
+
+/// The most changed configurations of a mirror stored in a row: the reserve of
+/// [`Mirror::change_reserve_full_at`], refilled by one every [`LEASES_WRITE_SECS`].
+pub const CHANGE_RESERVE: u32 = 30;
 
 /// The longest name of a mirror, in characters.
 pub const MAX_NAME_LEN: usize = 64;
@@ -135,9 +140,13 @@ pub struct Mirror {
     /// When the last push was accepted, changed or not.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_push: Option<Timestamp>,
-    /// When the configuration last changed.
+    /// When a changed configuration was last stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_change: Option<Timestamp>,
+    /// When the reserve of configuration writes is full again ([`CHANGE_RESERVE`]); none
+    /// is full. Written only with a stored configuration, and cleared with the token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub change_reserve_full_at: Option<Timestamp>,
     /// When the snapshot row was last written: its leases are from then.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_at: Option<Timestamp>,
@@ -228,6 +237,40 @@ impl Mirror {
                 .is_some_and(|last| now.saturating_since(last).as_secs() > self.stale_after_secs())
     }
 
+    /// The reserve's full time after a configuration write at `now`, or none when the
+    /// reserve is spent. A full time ahead of `now` holds rather than refills, so that a
+    /// controller whose clock is behind cannot spend a reserve again; an overflow is no write.
+    pub fn spend_change(&self, now: Timestamp) -> Option<Timestamp> {
+        let next = self.change_base(now).checked_add(Self::change_step())?;
+        (next <= now.checked_add(Self::change_step() * CHANGE_RESERVE)?).then_some(next)
+    }
+
+    /// How many changed configurations can be stored at `now`, from 0 to [`CHANGE_RESERVE`].
+    pub fn changes_left(&self, now: Timestamp) -> u32 {
+        now.checked_add(Self::change_step() * CHANGE_RESERVE)
+            .map_or(0, |full| {
+                let left = full.saturating_since(self.change_base(now)).as_secs()
+                    / u64::from(LEASES_WRITE_SECS);
+                u32::try_from(left).unwrap_or(0)
+            })
+    }
+
+    /// The earliest time at or after `now` at which a changed configuration can be stored.
+    pub fn change_due(&self, now: Timestamp) -> Timestamp {
+        self.change_reserve_full_at
+            .and_then(|full| full.checked_sub(Self::change_step() * (CHANGE_RESERVE - 1)))
+            .map_or(now, |due| due.max(now))
+    }
+
+    fn change_base(&self, now: Timestamp) -> Timestamp {
+        self.change_reserve_full_at
+            .map_or(now, |full| full.max(now))
+    }
+
+    fn change_step() -> Duration {
+        Duration::from_secs(u64::from(LEASES_WRITE_SECS))
+    }
+
     /// Whether a push at `now` is fresh enough for a takeover (section 2.7, step 1).
     pub fn is_fresh(&self, now: Timestamp) -> bool {
         self.last_push
@@ -245,8 +288,9 @@ pub struct Snapshot {
     /// The SHA-256 in canonical CBOR of the envelope's configuration (without the leases,
     /// their loss entries, the `sequence` and `taken_at`), as [`Mirror::last_hash`].
     pub hash: HexBytes,
-    /// When the push was accepted, by the node's clock: the leases are from then, and may be
-    /// up to [`LEASES_WRITE_SECS`] older than the newest push.
+    /// When the push was accepted, by the node's clock: the configuration and the leases are
+    /// from then, and while the controllers' clocks agree may be up to [`LEASES_WRITE_SECS`]
+    /// and one interval older than the newest push.
     pub received: Timestamp,
     /// The envelope as pushed.
     pub envelope: MirrorSnapshot,
@@ -806,7 +850,8 @@ pub mod metrics {
     )
     .labels(&["mirror"]);
 
-    /// The outcomes of [`PUSHES`], in label order.
+    /// The outcomes of [`PUSHES`], in label order; `changed` counts every push whose
+    /// configuration differs from the stored one, held or stored.
     pub const PUSH_OUTCOMES: [&str; 3] = ["changed", "unchanged", "refused"];
 }
 
@@ -899,6 +944,7 @@ mod tests {
             leases_hash: None,
             last_push: None,
             last_change: None,
+            change_reserve_full_at: None,
             stored_at: None,
             server: None,
             partner: None,
