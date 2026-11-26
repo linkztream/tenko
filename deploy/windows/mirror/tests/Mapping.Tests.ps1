@@ -254,6 +254,11 @@ Describe 'The mapping rules' {
             $always.client_may_update_a | Should -BeFalse
         }
 
+        It 'takes the updates for older clients as on while name protection is on' {
+            $protected = ConvertTo-DdnsPolicy -Setting ([pscustomobject]@{ DynamicUpdates = 'Always'; NameProtection = $true; DisableDnsPtrRRUpdate = $false; UpdateDnsRRForOlderClients = $false; DeleteDnsRROnLeaseExpiry = $true }) -Scope '192.0.2.0' -Losses $losses
+            $protected.legacy_clients | Should -BeTrue
+        }
+
         It 'maps the option definition types of the export and reports an unknown one' {
             $def = ConvertTo-IrOptionDef -Definition ([pscustomobject]@{ OptionId = 130; Name = 'x'; Type = 'Word'; MultiValued = $true; VendorClass = ''; Description = ''; DefaultValue = $null }) -Losses $losses
             $def.kind | Should -Be 'u16'

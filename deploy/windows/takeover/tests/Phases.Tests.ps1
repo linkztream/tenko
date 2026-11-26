@@ -361,8 +361,62 @@ Describe 'The run''s mirrors' {
     }
 }
 
+Describe 'The run''s scopes' {
+    BeforeEach { Install-FakeWorld }
+
+    It 'are prepared once per plan scope from the first server''s mirror, each answered prefix kept, and no phase is reported' {
+        $script:world.twoScopes = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $state = Read-State
+        $first = $state.mirrors['dc1.corp.example.test']
+        @($script:world.tenkoCalls | Where-Object { $_ -like 'POST */prepare' }) | Should -Be @("POST /migrate/mirrors/$first/scopes/192.0.2.0%2F24/prepare", "POST /migrate/mirrors/$first/scopes/198.51.100.0%2F24/prepare")
+        foreach ($cidr in '192.0.2.0/24', '198.51.100.0/24') { $state.values["prepare.$cidr"] | Should -CMatch $script:TkUuidPattern }
+        $script:world.tenkoCalls | Where-Object { $_ -like 'PUT *' } | Should -BeNullOrEmpty
+    }
+
+    It 'are removed by a reverse of phase 2 right after the mirrors, and their prefixes leave the record' {
+        $script:world.failRoute = '^GET /migrate/runs/'
+        $script:world.failSkip = 1
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        # The failed review is reversed first, then phase 2.
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+        $calls = @($script:world.tenkoCalls)
+        $state = Read-State
+        $removed = [array]::IndexOf($calls, "DELETE /migrate/runs/$($state.run)/scopes/192.0.2.0%2F24")
+        $removed | Should -BeGreaterThan 0
+        $calls[$removed - 1] | Should -BeLike 'DELETE /migrate/mirrors/*'
+        $state.values.Contains('prepare.192.0.2.0/24') | Should -BeFalse
+    }
+
+    It 'that Tenko keeps with a 409 hold no Windows step of the reverse back: a warning names the scope and the administrator''s removal' {
+        $script:world.failRoute = '^GET /migrate/runs/'
+        $script:world.failSkip = 1
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        Invoke-FakeRun -Reverse | Should -Be 5 -Because $script:lastError
+        Mock Invoke-FakeTenko -ParameterFilter { $Method -eq 'DELETE' -and $Path -like '/migrate/runs/*/scopes/*' } {
+            $refusal = [System.Exception]::new("Tenko refused DELETE $Path with 409 migrate.takeover.scope_enabled: someone else changed Tenko's switched-off scope (option set)")
+            $refusal.Data['tk.status'] = 409
+            $refusal.Data['tk.code'] = 'migrate.takeover.scope_enabled'
+            throw $refusal
+        }
+        $output = @(Invoke-FakeRun -Reverse 3>&1)
+        $output[-1] | Should -Be 5 -Because $script:lastError
+        $state = Read-State
+        $state.phases['2'] | Should -Be 'reversed'
+        $warning = ($output | Where-Object { $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { $_.Message }) -join ' '
+        $warning | Should -BeLike "*Tenko keeps its scope 192.0.2.0/24 (*option set)*DELETE /api/v1/migrate/runs/$($state.run)/scopes/192.0.2.0%2F24 in an administrator's session.*"
+    }
+}
+
 Describe 'A value from Tenko that Windows contradicts' {
     BeforeEach { Install-FakeWorld }
+
+    It 'a prefix that is not of the exact form stops with exit 4' {
+        $script:world.badPrefix = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4
+        (Read-State).values.Keys | Where-Object { $_ -like 'prepare.*' } | Should -BeNullOrEmpty
+    }
 
     It 'a mirror id that is not of the exact form stops with exit 4' {
         $script:world.badMirror = $true

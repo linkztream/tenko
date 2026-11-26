@@ -119,7 +119,7 @@ function Get-FakeWorld {
         runMirrors = [ordered]@{}; loseCreate = $false; noPush = $false; pairBody = ''; atCollect = ''; atMirror = ''; exported = [ordered]@{}
         tenkoCalls = [System.Collections.ArrayList]@()
         failRoute = ''; failSkip = 0; tenkoFailed = $false
-        badMirror = $false; badToken = $false; fingerprint = ''
+        badMirror = $false; badToken = $false; badPrefix = $false; fingerprint = ''
         tenkoLeases = @()
         answers = [System.Collections.ArrayList]@()
         unreachable = $false; disabled = $null; leaveOpen = $false; gpoMembers = @(); restartFails = $false
@@ -424,7 +424,11 @@ function Invoke-FakeTenko {
             if ($w.revertFailAt -eq $w.reverts) { throw "Tenko refused $Method $Path with 503 injected" }
             return (Get-FakeJob 'revert')
         }
-        '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' { return (Get-FakeJob 'prepare') }
+        '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/prepare$' {
+            [void]$w.calls.Add('tenko|prepare')
+            return [ordered]@{ prefix = $(if ($w.badPrefix) { '../x' } else { [guid]::NewGuid().ToString() }) }
+        }
+        '^DELETE /migrate/runs/[^/]+/scopes/[^/]+$' { [void]$w.calls.Add('tenko|unprepare'); return $null }
         '^POST /migrate/mirrors/[^/]+/scopes/([^/]+)/takeover$' {
             $scope = [uri]::UnescapeDataString($Matches[1])
             # A node that names one job for two scopes (sameJob).

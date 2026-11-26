@@ -2636,15 +2636,28 @@ function Get-TkPhase2 {
                         Start-Sleep -Seconds $script:TkPollSec
                     }
                 }
-                foreach ($server in $r.dhcp) {
-                    foreach ($scope in $server.scopes) {
-                        $key = "prepare.$($scope.cidr)"
-                        if (Get-TkField $State.Data.jobs $key) { continue }
-                        $job = Invoke-Tenko -Method POST -Path "/migrate/mirrors/$($State.Data.mirrors[$server.name])/scopes/$($scope.cidr -replace '/', '%2F')/prepare"
-                        $State.Data.jobs[$key] = [string](Get-TkField $job 'id')
-                        $done = Wait-TkJob -Id $State.Data.jobs[$key]
-                        if ($done.State -ne 'succeeded') { throw "the prepare of $($scope.cidr) ended $($done.State)" }
+                # Each scope of the plan once, from the first server whose readings hold it. Tenko
+                # names its prefix, a new one after a rebuild: the latest is kept.
+                foreach ($cidr in @($State.Data.plan.scopes)) {
+                    $server = @($r.dhcp | Where-Object { @($_.scopes | ForEach-Object { $_.cidr }) -contains $cidr })[0]
+                    $prepared = Invoke-Tenko -Method POST -Path "/migrate/mirrors/$($State.Data.mirrors[$server.name])/scopes/$($cidr -replace '/', '%2F')/prepare"
+                    $prefix = [string](Get-TkField $prepared 'prefix')
+                    if ($prefix -cnotmatch $script:TkUuidPattern) { Exit-TkTakeover 4 "Tenko answered a prefix for $cidr that is not of the exact form" }
+                    $State.Data.values["prepare.$cidr"] = $prefix
+                    Save-TkState $State
+                }
+            }
+            # The first undo after the mirrors', within the five minutes of the approval. A scope
+            # Tenko keeps (409) serves nothing while it is off and holds no Windows step back.
+            Undo = {
+                foreach ($cidr in @($State.Data.plan.scopes)) {
+                    $path = "/migrate/runs/$($State.Data.run)/scopes/$($cidr -replace '/', '%2F')"
+                    try { [void](Invoke-Tenko -Method DELETE -Path $path -Expect @(204, 404)) }
+                    catch {
+                        if ($_.Exception.Data['tk.status'] -ne 409) { throw }
+                        Write-Warning "Tenko keeps its scope $cidr ($($_.Exception.Message)); the reverse goes on. An administrator switches it off in Tenko if it is on, then removes it with DELETE /api/v1$path in an administrator's session."
                     }
+                    $State.Data.values.Remove("prepare.$cidr")
                 }
             }
         }
@@ -3874,7 +3887,6 @@ function Invoke-Takeover {
         if ($Reverse) {
             if (-not $latest) { Exit-TkTakeover 1 'nothing to reverse' }
             Invoke-TkPhase -State $state -Phase $latest -Payloads $payloads -Undo
-            [void](Invoke-Tenko -Method PUT -Path "/migrate/runs/$run/phases/$latest" -Body ([ordered]@{ state = 'reversed' }) -Expect @(200, 204, 404))
             if (-not (Get-TkLatestPhase $data.phases)) { [void](Invoke-TkRemote -Server $data.readings.pdc -Name WriteMarker -Arguments @($script:TkMarkerKey, '', '', $true)) }
             Write-TkNote "Phase $latest is reversed."
             return 5
@@ -3896,7 +3908,6 @@ function Invoke-Takeover {
             if ($phase -eq '4' -and $null -eq $script:TkWindowWatch) { [void](Confirm-TkWindow -State $state) }
             Write-TkNote "Phase $phase"
             Invoke-TkPhase -State $state -Phase $phase -Payloads $payloads
-            [void](Invoke-Tenko -Method PUT -Path "/migrate/runs/$run/phases/$phase" -Body ([ordered]@{ state = 'done' }) -Expect @(200, 204, 404))
             if ($phase -eq '5') { Write-TkNote 'The parallel period runs now. After it, run the script again for the finish.'; return 3 }
             if ($phase -eq '6') { Write-TkNote "The takeover is finished. The DHCP Server role stays installed on each DHCP server. $(Get-TkDhcpEndText $data.readings) README.md says how to remove the role yourself.$dnsNote"; return 0 }
             $phase = Get-TkNextPhase $data.phases

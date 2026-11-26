@@ -594,7 +594,8 @@ function ConvertTo-DdnsPolicy {
         reverse = -not [bool](Get-Prop $Setting 'DisableDnsPtrRRUpdate')
         conflict = $(if ($protection) { 'protect' } else { 'replace' })
         client_may_update_a = ($updates -eq 'OnClientRequest')
-        legacy_clients = [bool](Get-Prop $Setting 'UpdateDnsRRForOlderClients')
+        # Under name protection Windows also registers the clients that send no FQDN option.
+        legacy_clients = ([bool](Get-Prop $Setting 'UpdateDnsRRForOlderClients') -or $protection)
         refuse_foreign = $false
     }
     $deleteOnExpiry = Get-Prop $Setting 'DeleteDnsRROnLeaseExpiry'
