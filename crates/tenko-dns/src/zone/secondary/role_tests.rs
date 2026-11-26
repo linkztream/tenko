@@ -59,6 +59,8 @@ struct Primary {
     answer: Arc<Mutex<Answer>>,
     asked: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+    /// The connections accepted and the accepts that failed, for a failure's message.
+    accepts: Arc<Mutex<(usize, usize)>>,
 }
 
 impl Primary {
@@ -67,11 +69,28 @@ impl Primary {
         let address = listener.local_addr().expect("address");
         let answer = Arc::new(Mutex::new(answer));
         let (asked, release) = (Arc::default(), Arc::default());
+        let accepts = Arc::<Mutex<(usize, usize)>>::default();
         let shared = Arc::clone(&answer);
         let (on_ask, on_release): (Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>) =
             (Arc::clone(&asked), Arc::clone(&release));
+        let counted = Arc::clone(&accepts);
         tokio::spawn(async move {
-            while let Ok((mut stream, _)) = listener.accept().await {
+            loop {
+                // A failed accept (no memory, no descriptor) is counted and the loop goes
+                // on: the listener stays, and the test that needed the transfer says why.
+                let mut stream = match listener.accept().await {
+                    Ok((stream, _)) => {
+                        counted.lock().expect("accepts").0 += 1;
+                        stream
+                    }
+                    Err(error) => {
+                        counted.lock().expect("accepts").1 += 1;
+                        eprintln!("the test primary's accept failed: {error}");
+                        // test-lint: allow sleep a pause between accepts that keep failing; no condition waits
+                        tokio::time::sleep(Duration::from_millis(50)).await;
+                        continue;
+                    }
+                };
                 let answer = *shared.lock().expect("answer");
                 let serial = match answer {
                     Answer::Zone(serial) | Answer::Current(serial) => serial,
@@ -113,6 +132,7 @@ impl Primary {
             answer,
             asked,
             release,
+            accepts,
         }
     }
 
@@ -311,7 +331,19 @@ async fn a_new_term_reads_the_store_not_an_earlier_term() {
     let primary = Primary::start(Answer::Zone(7)).await;
     let lab = Lab::new(&primary).await;
     let node = lab.node();
+    let clock_before = Timestamp::now();
     term(&node).await;
+    let clock_after = Timestamp::now();
+    // The first term transferred the copy; if not, the state, the primary's accepts and
+    // the clock tell a clock read backward from a primary that took no connection.
+    let first = node.lock()[&lab.zone.id].clone();
+    assert_eq!(
+        lab.served().await,
+        Some(7),
+        "the first term transferred: {first:?}; accepted and failed accepts {:?}; \
+         clock {clock_before:?} before the term, {clock_after:?} after",
+        *primary.accepts.lock().expect("accepts")
+    );
     // The node remembers an expiry an hour gone; another leader refreshed since.
     node.lock().get_mut(&lab.zone.id).expect("state").expires = Some(hours_ago(1));
     primary.answer(Answer::Closed);
