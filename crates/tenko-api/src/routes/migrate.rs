@@ -22,13 +22,14 @@
 //! | `GET /migrate/mirrors/{id}/losses` | `migrate.read` | The loss report with the acknowledgments |
 //! | `POST /migrate/mirrors/{id}/losses/ack` | `migrate.write`, a session | Acknowledge loss entries |
 //! | `GET /migrate/mirrors/{id}/scopes/{cidr}/diff` | `migrate.read` | The diff of a mirrored scope against Tenko's |
-//! | `POST /migrate/mirrors/{id}/scopes/{cidr}/prepare` | `migrate.write`, a session | Start the prepare job |
+//! | `POST /migrate/mirrors/{id}/scopes/{cidr}/prepare` | a takeover run's delegated session, for its plan's scopes | Prepare Tenko's scope, switched off |
 //! | `POST /migrate/mirrors/{id}/scopes/{cidr}/takeover` | `migrate.write`, a session | Start the takeover job |
 //! | `POST /migrate/mirrors/{id}/scopes/{cidr}/revert` | `migrate.write`, a session | Start the revert job |
 //! | `GET /migrate/takeovers` | `migrate.read` | List takeover records |
 //! | `GET /migrate/takeovers/{id}` | `migrate.read` | Get a takeover record |
 //! | `GET /migrate/runs/{id}` | `migrate.read`; a delegated session its own run only | Get a takeover run with its plan |
 //! | `POST /migrate/runs/{id}/close` | `migrate.write`, a fresh session | Close a takeover run |
+//! | `DELETE /migrate/runs/{id}/scopes/{cidr}` | `migrate.write`, a session; a delegated session its run's untouched scopes | Remove a run's switched-off scope |
 //!
 //! `{cidr}` is the scope's network with its length in one path segment, the slash
 //! percent-encoded (`192.0.2.0%2F24`).
@@ -61,8 +62,9 @@ use tenko_auth::{
     service::{MirrorTokenTerms, types::SecretString},
 };
 use tenko_core::{
-    Action, CodedError, DelegationId, Denied, DenyReason, JobId, MirrorId, ObjectKind, RequestCtx,
-    TakeoverId, Timestamp, UserId,
+    Action, Authenticated, Coded as _, CodedError, DelegationId, Denied, DenyReason, JobId,
+    MirrorId, ObjectKind, RequestCtx, TakeoverId, Timestamp, UserId,
+    auth::Delegated,
     error::codes,
     ir::{MirrorSnapshot, SourceKindLabel},
     migrate::{
@@ -72,7 +74,7 @@ use tenko_core::{
 };
 pub use tenko_migrate::mirror::{
     DiffAction, DiffKind, DiffRow, MirrorItem, MirrorLossItem, MirrorLosses, MirrorPatch,
-    MirroredScope, ScopeDiff, SnapshotAccepted, SnapshotCounts,
+    MirroredScope, ScopeDiff, ScopePrepared, SnapshotAccepted, SnapshotCounts,
 };
 use tenko_migrate::mirror::{
     MirrorError, MirrorService,
@@ -82,7 +84,7 @@ use tenko_migrate::mirror::{
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use super::{not_implemented, system::CaRootSource};
+use super::{common::Ipam, dhcp::Configs, not_implemented, system::CaRootSource};
 use crate::{
     dto::Page,
     extract::Ctx,
@@ -264,6 +266,49 @@ fn mirror_op(
 /// The refusal of a delegated session's body outside its plan (ADR 0038).
 fn plan_refused() -> ApiError {
     tenko_auth::AuthError::DelegationRefused { reason: "plan" }.into()
+}
+
+/// The sitting of a takeover run's delegated session (ADR 0038), none for a person; a
+/// delegated principal whose request carries no sitting of its run is refused.
+fn sitting(
+    cx: &RequestCtx,
+    who: Option<Extension<Authenticated>>,
+) -> Result<Option<Delegated>, ApiError> {
+    let Some(run) = cx.principal.delegation() else {
+        return Ok(None);
+    };
+    (who.and_then(|Extension(who)| who.flags.delegation))
+        .filter(|sitting| sitting.id == run)
+        .map(Some)
+        .ok_or_else(|| tenko_auth::AuthError::DelegationRefused { reason: "run" }.into())
+}
+
+/// An IPAM refusal as a takeover run's session receives it: the code, the status and the
+/// title, and no object, since IPAM names a person's too (a prefix, a reservation's address
+/// and host name); the log keeps the whole refusal.
+fn unnamed(error: MirrorError) -> MirrorError {
+    let mut coded = error.to_coded_error();
+    if !coded.code.starts_with("ipam.") {
+        return error;
+    }
+    tracing::info!(code = %coded.code, detail = %coded.detail, params = ?coded.params, "IPAM refused a write of a takeover run");
+    coded.detail = coded.title.to_string();
+    coded.params.clear();
+    coded.errors.clear();
+    MirrorError::Dhcp(tenko_dhcp::config::ConfigError::from_coded(coded))
+}
+
+/// Refuses (403 `plan`) a scope the plan of the open run `run` does not prepare.
+async fn run_scope(
+    auth: Option<Extension<Arc<AuthService>>>,
+    run: DelegationId,
+    cidr: IpNet,
+) -> Result<(), ApiError> {
+    let (_, plan) = auth.ok_or_else(plan_refused)?.run(run).await?;
+    if !tenko_auth::delegation::scope_in_plan(&plan, cidr) {
+        return Err(plan_refused());
+    }
+    Ok(())
 }
 
 /// A 400 `sys.invalid_request` for a malformed path segment.
@@ -914,32 +959,48 @@ async fn get_mirror_scope_diff(
     tag = "migrate",
     operation_id = "prepare_mirror_scope",
     summary = "Prepare Tenko's scope from a mirrored scope",
-    description = "Scope: `migrate.write`, an interactive session. Starts the prepare job of plan section 2.5: the IPAM prefix, the disabled scope, the pool, the exclusions, the option sets, the DDNS settings and the reservations as IPAM hosts named by section 2.9. Refused while a loss entry of the scope is unacknowledged or a diff row needs a decision. Audited as `dhcp.scope.prepare` when the job completes.",
+    description = "Scope: `migrate.write`. A takeover script's delegated session (ADR 0038) prepares a scope its plan names (with the operation `prepare`) from the latest snapshot of a mirror its run created (plan section 2.5): in the default VRF the IPAM network with its one pool range, then in one batch the DHCP scope, disabled and not authoritative, with the snapshot's lease time and DDNS settings (without a forward zone or a TTL) and its exclusions. Nothing is served; options, reservations and filters stay rows of the diff, and no free text of the snapshot is written. Refused before any write while a loss entry of the scope is open, a diff row needs a decision, or the snapshot's scope has other than one range, a lease time or DDNS settings Tenko refuses. While the run's scope is disabled and nobody else changed it, a newer snapshot rebuilds it (removed, then created) in a later sitting than the one that prepared it; an unchanged snapshot writes nothing. An IPAM refusal names no object to the session. Every write is audited as its own kind. A person's request answers 501.",
     params(
         ("id" = String, Path, description = "Mirror identifier (UUID)"),
         ("cidr" = String, Path, description = "The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`)")
     ),
     security(("session" = [])),
     responses(
-        (status = 202, description = "The job", body = ScopeJobStarted),
+        (status = 200, description = "Tenko's scope of the network, switched off", body = ScopePrepared),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, no push yet, or no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The scope is not ready (`migrate.takeover.losses`, `migrate.takeover.diff`, `migrate.takeover.scope_enabled`, `migrate.takeover.running`, `migrate.mirror.stale`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 501, description = "Not built yet (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `plan` for a scope its plan does not prepare, `condition` for a rebuild of a scope its own sitting prepared", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such mirror, for a delegated session not one its run created (`migrate.mirror.not_found`), no push yet, or no such scope (`migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`); or the prefix of this prepare was removed between its two batches by a later sitting's prepare of the network, which made the scope (`ipam.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The scope is not ready, `detail` saying what to do: open loss entries (`migrate.takeover.losses`, `params.scope`, `params.count`), a diff row, a value of the snapshot or a change by someone else that the prepare does not take (`migrate.takeover.diff`, `params.item`), the run's scope switched on (`migrate.takeover.scope_enabled`, `params.item`); a prefix or a network not the run's at, around or inside the network (`ipam.prefix.overlap`), a scope not the run's on its prefix (`dhcp.scope.exists`), or a write the IPAM or DHCP rules refuse", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "A person's request (`sys.not_implemented`): only a takeover run's session prepares", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 async fn prepare_mirror_scope(
     State(app): State<AppState>,
+    mirrors: Mirrors,
+    configs: Configs,
+    auth: Option<Extension<Arc<AuthService>>>,
     Ctx(cx): Ctx,
+    who: Option<Extension<Authenticated>>,
+    ipam: Result<Ipam, ApiError>,
     Path((id, cidr)): Path<(String, String)>,
 ) -> Result<Response, ApiError> {
-    mirror_and_scope(&app, &cx, &id, &cidr, Action::Create, ObjectKind::Takeover)?;
-    Err(not_implemented(
-        "POST",
-        "/migrate/mirrors/{id}/scopes/{cidr}/prepare",
-    ))
+    let route = ("POST", "/migrate/mirrors/{id}/scopes/{cidr}/prepare");
+    let (id, scope) =
+        mirror_and_scope(&app, &cx, &id, &cidr, Action::Create, ObjectKind::Takeover)?;
+    let Some(sitting) = sitting(&cx, who)? else {
+        return Err(not_implemented(route.0, route.1));
+    };
+    // ADR 0038: only a scope of the run's plan, before the snapshot is read.
+    run_scope(auth, sitting.id, scope).await?;
+    let service = service(mirrors, route.0, route.1)?;
+    let (Ipam(ipam), config) = (ipam?, configs.get()?);
+    let prepared = service
+        .prepare(&cx, (&ipam, &config), &sitting, id, scope)
+        .await;
+    Ok(answered(prepared.map_err(unnamed)))
 }
 
 #[utoipa::path(
@@ -1151,6 +1212,64 @@ async fn close_run(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+#[utoipa::path(
+    delete,
+    path = "/migrate/runs/{id}/scopes/{cidr}",
+    tag = "migrate",
+    operation_id = "remove_run_scope",
+    summary = "Remove a run's switched-off scope",
+    description = "Scope: `migrate.write`, an interactive session. Removes the disabled DHCP scope that a takeover run prepared for a network of its plan, and its IPAM prefix with the ranges the run created, without cascade: an address of someone else moves to the prefix around it, or the removal stops with the scope gone and the prefix kept, which serves nothing. The run's delegated session (ADR 0038) removes it within five minutes of its approval, in a later sitting than the one that prepared it, and only while nobody else changed it: the scope, the prefix and their ranges (deleted ones too), addresses and exclusions are as the run wrote them, with no option set, pool setting or policy, and no active lease; an IPAM refusal names no object to it. A person removes any disabled scope of the run. Audited as the scope's and the prefix's deletion.",
+    params(
+        ("id" = String, Path, description = "Run identifier (UUID)"),
+        ("cidr" = String, Path, description = "The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`)")
+    ),
+    security(("session" = [])),
+    responses(
+        (status = 204, description = "Removed"),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, or a token was used; `auth.delegation.refused` with `params.reason` `plan` for a network the run's plan does not prepare, and for its delegated session `condition` past five minutes after its approval or for a scope its own sitting prepared, or `run` without an open run", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such open run (`migrate.run.not_found`), or the network has no prefix or scope the run created (`dhcp.scope.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The scope is enabled, or for a delegated session someone else changed it; `params.item` names the network or the kind of object, `detail` what to do (`migrate.takeover.scope_enabled`); or an address of someone else holds the prefix (`ipam.in_use`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "The server runs no mirror service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 503, description = "IPAM not configured (`ipam.unavailable`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn remove_run_scope(
+    State(app): State<AppState>,
+    mirrors: Mirrors,
+    configs: Configs,
+    auth: Option<Extension<Arc<AuthService>>>,
+    Ctx(cx): Ctx,
+    who: Option<Extension<Authenticated>>,
+    ipam: Result<Ipam, ApiError>,
+    Path((id, cidr)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let route = ("DELETE", "/migrate/runs/{id}/scopes/{cidr}");
+    app.authorize(
+        &cx.principal,
+        Action::Delete,
+        &anywhere(ObjectKind::Takeover),
+    )?;
+    let run = parse_id::<DelegationId>("id", &id)?;
+    let cidr = parse_cidr(&cidr)?;
+    let sitting = sitting(&cx, who)?;
+    run_scope(auth, run, cidr).await?;
+    let service = service(mirrors, route.0, route.1)?;
+    let (Ipam(ipam), config) = (ipam?, configs.get()?);
+    let removed = service
+        .remove(&cx, (&ipam, &config), (run, sitting.as_ref()), cidr)
+        .await;
+    removed.map_err(|error| {
+        if sitting.is_some() {
+            unnamed(error)
+        } else {
+            error
+        }
+    })?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 // ---------------------------------------------------------------------------------------
 // Findings
 
@@ -1242,6 +1361,7 @@ fn scope_and_takeover_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_takeover))
         .routes(routes!(get_run))
         .routes(routes!(close_run))
+        .routes(routes!(remove_run_scope))
 }
 
 #[cfg(test)]

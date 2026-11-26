@@ -21,7 +21,9 @@
 //! a password, deletes a credential or ends sessions. The one listed operation behind a recent
 //! sign-in, the creation of a mirror (which mints the mirror's token), is held to
 //! [`WithinApproval`](Condition::WithinApproval) instead: within five minutes of the approval
-//! on Tenko's clock. So are the pairing and the deletion of a run's mirror.
+//! on Tenko's clock. So are the pairing and the deletion of a run's mirror, and the removal
+//! of a run's scope. A sitting deletes a mirror, and removes or rebuilds a scope, only when an
+//! earlier sitting made it ([`made_by_sitting`]), so that one approval allows one cycle.
 //!
 //! It lives at most [`LIFETIME`] from the approval (or the profile's absolute lifetime, if
 //! shorter) and [`IDLE`] since its last recorded request (or the profile's idle lifetime, if
@@ -41,7 +43,11 @@ use tenko_core::{
     MirrorId, Timestamp,
     auth::Delegated,
     clock::stands_before,
-    migrate::{plan::TakeoverPlan, run::RunRecord},
+    ipam::Stamp,
+    migrate::{
+        plan::{PlanOperation, TakeoverPlan},
+        run::RunRecord,
+    },
 };
 
 use crate::service::FRESH_AUTHENTICATION;
@@ -50,7 +56,8 @@ use crate::service::FRESH_AUTHENTICATION;
 pub const LIFETIME: Duration = Duration::from_secs(8 * 3_600);
 /// The idle limit of a delegated session under every profile.
 pub const IDLE: Duration = Duration::from_secs(15 * 60);
-/// How long after the approval a delegated session may create, pair or delete a mirror.
+/// How long after the approval a delegated session may create, pair or delete a mirror, or
+/// remove a run's scope.
 pub const MIRROR_WINDOW: Duration = FRESH_AUTHENTICATION;
 
 /// When a listed operation is open to a delegated session.
@@ -105,7 +112,9 @@ pub struct Entry {
 /// The operations a takeover run's delegated session reaches. The list of zones holds the
 /// run's zones only, a zone it creates is an unserved secondary of its plan, and it deletes an
 /// unserved zone of its run only (each handler's rule). It reads its run's mirrors, pairs its
-/// two mirrors with each other and deletes them, and nothing else of a mirror. The reads of its
+/// two mirrors with each other and deletes them, and nothing else of a mirror. It prepares the
+/// scopes of its plan from its run's mirrors, switched off, and removes such a scope while
+/// nobody else touched it ([`scope_in_plan`] and the handlers' rules). The reads of its
 /// jobs and the operations of the run's later phases join with their plan checks and the run's
 /// stages; the flip and the takeover only after the window started.
 pub const TAKEOVER: &[Entry] = &[
@@ -175,6 +184,18 @@ pub const TAKEOVER: &[Entry] = &[
         condition: Condition::WithinApproval,
         objects: &[("id", Object::Mirror)],
     },
+    Entry {
+        method: "POST",
+        route: "/migrate/mirrors/{id}/scopes/{cidr}/prepare",
+        condition: Condition::Always,
+        objects: &[("id", Object::Mirror)],
+    },
+    Entry {
+        method: "DELETE",
+        route: "/migrate/runs/{id}/scopes/{cidr}",
+        condition: Condition::WithinApproval,
+        objects: &[("id", Object::Run)],
+    },
 ];
 
 /// The entry of `method` on `route` (the template below the API base), if [`TAKEOVER`] lists
@@ -193,6 +214,13 @@ pub fn within_approval(delegated: &Delegated, now: Timestamp) -> bool {
         && now.saturating_since(delegated.approved_at) <= MIRROR_WINDOW
 }
 
+/// Whether the sitting of `delegated` made what `created` stamps: its run, at or after its
+/// approval. Such an object is never deleted, removed or rebuilt in the same sitting (403
+/// `condition`): a mirror whose token the sitting may hold, or a scope it prepared.
+pub fn made_by_sitting(delegated: &Delegated, created: &Stamp) -> bool {
+    created.by.delegation() == Some(delegated.id) && created.at >= delegated.approved_at
+}
+
 /// Whether a mirror a delegated session creates stays inside its plan: the Windows DHCP
 /// exporter of one of the plan's DHCP servers (the mirror is named for it), its token bound to
 /// the mirror host's address alone (`source_prefixes`, a /32 or /128).
@@ -209,6 +237,12 @@ pub fn mirror_in_plan(
             .iter()
             .any(|server| server.name.as_str().eq_ignore_ascii_case(name))
         && matches!(source_prefixes, [only] if only.parse::<IpNet>().is_ok_and(|net| net == host))
+}
+
+/// Whether the run's plan prepares the scope `cidr`: it lists the prepare and the network.
+pub fn scope_in_plan(plan: &TakeoverPlan, cidr: IpNet) -> bool {
+    plan.operations.contains(&PlanOperation::Prepare)
+        && matches!(cidr, IpNet::V4(net) if plan.scopes.contains(&net))
 }
 
 /// The partner a run's mirror `id` may be paired with: the run's other mirror, in a plan of
@@ -250,14 +284,21 @@ mod tests {
         assert!(admits(&session, "POST", "/auth/logout", at(30_000)));
         assert!(admits(&session, "GET", "/migrate/runs/{id}", at(30_000)));
         assert!(admits(&session, "GET", "/migrate/mirrors/{id}", at(30_000)));
-        for method in ["PATCH", "DELETE"] {
-            assert!(admits(&session, method, "/migrate/mirrors/{id}", at(1_300)));
-            assert!(!admits(
-                &session,
-                method,
-                "/migrate/mirrors/{id}",
-                at(1_301)
-            ));
+        let prepare = "/migrate/mirrors/{id}/scopes/{cidr}/prepare";
+        assert!(admits(&session, "POST", prepare, at(30_000)));
+        for (method, route) in [
+            ("PATCH", "/migrate/mirrors/{id}"),
+            ("DELETE", "/migrate/mirrors/{id}"),
+            ("DELETE", "/migrate/runs/{id}/scopes/{cidr}"),
+        ] {
+            assert!(
+                admits(&session, method, route, at(1_300)),
+                "{method} {route}"
+            );
+            assert!(
+                !admits(&session, method, route, at(1_301)),
+                "{method} {route}"
+            );
         }
         for (method, route) in [
             ("GET", "/auth/session"),
@@ -277,6 +318,20 @@ mod tests {
                 "{method} {route}"
             );
         }
+    }
+
+    #[test]
+    fn a_scope_is_in_the_plan_when_the_plan_prepares_that_network() {
+        let mut plan: TakeoverPlan =
+            serde_json::from_value(crate::testing::approval::plan()).expect("a plan");
+        let net = |text: &str| text.parse::<IpNet>().expect("a network");
+        assert!(scope_in_plan(&plan, net("192.0.2.0/24")));
+        for outside in ["192.0.2.0/25", "198.51.100.0/24", "2001:db8::/64"] {
+            assert!(!scope_in_plan(&plan, net(outside)), "{outside}");
+        }
+        plan.operations
+            .retain(|operation| *operation != PlanOperation::Prepare);
+        assert!(!scope_in_plan(&plan, net("192.0.2.0/24")));
     }
 
     #[test]

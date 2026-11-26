@@ -769,6 +769,11 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/migrate/takeovers/{id}", "get_takeover"),
     ("GET", "/migrate/runs/{id}", "get_run"),
     ("POST", "/migrate/runs/{id}/close", "close_run"),
+    (
+        "DELETE",
+        "/migrate/runs/{id}/scopes/{cidr}",
+        "remove_run_scope",
+    ),
     ("GET", "/ipam/reconcile", "get_ipam_reconcile"),
     // WP13.0: the Kerberos account, the owners, the sign-in providers, the directory sign-in
     // flows and the directory mappings.

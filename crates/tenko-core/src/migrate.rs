@@ -558,8 +558,8 @@ pub mod codes {
     pub const TAKEOVER_NOT_FRESH: &str = "migrate.takeover.not_fresh";
     /// The source's scope is still active in the latest push (409). Params: `scope`.
     pub const TAKEOVER_SOURCE_ACTIVE: &str = "migrate.takeover.source_active";
-    /// The prepare's diff is not empty for pools, exclusions or reservations (409). Params:
-    /// `scope`, `rows`.
+    /// The scope is not ready: its diff holds a row, or its snapshot a value, that the step
+    /// does not take, or someone else changed Tenko's scope (409). Params: `item`.
     pub const TAKEOVER_DIFF: &str = "migrate.takeover.diff";
     /// A zone the takeover needs is missing, not a primary zone or takes no DHCP updates
     /// (409). Params: `zone`, `reason`.
@@ -569,8 +569,8 @@ pub mod codes {
     /// No push showed the source's scope inactive within the wait (409). Params: `scope`,
     /// `waited`.
     pub const TAKEOVER_WAIT_TIMEOUT: &str = "migrate.takeover.wait_timeout";
-    /// Tenko's scope is enabled, so a prepare or a takeover cannot run (409). Params:
-    /// `scope`.
+    /// Tenko's scope is enabled, so a prepare or a takeover cannot run, or someone else
+    /// changed it, so a run's session does not remove it (409). Params: `item`.
     pub const TAKEOVER_SCOPE_ENABLED: &str = "migrate.takeover.scope_enabled";
     /// A takeover or a prepare of the scope runs already (409). Params: `scope`, `job`.
     pub const TAKEOVER_RUNNING: &str = "migrate.takeover.running";

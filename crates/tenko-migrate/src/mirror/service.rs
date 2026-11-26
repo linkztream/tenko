@@ -500,7 +500,7 @@ impl MirrorService {
         self.memory.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    async fn view(&self) -> Result<Arc<dyn ReadView>, MirrorError> {
+    pub(super) async fn view(&self) -> Result<Arc<dyn ReadView>, MirrorError> {
         Ok(self.store.read(ReadConsistency::Local).await?)
     }
 
@@ -1342,7 +1342,7 @@ impl MirrorService {
     /// # Errors
     ///
     /// [`MirrorError::Busy`] when another read held it that long.
-    async fn reading(&self) -> Result<tokio::sync::SemaphorePermit<'_>, MirrorError> {
+    pub(super) async fn reading(&self) -> Result<tokio::sync::SemaphorePermit<'_>, MirrorError> {
         tokio::time::timeout(
             Duration::from_secs(DECODE_WAIT_SECS),
             self.reading.acquire(),
@@ -1505,11 +1505,21 @@ impl MirrorService {
     pub async fn diff(&self, id: MirrorId, scope: IpNet) -> Result<ScopeDiff, MirrorError> {
         // One read holds both snapshots of a pair.
         let _reading = self.reading().await?;
-        let view = self.view().await?;
-        let (mirror, snapshot, _) = Self::stored_in(view.as_ref(), id)?;
+        Ok(self.diff_in(self.view().await?.as_ref(), id, scope)?.0)
+    }
+
+    /// The diff of a mirrored scope in `view`, with the stored snapshot it was made from; the
+    /// caller holds the node's one read of a stored snapshot.
+    pub(super) fn diff_in(
+        &self,
+        view: &dyn ReadView,
+        id: MirrorId,
+        scope: IpNet,
+    ) -> Result<(ScopeDiff, Snapshot), MirrorError> {
+        let (mirror, snapshot, _) = Self::stored_in(view, id)?;
         let open = self
             .summary_of(&snapshot)?
-            .open(&Self::acks(view.as_ref(), id)?, Some(scope));
+            .open(&Self::acks(view, id)?, Some(scope));
         let partner = match mirror.partner {
             Some(partner) => Some((
                 partner,
@@ -1518,7 +1528,8 @@ impl MirrorService {
             )),
             None => None,
         };
-        super::diff::diff(view.as_ref(), &snapshot, scope, open, partner)
+        let diff = super::diff::diff(view, &snapshot, scope, open, partner)?;
+        Ok((diff, snapshot))
     }
 
     /// The health findings of the mirrors (plan sections 2.12 and 2.17): stale mirrors (none

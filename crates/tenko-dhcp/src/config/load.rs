@@ -105,7 +105,18 @@ pub(crate) fn address_range<A: tenko_core::codec::key::KeyCodec>(
 /// # Errors
 ///
 /// The store's error.
-pub(crate) fn ranges_of(
+pub fn ranges_of(view: &dyn ReadView, prefix: PrefixId) -> ConfigResult<Vec<(Range, Revision)>> {
+    let mut ranges = every_range_of(view, prefix)?;
+    ranges.retain(|(range, _)| !range.meta.is_deleted());
+    Ok(ranges)
+}
+
+/// The ranges of a prefix, the deleted ones too.
+///
+/// # Errors
+///
+/// The store's error.
+pub fn every_range_of(
     view: &dyn ReadView,
     prefix: PrefixId,
 ) -> ConfigResult<Vec<(Range, Revision)>> {
@@ -116,11 +127,7 @@ pub(crate) fn ranges_of(
         usize::MAX,
         false,
     )? {
-        if let Some((range, revision)) = view.get_typed(&RANGES, &id)?
-            && !range.meta.is_deleted()
-        {
-            ranges.push((range, revision));
-        }
+        ranges.extend(view.get_typed(&RANGES, &id)?);
     }
     Ok(ranges)
 }
@@ -130,7 +137,7 @@ pub(crate) fn ranges_of(
 /// # Errors
 ///
 /// The store's error.
-pub(crate) fn addresses_of(view: &dyn ReadView, prefix: &Prefix) -> ConfigResult<Vec<Address>> {
+pub fn addresses_of(view: &dyn ReadView, prefix: &Prefix) -> ConfigResult<Vec<Address>> {
     let range = match prefix.cidr {
         ipnet::IpNet::V4(net) => address_range(
             prefix.vrf,

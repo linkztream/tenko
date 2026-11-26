@@ -158,8 +158,9 @@ impl AuthService {
                     // A sitting deletes only what an earlier one made: never a mirror whose token
                     // it may hold, nor one made again after a deletion.
                     if method == "DELETE"
-                        && owner == Some(Some(delegated.id))
-                        && row.is_some_and(|mirror| mirror.created.at >= delegated.approved_at)
+                        && row.is_some_and(|mirror| {
+                            delegation::made_by_sitting(delegated, &mirror.created)
+                        })
                     {
                         return refused("condition");
                     }

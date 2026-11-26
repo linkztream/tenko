@@ -8,12 +8,14 @@
 //! | [`body`] | a push body to a checked [`MirrorSnapshot`](tenko_core::ir::MirrorSnapshot): the bounds before anything is allocated, gzip, the strict parse with the path of the first error |
 //! | [`service`] | [`MirrorService`]: the rows, the push, the freshness in memory, the losses, the findings and the metrics |
 //! | [`diff`] | the rows of the diff of plan section 2.5 |
+//! | [`prepare`] | Tenko's own copy of a mirrored scope, switched off, for a takeover run |
 //!
 //! The answers of the service are the types of the API (they derive `ToSchema`); the routes
 //! of `tenko-api` add the request wrappers and nothing else.
 
 pub mod body;
 pub mod diff;
+pub mod prepare;
 pub mod service;
 
 use std::{collections::BTreeMap, fmt};
@@ -279,6 +281,13 @@ pub struct ScopeDiff {
     pub losses_open: u32,
 }
 
+/// The answer of a prepare: Tenko's scope of the network, switched off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ScopePrepared {
+    /// The IPAM prefix Tenko's scope is keyed by; a rebuild names a new one.
+    pub prefix: PrefixId,
+}
+
 /// Why the service refused.
 #[derive(Debug)]
 pub enum MirrorError {
@@ -363,7 +372,31 @@ pub enum MirrorError {
     },
     /// The account and token of the mirror.
     Auth(AuthError),
-    /// The rows of the diff.
+    /// A step of a takeover run is refused (409): `migrate.takeover.diff` with the diff row or
+    /// the snapshot's field Tenko does not take, or `migrate.takeover.scope_enabled` with the
+    /// network of Tenko's scope that is switched on.
+    Takeover {
+        /// The code.
+        code: &'static str,
+        /// What the refusal names.
+        item: String,
+    },
+    /// The scope has open loss entries (409 `migrate.takeover.losses`).
+    Losses {
+        /// The scope.
+        scope: IpNet,
+        /// How many.
+        count: u32,
+    },
+    /// Someone else changed the run's switched-off scope (409, a code of [`Self::Takeover`]);
+    /// `item` names the kind of object.
+    Touched {
+        /// The code.
+        code: &'static str,
+        /// The kind of object.
+        item: &'static str,
+    },
+    /// The rows of the diff, and the IPAM and DHCP writes of the prepare.
     Dhcp(tenko_dhcp::config::ConfigError),
     /// The store.
     Store(StoreError),
@@ -427,6 +460,22 @@ impl fmt::Display for MirrorError {
                 f,
                 "the mirror {id} cannot be paired with {partner}: {reason}"
             ),
+            Self::Takeover { code, item } if *code == codes::TAKEOVER_SCOPE_ENABLED => write!(
+                f,
+                "Tenko's scope {item} is switched on, so it is neither rebuilt nor removed: switch it off in Tenko first"
+            ),
+            Self::Takeover { item, .. } => write!(
+                f,
+                "the mirrored scope holds {item}, which Tenko does not prepare as it stands: change it on the Windows server, then run the script again"
+            ),
+            Self::Losses { scope, count } => write!(
+                f,
+                "the scope {scope} has {count} open losses: acknowledge them on the Losses tab of the mirrored source in Tenko, then run the script again"
+            ),
+            Self::Touched { item, .. } => write!(
+                f,
+                "someone else changed Tenko's switched-off scope ({item}), so the run's session neither rebuilds nor removes it: an administrator's session removes it with DELETE /api/v1/migrate/runs/<run>/scopes/<network>"
+            ),
             Self::Auth(error) => error.fmt(f),
             Self::Dhcp(error) => error.fmt(f),
             Self::Store(error) => error.fmt(f),
@@ -457,6 +506,8 @@ impl Coded for MirrorError {
             Self::BodyTimeout => BODY_TIMEOUT,
             Self::Source { .. } => codes::MIRROR_SOURCE,
             Self::Partner { .. } => codes::MIRROR_PARTNER,
+            Self::Takeover { code, .. } | Self::Touched { code, .. } => code,
+            Self::Losses { .. } => codes::TAKEOVER_LOSSES,
             Self::Auth(error) => error.code(),
             Self::Dhcp(error) => error.code(),
             Self::Store(error) => error.code(),
@@ -472,7 +523,10 @@ impl Coded for MirrorError {
             | Self::Conflict(_)
             | Self::Limit { .. }
             | Self::Source { .. }
-            | Self::Partner { .. } => 409,
+            | Self::Partner { .. }
+            | Self::Takeover { .. }
+            | Self::Losses { .. }
+            | Self::Touched { .. } => 409,
             Self::BodyTimeout => 408,
             Self::Settings { .. } | Self::Request(_) => 400,
             Self::Disabled(_) => 403,
@@ -526,6 +580,11 @@ impl Coded for MirrorError {
                 ("partner", partner.to_string()),
                 ("reason", (*reason).to_owned()),
             ]),
+            Self::Takeover { item, .. } => BTreeMap::from([("item", item.clone())]),
+            Self::Touched { item, .. } => BTreeMap::from([("item", (*item).to_owned())]),
+            Self::Losses { scope, count } => {
+                BTreeMap::from([("scope", scope.to_string()), ("count", count.to_string())])
+            }
             Self::Auth(error) => error.params(),
             Self::Dhcp(error) => error.params(),
             Self::Store(error) => error.params(),
@@ -537,6 +596,18 @@ impl Coded for MirrorError {
             Self::Invalid(invalid) => invalid.title(),
             Self::Auth(error) => error.title(),
             _ => "Mirrored source",
+        }
+    }
+
+    // The IPAM and DHCP errors carry their parameters in their own form.
+    fn to_coded_error(&self) -> tenko_core::CodedError {
+        match self {
+            Self::Dhcp(error) => error.to_coded_error(),
+            _ => (self.params().into_iter()).fold(
+                tenko_core::CodedError::new(self.code(), self.http_status(), self.to_string())
+                    .with_title(self.title()),
+                |error, (key, value)| error.with_param(key, value),
+            ),
         }
     }
 }
@@ -556,6 +627,14 @@ impl From<tenko_core::codec::CodecError> for MirrorError {
 impl From<tenko_dhcp::config::ConfigError> for MirrorError {
     fn from(error: tenko_dhcp::config::ConfigError) -> Self {
         Self::Dhcp(error)
+    }
+}
+
+impl From<tenko_ipam::IpamError> for MirrorError {
+    fn from(error: tenko_ipam::IpamError) -> Self {
+        Self::Dhcp(tenko_dhcp::config::ConfigError::from_coded(
+            error.to_coded_error(),
+        ))
     }
 }
 

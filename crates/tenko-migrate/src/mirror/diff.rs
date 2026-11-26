@@ -72,7 +72,10 @@ impl DiffRow {
 }
 
 /// The prefix of the network in the default VRF, and whether it has a DHCP scope.
-fn prefix_of(view: &dyn ReadView, cidr: IpNet) -> Result<Option<(PrefixId, bool)>, MirrorError> {
+pub(super) fn prefix_of(
+    view: &dyn ReadView,
+    cidr: IpNet,
+) -> Result<Option<(PrefixId, bool)>, MirrorError> {
     let default = "default".to_owned();
     let Some((tenant, _)) = view.get_typed(&TENANT_NAMES, &default)? else {
         return Ok(None);

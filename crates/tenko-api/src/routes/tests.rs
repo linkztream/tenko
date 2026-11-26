@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 469, "every operation of the document");
+    assert_eq!(all.len(), 470, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -119,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        109,
+        110,
         "the session-only operations"
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        469 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        470 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -360,7 +360,7 @@ async fn served() -> (TestEnv, String, axum::Router) {
     let store: Arc<dyn Store> = env.store.clone();
     let ipam = IpamService::with_direct_jobs(Arc::clone(&store)).expect("ipam");
     let mirrors = Arc::new(tenko_migrate::mirror::MirrorService::new(
-        store,
+        Arc::clone(&store),
         Arc::clone(&env.service),
     ));
     let mut state = crate::state::AppState::new(env.store.clone());
@@ -382,10 +382,26 @@ async fn served() -> (TestEnv, String, axum::Router) {
     let app = crate::server::app(state, &http, &crate::ui::UiSource::Embedded)
         .expect("the application")
         .layer(Extension(ipam))
+        .layer(Extension(dhcp_config(store)))
         .layer(Extension(mirrors))
         .layer(Extension(Arc::new(root)))
         .layer(Extension(Arc::clone(&env.service)));
     (env, admin, app)
+}
+
+/// The DHCP configuration service as the server sets it up: under the stored Hardened profile
+/// it refuses `replace`.
+fn dhcp_config(store: Arc<dyn Store>) -> Arc<tenko_dhcp::config::ConfigService> {
+    use tenko_dhcp::ddns::DdnsProfile;
+    let config = tenko_dhcp::config::ConfigService::with_direct_jobs(store);
+    config.set_profile(Arc::new(|view: &dyn tenko_store::ReadView| {
+        let stored = tenko_store::ReadViewExt::get_typed(view, &tenko_auth::model::SETTINGS, &());
+        match stored.ok().flatten().map(|(settings, _)| settings.profile) {
+            Some(Profile::Hardened) => DdnsProfile::HARDENED,
+            _ => DdnsProfile::HOME,
+        }
+    }));
+    config
 }
 
 /// A request over TLS from `address`, as the listener hands it on: the session cookie under
@@ -526,7 +542,7 @@ async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
     let routes = routed(&app).await;
     assert_eq!(
         routes.len(),
-        473,
+        474,
         "every route of the router: decide whether a delegated session reaches a new one \
          (tenko_auth::delegation::TAKEOVER) and count it here"
     );
@@ -1291,4 +1307,5 @@ async fn a_person_closes_a_run_once_its_mirrors_are_gone() {
 }
 
 mod mirrors;
+mod prepare;
 mod zones;

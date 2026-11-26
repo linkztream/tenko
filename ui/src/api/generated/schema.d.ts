@@ -3980,7 +3980,7 @@ export interface paths {
         put?: never;
         /**
          * Prepare Tenko's scope from a mirrored scope
-         * @description Scope: `migrate.write`, an interactive session. Starts the prepare job of plan section 2.5: the IPAM prefix, the disabled scope, the pool, the exclusions, the option sets, the DDNS settings and the reservations as IPAM hosts named by section 2.9. Refused while a loss entry of the scope is unacknowledged or a diff row needs a decision. Audited as `dhcp.scope.prepare` when the job completes.
+         * @description Scope: `migrate.write`. A takeover script's delegated session (ADR 0038) prepares a scope its plan names (with the operation `prepare`) from the latest snapshot of a mirror its run created (plan section 2.5): in the default VRF the IPAM network with its one pool range, then in one batch the DHCP scope, disabled and not authoritative, with the snapshot's lease time and DDNS settings (without a forward zone or a TTL) and its exclusions. Nothing is served; options, reservations and filters stay rows of the diff, and no free text of the snapshot is written. Refused before any write while a loss entry of the scope is open, a diff row needs a decision, or the snapshot's scope has other than one range, a lease time or DDNS settings Tenko refuses. While the run's scope is disabled and nobody else changed it, a newer snapshot rebuilds it (removed, then created) in a later sitting than the one that prepared it; an unchanged snapshot writes nothing. An IPAM refusal names no object to the session. Every write is audited as its own kind. A person's request answers 501.
          */
         post: operations["prepare_mirror_scope"];
         delete?: never;
@@ -4108,6 +4108,26 @@ export interface paths {
          */
         post: operations["close_run"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/migrate/runs/{id}/scopes/{cidr}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a run's switched-off scope
+         * @description Scope: `migrate.write`, an interactive session. Removes the disabled DHCP scope that a takeover run prepared for a network of its plan, and its IPAM prefix with the ranges the run created, without cascade: an address of someone else moves to the prefix around it, or the removal stops with the scope gone and the prefix kept, which serves nothing. The run's delegated session (ADR 0038) removes it within five minutes of its approval, in a later sitting than the one that prepared it, and only while nobody else changed it: the scope, the prefix and their ranges (deleted ones too), addresses and exclusions are as the run wrote them, with no option set, pool setting or policy, and no active lease; an IPAM refusal names no object to it. A person removes any disabled scope of the run. Audited as the scope's and the prefix's deletion.
+         */
+        delete: operations["remove_run_scope"];
         options?: never;
         head?: never;
         patch?: never;
@@ -22886,6 +22906,11 @@ export interface components {
         };
         /** @description Zone scope name ([a-z0-9][a-z0-9_-]{0,62}); `default` for the default scope */
         ScopeName: string;
+        /** @description The answer of a prepare: Tenko's scope of the network, switched off. */
+        ScopePrepared: {
+            /** @description The IPAM prefix Tenko's scope is keyed by; a rebuild names a new one. */
+            prefix: components["schemas"]["PrefixId"];
+        };
         /**
          * @description A scope rule in the API (IAM-01): `{"kind": "prefix", "value": {"id": "...",
          *     "subtree": true}}`. Grants use `vrf`, `site` and `prefix`; `tenant` and `object` are
@@ -45861,13 +45886,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The job */
-            202: {
+            /** @description Tenko's scope of the network, switched off */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ScopeJobStarted"];
+                    "application/json": components["schemas"]["ScopePrepared"];
                 };
             };
             /** @description The request is malformed (`sys.invalid_request`) */
@@ -45888,7 +45913,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The principal lacks the scope `migrate.write`, or a token was used */
+            /** @description The principal lacks the scope `migrate.write`, or a token was used; a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `run` without an open run, `plan` for a scope its plan does not prepare, `condition` for a rebuild of a scope its own sitting prepared */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -45897,7 +45922,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description No such mirror, no push yet, or no such scope (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`) */
+            /** @description No such mirror, for a delegated session not one its run created (`migrate.mirror.not_found`), no push yet, or no such scope (`migrate.mirror.no_snapshot`, `migrate.mirror.scope_not_found`); or the prefix of this prepare was removed between its two batches by a later sitting's prepare of the network, which made the scope (`ipam.not_found`) */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -45906,7 +45931,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description The scope is not ready (`migrate.takeover.losses`, `migrate.takeover.diff`, `migrate.takeover.scope_enabled`, `migrate.takeover.running`, `migrate.mirror.stale`) */
+            /** @description The scope is not ready, `detail` saying what to do: open loss entries (`migrate.takeover.losses`, `params.scope`, `params.count`), a diff row, a value of the snapshot or a change by someone else that the prepare does not take (`migrate.takeover.diff`, `params.item`), the run's scope switched on (`migrate.takeover.scope_enabled`, `params.item`); a prefix or a network not the run's at, around or inside the network (`ipam.prefix.overlap`), a scope not the run's on its prefix (`dhcp.scope.exists`), or a write the IPAM or DHCP rules refuse */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -45915,8 +45940,26 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Not built yet (`sys.not_implemented`) */
+            /** @description Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description A person's request (`sys.not_implemented`): only a takeover run's session prepares */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -46466,6 +46509,92 @@ export interface operations {
             };
             /** @description No authentication service (`sys.not_implemented`) */
             501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    remove_run_scope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Run identifier (UUID) */
+                id: string;
+                /** @description The scope's network with its length, the slash percent-encoded (`192.0.2.0%2F24`) */
+                cidr: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The request is malformed (`sys.invalid_request`) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No valid session */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The principal lacks the scope `migrate.write`, or a token was used; `auth.delegation.refused` with `params.reason` `plan` for a network the run's plan does not prepare, and for its delegated session `condition` past five minutes after its approval or for a scope its own sitting prepared, or `run` without an open run */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description No such open run (`migrate.run.not_found`), or the network has no prefix or scope the run created (`dhcp.scope.not_found`) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The scope is enabled, or for a delegated session someone else changed it; `params.item` names the network or the kind of object, `detail` what to do (`migrate.takeover.scope_enabled`); or an address of someone else holds the prefix (`ipam.in_use`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description The server runs no mirror service (`sys.not_implemented`) */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description IPAM not configured (`ipam.unavailable`) */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

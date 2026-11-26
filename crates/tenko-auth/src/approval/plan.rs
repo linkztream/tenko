@@ -1,7 +1,10 @@
 //! Tenko's own limits on a takeover plan (plan section 2.16.2), checked before a request is
 //! accepted.
 
-use std::{collections::BTreeSet, net::IpAddr};
+use std::{
+    collections::BTreeSet,
+    net::{IpAddr, Ipv4Addr},
+};
 
 use ipnet::Ipv4Net;
 use tenko_core::migrate::plan::{
@@ -13,6 +16,14 @@ use tenko_core::migrate::plan::{
 /// the loopback name (Windows' global query block list and `localhost`).
 const DENIED_NODE_NAMES: [&str; 3] = ["wpad", "isatap", "localhost"];
 
+/// Networks a plan's scope never meets, since none is a client network: "this network",
+/// loopback, and multicast with the reserved block above it (RFC 6890).
+const NEVER_SCOPES: [Ipv4Net; 3] = [
+    Ipv4Net::new_assert(Ipv4Addr::UNSPECIFIED, 8),
+    Ipv4Net::new_assert(Ipv4Addr::new(127, 0, 0, 0), 8),
+    Ipv4Net::new_assert(Ipv4Addr::new(224, 0, 0, 0), 3),
+];
+
 /// Checks `plan` against Tenko's limits; the reason of a refusal names the rule.
 ///
 /// - The counts: 1 to 64 zones, 1 to 16 controllers with exactly one PDC emulator, at most 32
@@ -21,7 +32,8 @@ const DENIED_NODE_NAMES: [&str; 3] = ["wpad", "isatap", "localhost"];
 /// - The domain is the forest root or below it.
 /// - The zones are the domain, `_msdcs.<forest root>` and reverse zones that cover a scope's
 ///   network or lie inside one, nothing else.
-/// - The scopes are networks (no host bits); the mirror host is no controller, by name or by
+/// - The scopes are networks (no host bits) of at most a /30 that meet none of 0.0.0.0/8,
+///   127.0.0.0/8 and 224.0.0.0/3; the mirror host is no controller, by name or by
 ///   address (an IPv4-mapped IPv6 address as its IPv4 address); the node's name is one label, not on the deny list and not the first label of a
 ///   controller, a DHCP server or the mirror host; the relationship's name is printable ASCII.
 /// - Tenko's computer account is there exactly when `kerberos_adopt` is: its realm is the
@@ -78,9 +90,7 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
     if !plan.domain.is_subdomain_of(&plan.forest_root) || plan.forest_root.is_root() {
         return Err("domain: the forest root or below it");
     }
-    if plan.scopes.iter().any(|scope| scope.trunc() != *scope) {
-        return Err("scopes: networks without host bits");
-    }
+    check_scopes(plan)?;
     let msdcs = format!("_msdcs.{}", plan.forest_root.as_str());
     let allowed = |zone: &str| {
         zone == plan.domain.as_str()
@@ -131,6 +141,23 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
         {
             return Err("relationship: 1 to 64 printable ASCII characters");
         }
+    }
+    Ok(())
+}
+
+/// The scopes are client networks: no host bits, at most a /30, meeting no network of
+/// [`NEVER_SCOPES`].
+fn check_scopes(plan: &TakeoverPlan) -> Result<(), &'static str> {
+    if plan.scopes.iter().any(|scope| scope.trunc() != *scope) {
+        return Err("scopes: networks without host bits");
+    }
+    if plan.scopes.iter().any(|scope| {
+        scope.prefix_len() > 30
+            || (NEVER_SCOPES.iter()).any(|never| never.contains(scope) || scope.contains(never))
+    }) {
+        return Err(
+            "scopes: client networks of at most a /30, outside 0.0.0.0/8, 127.0.0.0/8 and 224.0.0.0/3",
+        );
     }
     Ok(())
 }
@@ -222,7 +249,7 @@ mod tests {
     #[allow(clippy::too_many_lines)] // One table of refused plans.
     fn plans_outside_the_limits_are_refused() {
         type Edit = fn(&mut serde_json::Value);
-        let refused: [(Edit, &str); 29] = [
+        let refused: [(Edit, &str); 33] = [
             (
                 |plan| plan["zones"] = json!(["other.example.test"]),
                 "zones:",
@@ -249,6 +276,22 @@ mod tests {
                 "controllers.addresses",
             ),
             (|plan| plan["scopes"] = json!(["192.0.2.1/24"]), "scopes:"),
+            (
+                |plan| plan["scopes"] = json!(["192.0.2.0/31"]),
+                "scopes: client",
+            ),
+            (
+                |plan| plan["scopes"] = json!(["127.0.0.0/24"]),
+                "scopes: client",
+            ),
+            (
+                |plan| plan["scopes"] = json!(["239.1.0.0/16"]),
+                "scopes: client",
+            ),
+            (
+                |plan| plan["scopes"] = json!(["0.0.0.0/0"]),
+                "scopes: client",
+            ),
             (|plan| plan["node_name"] = json!("wpad"), "node_name"),
             (
                 |plan| plan["node_name"] = json!("tenko.corp.example.test"),
