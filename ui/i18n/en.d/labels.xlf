@@ -166,6 +166,10 @@
         <notes><note category="description">What the audit action auth.approval.request is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Ask approval for a takeover script</source></segment>
       </unit>
+      <unit id="audit.action.auth.delegation.refuse">
+        <notes><note category="description">What the audit action auth.delegation.refuse is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Refuse a request of a takeover script's session</source></segment>
+      </unit>
       <unit id="audit.action.auth.client_cert.code_create">
         <notes><note category="description">What the audit action auth.client_cert.code_create is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Create an integration enrollment code</source></segment>

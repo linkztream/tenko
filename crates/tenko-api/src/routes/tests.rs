@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 467, "every operation of the document");
+    assert_eq!(all.len(), 468, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        467 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        468 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -444,49 +444,128 @@ fn delegation_refused(reply: &Reply) -> bool {
     reply.status.as_u16() == 403 && reply.body["code"] == "auth.delegation.refused"
 }
 
-/// ADR 0038 (E145): within its first five minutes, a delegated session is refused on every
-/// operation of the served document outside its allow-list, every `/auth/*` operation and
-/// every account self-service operation among them, before any handler; a listed operation
-/// is not refused for being delegated. Its own sign-out ends it.
+/// `reply` is the refusal of a delegated session for `reason`.
+#[track_caller]
+fn assert_refused(reply: &Reply, reason: &str) {
+    reply.assert_problem(403, "auth.delegation.refused");
+    assert_eq!(reply.body["params"]["reason"], reason, "{}", reply.text);
+}
+
+/// `template` with every path parameter set to `value`.
+fn fill(template: &str, value: &str) -> String {
+    template
+        .split('/')
+        .map(|segment| {
+            if segment.starts_with('{') {
+                value
+            } else {
+                segment
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Every route of `app` below the API base as `"METHOD /template"`: the templates of the
+/// router's own table, which its `Debug` form lists, each with the methods that an anonymous
+/// request reaches (anything but 405), the routes outside the OpenAPI document included.
+async fn routed(app: &axum::Router) -> BTreeSet<String> {
+    let table = format!("{app:?}");
+    let templates: BTreeSet<&str> = table
+        .split('"')
+        .filter_map(|text| text.strip_prefix(API_BASE))
+        .filter(|template| template.starts_with('/'))
+        .collect();
+    let mut routes = BTreeSet::new();
+    for template in templates {
+        let path = fill(template, "0190d1c2-0000-7000-8000-000000000001");
+        for method in ["GET", "PUT", "POST", "DELETE", "PATCH"] {
+            // From an address of its own: an anonymous approval request paces its source.
+            let reply = send(app, from("192.0.2.77", method, &path, Anonymous, None)).await;
+            if reply.status.as_u16() != 405 {
+                routes.insert(format!("{method} {template}"));
+            }
+        }
+    }
+    routes
+}
+
+/// A delegated session of the administrator whose session secret is `admin`, for the test
+/// script's reference plan, from `source`.
+async fn delegated(
+    env: &TestEnv,
+    admin: &str,
+    source: &str,
+) -> tenko_auth::approval::DelegatedSession {
+    let admin = env
+        .ctx_for(&tenko_core::Credentials::Session(admin.to_owned()))
+        .await
+        .expect("the administrator");
+    env.delegate(
+        &admin,
+        &Script::default(),
+        source.parse().expect("an address"),
+    )
+    .await
+    .expect("a delegated session")
+}
+
+/// ADR 0038 (E145): a delegated session is refused before any handler, with the reason
+/// `unlisted`, on every route of the served router that the allow-list does not list, the
+/// routes outside the OpenAPI document and every account self-service route among them; a
+/// listed route is not refused for being delegated. Every entry is one route of the router,
+/// listed once, with its object parameters in its template. A new route fails the count here
+/// until its author has decided whether a delegated session reaches it. Its own sign-out
+/// ends the session.
 #[tokio::test]
 async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
     let (env, admin, app) = served().await;
-    let admin = env
-        .ctx_for(&tenko_core::Credentials::Session(admin))
-        .await
-        .expect("the administrator");
-    let session = env
-        .delegate(
-            &admin,
-            &Script::default(),
-            SCRIPT.parse().expect("an address"),
-        )
-        .await
-        .expect("a delegated session");
+    let session = delegated(&env, &admin, SCRIPT).await;
     let secret = session.secret.expose().to_owned();
-    let listed: BTreeSet<String> = tenko_auth::delegation::TAKEOVER
-        .iter()
-        .map(|entry| format!("{} {}", entry.method, entry.route))
-        .collect();
-    let all: BTreeSet<String> = operations().into_iter().map(|(key, _, _)| key).collect();
-    assert!(listed.is_subset(&all), "every listed route is an operation");
+    let run = session.delegation.to_string();
+    let routes = routed(&app).await;
+    assert_eq!(
+        routes.len(),
+        472,
+        "every route of the router: decide whether a delegated session reaches a new one \
+         (tenko_auth::delegation::TAKEOVER) and count it here"
+    );
+    let documented: BTreeSet<String> = operations().into_iter().map(|(key, _, _)| key).collect();
+    assert!(
+        documented.is_subset(&routes),
+        "the router serves the whole document"
+    );
+    let mut listed = BTreeSet::new();
+    for entry in tenko_auth::delegation::TAKEOVER {
+        let key = format!("{} {}", entry.method, entry.route);
+        assert!(routes.contains(&key), "{key} is a route");
+        assert!(listed.insert(key.clone()), "{key} is listed once");
+        for (name, _) in entry.objects {
+            assert!(
+                entry.route.contains(&format!("{{{name}}}")),
+                "{key}: {name}"
+            );
+        }
+    }
     let mut wrong = Vec::new();
     let mut refused = 0_usize;
-    for (key, _, operation) in operations() {
+    for key in &routes {
         if key == "POST /auth/logout" {
             continue;
         }
-        let (method, path) = concrete(&key, &operation);
-        let body = operation.get("requestBody").map(|_| "{}");
-        let reply = send(&app, from(SCRIPT, &method, &path, Bearer(&secret), body)).await;
-        match (listed.contains(&key), delegation_refused(&reply)) {
-            (false, true) => refused += 1,
-            (true, false) => {}
+        let (method, template) = key.split_once(' ').expect("METHOD /path");
+        let body = matches!(method, "POST" | "PUT" | "PATCH").then_some("{}");
+        let path = fill(template, &run);
+        let reply = send(&app, from(SCRIPT, method, &path, Bearer(&secret), body)).await;
+        let unlisted = delegation_refused(&reply) && reply.body["params"]["reason"] == "unlisted";
+        match (listed.contains(key), unlisted, delegation_refused(&reply)) {
+            (false, true, _) => refused += 1,
+            (true, false, false) => {}
             _ => wrong.push(format!("{key}: {} {}", reply.status, reply.text)),
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
-    assert_eq!(refused, all.len() - listed.len());
+    assert_eq!(refused, routes.len() - listed.len());
     // From another address it is an unknown session, on a listed operation too (a public one
     // answers as to anybody).
     let elsewhere = send(
@@ -538,10 +617,7 @@ async fn the_request_context_holds_the_allow_list_too() {
         source_ip: Some(SCRIPT.parse().expect("an address")),
         ..crate::extract::ClientInfo::default()
     });
-    harness
-        .send(request)
-        .await
-        .assert_problem(403, "auth.delegation.refused");
+    assert_refused(&harness.send(request).await, "unlisted");
 }
 
 /// ADR 0038 over HTTP: the request, the code, the approval, the collect, and the one listed
@@ -622,12 +698,12 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
         mirror("dhcp9.corp.example.test", "192.0.2.30/32"),
         mirror("dhcp1.corp.example.test", "192.0.2.0/24"),
     ] {
-        send(
+        let reply = send(
             &app,
             from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&outside)),
         )
-        .await
-        .assert_problem(403, "auth.delegation.refused");
+        .await;
+        assert_refused(&reply, "plan");
     }
     let inside = mirror("dhcp1.corp.example.test", "192.0.2.30/32");
     send(
@@ -638,12 +714,12 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     .assert_status(201);
     // One mirror per server: a second one for the same server, in any case, is refused.
     let again = mirror("DHCP1.corp.example.test", "192.0.2.30/32");
-    send(
+    let reply = send(
         &app,
         from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&again)),
     )
-    .await
-    .assert_problem(403, "auth.delegation.refused");
+    .await;
+    assert_refused(&reply, "taken");
     // Six minutes after the approval, on Tenko's clock, the mirror creation is closed.
     let view = env
         .store
@@ -672,12 +748,12 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
         .expect("a time");
     approved_at(six_minutes_ago).await.expect("commit");
     let second = mirror("dhcp2.corp.example.test", "192.0.2.30/32");
-    send(
+    let reply = send(
         &app,
         from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&second)),
     )
-    .await
-    .assert_problem(403, "auth.delegation.refused");
+    .await;
+    assert_refused(&reply, "condition");
     // Within the window again: one mirror per DHCP server of the plan, two in all.
     approved_at(Timestamp::now()).await.expect("commit");
     send(
@@ -686,12 +762,12 @@ async fn a_script_is_approved_collects_and_creates_its_mirrors_over_http() {
     )
     .await
     .assert_status(201);
-    send(
+    let reply = send(
         &app,
         from(SCRIPT, "POST", mirrors, Bearer(&secret), Some(&inside)),
     )
-    .await
-    .assert_problem(403, "auth.delegation.refused");
+    .await;
+    assert_refused(&reply, "taken");
 }
 
 /// The two public operations of the approval are bounded: a request body above 64 KiB and a
@@ -785,4 +861,344 @@ async fn the_script_s_own_requests_are_answered_and_bounded() {
     send(&app, plain("POST", "/auth/logout", Some(&secret), None))
         .await
         .assert_status(204);
+}
+
+/// A request of `script` for `plan` from `source`, at the service: its ticket and its body.
+async fn requested(
+    env: &TestEnv,
+    script: &Script,
+    plan: &Value,
+    source: &str,
+) -> (tenko_auth::approval::ApprovalTicket, String) {
+    let body = script.request_for(plan);
+    let ctx = env
+        .public_ctx()
+        .with_source_ip(source.parse().expect("an address"));
+    let ticket = env
+        .service
+        .request_approval(&ctx, body.as_bytes())
+        .await
+        .expect("a request");
+    (ticket, body)
+}
+
+/// The collect of `ticket` by `script` from `source`, at the service.
+async fn collected(
+    env: &TestEnv,
+    script: &Script,
+    ticket: &tenko_auth::approval::ApprovalTicket,
+    source: &str,
+) -> Result<tenko_auth::approval::DelegatedSession, tenko_auth::AuthError> {
+    let ctx = env
+        .public_ctx()
+        .with_source_ip(source.parse().expect("an address"));
+    env.service
+        .collect_approval(&ctx, ticket.id, script.collect(ticket).as_bytes())
+        .await
+}
+
+/// The reference plan with another forwarder: a plan of the same domain that is not equal.
+fn other_plan() -> Value {
+    let mut plan = tenko_auth::testing::approval::plan();
+    plan["forwarders"] = json!([{ "zone": ".", "servers": ["198.51.100.54"] }]);
+    plan
+}
+
+/// Puts an open run with `plan` into the store, as a first collect writes it.
+async fn put_run(env: &TestEnv, plan: &Value) -> tenko_core::DelegationId {
+    use tenko_core::migrate::{
+        plan::TakeoverPlan,
+        run::RunRecord,
+        tables::{RUN_DOMAINS, RUN_PLANS, RUNS},
+    };
+    let plan: TakeoverPlan = serde_json::from_value(plan.clone()).expect("a plan");
+    let id = tenko_core::DelegationId::generate();
+    let run = RunRecord {
+        id,
+        domain: plan.domain.clone(),
+        created_at: Timestamp::now(),
+        sittings: Vec::new(),
+        mirrors: Vec::new(),
+    };
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        Timestamp::now(),
+    );
+    batch.put_typed(&RUNS, &id, &run).expect("encode");
+    batch.put_typed(&RUN_PLANS, &id, &plan).expect("encode");
+    batch
+        .put_typed(&RUN_DOMAINS, &plan.domain.as_str().to_owned(), &id)
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+    id
+}
+
+/// The `found` of every `auth.delegation.refuse` record, sorted.
+async fn refusals_found(env: &TestEnv) -> Vec<String> {
+    let view = env
+        .store
+        .read(tenko_store::ReadConsistency::Local)
+        .await
+        .expect("a view");
+    let mut found: Vec<String> = tenko_store::ReadViewExt::scan_typed(
+        view.as_ref(),
+        &tenko_store::tables::AUDIT,
+        tenko_store::KeyRange::all(),
+        usize::MAX,
+        false,
+    )
+    .expect("the audit")
+    .into_iter()
+    .filter(|(_, record, _)| record.draft.action.as_str() == "auth.delegation.refuse")
+    .filter_map(|(_, record, _)| record.draft.details.context.get("found").cloned())
+    .collect();
+    found.sort();
+    found
+}
+
+/// The mirror creation of a delegated session for the plan's first DHCP server.
+const DHCP1: &str = r#"{"name":"dhcp1.corp.example.test","kind":"windows-dhcp","source_prefixes":["192.0.2.30/32"]}"#;
+
+/// The first collect of a domain creates its run, and a later sitting with an equal plan joins
+/// it: the person who approves the later sitting is shown the run it joins, and both sittings
+/// act for that run.
+#[tokio::test]
+async fn a_run_is_created_at_the_first_collect_and_joined_at_the_next() {
+    let (env, admin, app) = served().await;
+    let first = delegated(&env, &admin, SCRIPT).await;
+    let logout = from(
+        SCRIPT,
+        "POST",
+        "/auth/logout",
+        Bearer(first.secret.expose()),
+        None,
+    );
+    send(&app, logout).await.assert_status(204);
+    let script = Script::default();
+    let reference = tenko_auth::testing::approval::plan();
+    let (ticket, body) = requested(&env, &script, &reference, "192.0.2.11").await;
+    let code = json!({ "code": script.code(&body, ticket.id) }).to_string();
+    let approve = format!("/auth/approvals/{}/approve", ticket.id);
+    let approved = send(
+        &app,
+        from(SCRIPT, "POST", &approve, Cookie(&admin), Some(&code)),
+    )
+    .await;
+    approved.assert_status(200);
+    let run = first.delegation.to_string();
+    assert_eq!(approved.body["run"]["id"], run);
+    assert_eq!(approved.body["run"]["sittings"], 1);
+    assert_eq!(approved.body["run"]["last_source"], SCRIPT);
+    let second = collected(&env, &script, &ticket, "192.0.2.11")
+        .await
+        .expect("collected");
+    assert_eq!(second.delegation, first.delegation, "one run per domain");
+    let read = send(
+        &app,
+        from(
+            SCRIPT,
+            "GET",
+            &format!("/migrate/runs/{run}"),
+            Cookie(&admin),
+            None,
+        ),
+    )
+    .await;
+    read.assert_status(200);
+    assert_eq!(read.body["domain"], "corp.example.test");
+    assert_eq!(read.body["plan"]["domain"], "corp.example.test");
+    let sittings = read.body["sittings"].as_array().expect("the sittings");
+    assert_eq!(sittings.len(), 2);
+    assert_eq!(sittings[0]["session"], first.session.to_string());
+    assert_eq!(sittings[1]["session"], second.session.to_string());
+    assert_eq!(sittings[1]["source"], "192.0.2.11");
+}
+
+/// A domain with an open run takes no plan but the run's: the approval of another plan is
+/// refused, and so is the collect of one approved before the run opened.
+#[tokio::test]
+async fn a_plan_other_than_the_open_runs_is_refused_at_the_approve_and_the_collect() {
+    let (env, admin, app) = served().await;
+    let admin_ctx = env
+        .ctx_for(&tenko_core::Credentials::Session(admin.clone()))
+        .await
+        .expect("the administrator");
+    let script = Script::default();
+    let (early, body) = requested(&env, &script, &other_plan(), "192.0.2.11").await;
+    let code = tenko_auth::service::SecretString::new(script.code(&body, early.id));
+    env.service
+        .approve(&admin_ctx, early.id, &code, &ROOT_SHA256)
+        .await
+        .expect("approved while the domain has no run");
+    let run = put_run(&env, &tenko_auth::testing::approval::plan()).await;
+    let refused = collected(&env, &script, &early, "192.0.2.11").await;
+    assert!(
+        matches!(refused, Err(tenko_auth::AuthError::RunPlan { run: named }) if named == run),
+        "{refused:?}"
+    );
+    env.service
+        .deny_approval(&admin_ctx, early.id)
+        .await
+        .expect("withdrawn");
+    let (ticket, body) = requested(&env, &script, &other_plan(), "192.0.2.12").await;
+    let code = json!({ "code": script.code(&body, ticket.id) }).to_string();
+    let approve = format!("/auth/approvals/{}/approve", ticket.id);
+    let reply = send(
+        &app,
+        from(SCRIPT, "POST", &approve, Cookie(&admin), Some(&code)),
+    )
+    .await;
+    reply.assert_problem(409, "migrate.run.plan");
+    assert_eq!(reply.body["params"]["run"], run.to_string());
+    let collect = format!("/auth/approvals/{}/collect", ticket.id);
+    let signed = script.collect(&ticket);
+    send(
+        &app,
+        from("192.0.2.12", "POST", &collect, Anonymous, Some(&signed)),
+    )
+    .await
+    .assert_problem(409, "auth.approval.pending");
+}
+
+/// A delegated session reads its own run and gets the same 404, byte for byte, for another
+/// run, for a run that does not exist and for a value that is no id; only the audit says
+/// which, at most once a minute per session for both alike. A path value is judged decoded, as
+/// the handler reads it.
+#[tokio::test]
+async fn a_delegated_session_reads_its_own_run_only() {
+    let (env, admin, app) = served().await;
+    let session = delegated(&env, &admin, SCRIPT).await;
+    let secret = session.secret.expose().to_owned();
+    let own = session.delegation.to_string();
+    let encoded = format!("%{:02X}{}", own.as_bytes()[0], &own[1..]);
+    for id in [own.clone(), encoded] {
+        let path = format!("/migrate/runs/{id}");
+        let reply = send(&app, from(SCRIPT, "GET", &path, Bearer(&secret), None)).await;
+        reply.assert_status(200);
+        assert_eq!(reply.body["id"], own);
+    }
+    let mut plan = tenko_auth::testing::approval::plan();
+    plan["domain"] = json!("other.example.test");
+    let other = put_run(&env, &plan).await;
+    let mut answers = Vec::new();
+    for id in [
+        other.to_string(),
+        tenko_core::DelegationId::generate().to_string(),
+        "not-a-run".to_owned(),
+        tenko_core::DelegationId::generate().to_string(),
+    ] {
+        let path = format!("/migrate/runs/{id}");
+        let reply = send(&app, from(SCRIPT, "GET", &path, Bearer(&secret), None)).await;
+        reply.assert_problem(404, "migrate.run.not_found");
+        answers.push(reply.text);
+    }
+    assert!(
+        answers.iter().all(|text| *text == answers[0]),
+        "{answers:?}"
+    );
+    assert_eq!(refusals_found(&env).await, ["outside_run"]);
+}
+
+/// One live mirror per DHCP server of the plan in a run, across its sittings: a later sitting
+/// is refused the server whose mirror exists, and creates it once a person deleted that mirror.
+#[tokio::test]
+async fn one_live_mirror_per_plan_server_per_run_across_sittings() {
+    let (env, admin, app) = served().await;
+    let first = delegated(&env, &admin, SCRIPT).await;
+    let bearer = Bearer(first.secret.expose());
+    let created = send(
+        &app,
+        from(SCRIPT, "POST", "/migrate/mirrors", bearer, Some(DHCP1)),
+    )
+    .await;
+    created.assert_status(201);
+    let mirror = created.body["mirror"]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned();
+    let logout = from(
+        SCRIPT,
+        "POST",
+        "/auth/logout",
+        Bearer(first.secret.expose()),
+        None,
+    );
+    send(&app, logout).await.assert_status(204);
+    let second = delegated(&env, &admin, "192.0.2.11").await;
+    assert_eq!(second.delegation, first.delegation);
+    let create = || {
+        let bearer = Bearer(second.secret.expose());
+        from(
+            "192.0.2.11",
+            "POST",
+            "/migrate/mirrors",
+            bearer,
+            Some(DHCP1),
+        )
+    };
+    assert_refused(&send(&app, create()).await, "taken");
+    let path = format!("/migrate/mirrors/{mirror}");
+    send(&app, from(SCRIPT, "DELETE", &path, Cookie(&admin), None))
+        .await
+        .assert_status(204);
+    send(&app, create()).await.assert_status(201);
+}
+
+/// A session whose run is gone reaches no listed route but its own sign-out, which ends it.
+#[tokio::test]
+async fn a_session_whose_run_is_gone_is_refused_on_every_listed_route() {
+    let (env, admin, app) = served().await;
+    let session = delegated(&env, &admin, SCRIPT).await;
+    let secret = session.secret.expose().to_owned();
+    let mut batch = tenko_store::WriteBatch::new(
+        tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
+        Timestamp::now(),
+    );
+    batch.delete_typed(&tenko_core::migrate::tables::RUNS, &session.delegation);
+    env.store.propose(batch).await.expect("commit");
+    for entry in tenko_auth::delegation::TAKEOVER {
+        if entry.route == "/auth/logout" {
+            continue;
+        }
+        let path = fill(entry.route, &session.delegation.to_string());
+        let body = (entry.method == "POST").then_some(DHCP1);
+        let reply = send(
+            &app,
+            from(SCRIPT, entry.method, &path, Bearer(&secret), body),
+        )
+        .await;
+        assert_refused(&reply, "run");
+    }
+    let logout = || from(SCRIPT, "POST", "/auth/logout", Bearer(&secret), None);
+    send(&app, logout()).await.assert_status(204);
+    let ended = send(&app, logout()).await;
+    assert!(refused_as_unauthenticated(&ended), "{}", ended.text);
+}
+
+/// The guard of the operations behind a recent sign-in refuses a delegated session, whatever
+/// the allow-list lists.
+#[tokio::test]
+async fn the_fresh_guard_refuses_a_delegated_session_whatever_the_table_says() {
+    let (env, admin, _app) = served().await;
+    let session = delegated(&env, &admin, SCRIPT).await;
+    let source: std::net::IpAddr = SCRIPT.parse().expect("an address");
+    let now = Timestamp::now();
+    let authenticated = env
+        .service
+        .authenticate_from(
+            &tenko_core::Credentials::Bearer(session.secret.expose().to_owned()),
+            Some(source),
+            now,
+        )
+        .await
+        .expect("the delegated session");
+    let ctx = tenko_core::RequestCtx::new(authenticated.principal)
+        .at(now)
+        .with_source_ip(source);
+    let auth = Some(Extension(Arc::clone(&env.service)));
+    let refused = super::needs_a_fresh_session(auth, &ctx, "/migrate/runs/{id}/close")
+        .await
+        .expect_err("refused");
+    assert_eq!(refused.coded_error().code, "auth.delegation.refused");
+    assert_eq!(refused.coded_error().status, 403);
 }

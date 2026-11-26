@@ -6,10 +6,16 @@ use aws_lc_rs::constant_time::verify_slices_are_equal;
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use tenko_core::{
     Action, ApprovalId, DelegationId, MirrorId, ObjectKind, ObjectRef, Principal, RequestCtx,
-    SessionId, SystemComponent, Timestamp, UserId,
+    Revision, SessionId, SystemComponent, Timestamp, UserId,
     audit::{AuditAction, AuditDraft},
     auth::Delegated,
-    migrate::plan::TakeoverPlan,
+    dns::DnsName,
+    migrate::{
+        audit::{RUN_CREATE, RUN_JOIN},
+        plan::TakeoverPlan,
+        run::{RunMirror, RunRecord, Sitting},
+        tables::{MIRRORS, RUN_DOMAINS, RUN_PLANS, RUNS},
+    },
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
 
@@ -83,7 +89,6 @@ impl AuthService {
             source,
             state: ApprovalState::Pending,
             created_at: ctx.now,
-            mirrors: Vec::new(),
         };
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(&APPROVALS, &record.id, None);
@@ -137,7 +142,10 @@ impl AuthService {
             .filter(|(_, record, _)| record.pending(ctx.now) && matches(record, code, root))
             .map(|(_, record, _)| record);
         match (found.next(), found.next()) {
-            (Some(record), None) => Ok(record.view(plan_of(view.as_ref(), record.id)?, ctx.now)),
+            (Some(record), None) => {
+                let run = open_run(view.as_ref(), &record.domain)?.map(|(run, _)| run.summary());
+                Ok(record.view(plan_of(view.as_ref(), record.id)?, run, ctx.now))
+            }
             (Some(_), Some(_)) => Err(Refusal::Ambiguous.into()),
             (None, _) => Err(self.wrong_code(ctx, user, session).await),
         }
@@ -145,12 +153,14 @@ impl AuthService {
 
     /// `POST /auth/approvals/{id}/approve`: the person approves the request whose code they
     /// typed again, after a sign-in within the last five minutes. At most one approval per
-    /// domain is approved or has a delegated session alive at a time.
+    /// domain is approved or has a delegated session alive at a time. When the domain has an
+    /// open run, the approval joins it at its collect and its plan must be the run's.
     ///
     /// # Errors
     ///
     /// [`Refusal::NotFound`], [`Refusal::Expired`], [`Refusal::Code`], [`Refusal::Denied`],
-    /// [`Refusal::Consumed`], [`Refusal::Limit`], and the errors of the approver's checks.
+    /// [`Refusal::Consumed`], [`Refusal::Limit`], [`AuthError::RunPlan`], and the errors of
+    /// the approver's checks.
     pub async fn approve(
         &self,
         ctx: &RequestCtx,
@@ -188,6 +198,11 @@ impl AuthService {
                 return Err(Refusal::Limit("domain").into());
             }
         }
+        let plan = plan_of(view.as_ref(), id)?;
+        let run = open_run(view.as_ref(), &record.domain)?.map(|(run, _)| run);
+        if let Some(run) = &run {
+            same_plan(view.as_ref(), run.id, &plan)?;
+        }
         let strength = ctx.principal.strength().ok_or(AuthError::Unauthenticated)?;
         let (account, _) = view
             .get_typed(&USERS, &user)?
@@ -201,20 +216,22 @@ impl AuthService {
             delegation,
             generation: account.sessions_generation,
         });
-        let plan = plan_of(view.as_ref(), id)?;
         let mut batch = WriteBatch::for_request(ctx);
         batch.expect_typed(&APPROVALS, &id, Some(revision));
         batch.put_typed(&APPROVALS, &id, &record)?;
+        // A joining approval's own delegation stays unused: the audit names the run's.
+        let named = run.as_ref().map_or(delegation, |run| run.id);
         batch.audit(
             decision_audit(actions::APPROVE, &record, user, session, ctx)
-                .with_context("delegation", delegation.to_string())
+                .with_context("delegation", named.to_string())
+                .with_context("run", if run.is_some() { "join" } else { "new" })
                 .with_context("zones", plan.zones.len().to_string())
                 .with_context("controllers", plan.controllers.len().to_string())
                 .with_context("dhcp_servers", plan.dhcp_servers.len().to_string())
                 .with_context("scopes", plan.scopes.len().to_string()),
         );
         self.commit(batch).await?;
-        Ok(record.view(plan, ctx.now))
+        Ok(record.view(plan, run.map(|run| run.summary()), ctx.now))
     }
 
     /// `POST /auth/approvals/{id}/deny`: an administrator refuses a waiting request, or
@@ -283,11 +300,14 @@ impl AuthService {
     /// `POST /auth/approvals/{id}/collect`: the script proves its key by signing the nonce,
     /// from the request's source address, and receives the delegated session once, while its
     /// approver may still administer under the same sessions generation as at the approval.
+    /// The session acts for the open run of the domain, which the sitting joins with an equal
+    /// plan, or for the run it creates when the domain has none.
     ///
     /// # Errors
     ///
     /// [`Refusal::NotFound`] for another source, [`Refusal::Signature`], [`Refusal::Pending`],
-    /// [`Refusal::Denied`], [`Refusal::Expired`], [`Refusal::Consumed`];
+    /// [`Refusal::Denied`], [`Refusal::Expired`], [`Refusal::Consumed`] (also for a run another
+    /// collect created or changed meanwhile), [`AuthError::RunPlan`];
     /// [`AuthError::Unauthenticated`] when the approver may no longer administer or ended their
     /// sessions since the approval.
     pub async fn collect_approval(
@@ -345,8 +365,10 @@ impl AuthService {
         };
         let (absolute, idle) = super::delegated_lifetimes(&self.settings());
         let expires_at = decision.at.checked_add(absolute).ok_or(Refusal::Expired)?;
+        let open = open_run(view.as_ref(), &record.domain)?;
+        let run = open.as_ref().map_or(decision.delegation, |(run, _)| run.id);
         let secret = crate::secret::new_delegation_secret()?;
-        let session = delegated_session(&record, &user, &decision, expires_at, idle, ctx.now);
+        let session = delegated_session(&record, &user, &decision, run, expires_at, idle, ctx.now);
         let delegated = session.delegation.ok_or(Refusal::NotFound)?;
         let cx = RequestCtx {
             principal: Principal::User {
@@ -368,6 +390,7 @@ impl AuthService {
         batch.put_typed(&APPROVALS, &id, &record)?;
         batch.put_typed(&SESSIONS, &hash, &session)?;
         batch.put_typed(&USER_SESSIONS, &(user.id, session.id), &hash)?;
+        stage_sitting(&mut batch, view.as_ref(), open, &record, &session)?;
         batch.audit(
             AuditDraft::success(
                 actions::COLLECT,
@@ -396,27 +419,28 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::DelegationRefused`] for any other principal or a session without its
-    /// approval.
+    /// [`AuthError::DelegationRefused`] for any other principal or a session without an
+    /// open run.
     pub async fn delegation_plan(&self, ctx: &RequestCtx) -> Result<TakeoverPlan, AuthError> {
         let view = self.view().await?;
-        let delegated =
-            Self::delegated_of(ctx, view.as_ref())?.ok_or(AuthError::DelegationRefused)?;
-        view.get_typed(&APPROVAL_PLANS, &delegated.approval)?
+        let refused = || AuthError::DelegationRefused { reason: "run" };
+        let delegated = Self::delegated_of(ctx, view.as_ref())?.ok_or_else(refused)?;
+        view.get_typed(&RUN_PLANS, &delegated.id)?
             .map(|(plan, _)| plan)
-            .ok_or(AuthError::DelegationRefused)
+            .ok_or_else(refused)
     }
 
-    /// For a delegated session, stages the mirror `mirror`, named `name`, into its approval
-    /// and answers `true`: within [`delegation::MIRROR_WINDOW`] of the approval on this
-    /// controller's clock, for the plan's DHCP server of that name (case aside) that has no
-    /// mirror yet, in the batch that creates the mirror. Answers `false` for any other
-    /// principal.
+    /// For a delegated session, stages the mirror `mirror`, named `name`, into its run and
+    /// answers `true`: within [`delegation::MIRROR_WINDOW`] of the approval on this
+    /// controller's clock, for the plan's DHCP server of that name (case aside) whose mirror in
+    /// the run, if any, no longer exists, in the batch that creates the mirror. Answers `false`
+    /// for any other principal.
     ///
     /// # Errors
     ///
-    /// [`AuthError::DelegationRefused`] past the window, for a name that is no DHCP server of
-    /// the plan, or for a server that has its mirror.
+    /// [`AuthError::DelegationRefused`] past the window (`condition`), without an open run
+    /// (`run`), for a name that is no DHCP server of the plan (`plan`), or for a server whose
+    /// mirror exists (`taken`).
     pub(super) fn stage_delegated_mirror(
         ctx: &RequestCtx,
         view: &dyn ReadView,
@@ -427,25 +451,32 @@ impl AuthService {
         let Some(delegated) = Self::delegated_of(ctx, view)? else {
             return Ok(false);
         };
+        let refused = |reason| AuthError::DelegationRefused { reason };
         if !delegation::within_approval(&delegated, ctx.now) {
-            return Err(AuthError::DelegationRefused);
+            return Err(refused("condition"));
         }
-        let (mut record, revision) = view
-            .get_typed(&APPROVALS, &delegated.approval)?
-            .ok_or(AuthError::DelegationRefused)?;
-        let server = plan_of(view, delegated.approval)
-            .map_err(|_| AuthError::DelegationRefused)?
+        let (mut run, revision) = view
+            .get_typed(&RUNS, &delegated.id)?
+            .ok_or_else(|| refused("run"))?;
+        let server = view
+            .get_typed(&RUN_PLANS, &delegated.id)?
+            .ok_or_else(|| refused("run"))?
+            .0
             .dhcp_servers
             .into_iter()
             .find(|server| server.name.as_str().eq_ignore_ascii_case(name))
-            .ok_or(AuthError::DelegationRefused)?
+            .ok_or_else(|| refused("plan"))?
             .name;
-        if record.mirrors.iter().any(|(taken, _)| *taken == server) {
-            return Err(AuthError::DelegationRefused);
+        match run.mirrors.iter_mut().find(|entry| entry.server == server) {
+            Some(entry) if view.get_typed(&MIRRORS, &entry.mirror)?.is_some() => {
+                return Err(refused("taken"));
+            }
+            // A mirror a person deleted frees its server.
+            Some(entry) => entry.mirror = mirror,
+            None => run.mirrors.push(RunMirror { server, mirror }),
         }
-        record.mirrors.push((server, mirror));
-        batch.expect_typed(&APPROVALS, &delegated.approval, Some(revision));
-        batch.put_typed(&APPROVALS, &delegated.approval, &record)?;
+        batch.expect_typed(&RUNS, &run.id, Some(revision));
+        batch.put_typed(&RUNS, &run.id, &run)?;
         Ok(true)
     }
 
@@ -459,7 +490,7 @@ impl AuthService {
         record
             .delegation
             .map(Some)
-            .ok_or(AuthError::DelegationRefused)
+            .ok_or(AuthError::DelegationRefused { reason: "run" })
     }
 
     /// Removes the approvals that are over: a consumed one [`delegation::LIFETIME`] after its
@@ -518,7 +549,7 @@ impl AuthService {
 
     /// Writes the audit record of a refusal on its own, at most once a minute per `pace`
     /// (a browser session, a delegated session or a source).
-    async fn approval_refusal_audit(
+    pub(super) async fn approval_refusal_audit(
         &self,
         principal: &Principal,
         pace: &[u8],
@@ -550,7 +581,7 @@ impl AuthService {
     ) -> Result<(UserId, SessionId), AuthError> {
         let (user, session, _) = Self::session_principal(ctx)?;
         if ctx.principal.delegation().is_some() {
-            return Err(AuthError::DelegationRefused);
+            return Err(AuthError::DelegationRefused { reason: "person" });
         }
         self.authorize(
             ctx,
@@ -599,14 +630,15 @@ impl AuthService {
     }
 }
 
-/// The delegated session of `user` for the approved `record`, created at `now`: never fresh
-/// (the Unix epoch as its sign-in), bound to the request's source, ending at `expires_at` or
-/// `idle` after its last request, and described in the session list by what the script
-/// reported.
+/// The delegated session of `user` for the approved `record`, acting for `run` and created
+/// at `now`: never fresh (the Unix epoch as its sign-in), bound to the request's source,
+/// ending at `expires_at` or `idle` after its last request, and described in the session list
+/// by what the script reported.
 fn delegated_session(
     record: &ApprovalRecord,
     user: &crate::model::UserRecord,
     decision: &Decision,
+    run: DelegationId,
     expires_at: Timestamp,
     idle: std::time::Duration,
     now: Timestamp,
@@ -631,7 +663,7 @@ fn delegated_session(
         directory_checked_at: None,
         generation: user.sessions_generation,
         delegation: Some(Delegated {
-            id: decision.delegation,
+            id: run,
             approval: record.id,
             approved_at: decision.at,
         }),
@@ -648,6 +680,82 @@ fn collectable(record: &ApprovalRecord, now: Timestamp) -> Result<Decision, Refu
         ApprovalState::Denied { .. } => Err(Refusal::Denied),
         ApprovalState::Consumed { .. } => Err(Refusal::Consumed),
         ApprovalState::Approved(decision) => Ok(decision.clone()),
+    }
+}
+
+/// The open run of `domain`, with its row's revision.
+fn open_run(
+    view: &dyn ReadView,
+    domain: &DnsName,
+) -> Result<Option<(RunRecord, Revision)>, AuthError> {
+    match view.get_typed(&RUN_DOMAINS, &domain.as_str().to_owned())? {
+        Some((run, _)) => Ok(view.get_typed(&RUNS, &run)?),
+        None => Ok(None),
+    }
+}
+
+/// Stages the sitting of the collected `record` and its delegated `session` into the
+/// domain's open run `open`, whose plan must equal the approval's, or creates the run the
+/// session acts for with the approval's plan when the domain has none, and audits which. The
+/// run rows are expected as read, so a collect that raced another answers a conflict.
+fn stage_sitting(
+    batch: &mut WriteBatch,
+    view: &dyn ReadView,
+    open: Option<(RunRecord, Revision)>,
+    record: &ApprovalRecord,
+    session: &SessionRecord,
+) -> Result<(), AuthError> {
+    let delegated = session.delegation.ok_or(Refusal::NotFound)?;
+    let (run, plan, at) = (delegated.id, plan_of(view, record.id)?, session.created_at);
+    let sitting = Sitting {
+        approval: record.id,
+        approved_by: session.user,
+        session: session.id,
+        source: record.source,
+        approved_at: delegated.approved_at,
+        collected_at: at,
+    };
+    let audit = if let Some((mut joined, revision)) = open {
+        same_plan(view, run, &plan)?;
+        joined.add_sitting(sitting);
+        batch.expect_typed(&RUNS, &run, Some(revision));
+        batch.put_typed(&RUNS, &run, &joined)?;
+        AuditDraft::success(RUN_JOIN, Vec::new())
+            .with_context("sittings", joined.sittings.len().to_string())
+    } else {
+        let key = record.domain.as_str().to_owned();
+        let created = RunRecord {
+            id: run,
+            domain: record.domain.clone(),
+            created_at: at,
+            sittings: vec![sitting],
+            mirrors: Vec::new(),
+        };
+        batch.expect_typed(&RUNS, &run, None);
+        // A domain row whose run is gone is replaced, never a lasting block of its domain.
+        let domain_row = view
+            .get_typed(&RUN_DOMAINS, &key)?
+            .map(|(_, revision)| revision);
+        batch.expect_typed(&RUN_DOMAINS, &key, domain_row);
+        batch.put_typed(&RUNS, &run, &created)?;
+        batch.put_typed(&RUN_PLANS, &run, &plan)?;
+        batch.put_typed(&RUN_DOMAINS, &key, &run)?;
+        AuditDraft::success(RUN_CREATE, Vec::new()).with_context("domain", key)
+    };
+    batch.audit(
+        audit
+            .with_source_ip(Some(record.source))
+            .with_context("run", run.to_string())
+            .with_context("approval", record.id.to_string()),
+    );
+    Ok(())
+}
+
+/// Refuses `plan` unless it equals the plan of the open run `run`.
+fn same_plan(view: &dyn ReadView, run: DelegationId, plan: &TakeoverPlan) -> Result<(), AuthError> {
+    match view.get_typed(&RUN_PLANS, &run)? {
+        Some((stored, _)) if stored == *plan => Ok(()),
+        _ => Err(AuthError::RunPlan { run }),
     }
 }
 

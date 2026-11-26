@@ -270,7 +270,7 @@ impl AuthService {
         ctx: &RequestCtx,
     ) -> Result<(UserRecord, Revision, Vec<u8>, crate::model::SessionRecord), AuthError> {
         if ctx.principal.delegation().is_some() {
-            return Err(AuthError::DelegationRefused);
+            return Err(AuthError::DelegationRefused { reason: "person" });
         }
         let (user_id, session_id, _) = Self::session_principal(ctx)?;
         Self::live_session(self.view().await?.as_ref(), user_id, session_id)
@@ -285,7 +285,7 @@ impl AuthService {
         now: tenko_core::Timestamp,
     ) -> Result<(), AuthError> {
         if session.delegation.is_some() {
-            return Err(AuthError::DelegationRefused);
+            return Err(AuthError::DelegationRefused { reason: "fresh" });
         }
         if tenko_core::clock::stands_before(now, session.authenticated_at)
             || now.saturating_since(session.authenticated_at) > FRESH_AUTHENTICATION
@@ -391,7 +391,7 @@ impl AuthService {
         // and a delegated session ends only itself, by signing out (ADR 0038).
         let (user, _, _) = Self::session_principal(ctx)?;
         if ctx.principal.delegation().is_some() {
-            return Err(AuthError::DelegationRefused);
+            return Err(AuthError::DelegationRefused { reason: "person" });
         }
         let view = self.view().await?;
         let found = Self::load_session(view.as_ref(), user, id)?

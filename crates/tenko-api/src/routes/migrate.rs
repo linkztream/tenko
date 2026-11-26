@@ -27,6 +27,7 @@
 //! | `POST /migrate/mirrors/{id}/scopes/{cidr}/revert` | `migrate.write`, a session | Start the revert job |
 //! | `GET /migrate/takeovers` | `migrate.read` | List takeover records |
 //! | `GET /migrate/takeovers/{id}` | `migrate.read` | Get a takeover record |
+//! | `GET /migrate/runs/{id}` | `migrate.read`; a delegated session its own run only | Get a takeover run with its plan |
 //!
 //! `{cidr}` is the scope's network with its length in one path segment, the slash
 //! percent-encoded (`192.0.2.0%2F24`).
@@ -59,13 +60,13 @@ use tenko_auth::{
     service::{MirrorTokenTerms, types::SecretString},
 };
 use tenko_core::{
-    Action, CodedError, Denied, DenyReason, JobId, MirrorId, ObjectKind, RequestCtx, TakeoverId,
-    Timestamp, UserId,
+    Action, CodedError, DelegationId, Denied, DenyReason, JobId, MirrorId, ObjectKind, RequestCtx,
+    TakeoverId, Timestamp, UserId,
     error::codes,
     ir::{MirrorSnapshot, SourceKindLabel},
     migrate::{
         LossAck, Mirror, SkippedItem, Snapshot, TakeoverCounts, TakeoverState, findings,
-        mirror_object, takeover_object,
+        mirror_object, plan::TakeoverPlan, run::RunRecord, takeover_object,
     },
 };
 pub use tenko_migrate::mirror::{
@@ -532,7 +533,7 @@ async fn list_mirrors(
         (status = 201, description = "The mirror and its token", body = MirrorCreated),
         (status = 400, description = "The request is malformed, or the settings are invalid (`migrate.mirror.invalid_settings`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan, `taken` for a server whose mirror of the run exists", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The installation holds 32 mirrors (`migrate.mirror.limit`), or an account of the service account's name exists; `params.name` names it (`migrate.mirror.exists`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -547,7 +548,8 @@ async fn create_mirror(
     app.authorize(&cx.principal, Action::Create, &anywhere(ObjectKind::Mirror))?;
     // ADR 0038: a takeover script's delegated session creates only the mirrors of its plan.
     if cx.principal.delegation().is_some() {
-        let refused = || ApiError::from(tenko_auth::AuthError::DelegationRefused);
+        let refused =
+            || ApiError::from(tenko_auth::AuthError::DelegationRefused { reason: "plan" });
         let plan = auth.ok_or_else(refused)?.delegation_plan(&cx).await?;
         if !tenko_auth::delegation::mirror_in_plan(
             &plan,
@@ -1031,6 +1033,58 @@ async fn get_takeover(
 }
 
 // ---------------------------------------------------------------------------------------
+// Runs
+
+/// `GET /migrate/runs/{id}`: an open takeover run with its plan.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RunView {
+    /// The run.
+    #[serde(flatten)]
+    pub run: RunRecord,
+    /// The plan as its first sitting's approval fixed it.
+    pub plan: TakeoverPlan,
+}
+
+/// The authentication service, which keeps the runs, or the `501` stub answer without it.
+fn runs_of(
+    auth: Option<Extension<Arc<AuthService>>>,
+    method: &str,
+    path: &str,
+) -> Result<Arc<AuthService>, ApiError> {
+    auth.map(|Extension(auth)| auth)
+        .ok_or_else(|| not_implemented(method, path))
+}
+
+#[utoipa::path(
+    get,
+    path = "/migrate/runs/{id}",
+    tag = "migrate",
+    operation_id = "get_run",
+    summary = "Get a takeover run",
+    description = "Scope: `migrate.read`. An open run of a takeover script (ADR 0038): its sittings, its mirrors and its plan. A run's delegated session reads its own run only; any other id answers 404, whether or not such a run exists.",
+    params(("id" = String, Path, description = "Run identifier (UUID): the `delegation` of the collect")),
+    responses(
+        (status = 200, description = "The run", body = RunView),
+        (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.read`; a delegated session whose run is not open (`auth.delegation.refused`, `params.reason` `run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such open run, or for a delegated session not its own (`migrate.run.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "No authentication service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn get_run(
+    State(app): State<AppState>,
+    auth: Option<Extension<Arc<AuthService>>>,
+    Ctx(cx): Ctx,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    app.authorize(&cx.principal, Action::Read, &anywhere(ObjectKind::Takeover))?;
+    let id = parse_id::<DelegationId>("id", &id)?;
+    let (run, plan) = runs_of(auth, "GET", "/migrate/runs/{id}")?.run(id).await?;
+    Ok(Json(RunView { run, plan }).into_response())
+}
+
+// ---------------------------------------------------------------------------------------
 // Findings
 
 /// The health findings of the mirrored sources for `GET /system/status` (plan section 2.12):
@@ -1119,6 +1173,7 @@ fn scope_and_takeover_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(revert_mirror_scope))
         .routes(routes!(list_takeovers))
         .routes(routes!(get_takeover))
+        .routes(routes!(get_run))
 }
 
 #[cfg(test)]

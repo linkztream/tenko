@@ -3242,7 +3242,7 @@
           "auth"
         ],
         "summary": "Approve a takeover script's request",
-        "description": "An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. Audited as `auth.approval.approve` with the run.",
+        "description": "An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. When the domain has an open run (`run` in the answer and in the lookup's), the approval joins it at the collect, and its plan must equal the run's. Audited as `auth.approval.approve` with the run.",
         "operationId": "approve_approval",
         "parameters": [
           {
@@ -3317,7 +3317,7 @@
             }
           },
           "409": {
-            "description": "The approval was decided before (`auth.approval.consumed`)",
+            "description": "The approval was decided before (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3370,7 +3370,7 @@
           "auth"
         ],
         "summary": "Collect the delegated session of an approved request",
-        "description": "No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.",
+        "description": "No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, for its run only (`delegation`, the run's id: the domain's open run, which the sitting joins with an equal plan, or the run the collect creates, audited as `migrate.run.join` or `migrate.run.create`), is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.",
         "operationId": "collect_approval",
         "parameters": [
           {
@@ -3445,7 +3445,7 @@
             }
           },
           "409": {
-            "description": "The person has not decided yet (`auth.approval.pending`), or it was collected before (`auth.approval.consumed`)",
+            "description": "The person has not decided yet (`auth.approval.pending`), or it was collected before or its run changed meanwhile (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -24542,7 +24542,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session past five minutes after its approval, or with a mirror outside its plan (`auth.delegation.refused`)",
+            "description": "The principal lacks the scope `migrate.write`, a token was used, or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` past five minutes after its approval, `run` without an open run, `plan` for a mirror outside its plan, `taken` for a server whose mirror of the run exists",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25736,6 +25736,89 @@
             "session": []
           }
         ]
+      }
+    },
+    "/api/v1/migrate/runs/{id}": {
+      "get": {
+        "tags": [
+          "migrate"
+        ],
+        "summary": "Get a takeover run",
+        "description": "Scope: `migrate.read`. An open run of a takeover script (ADR 0038): its sittings, its mirrors and its plan. A run's delegated session reads its own run only; any other id answers 404, whether or not such a run exists.",
+        "operationId": "get_run",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run identifier (UUID): the `delegation` of the collect",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is malformed (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session or token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `migrate.read`; a delegated session whose run is not open (`auth.delegation.refused`, `params.reason` `run`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such open run, or for a delegated session not its own (`migrate.run.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "No authentication service (`sys.not_implemented`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/migrate/takeovers": {
@@ -44289,6 +44372,17 @@
             "$ref": "#/components/schemas/ApprovalClient",
             "description": "The machine, the Windows user and the version, as the script reported them: shown\nlabeled as reported, as text."
           },
+          "run": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RunSummary",
+                "description": "The open run of the plan's domain, which this approval joins (its plan must be equal);\nabsent when the domain has none and the approval starts a new run."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "source": {
             "type": "string",
             "description": "The source address of the request."
@@ -49115,7 +49209,7 @@
           "delegation": {
             "type": "string",
             "format": "uuid",
-            "description": "The run it acts for."
+            "description": "The run it acts for: the same in every sitting of the run."
           },
           "expires_at": {
             "type": "string",
@@ -81688,6 +81782,25 @@
           }
         }
       },
+      "RunMirror": {
+        "type": "object",
+        "description": "A mirror of a run, with the plan's DHCP server it is named for.",
+        "required": [
+          "server",
+          "mirror"
+        ],
+        "properties": {
+          "mirror": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The mirror."
+          },
+          "server": {
+            "type": "string",
+            "description": "The DHCP server."
+          }
+        }
+      },
       "RunOutcome": {
         "type": "string",
         "description": "How a run ended.",
@@ -81696,6 +81809,79 @@
           "failed"
         ]
       },
+      "RunRecord": {
+        "type": "object",
+        "description": "An open run (`migrate.runs`).",
+        "required": [
+          "id",
+          "domain",
+          "created_at",
+          "sittings"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its first sitting was collected, on the collecting controller's clock."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The plan's domain."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run's id: the delegation of every sitting's session."
+          },
+          "mirrors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunMirror"
+            },
+            "description": "The mirrors its sessions created: at most one per DHCP server of the plan."
+          },
+          "sittings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Sitting"
+            },
+            "description": "Its sittings, oldest first, at most [`MAX_SITTINGS`]."
+          }
+        }
+      },
+      "RunSummary": {
+        "type": "object",
+        "description": "The open run an approval would join, as the person reads it before approving.",
+        "required": [
+          "id",
+          "created_at",
+          "sittings"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When its first sitting was collected."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run's id."
+          },
+          "last_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The source address of its newest sitting."
+          },
+          "sittings": {
+            "type": "integer",
+            "description": "How many sittings it keeps.",
+            "minimum": 0
+          }
+        }
+      },
       "RunTrigger": {
         "type": "string",
         "description": "What started a run.",
@@ -81703,6 +81889,27 @@
           "schedule",
           "manual"
         ]
+      },
+      "RunView": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RunRecord",
+            "description": "The run."
+          },
+          {
+            "type": "object",
+            "required": [
+              "plan"
+            ],
+            "properties": {
+              "plan": {
+                "$ref": "#/components/schemas/TakeoverPlan",
+                "description": "The plan as its first sitting's approval fixed it."
+              }
+            }
+          }
+        ],
+        "description": "`GET /migrate/runs/{id}`: an open takeover run with its plan."
       },
       "ScanArpSweepMethod": {
         "type": "object",
@@ -84767,6 +84974,49 @@
           }
         },
         "additionalProperties": false
+      },
+      "Sitting": {
+        "type": "object",
+        "description": "One sitting of a run: an approval and the delegated session collected for it.",
+        "required": [
+          "approval",
+          "approved_by",
+          "session",
+          "source",
+          "approved_at",
+          "collected_at"
+        ],
+        "properties": {
+          "approval": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The approval."
+          },
+          "approved_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When it was approved."
+          },
+          "approved_by": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The person who approved it."
+          },
+          "collected_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the script collected it."
+          },
+          "session": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The delegated session."
+          },
+          "source": {
+            "type": "string",
+            "description": "The approval's source address, the only one the session is accepted from."
+          }
+        }
       },
       "SkippedItem": {
         "type": "object",

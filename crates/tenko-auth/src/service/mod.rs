@@ -42,6 +42,8 @@ mod renewal;
 mod mirror;
 // The takeover script's approval and its delegated session (ADR 0038).
 mod approval;
+// The takeover runs: the one check of a delegated session's request and the read of a run.
+mod run;
 
 pub use admin::{OfflineUnlock, unlock_offline};
 pub use devices::{

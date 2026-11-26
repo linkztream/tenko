@@ -24,7 +24,8 @@ use tenko_auth::{
     },
 };
 use tenko_core::{
-    ApprovalId, Credentials, Principal, RequestCtx, SystemComponent, Timestamp, audit::AuditRecord,
+    ApprovalId, Credentials, DelegationId, Principal, RequestCtx, SystemComponent, Timestamp,
+    audit::AuditRecord, migrate::tables::RUN_DOMAINS,
 };
 use tenko_store::{KeyRange, ReadConsistency, ReadViewExt, Store, WriteBatch, tables};
 
@@ -510,30 +511,30 @@ async fn the_delegated_session_is_bound_never_fresh_and_ends() {
     };
     assert!(matches!(
         env.service.create_token(&ctx, &token).await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     assert!(matches!(
         env.service.totp_enroll_start(&ctx).await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     assert!(matches!(
         env.service.require_fresh_session(&ctx).await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     assert!(matches!(
         env.service.current_session(&ctx).await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     assert!(matches!(
         env.service.revoke_session(&ctx, session.session).await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     // It never approves, not even its own kind.
     assert!(matches!(
         env.service
             .deny_approval(&ctx, ApprovalId::generate())
             .await,
-        Err(AuthError::DelegationRefused)
+        Err(AuthError::DelegationRefused { reason: "person" })
     ));
     let second = env.delegate(&admin, &Script::default(), source(51)).await;
     assert_eq!(
@@ -971,4 +972,71 @@ async fn the_sweep_removes_an_ended_approval_within_ten_minutes() {
         !present().await
     })
     .await;
+}
+
+/// The one check refuses a listed operation whose condition no longer holds: the mirror
+/// create five minutes and one second after the approval.
+#[tokio::test]
+async fn the_check_refuses_an_operation_past_its_condition() {
+    let (env, _, admin) = installation().await;
+    let session = env
+        .delegate(&admin, &Script::default(), client())
+        .await
+        .expect("a delegated session");
+    let who = env
+        .service
+        .authenticate_from(
+            &Credentials::Bearer(session.secret.expose().to_owned()),
+            Some(client()),
+            env.now(),
+        )
+        .await
+        .expect("acts");
+    let approved_at = who.flags.delegation.expect("delegated").approved_at;
+    let late = approved_at
+        .checked_add(Duration::from_secs(301))
+        .expect("a time");
+    let refused = env
+        .service
+        .admit_delegated(
+            &who,
+            "POST",
+            Some("/migrate/mirrors"),
+            &[],
+            Some(client()),
+            late,
+        )
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(AuthError::DelegationRefused {
+                reason: "condition"
+            })
+        ),
+        "{refused:?}"
+    );
+}
+
+/// A domain row whose run is gone holds nothing: the next collect of the domain creates a run
+/// and the row names it.
+#[tokio::test]
+async fn a_domain_row_without_its_run_gives_way_to_a_new_run() {
+    let (env, _, admin) = installation().await;
+    let domain = plan()["domain"].as_str().expect("a domain").to_owned();
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+    batch
+        .put_typed(&RUN_DOMAINS, &domain, &DelegationId::generate())
+        .expect("encode");
+    env.store.propose(batch).await.expect("commit");
+    let session = env
+        .delegate(&admin, &Script::default(), client())
+        .await
+        .expect("a new run");
+    let view = env.store.read(ReadConsistency::Local).await.expect("view");
+    let (run, _) = view
+        .get_typed(&RUN_DOMAINS, &domain)
+        .expect("read")
+        .expect("the row");
+    assert_eq!(run, session.delegation);
 }

@@ -4,10 +4,9 @@ use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
 use tenko_core::{
-    ApprovalId, AuthStrength, DelegationId, MirrorId, SessionId, Timestamp, UserId,
+    ApprovalId, AuthStrength, DelegationId, SessionId, Timestamp, UserId,
     dns::{DnsName, is_host_label},
-    migrate::plan::TakeoverPlan,
-    net::Fqdn,
+    migrate::{plan::TakeoverPlan, run::RunSummary},
     table::TableDef,
 };
 use utoipa::ToSchema;
@@ -153,7 +152,7 @@ pub struct DelegatedSession {
     /// The session's id, as the session list shows it.
     #[schema(value_type = String, format = Uuid)]
     pub session: SessionId,
-    /// The run it acts for.
+    /// The run it acts for: the same in every sitting of the run.
     #[schema(value_type = String, format = Uuid)]
     pub delegation: DelegationId,
     /// Its deadline, on Tenko's clock; the idle limit ends it earlier.
@@ -200,7 +199,7 @@ pub struct Decision {
     pub strength: AuthStrength,
     /// When.
     pub at: Timestamp,
-    /// The run the delegated session acts for.
+    /// A new run's id: the run the collect creates when its domain has no open run.
     pub delegation: DelegationId,
     /// The approver's sessions generation at the approval: ending every session of the
     /// account, or a password change, before the collect refuses it.
@@ -233,10 +232,6 @@ pub struct ApprovalRecord {
     pub state: ApprovalState,
     /// When the request arrived.
     pub created_at: Timestamp,
-    /// The mirrors the delegated session created, each with the plan's DHCP server it is
-    /// named for: one per server.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mirrors: Vec<(Fqdn, MirrorId)>,
 }
 
 impl ApprovalRecord {
@@ -253,12 +248,18 @@ impl ApprovalRecord {
         matches!(self.state, ApprovalState::Pending) && !self.expired(now)
     }
 
-    /// What the person reads, with the approval's plan.
-    pub fn view(&self, plan: TakeoverPlan, now: Timestamp) -> ApprovalView {
+    /// What the person reads, with the approval's plan and the open run it would join.
+    pub fn view(
+        &self,
+        plan: TakeoverPlan,
+        run: Option<RunSummary>,
+        now: Timestamp,
+    ) -> ApprovalView {
         ApprovalView {
             id: self.id,
             purpose: self.purpose,
             plan,
+            run,
             reported: self.client.clone(),
             source: self.source.to_string(),
             created_at: self.created_at,
@@ -290,6 +291,10 @@ pub struct ApprovalView {
     pub purpose: Purpose,
     /// The plan in full.
     pub plan: TakeoverPlan,
+    /// The open run of the plan's domain, which this approval joins (its plan must be equal);
+    /// absent when the domain has none and the approval starts a new run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<RunSummary>,
     /// The machine, the Windows user and the version, as the script reported them: shown
     /// labeled as reported, as text.
     pub reported: ApprovalClient,

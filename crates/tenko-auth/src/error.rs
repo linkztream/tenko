@@ -180,10 +180,29 @@ pub enum AuthError {
         /// The limit.
         max_keys: usize,
     },
-    /// A delegated session (ADR 0038) reached an operation outside its allow-list, an
-    /// operation that needs a recent sign-in, or a body outside its run's plan.
-    #[error("a delegated session may not do this")]
-    DelegationRefused,
+    /// A delegated session (ADR 0038) was refused; `reason` says why: `unlisted` (an
+    /// operation outside its allow-list), `condition` (outside the operation's condition),
+    /// `run` (its run is not open), `plan` (a body outside its run's plan), `taken` (the
+    /// plan's server has its mirror), `person` (an operation of the person's own account) or
+    /// `fresh` (an operation that needs a recent sign-in).
+    #[error("a delegated session may not do this ({reason})")]
+    DelegationRefused {
+        /// Why.
+        reason: &'static str,
+    },
+    /// An object a request names does not exist, or is not the caller's to see; `code` is
+    /// its area's not-found code.
+    #[error("no such object")]
+    NoObject {
+        /// The stable code.
+        code: &'static str,
+    },
+    /// The domain has an open takeover run with another plan (ADR 0038).
+    #[error("the domain has an open takeover run with another plan; close the run first")]
+    RunPlan {
+        /// The open run.
+        run: tenko_core::DelegationId,
+    },
     /// An approval of a takeover script was refused (ADR 0038).
     #[error("{0}")]
     Approval(crate::approval::Refusal),
@@ -281,7 +300,9 @@ impl Coded for AuthError {
             Self::ScopeUnavailable => "auth.scope.unavailable",
             Self::PreferenceTooLarge { .. } => "auth.preference.too_large",
             Self::PreferenceLimit { .. } => "auth.preference.limit",
-            Self::DelegationRefused => "auth.delegation.refused",
+            Self::DelegationRefused { .. } => "auth.delegation.refused",
+            Self::NoObject { code } => code,
+            Self::RunPlan { .. } => tenko_core::migrate::codes::RUN_PLAN,
             Self::Approval(refusal) => refusal.code(),
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
@@ -303,7 +324,7 @@ impl Coded for AuthError {
             | Self::PasswordChangeRequired
             | Self::GrantExceedsOwn
             | Self::TokenRenewalRefused { .. }
-            | Self::DelegationRefused => 403,
+            | Self::DelegationRefused { .. } => 403,
             Self::Approval(refusal) => refusal.http_status(),
             Self::Denied(denied) => denied.http_status(),
             Self::PasswordPolicy(_)
@@ -312,7 +333,7 @@ impl Coded for AuthError {
             | Self::GrantInvalidScope(_)
             | Self::GrantInvalidRole { .. } => 422,
             Self::WebAuthn(error) => error.http_status(),
-            Self::NotFound { .. } => 404,
+            Self::NotFound { .. } | Self::NoObject { .. } => 404,
             Self::TotpAlreadyEnrolled
             | Self::TotpNotEnrolled
             | Self::UserNameTaken
@@ -325,7 +346,8 @@ impl Coded for AuthError {
             | Self::GrantDuplicate
             | Self::ServiceAccountNoLogin
             | Self::PreferenceLimit { .. }
-            | Self::TokenLimit { .. } => 409,
+            | Self::TokenLimit { .. }
+            | Self::RunPlan { .. } => 409,
             Self::PreferenceTooLarge { .. } => 413,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
@@ -347,9 +369,10 @@ impl Coded for AuthError {
             Self::TokenLifetime { max_days } => {
                 BTreeMap::from([("max_days", max_days.to_string())])
             }
-            Self::TokenRenewalRefused { reason } => {
+            Self::TokenRenewalRefused { reason } | Self::DelegationRefused { reason } => {
                 BTreeMap::from([("reason", (*reason).to_owned())])
             }
+            Self::RunPlan { run } => BTreeMap::from([("run", run.to_string())]),
             Self::TokenLimit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
             Self::InvalidHostName(name) => BTreeMap::from([("host_name", name.clone())]),
@@ -453,7 +476,7 @@ mod tests {
             AuthError::NotFound { kind: "preference" },
             AuthError::PreferenceTooLarge { max_bytes: 16_384 },
             AuthError::PreferenceLimit { max_keys: 64 },
-            AuthError::DelegationRefused,
+            AuthError::DelegationRefused { reason: "run" },
             AuthError::Approval(crate::approval::Refusal::Consumed),
         ] {
             let code = error.code();

@@ -109,6 +109,9 @@ pub mod actions {
     /// A code that matched nothing, or a collect that failed its source or signature (at
     /// most one record a minute per browser session or source).
     pub const REFUSE: AuditAction = AuditAction::from_static("auth.approval.refuse");
+    /// A delegated session's request was refused (at most one record a minute per session
+    /// and outcome).
+    pub const DELEGATION_REFUSE: AuditAction = AuditAction::from_static("auth.delegation.refuse");
 }
 
 /// Why an approval step was refused. Codes `auth.approval.*`.

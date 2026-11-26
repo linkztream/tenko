@@ -158,7 +158,7 @@ async fn look_up_approval(
     tag = "auth",
     operation_id = "approve_approval",
     summary = "Approve a takeover script's request",
-    description = "An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. Audited as `auth.approval.approve` with the run.",
+    description = "An administrator's own session that signed in within the last five minutes (a passkey under Hardened), with the code typed again, compared in constant time. The script may then collect a delegated session of this administrator, narrowed to the plan. At most one approval per domain is approved or has a delegated session alive at a time. When the domain has an open run (`run` in the answer and in the lookup's), the approval joins it at the collect, and its plan must equal the run's. Audited as `auth.approval.approve` with the run.",
     params(("id" = String, Path, description = "Approval identifier (UUID)")),
     request_body(content = CodeEntry, content_type = "application/json"),
     responses(
@@ -167,7 +167,7 @@ async fn look_up_approval(
         (status = 401, description = "No valid session; a token is refused (`auth.unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "Not an administrator (`auth.forbidden`), the sign-in is older than five minutes (`auth.step_up_required`), a delegated session (`auth.delegation.refused`), a wrong code (`auth.approval.code`), or the request was denied (`auth.approval.denied`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such approval (`auth.approval.not_found`), or no internal authority's root (`tls.no_internal_ca`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The approval was decided before (`auth.approval.consumed`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The approval was decided before (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 410, description = "The approval waited longer than ten minutes (`auth.approval.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Another approval of the domain is open, or the session's lookups are locked (`auth.approval.limit`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable
@@ -250,7 +250,7 @@ async fn clear_approvals(
     tag = "auth",
     operation_id = "collect_approval",
     summary = "Collect the delegated session of an approved request",
-    description = "No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.",
+    description = "No credential: the script signs the collect message (`tenko-takeover-collect-v1`, a zero octet, the id's 16 octets and the nonce) with its key, from the request's source address. Answers once with the delegated session: a `tnka_` bearer secret, accepted only from that address, that reaches the routes of `tenko_auth::delegation::TAKEOVER` and nothing else, for its run only (`delegation`, the run's id: the domain's open run, which the sitting joins with an equal plan, or the run the collect creates, audited as `migrate.run.join` or `migrate.run.create`), is never fresh, and ends at its deadline (the shorter of eight hours after the approval and the profile's absolute lifetime) or after 15 minutes without a request. Audited as `auth.approval.collect`; a collect from another address or with a wrong signature as `auth.approval.refuse`, at most once a minute per source.",
     params(("id" = String, Path, description = "Approval identifier (UUID)")),
     request_body(content = CollectRequest, content_type = "application/json"),
     responses(
@@ -259,7 +259,7 @@ async fn clear_approvals(
         (status = 401, description = "The approver may no longer administer (`auth.unauthenticated`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 403, description = "The signature does not verify (`auth.approval.signature`), or the request was denied (`auth.approval.denied`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such approval from this address (`auth.approval.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The person has not decided yet (`auth.approval.pending`), or it was collected before (`auth.approval.consumed`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The person has not decided yet (`auth.approval.pending`), or it was collected before or its run changed meanwhile (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 410, description = "The approval's time is over (`auth.approval.expired`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 413, description = "The body is larger than 1 KiB (`sys.body_too_large`)", body = ProblemDetails, content_type = "application/problem+json"),
         Unavailable

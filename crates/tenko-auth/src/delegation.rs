@@ -3,11 +3,18 @@
 //!
 //! A delegated session is a session of the administrator who approved a takeover script's
 //! request ([`crate::approval`]), presented by the script as a `tnka_` bearer secret from the
-//! approval's source address only. It is default-deny: the API's authentication layer
-//! refuses, before any handler runs, every (method, route template) that [`TAKEOVER`] does not
-//! list with a condition that holds (403 `auth.delegation.refused`), so the account routes,
-//! which never call `authorize`, are closed to it. Inside the list the approver's rights apply
-//! as for any session, and each listed handler checks its body against the run's plan.
+//! approval's source address only. It acts for one takeover run (`tenko_core::migrate::run`):
+//! its delegation is the run's id. It is default-deny: before any handler runs, the API's
+//! authentication layer calls the one check of its requests,
+//! [`AuthService::admit_delegated`](crate::AuthService::admit_delegated), which refuses
+//! (403 `auth.delegation.refused`, `params.reason`) every (method, route template) that
+//! [`TAKEOVER`] does not list (`unlisted`), a listed one whose condition does not hold
+//! (`condition`), and every request of a session whose run is not open (`run`) but its own
+//! sign-out. So the account routes, which never call `authorize`, are closed to it. Every
+//! object a listed route's path names must exist and be the run's: a missing object and an
+//! object of another run answer the same 404, so that the session never learns that objects
+//! outside its run exist. Inside the list the approver's rights apply as for any session,
+//! and each listed handler checks its body against the run's plan.
 //!
 //! It is never fresh: its `authenticated_at` is the Unix epoch, and every check of a recent
 //! sign-in refuses it explicitly too, so it never creates a token, registers a factor, changes
@@ -60,8 +67,17 @@ impl Condition {
     }
 }
 
+/// What a path parameter of a listed operation names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Object {
+    /// A takeover run (`migrate.runs`): the session's own only, else 404
+    /// `migrate.run.not_found`.
+    Run,
+}
+
 /// One operation of the allow-list: the method and the route template below the API base, as
-/// the OpenAPI document names them.
+/// the OpenAPI document names them, when it is open, and the path parameters that name an
+/// object of the run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Entry {
     /// The upper-case method.
@@ -70,40 +86,52 @@ pub struct Entry {
     pub route: &'static str,
     /// When it is open.
     pub condition: Condition,
+    /// The path parameters that name an object, each with its kind.
+    pub objects: &'static [(&'static str, Object)],
 }
 
-/// The operations a takeover run's delegated session reaches. The reads of the run, its
-/// zones, mirrors and jobs, and the operations of the run's phases join with their plan checks
-/// and the run's stages; the flip and the takeover only after the window started.
+/// The operations a takeover run's delegated session reaches. The reads of its zones, mirrors
+/// and jobs, and the operations of the run's phases join with their plan checks and the run's
+/// stages; the flip and the takeover only after the window started.
 pub const TAKEOVER: &[Entry] = &[
     Entry {
         method: "GET",
         route: "/health",
         condition: Condition::Always,
+        objects: &[],
     },
     Entry {
         method: "GET",
         route: "/system/ca-root",
         condition: Condition::Always,
+        objects: &[],
     },
     Entry {
         method: "POST",
         route: "/auth/logout",
         condition: Condition::Always,
+        objects: &[],
     },
     Entry {
         method: "POST",
         route: "/migrate/mirrors",
         condition: Condition::WithinApproval,
+        objects: &[],
+    },
+    Entry {
+        method: "GET",
+        route: "/migrate/runs/{id}",
+        condition: Condition::Always,
+        objects: &[("id", Object::Run)],
     },
 ];
 
-/// Whether a delegated session reaches `method` on `route` (the template below the API base)
-/// at `now`.
-pub fn admits(delegated: &Delegated, method: &str, route: &str, now: Timestamp) -> bool {
-    TAKEOVER.iter().any(|entry| {
-        entry.method == method && entry.route == route && entry.condition.holds(delegated, now)
-    })
+/// The entry of `method` on `route` (the template below the API base), if [`TAKEOVER`] lists
+/// it.
+pub fn entry(method: &str, route: &str) -> Option<&'static Entry> {
+    TAKEOVER
+        .iter()
+        .find(|entry| entry.method == method && entry.route == route)
 }
 
 /// Whether `now` lies within [`MIRROR_WINDOW`] of the approval, on a clock that does not stand
@@ -150,11 +178,16 @@ mod tests {
         Timestamp::from_unix_nanos(secs * 1_000_000_000).expect("in range")
     }
 
+    fn admits(delegated: &Delegated, method: &str, route: &str, now: Timestamp) -> bool {
+        entry(method, route).is_some_and(|entry| entry.condition.holds(delegated, now))
+    }
+
     #[test]
     fn the_list_is_default_deny() {
         let session = delegated(at(1_000));
         assert!(admits(&session, "GET", "/system/ca-root", at(1_000)));
         assert!(admits(&session, "POST", "/auth/logout", at(30_000)));
+        assert!(admits(&session, "GET", "/migrate/runs/{id}", at(30_000)));
         for (method, route) in [
             ("GET", "/auth/session"),
             ("POST", "/auth/tokens"),
@@ -164,6 +197,8 @@ mod tests {
             ("get", "/system/ca-root"),
             ("POST", "/dns/zones/{id}/flip"),
             ("POST", "/migrate/mirrors/{id}/scopes/{cidr}/takeover"),
+            ("GET", "/migrate/runs"),
+            ("POST", "/migrate/runs/{id}/close"),
         ] {
             assert!(
                 !admits(&session, method, route, at(1_000)),

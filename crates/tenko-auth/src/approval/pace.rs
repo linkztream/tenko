@@ -9,7 +9,8 @@ use std::{
 };
 
 /// Keys a pace holds at most: at capacity the windows that are over go first, then an
-/// arbitrary one. With keys of at most 16 octets this is below 1 MiB per pace.
+/// arbitrary one. With keys of at most 39 octets (an IPv6 address as text) this is below 1 MiB
+/// per pace.
 const CAPACITY: usize = 4_096;
 
 /// Events per key in windows: a window starts at a key's first event and lasts its duration.

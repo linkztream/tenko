@@ -16,7 +16,9 @@
 use std::net::{IpAddr, SocketAddr};
 
 use axum::{
-    extract::{ConnectInfo, FromRef, FromRequestParts},
+    extract::{
+        ConnectInfo, FromRef, FromRequestParts, RawPathParams, rejection::RawPathParamsRejection,
+    },
     http::{HeaderMap, Uri, header, request::Parts},
 };
 use tenko_auth::service::{
@@ -109,11 +111,15 @@ where
                     }
                     .into());
                 }
-                // ADR 0038: a delegated session reaches the routes of its allow-list only.
-                if let Some(delegated) = &authenticated.flags.delegation
-                    && !delegation_admits(&parts.method, &parts.extensions, delegated, now)
+                // ADR 0038: the one check of a delegated session's request, here when the
+                // middleware did not run it.
+                if authenticated.flags.delegation.is_some()
+                    && parts.extensions.get::<DelegationChecked>().is_none()
                 {
-                    return Err(tenko_auth::AuthError::DelegationRefused.into());
+                    let params = RawPathParams::from_request_parts(parts, state).await;
+                    let (method, extensions) = (&parts.method, &parts.extensions);
+                    delegation_check(method, extensions, params, &authenticated, source_ip, now)
+                        .await?;
                 }
                 parts.extensions.insert(authenticated);
                 principal
@@ -141,22 +147,37 @@ fn is_mirror_push(method: &axum::http::Method, path: &str, mirror: tenko_core::M
             == Some(mirror)
 }
 
-/// Whether a delegated session (ADR 0038) reaches the matched route of a request, as the
-/// allow-list `tenko_auth::delegation::TAKEOVER` says: a request whose route is unknown is
-/// refused.
-pub(crate) fn delegation_admits(
+/// Marks a request whose delegated session the middleware checked.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DelegationChecked;
+
+/// The one check of a delegated session's request (ADR 0038,
+/// `tenko_auth::AuthService::admit_delegated`) on the matched route's template and the path
+/// parameters as the router decoded them, the values the handler's `Path` reads. Parameters
+/// that do not decode, or a request without its route, are judged as an unlisted route;
+/// without the authentication service the request is refused.
+pub(crate) async fn delegation_check(
     method: &axum::http::Method,
     extensions: &axum::http::Extensions,
-    delegated: &tenko_core::auth::Delegated,
+    params: Result<RawPathParams, RawPathParamsRejection>,
+    who: &Authenticated,
+    source_ip: Option<IpAddr>,
     now: Timestamp,
-) -> bool {
-    extensions
+) -> Result<(), ApiError> {
+    let Some(auth) = extensions.get::<std::sync::Arc<tenko_auth::AuthService>>() else {
+        return Err(tenko_auth::AuthError::DelegationRefused { reason: "run" }.into());
+    };
+    let route = extensions
         .get::<axum::extract::MatchedPath>()
-        .map(axum::extract::MatchedPath::as_str)
-        .is_some_and(|route| {
-            let route = route.strip_prefix(crate::API_BASE).unwrap_or(route);
-            tenko_auth::delegation::admits(delegated, method.as_str(), route, now)
-        })
+        .filter(|_| params.is_ok())
+        .map(|route| {
+            let route = route.as_str();
+            route.strip_prefix(crate::API_BASE).unwrap_or(route)
+        });
+    let params: Vec<(&str, &str)> = params.iter().flat_map(RawPathParams::iter).collect();
+    Ok(auth
+        .admit_delegated(who, method.as_str(), route, &params, source_ip, now)
+        .await?)
 }
 
 /// The routes an account that must change its password may still use: the password change

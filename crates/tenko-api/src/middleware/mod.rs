@@ -11,8 +11,10 @@
 //!   authentication, so it shields the login path), authentication through the
 //!   [`Authenticator`](tenko_core::Authenticator) of the state (once per request, with the
 //!   session cookie of the request's scheme only, as `Ctx` reads it; the outcome goes to
-//!   [`AuthOutcome`] for `Ctx`), the allow-list of a delegated session (ADR 0038, 403
-//!   `auth.delegation.refused` outside it), the per-principal rate limit, the quorum
+//!   [`AuthOutcome`] for `Ctx`), the one check of a delegated session's request (ADR 0038,
+//!   `tenko_auth::AuthService::admit_delegated`: 403 `auth.delegation.refused` outside its
+//!   allow-list or its run, 404 for an object outside its run), the per-principal rate limit,
+//!   the quorum
 //!   gate of an isolated controller ([`quorum`]), the `Idempotency-Key` replay
 //!   ([`idempotency`]), `Cache-Control: no-store` on API responses that set no caching
 //!   themselves, and `Tenko-Staleness` on every answer of a controller without quorum.
@@ -39,7 +41,8 @@ mod tests;
 use std::{sync::Arc, time::Instant};
 
 use axum::{
-    extract::{MatchedPath, Request, State},
+    RequestExt as _,
+    extract::{MatchedPath, RawPathParams, Request, State},
     http::{HeaderName, HeaderValue, header},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -50,7 +53,10 @@ pub use idempotency::IdempotencyConfig;
 pub use rate_limit::{LimitScope, Quota, RateLimitConfig, RateLimiter, RetryAfter};
 
 use crate::{
-    extract::{AuthOutcome, ClientInfo, credentials_of, delegation_admits, placeholder_principal},
+    extract::{
+        AuthOutcome, ClientInfo, DelegationChecked, credentials_of, delegation_check,
+        placeholder_principal,
+    },
     problem::{ApiError, codes},
     server::forwarded::{ConnInfo, UnstatedScheme, resolve},
     state::AppState,
@@ -302,18 +308,20 @@ async fn guard(layers: &Layers, request: &mut Request) -> Option<Response> {
     let delegated = outcome
         .as_ref()
         .ok()
-        .and_then(|authenticated| authenticated.flags.delegation);
+        .filter(|authenticated| authenticated.flags.delegation.is_some())
+        .cloned();
     request.extensions_mut().insert(AuthOutcome(outcome));
-    // ADR 0038: before any handler, a delegated session reaches its allow-list only.
-    if let Some(delegated) = delegated
-        && !delegation_admits(
-            request.method(),
-            request.extensions(),
-            &delegated,
-            Timestamp::now(),
-        )
-    {
-        return Some(ApiError::from(tenko_auth::AuthError::DelegationRefused).into_response());
+    // ADR 0038: before any handler, the one check of a delegated session's request.
+    if let Some(who) = delegated {
+        let params = request.extract_parts::<RawPathParams>().await;
+        let (method, extensions) = (request.method(), request.extensions());
+        let now = Timestamp::now();
+        if let Err(refusal) =
+            delegation_check(method, extensions, params, &who, client.source_ip, now).await
+        {
+            return Some(refusal.into_response());
+        }
+        request.extensions_mut().insert(DelegationChecked);
     }
 
     if let Some(subject) = principal
