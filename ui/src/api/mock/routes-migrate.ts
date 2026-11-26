@@ -86,6 +86,8 @@ const create = route("post", "/api/v1/migrate/mirrors", async (ctx) => {
     updated: STAMP(),
     stale: false,
     losses_open: 0,
+    changes_left: 30,
+    change_reserve: 30,
     scopes: [],
     source_prefixes: sourcesOf(body),
     ca_fingerprint: "ab".repeat(32),

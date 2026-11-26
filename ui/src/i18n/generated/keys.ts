@@ -6457,8 +6457,12 @@ export type MessageKey =
   | "metrics.unit.percent"
   | "metrics.waiting"
   | "migrate.card.ago"
+  | "migrate.card.changes_left"
+  | "migrate.card.changes_left_text"
   | "migrate.card.counts"
   | "migrate.card.counts_text"
+  | "migrate.card.held_change"
+  | "migrate.card.held_change_clock"
   | "migrate.card.last_change"
   | "migrate.card.last_push"
   | "migrate.card.losses"
@@ -9983,7 +9987,9 @@ export interface MessageArgs {
   "metrics.tile.requests_hint": { p50: string | number; p99: string | number };
   "metrics.tile.store_hint": { data: string | number };
   "migrate.card.ago": { age: string | number };
+  "migrate.card.changes_left_text": { left: string | number; total: string | number };
   "migrate.card.counts_text": { leases: number; reservations: number; scopes: number };
+  "migrate.card.held_change": { due: string | number };
   "migrate.delete.title": { name: string | number };
   "migrate.diff.summary": { losses: number; source: string | number; tenko: string | number };
   "migrate.losses.ack": { count: number };
@@ -16865,8 +16871,12 @@ export const messageKeys: readonly MessageKey[] = [
   "metrics.unit.percent",
   "metrics.waiting",
   "migrate.card.ago",
+  "migrate.card.changes_left",
+  "migrate.card.changes_left_text",
   "migrate.card.counts",
   "migrate.card.counts_text",
+  "migrate.card.held_change",
+  "migrate.card.held_change_clock",
   "migrate.card.last_change",
   "migrate.card.last_push",
   "migrate.card.losses",

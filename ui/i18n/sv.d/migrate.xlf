@@ -84,6 +84,22 @@
         <notes><note category="description">Label: when the snapshot last changed.</note></notes>
         <segment><source>Last change</source><target>Senaste ändring</target></segment>
       </unit>
+      <unit id="migrate.card.changes_left">
+        <notes><note category="description">Label: how many changed configurations the mirror can still store at once; one more comes back every ten minutes.</note></notes>
+        <segment><source>Changes stored at once</source><target>Ändringar som kan sparas direkt</target></segment>
+      </unit>
+      <unit id="migrate.card.changes_left_text">
+        <notes><note category="description">{left} changes of {total} the mirror can still store at once.</note></notes>
+        <segment><source>{left} of {total}</source><target>{left} av {total}</target></segment>
+      </unit>
+      <unit id="migrate.card.held_change">
+        <notes><note category="description">A changed configuration arrived after the mirror could store no more at once; {due} is a date and time.</note></notes>
+        <segment><source>A newer configuration has arrived. It is stored with the first push after {due}.</source><target>En nyare konfiguration har kommit. Den sparas vid första sändningen efter {due}.</target></segment>
+      </unit>
+      <unit id="migrate.card.held_change_clock">
+        <notes><note category="description">A changed configuration is held while the controller's clock guard holds its clock, so no time can be given.</note></notes>
+        <segment><source>A newer configuration has arrived. It is stored when Tenko trusts this controller's clock again.</source><target>En nyare konfiguration har kommit. Den sparas när Tenko litar på den här kontrollerns klocka igen.</target></segment>
+      </unit>
       <unit id="migrate.card.sequence">
         <notes><note category="description">Label: the last accepted push sequence number.</note></notes>
         <segment><source>Sequence</source><target>Sekvensnummer</target></segment>

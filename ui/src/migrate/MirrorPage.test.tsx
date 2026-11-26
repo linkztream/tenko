@@ -11,7 +11,7 @@ import { axeViolations } from "../app/testing/axe";
 import { renderRoute } from "../app/testing/render";
 import { signInAlex } from "../auth/account/testkit";
 import { setSessionForTest } from "../auth/session";
-import { setLocale } from "../i18n";
+import { formatDateTime, setLocale } from "../i18n";
 import { sourceList } from "./api";
 import { MirrorCards, REFRESH_MS } from "./MirrorCards";
 import MirrorPage from "./MirrorPage";
@@ -142,6 +142,34 @@ describe("the mirror cards", () => {
     fireEvent.click(screen.getByTestId("mirror-token-done"));
     await waitFor(() => expect(screen.getAllByTestId("mirror-card")).toHaveLength(2));
     expect(screen.queryByTestId("mirror-token")).toBeNull();
+  });
+
+  it("show the changes left and when a held change is stored, in English and Swedish", async () => {
+    const due = "2026-11-20T08:10:00Z";
+    seed({ changes_left: 0, change_reserve: 30, change_held: true, held_change_due: due });
+    renderRoute(MirrorCards, { url: "/connectors", path: "/connectors" });
+    const card = await screen.findByTestId("mirror-card");
+    expect(within(card).getByTestId("mirror-changes-left").textContent).toBe("0 of 30");
+    expect(within(card).getByTestId("mirror-held-change").textContent).toBe(`A newer configuration has arrived. It is stored with the first push after ${formatDateTime(due)}.`);
+    await setLocale("sv");
+    expect(within(card).getByTestId("mirror-changes-left").textContent).toBe("0 av 30");
+    expect(within(card).getByTestId("mirror-held-change").textContent).toBe(`En nyare konfiguration har kommit. Den sparas vid första sändningen efter ${formatDateTime(due)}.`);
+  });
+
+  it("show the full count and no notice when no change is held", async () => {
+    seed({ changes_left: 30, change_reserve: 30, change_held: false });
+    renderRoute(MirrorCards, { url: "/connectors", path: "/connectors" });
+    const card = await screen.findByTestId("mirror-card");
+    expect(within(card).getByTestId("mirror-changes-left").textContent).toBe("30 of 30");
+    expect(within(card).queryByTestId("mirror-held-change")).toBeNull();
+  });
+
+  it("show a held change without a time while the clock is held, with the server's total", async () => {
+    seed({ changes_left: 4, change_reserve: 40, change_held: true });
+    renderRoute(MirrorCards, { url: "/connectors", path: "/connectors" });
+    const card = await screen.findByTestId("mirror-card");
+    expect(within(card).getByTestId("mirror-changes-left").textContent).toBe("4 of 40");
+    expect(within(card).getByTestId("mirror-held-change").textContent).toBe("A newer configuration has arrived. It is stored when Tenko trusts this controller's clock again.");
   });
 });
 

@@ -1,14 +1,15 @@
 // The mirrored sources on the connectors page, beside the plugin instances (plan section 2.4):
 // one card per mirror with its freshness, the counts of its latest snapshot, the server and the
-// exporter's version, and its open losses. A push moves the freshness in the server's memory
-// only, so the cards read the list again every few seconds instead of waiting for an event.
+// exporter's version, its open losses, how many changes it can still store at once and when a
+// held change is stored. A push moves the freshness in the server's memory only, so the cards
+// read the list again every few seconds instead of waiting for an event.
 // Administrators create a mirror here; its token is shown once.
 import { A } from "@solidjs/router";
 import { createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { isAdmin } from "../auth/session";
 import { Dialog } from "../components/Dialog";
-import { ErrorNotice } from "../components/Notice";
-import { formatDuration, formatRelative, t } from "../i18n";
+import { ErrorNotice, Notice } from "../components/Notice";
+import { formatDateTime, formatDuration, formatRelative, t } from "../i18n";
 import { createMirror, listMirrors, sourceList, type MirrorCreated, type MirrorItem } from "./api";
 import { mirrorState, shortId } from "./model";
 import { migratePaths } from "./paths";
@@ -41,6 +42,10 @@ export function MirrorCard(props: { mirror: MirrorItem }) {
         </dd>
         <dt>{t("migrate.card.last_change")}</dt>
         <dd>{m().last_change ? formatRelative(m().last_change ?? "") : t("migrate.card.never")}</dd>
+        <Show when={m().changes_left !== undefined}>
+          <dt>{t("migrate.card.changes_left")}</dt>
+          <dd data-testid="mirror-changes-left">{t("migrate.card.changes_left_text", { left: m().changes_left ?? 0, total: m().change_reserve ?? 0 })}</dd>
+        </Show>
         <dt>{t("migrate.card.sequence")}</dt>
         <dd class="mono">{m().last_sequence ?? "-"}</dd>
         <Show when={m().counts}>
@@ -64,6 +69,11 @@ export function MirrorCard(props: { mirror: MirrorItem }) {
         <dt>{t("migrate.card.losses")}</dt>
         <dd data-testid="mirror-losses-open">{m().losses_open}</dd>
       </dl>
+      <Show when={m().change_held}>
+        <Notice kind="info" role="status" testid="mirror-held-change">
+          {m().held_change_due ? t("migrate.card.held_change", { due: formatDateTime(m().held_change_due ?? "") }) : t("migrate.card.held_change_clock")}
+        </Notice>
+      </Show>
     </article>
   );
 }
