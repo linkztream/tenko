@@ -39,6 +39,7 @@ All notable changes to Tenko DDI are recorded here, one section per release, in 
 - When another client takes an address, its lease row (`ddns` in `GET /dhcp/leases/{addr}`) keeps the DDNS outcome recorded for the last client until the worker has removed those names under the last client's DHCID, so they are removed also when the worker starts again before it handled the change; the row no longer starts empty.
 - The gauges `tenko_dhcp_ddns_queue` and `tenko_dhcp_ddns_oldest_seconds` are absent on a controller whose DDNS worker has stopped, so a controller that no longer leads stops showing its last queue, on `/metrics` and in the start page's cluster figure (`docs/observability.md`).
 - The gauge `tenko_dhcp_ddns_queue` counts the leases waiting for their retry after a failed name update too, as `tenko_dhcp_ddns_oldest_seconds` does, so a store outage shows as waiting leases (`docs/observability.md`).
+- Data format 8: a DNS zone records whether it is served (`served`). A zone written before reads as served, so nothing is rewritten. A binary of format 7 would ignore the field and answer for an unserved zone, so it refuses a directory of format 8. The first start of this version copies the store to `upgrade-backups/` and raises the format; a return to 0.0.12-rc.7 or earlier needs that copy (`docs/upgrades.md`).
 
 ### Fixed
 

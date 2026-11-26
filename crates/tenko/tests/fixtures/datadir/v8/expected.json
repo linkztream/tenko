@@ -1,0 +1,28 @@
+{
+  "admin": "admin",
+  "format": 8,
+  "objects": {
+    "addresses": [
+      "192.0.2.1"
+    ],
+    "hosts": [
+      "printer01"
+    ],
+    "prefixes": [
+      "192.0.2.0/24",
+      "198.51.100.0/24",
+      "2001:db8:42::/48"
+    ],
+    "vlans": [
+      42
+    ],
+    "zones": [
+      [
+        "corp.example.test",
+        false
+      ]
+    ]
+  },
+  "password": "plover quartz mitten ember",
+  "written_by": "0.0.12-rc.7"
+}

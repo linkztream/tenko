@@ -89,12 +89,107 @@ fn objects(api: &Api) -> Value {
         .map(|item| item["vid"].as_u64().expect("vid"))
         .collect();
     vlans.sort_unstable();
-    json!({
+    let mut objects = json!({
         "prefixes": prefixes,
         "addresses": addresses,
         "hosts": hosts,
         "vlans": vlans,
-    })
+    });
+    // From format 8 on: the DNS zones, by name, with whether each is served.
+    let zones: Vec<Value> = api
+        .list_all("/dns/zones")
+        .iter()
+        .map(|zone| json!([zone["name"], zone["served"]]))
+        .collect();
+    if !zones.is_empty() {
+        objects["zones"] = json!(zones);
+    }
+    objects
+}
+
+/// A node that runs the DNS role too (the zone routes), on a loopback port.
+fn dns_node() -> Node {
+    let port = tenko_core::testing::free_port().release();
+    Node::new()
+        .with_args(&["--roles", "controller,dns"])
+        .with_config(&format!(
+            "[dns]
+listen = [\"127.0.0.1:{port}\"]
+workers = 1
+"
+        ))
+}
+
+/// The zone of the fixture from format 8 on: the plan's domain zone, unserved.
+const UNSERVED_ZONE: &str = "corp.example.test";
+
+/// Writes [`UNSERVED_ZONE`] into the closed store `store_dir` as a takeover run's create does:
+/// an unserved secondary of the plan's PDC emulator, stamped with a delegated session.
+fn unserved_zone(store_dir: &Path) {
+    use tenko_core::dns::{
+        DnsName, PrimaryServer, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy,
+        UpdatePolicy, ZoneKind,
+    };
+    let name = |text: &str| DnsName::new(text).expect("a name");
+    let node = fs::read_to_string(store_dir.join(tenko_store::raft::NODE_ID_FILE))
+        .expect("the node id")
+        .trim()
+        .parse()
+        .expect("a node id");
+    let mut config = tenko_store::raft::RaftStoreConfig::new(store_dir);
+    config.node_id = tenko_core::NodeId(node);
+    config.fsync_probe_samples = 0;
+    let run = tenko_core::Principal::User {
+        id: tenko_core::UserId::generate(),
+        session: tenko_core::SessionId::generate(),
+        strength: tenko_core::AuthStrength::Password,
+        delegation: Some(tenko_core::DelegationId::generate()),
+    };
+    let zone = tenko_dns::zone::NewZone {
+        name: name(UNSERVED_ZONE),
+        kind: ZoneKind::Secondary,
+        tenant: None,
+        scopes: Vec::new(),
+        serial: SerialPolicy::default(),
+        soa: SoaDefaults::new(
+            name("tenko.corp.example.test"),
+            name("hostmaster.corp.example.test"),
+        ),
+        name_servers: Vec::new(),
+        transfer: TransferPolicy::default(),
+        update: UpdatePolicy::default(),
+        dnssec: tenko_core::dns::DnssecPolicy::default(),
+        source: Some(SecondarySource {
+            primaries: vec![PrimaryServer {
+                address: "192.0.2.11".parse().expect("an address"),
+                port: 53,
+                key: None,
+                xot: false,
+                tls_name: None,
+            }],
+        }),
+        description: None,
+        reverse_of: None,
+        catalog: false,
+    };
+    tokio::runtime::Runtime::new()
+        .expect("a runtime")
+        .block_on(async {
+            let store = std::sync::Arc::new(
+                tenko_store::raft::RaftStore::open(config)
+                    .await
+                    .expect("open the store"),
+            );
+            let zones = tenko_dns::zone::ZoneService::with_direct_jobs(
+                store.clone(),
+                None,
+                tenko_dns::zone::ZoneConfig::default(),
+            );
+            let cx = tenko_core::RequestCtx::new(run);
+            let written = zones.create_unserved(&cx, zone).await.expect("the zone");
+            assert!(!written.zone.served);
+            store.shutdown().await.expect("close the store");
+        });
 }
 
 /// Writes the objects of the fixture through the API.
@@ -145,12 +240,14 @@ fn populate(api: &Api) {
 /// Writes `fixtures/datadir/v<format>/` with the running binary.
 fn regenerate(format: u64) {
     let target = fixtures().join(format!("v{format}"));
-    let mut node = Node::new();
+    // No integration listener, so no integration certificate and its key; the controller's
+    // internal CA is made at every start, as in every fixture since format 2.
+    let mut node = dns_node().with_config("[integrations]\nlisten = []");
     let mut server = node.start();
     let mut api = Api::new(&node);
     api.setup(&wait_for_setup_token(&server));
     populate(&api);
-    let expected = json!({
+    let mut expected = json!({
         "format": format,
         "written_by": serve_support::VERSION,
         "admin": serve_support::ADMIN,
@@ -158,6 +255,8 @@ fn regenerate(format: u64) {
         "objects": objects(&api),
     });
     server.stop().assert_code(0);
+    unserved_zone(&node.data_dir().join("store"));
+    expected["objects"]["zones"] = json!([[UNSERVED_ZONE, false]]);
     let _ = fs::remove_dir_all(&target);
     copy_dir(&node.data_dir().join("store"), &target.join("store"));
     // The fixture stays in the repository for good: only the pages in use.
@@ -262,7 +361,7 @@ fn opens(format: u64, current: u64) -> bool {
         serde_json::from_slice(&fs::read(fixture.join("expected.json")).expect("expected.json"))
             .expect("JSON");
     assert_eq!(expected["format"], format);
-    let mut node = Node::new();
+    let mut node = dns_node();
     copy_dir(&fixture.join("store"), &node.data_dir().join("store"));
     let key = fs::read_to_string(fixture.join("fixture-kek.hex")).expect("the fixture key");
     fs::write(node.kek_path(), key.trim()).expect("write the key");
