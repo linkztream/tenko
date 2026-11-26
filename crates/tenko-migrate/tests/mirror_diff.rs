@@ -490,6 +490,94 @@ async fn the_network_is_looked_up_in_the_default_vrf() {
     );
 }
 
+/// A view that keeps the most interface rows one read handed the diff.
+struct Widest {
+    inner: Arc<dyn tenko_store::ReadView>,
+    rows: std::sync::atomic::AtomicUsize,
+}
+
+impl tenko_store::ReadView for Widest {
+    fn revision(&self) -> tenko_core::Revision {
+        self.inner.revision()
+    }
+
+    fn get(
+        &self,
+        table: &tenko_core::TableName,
+        key: &[u8],
+    ) -> Result<Option<tenko_store::Versioned>, tenko_store::StoreError> {
+        self.inner.get(table, key)
+    }
+
+    fn scan(
+        &self,
+        table: &tenko_core::TableName,
+        range: tenko_store::KeyRange,
+        limit: usize,
+        reverse: bool,
+    ) -> Result<Vec<(bytes::Bytes, tenko_store::Versioned)>, tenko_store::StoreError> {
+        let rows = self.inner.scan(table, range, limit, reverse)?;
+        if table == INTERFACES.name() {
+            self.rows
+                .fetch_max(rows.len(), std::sync::atomic::Ordering::SeqCst);
+        }
+        Ok(rows)
+    }
+
+    fn counter(&self, counter: &tenko_core::CounterKey) -> Result<u64, tenko_store::StoreError> {
+        self.inner.counter(counter)
+    }
+}
+
+/// The holder of a reservation's client identifier is found behind thousands of other
+/// interfaces, and the diff reads the interfaces a page at a time, however many IPAM holds.
+#[tokio::test]
+async fn a_diff_finds_a_client_id_holder_past_the_first_page() {
+    const OTHERS: u32 = 3_000;
+    let mut tenko = Tenko::new();
+    for n in 0..OTHERS {
+        tenko.host(
+            &format!("pc{n}"),
+            AssignmentMode::Dynamic,
+            None,
+            Some(&format!("01{n:08x}")),
+            None,
+        );
+    }
+    // Written last, so its key comes after every other interface's.
+    tenko.host(
+        "tv",
+        AssignmentMode::Reserved,
+        None,
+        Some("ff00000001000100012e5a1c4000005e005323"),
+        None,
+    );
+    let store = tenko.store().await;
+    let view = Widest {
+        inner: store.read(ReadConsistency::Local).await.expect("view"),
+        rows: std::sync::atomic::AtomicUsize::new(0),
+    };
+    let found = diff(
+        &view,
+        &snapshot(fixture()),
+        SCOPE.parse().expect("net"),
+        0,
+        None,
+    )
+    .expect("diff");
+    assert!(
+        rows_of(&found.rows, DiffKind::Reservation)
+            .contains(&("192.0.2.35".to_owned(), DiffAction::Attach)),
+        "the holder behind the others"
+    );
+    let widest = view.rows.into_inner();
+    println!(
+        "the widest read of interfaces: {widest} rows of {}",
+        OTHERS + 1
+    );
+    assert!(widest <= 1_024, "{widest} interfaces in one read");
+}
+
 /// The MAC filters against a Tenko scope that exists: the source's restriction updates the
 /// scope's, a source entry Tenko lacks is created, Tenko's own deny entry stays, and Tenko's
 /// own allow entry on a scope the source restricts is the operator's decision.

@@ -368,29 +368,52 @@ fn holds(interface: &Interface, reservation: &IrReservation) -> bool {
     }
 }
 
-/// The interfaces that hold a client identifier, wherever IPAM keeps them; read once, and
-/// only when a reservation is keyed by one.
-fn client_ids(view: &dyn ReadView) -> Result<HashMap<HexBytes, Interface>, MirrorError> {
-    Ok(view
-        .scan_typed(&INTERFACES, KeyRange::all(), usize::MAX, false)?
-        .into_iter()
-        .filter(|(_, interface, _)| !interface.meta.is_deleted())
-        .filter_map(|(_, interface, _)| Some((interface.client_id.clone()?, interface)))
-        .collect())
+/// The interfaces read at once while the diff looks for client identifiers.
+const PAGE: usize = 1_024;
+
+/// The interfaces that hold one of the client identifiers `wanted`, wherever IPAM keeps
+/// them: IPAM has no index of them, so every interface is read, a page at a time, and only
+/// the holders are kept. Nothing is read when `wanted` is empty.
+fn client_ids(
+    view: &dyn ReadView,
+    wanted: &BTreeSet<&HexBytes>,
+) -> Result<HashMap<HexBytes, Interface>, MirrorError> {
+    let mut found = HashMap::new();
+    let mut range = KeyRange::all();
+    while !wanted.is_empty() {
+        let page = view.scan_typed(&INTERFACES, range, PAGE, false)?;
+        let full = page.len() == PAGE;
+        let Some((last, _, _)) = page.last() else {
+            break;
+        };
+        range = KeyRange::all().after(INTERFACES.key(last));
+        found.extend(
+            page.into_iter()
+                .filter(|(_, interface, _)| !interface.meta.is_deleted())
+                .filter_map(|(_, interface, _)| {
+                    let id = interface
+                        .client_id
+                        .clone()
+                        .filter(|id| wanted.contains(id))?;
+                    Some((id, interface))
+                }),
+        );
+        if !full {
+            break;
+        }
+    }
+    Ok(found)
 }
 
-/// The interface that holds the reservation's identity: by client identifier, else by MAC
-/// address through IPAM's index.
+/// The interface that holds the reservation's identity: by client identifier among `ids`,
+/// else by MAC address through IPAM's index.
 fn holder(
     view: &dyn ReadView,
-    ids: &mut Option<HashMap<HexBytes, Interface>>,
+    ids: &HashMap<HexBytes, Interface>,
     reservation: &IrReservation,
 ) -> Result<Option<Interface>, MirrorError> {
     if let Some(id) = &reservation.client.client_id {
-        if ids.is_none() {
-            *ids = Some(client_ids(view)?);
-        }
-        return Ok(ids.as_ref().and_then(|ids| ids.get(id)).cloned());
+        return Ok(ids.get(id).cloned());
     }
     let Some(mac) = reservation.client.mac else {
         return Ok(None);
@@ -548,12 +571,17 @@ pub fn diff(
             Some((address.ip, (host, interface)))
         })
         .collect();
-    let mut ids = None;
+    let wanted = ir
+        .reservations
+        .iter()
+        .filter_map(|reservation| reservation.client.client_id.as_ref())
+        .collect();
+    let ids = client_ids(view, &wanted)?;
     let mut mirrored = BTreeSet::new();
     for reservation in &ir.reservations {
         mirrored.insert(reservation.ip);
         let item = reservation.ip.to_string();
-        let holder = holder(view, &mut ids, reservation)?;
+        let holder = holder(view, &ids, reservation)?;
         let at_ip = by_ip.get(&reservation.ip);
         let mine = Some(identity(reservation));
         let theirs = at_ip.map(|(host, interface)| {

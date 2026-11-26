@@ -28,6 +28,8 @@ utoipa = { workspace = true }
 [dev-dependencies]
 # The store of tests/mirror_service.rs that lets a write wait for the test.
 async-trait = { workspace = true }
+# The key type of `ReadView::scan`, for the view of tests/mirror_diff.rs that counts a read.
+bytes = { workspace = true }
 proptest = { workspace = true }
 # The counting allocator of tests/decode_alloc.rs (the bound of what decoding allocates).
 stats_alloc = { workspace = true }

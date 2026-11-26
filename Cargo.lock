@@ -3615,6 +3615,7 @@ name = "tenko-migrate"
 version = "0.0.12-rc.7"
 dependencies = [
  "async-trait",
+ "bytes",
  "flate2",
  "ipnet",
  "proptest",
