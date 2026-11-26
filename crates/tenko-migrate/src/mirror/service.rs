@@ -268,6 +268,32 @@ pub fn content_hashes(snapshot: &MirrorSnapshot) -> Result<(Vec<u8>, Vec<u8>), M
     Ok((configuration.to_vec(), leases.to_vec()))
 }
 
+/// A decoded push with what its write needs: its two hashes ([`content_hashes`]) and its
+/// summary. Made in the push's decode ([`blocking`]), so that the hashes and the summary are
+/// not made on a runtime worker.
+#[derive(Debug)]
+pub struct Decoded {
+    snapshot: MirrorSnapshot,
+    hashes: (Vec<u8>, Vec<u8>),
+    summary: Summary,
+}
+
+impl Decoded {
+    /// The hashes and the summary of `snapshot`.
+    ///
+    /// # Errors
+    ///
+    /// A codec error.
+    pub fn of(snapshot: MirrorSnapshot) -> Result<Self, MirrorError> {
+        Ok(Self {
+            hashes: content_hashes(&snapshot)?,
+            // The push sets the time of its write.
+            summary: Summary::of(&snapshot, snapshot.taken_at)?,
+            snapshot,
+        })
+    }
+}
+
 fn entry_hash(entry: &LossEntry) -> Result<Vec<u8>, MirrorError> {
     Ok(canonical_sha256(entry)?.to_vec())
 }
@@ -1018,7 +1044,8 @@ impl MirrorService {
     /// holds it through the inflate, the decode and the write, so that the memory a decode
     /// may take (`body::DECODE_ALLOCATION_BOUND`) is taken once on a node, however many
     /// mirrors and controllers push, and a body that arrives slowly holds no one else. The
-    /// decode runs in [`blocking`], which owns it until the decode ends.
+    /// decode and the encode of the snapshot row run in [`blocking`], which owns it until
+    /// each ends.
     ///
     /// # Errors
     ///
@@ -1088,7 +1115,8 @@ impl MirrorService {
     /// `migrate.mirror.push` at once; changed leases alone write the snapshot and the row at
     /// most every [`LEASES_WRITE_SECS`]; otherwise the row is written at most every
     /// [`Mirror::freshness_write_secs`]. The envelope is held in memory as the newest either
-    /// way.
+    /// way. The push holds `guards` (its [`InFlight`] and its permit of the node's decode)
+    /// until it ends, and the snapshot row is encoded in [`blocking`] with them.
     ///
     /// # Errors
     ///
@@ -1096,16 +1124,26 @@ impl MirrorService {
     /// [`MirrorError::NotFound`], [`MirrorError::Disabled`], [`MirrorError::Sequence`] with
     /// the last accepted sequence, [`MirrorError::TooLarge`] for a snapshot the store's batch
     /// cannot hold, [`MirrorError::Conflict`], a store error.
-    pub async fn push(
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one attempt of the write, read top to bottom"
+    )]
+    pub async fn push<G: Send + 'static>(
         &self,
         ctx: &RequestCtx,
         id: MirrorId,
-        snapshot: MirrorSnapshot,
+        decoded: Decoded,
+        mut guards: G,
     ) -> Result<SnapshotAccepted, MirrorError> {
-        let (hash, leases_hash) = content_hashes(&snapshot)?;
+        let Decoded {
+            snapshot,
+            hashes: (hash, leases_hash),
+            mut summary,
+        } = decoded;
         let sequence = snapshot.sequence;
         let now = self.now();
-        let summary = Arc::new(Summary::of(&snapshot, now)?);
+        summary.stored_at = now;
+        let summary = Arc::new(summary);
         let mut snapshot = Some(snapshot);
         for _ in 0..ATTEMPTS {
             let view = self.view().await?;
@@ -1164,9 +1202,21 @@ impl MirrorService {
                         received: now,
                         envelope,
                     };
-                    let staged = batch.put_typed(&tables::SNAPSHOTS, &id, &row);
+                    let ((encoded, row), held) =
+                        blocking(guards, move || (tables::SNAPSHOTS.encode(&row), row))
+                            .await
+                            .map_err(|error| {
+                                MirrorError::Request(format!(
+                                    "the snapshot was not encoded: {error}"
+                                ))
+                            })?;
+                    guards = held;
                     snapshot = Some(row.envelope);
-                    staged?;
+                    batch.put(
+                        tables::SNAPSHOTS.name().clone(),
+                        tables::SNAPSHOTS.key(&id),
+                        encoded?,
+                    );
                 }
                 batch.put_typed(&tables::MIRRORS, &id, &mirror)?;
                 match self.store.propose(batch).await {

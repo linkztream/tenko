@@ -75,7 +75,7 @@ pub use tenko_migrate::mirror::{
 use tenko_migrate::mirror::{
     MirrorError, MirrorService,
     body::{self, MAX_BODY_BYTES},
-    service::{NewMirror, blocking},
+    service::{Decoded, NewMirror, blocking},
 };
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -436,15 +436,18 @@ async fn push_mirror_snapshot(
     // One push of the mirror in flight on this controller until this one ends, however it
     // ends. The body is read first, under its deadline, so that a slow body holds no other
     // mirror's push; one decode at a time on this node, from the inflate to the write. The
-    // decode runs on a blocking thread that owns both until it ends, however the request ends.
+    // decode with its hashes, and the row's encode, run on a blocking thread that owns both
+    // until it ends, however the request ends.
     let outcome = async {
         let in_flight = service.admit(id).await?;
         let (bytes, gzip) = read_body(&headers, raw).await?;
         let guards = (in_flight, service.decoding().await?);
-        let (snapshot, _guards) = blocking(guards, move || body::decode(&bytes, gzip))
-            .await
-            .map_err(|error| MirrorError::Request(format!("the body was not decoded: {error}")))?;
-        service.push(&cx, id, snapshot?).await
+        let (decoded, guards) = blocking(guards, move || {
+            body::decode(&bytes, gzip).and_then(Decoded::of)
+        })
+        .await
+        .map_err(|error| MirrorError::Request(format!("the body was not decoded: {error}")))?;
+        service.push(&cx, id, decoded?, guards).await
     }
     .await;
     let error = match outcome {

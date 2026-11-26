@@ -31,7 +31,7 @@ use tenko_core::{
 };
 use tenko_migrate::mirror::{
     DiffAction, MirrorError, MirrorPatch, MirrorService, body,
-    service::{NewMirror, content_hashes, register_metrics},
+    service::{Decoded, NewMirror, content_hashes, register_metrics},
 };
 use tenko_store::{
     ChangeStream, CoalescerConfig, Committed, DerivedIndex, KeyRange, Leadership, MemStore,
@@ -164,7 +164,7 @@ impl Lab {
         self.service.admit(self.id).await?;
         Ok(self
             .service
-            .push(&self.pusher, self.id, snapshot)
+            .push(&self.pusher, self.id, decoded(snapshot), ())
             .await?
             .changed)
     }
@@ -205,6 +205,11 @@ fn new_mirror(name: &str, sources: &[&str]) -> NewMirror {
             source_prefixes: sources.iter().map(|&prefix| prefix.to_owned()).collect(),
         },
     }
+}
+
+/// A push as the route's decode hands it to the service.
+fn decoded(snapshot: MirrorSnapshot) -> Decoded {
+    Decoded::of(snapshot).expect("decoded")
 }
 
 fn fixture(sequence: u64) -> MirrorSnapshot {
@@ -387,7 +392,7 @@ async fn a_new_token_starts_a_new_series_of_sequences() {
     lab.service.admit(lab.id).await.expect("admitted");
     let accepted = lab
         .service
-        .push(&pusher, lab.id, fixture(1))
+        .push(&pusher, lab.id, decoded(fixture(1)), ())
         .await
         .expect("accepted");
     assert_eq!(accepted.sequence, 1);
@@ -409,7 +414,8 @@ async fn a_push_whose_token_is_replaced_before_its_write_is_a_revoked_token_s() 
     // write then meets the new row, and the next attempt reads it again.
     let (arrived, go) = gate.arm();
     let (pushed, replaced) = tokio::join!(
-        lab.service.push(&lab.pusher, lab.id, fixture(u64::MAX)),
+        lab.service
+            .push(&lab.pusher, lab.id, decoded(fixture(u64::MAX)), ()),
         async {
             arrived.await.expect("the push reached its write");
             let replaced = lab
@@ -434,7 +440,10 @@ async fn a_push_whose_token_is_replaced_before_its_write_is_a_revoked_token_s() 
     // The same refusal for a push that arrives after the replacement.
     lab.at(10);
     lab.service.admit(lab.id).await.expect("admitted");
-    let late = lab.service.push(&lab.pusher, lab.id, fixture(2)).await;
+    let late = lab
+        .service
+        .push(&lab.pusher, lab.id, decoded(fixture(2)), ())
+        .await;
     assert_eq!(late.expect_err("refused").code(), "auth.unauthenticated");
 }
 
@@ -457,7 +466,7 @@ async fn a_second_service_reads_the_freshness_and_the_sequence_from_the_row() {
     );
     other.admit(lab.id).await.expect("admitted");
     let replay = other
-        .push(&lab.pusher, lab.id, fixture(9))
+        .push(&lab.pusher, lab.id, decoded(fixture(9)), ())
         .await
         .expect_err("replay");
     assert_eq!(replay.code(), "migrate.mirror.sequence");
@@ -685,7 +694,11 @@ async fn push_as(
     snapshot: MirrorSnapshot,
 ) -> Result<bool, MirrorError> {
     lab.service.admit(id).await?;
-    Ok(lab.service.push(pusher, id, snapshot).await?.changed)
+    Ok(lab
+        .service
+        .push(pusher, id, decoded(snapshot), ())
+        .await?
+        .changed)
 }
 
 fn pair(partner: Option<MirrorId>) -> MirrorPatch {

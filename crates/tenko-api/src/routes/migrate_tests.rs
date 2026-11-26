@@ -362,6 +362,57 @@ fn a_dropped_push_holds_its_mirror_and_the_decode_until_its_decode_ends() {
         });
 }
 
+/// A push dropped while its snapshot row waits to be encoded holds its mirror and the node's
+/// decode until the encode has run. Its decode has ended when the test takes the runtime's
+/// one blocking thread, so the push next waits for that thread at its encode.
+#[test]
+fn a_dropped_push_holds_its_mirror_and_the_decode_until_its_encode_ends() {
+    use futures::FutureExt as _;
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .max_blocking_threads(1)
+        .build()
+        .expect("a runtime")
+        .block_on(async {
+            let (harness, admin) = harness().await;
+            let (first, first_token) = mirror(&harness, &admin, "dc1").await;
+            let (second, second_token) = mirror(&harness, &admin, "dc2").await;
+            let mut dropped = Box::pin(push(&harness, &first, &first_token, snapshot(1), &[]));
+            assert!(
+                dropped.as_mut().now_or_never().is_none(),
+                "the push decodes"
+            );
+            // The one blocking thread runs its work in order: the decode has ended.
+            tokio::task::spawn_blocking(|| ()).await.expect("after it");
+            let (free, held) = std::sync::mpsc::channel::<()>();
+            let holder = tokio::task::spawn_blocking(move || held.recv());
+            assert!(
+                dropped.as_mut().now_or_never().is_none(),
+                "the push waits at its encode"
+            );
+            drop(dropped);
+            let answered = |reply| tokio::time::timeout(Duration::from_secs(10), reply);
+            later(&harness, 10);
+            let again = answered(push(&harness, &first, &first_token, snapshot(2), &[]))
+                .await
+                .expect("the dropped push still holds its mirror");
+            again.assert_problem(429, "migrate.mirror.rate");
+            assert_eq!(again.header("retry-after"), Some("10"));
+            let other = answered(push(&harness, &second, &second_token, snapshot(1), &[]))
+                .await
+                .expect("the dropped push still holds the decode");
+            other.assert_problem(429, "migrate.mirror.rate");
+            assert_eq!(other.header("retry-after"), Some("2"));
+            free.send(()).expect("let go");
+            holder.await.expect("ended").expect("heard");
+            tokio::task::spawn_blocking(|| ()).await.expect("after it");
+            later(&harness, 10);
+            push(&harness, &first, &first_token, snapshot(2), &[])
+                .await
+                .assert_status(200);
+        });
+}
+
 #[tokio::test]
 async fn a_finding_names_mirrors_that_share_a_name_by_their_ids() {
     let (harness, admin) = harness().await;
