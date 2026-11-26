@@ -299,6 +299,7 @@ struct ScopeData {
 #[derive(Debug)]
 struct ZoneEntry {
     kind: ZoneKind,
+    served: bool,
     apex: Box<[u8]>,
     labels: usize,
     scopes: HashMap<ScopeName, ScopeData>,
@@ -339,6 +340,7 @@ impl MemIndex {
                 zone.id,
                 ZoneEntry {
                     kind: zone.kind,
+                    served: zone.served,
                     labels: name::label_count(&apex),
                     apex,
                     scopes: HashMap::new(),
@@ -385,7 +387,7 @@ impl MemIndex {
         let labels = name::label_count(qname);
         (0..=labels).find_map(|skip| {
             let id = *self.apexes.get(name::suffix(qname, skip))?;
-            Some((id, self.zones.get(&id)?))
+            Some((id, self.zones.get(&id).filter(|entry| entry.served)?))
         })
     }
 

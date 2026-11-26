@@ -60,6 +60,7 @@ fn zone(apex: &str, stamp: &Stamp) -> Zone {
         source: None,
         reverse_of: None,
         catalog: false,
+        served: true,
         description: None,
         created: stamp.clone(),
         updated: stamp.clone(),

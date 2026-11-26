@@ -9,7 +9,8 @@
 //! after the NOTIFY must see the new serial), reads the serial and sends one NOTIFY per
 //! target, signed with the target's key when it has one, over UDP. A target
 //! that does not answer gets the NOTIFY again after 15, 30, 60 and 120 seconds, five
-//! attempts in all; a newer serial meanwhile replaces the one being retried.
+//! attempts in all; a newer serial meanwhile replaces the one being retried. An unserved zone
+//! (`Zone::served`) sends none.
 
 use std::{collections::HashMap, net::SocketAddr, sync::Arc, time::Duration};
 
@@ -118,11 +119,12 @@ impl NotifyService {
         }
     }
 
-    /// The zone's NOTIFY targets, its apex and the SOA of its default scope now.
+    /// The zone's NOTIFY targets, its apex and the SOA of its default scope now; none for an
+    /// unserved zone.
     async fn targets(&self, zone: ZoneId) -> Option<(Vec<NotifyTarget>, Vec<u8>, Soa)> {
         let view = self.zones.view(None).await.ok()?;
         let row = ZoneService::zone(view.as_ref(), zone).ok()?.zone;
-        if row.transfer.notify.is_empty() {
+        if !row.served || row.transfer.notify.is_empty() {
             return None;
         }
         let key = tenko_core::dns::RrSetKey {
@@ -380,9 +382,111 @@ impl LeaderService for NotifyService {
 
 #[cfg(test)]
 mod tests {
-    use tenko_store::{MemStore, Store};
+    use tenko_core::{
+        Principal, RequestCtx, SystemComponent, Timestamp,
+        dns::{
+            DnsName, Origin, PrimaryServer, Rdata, RecordData, RrSet, SecondarySource, SoaDefaults,
+            TransferPolicy, Zone, ZoneKind, tables::ZONES,
+        },
+    };
+    use tenko_store::{MemStore, Store, WriteBatch};
 
     use super::*;
+    use crate::zone::NewZone;
+
+    /// An unserved zone sends no NOTIFY: it has no targets until its row says served.
+    #[tokio::test]
+    async fn an_unserved_zone_has_no_notify_targets() {
+        let store = Arc::new(MemStore::default());
+        let zones = ZoneService::with_direct_jobs(
+            Arc::clone(&store) as Arc<dyn Store>,
+            None,
+            crate::zone::ZoneConfig::default(),
+        );
+        let keys = Arc::new(KeyLoader::new(Arc::clone(&zones)));
+        let service = NotifyService::new(
+            Arc::clone(&zones),
+            keys,
+            ServedRevision::default(),
+            NotifySettings::default(),
+        );
+        let name = |text: &str| DnsName::new(text).expect("name");
+        let address = "192.0.2.53".parse().expect("address");
+        let zone = zones
+            .create_unserved(
+                &RequestCtx::system(SystemComponent::Dns),
+                NewZone {
+                    name: name("copy.test"),
+                    kind: ZoneKind::Secondary,
+                    tenant: None,
+                    scopes: Vec::new(),
+                    serial: tenko_core::dns::SerialPolicy::default(),
+                    soa: SoaDefaults::new(name("ns1.copy.test"), name("hostmaster.copy.test")),
+                    name_servers: Vec::new(),
+                    transfer: TransferPolicy {
+                        notify: vec![NotifyTarget {
+                            address,
+                            port: 53,
+                            key: None,
+                        }],
+                        ..TransferPolicy::default()
+                    },
+                    update: tenko_core::dns::UpdatePolicy::default(),
+                    dnssec: tenko_core::dns::DnssecPolicy::default(),
+                    source: Some(SecondarySource {
+                        primaries: vec![PrimaryServer {
+                            address,
+                            port: 53,
+                            key: None,
+                            xot: false,
+                            tls_name: None,
+                        }],
+                    }),
+                    description: None,
+                    reverse_of: None,
+                    catalog: false,
+                },
+            )
+            .await
+            .expect("an unserved copy")
+            .zone;
+        // The SOA a refresh writes.
+        let soa = RecordData::Soa {
+            mname: name("ns1.copy.test"),
+            rname: name("hostmaster.copy.test"),
+            serial: 1,
+            refresh: 3600,
+            retry: 900,
+            expire: 1_209_600,
+            minimum: 60,
+        };
+        let set = RrSet {
+            zone: zone.id,
+            scope: ScopeName::DEFAULT,
+            name: zone.name.clone(),
+            rtype: Rtype::SOA,
+            ttl: 300,
+            rdata: vec![Rdata::from_data(&soa)],
+            origin: Origin::Transfer,
+            key: None,
+            principal: None,
+            updated: zone.created.clone(),
+        };
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dns), Timestamp::now());
+        batch.put_typed(&RRSETS, &set.key(), &set).expect("encode");
+        store.propose(batch).await.expect("commit");
+        assert!(service.targets(zone.id).await.is_none());
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dns), Timestamp::now());
+        let served = Zone {
+            served: true,
+            ..zone
+        };
+        batch
+            .put_typed(&ZONES, &served.id, &served)
+            .expect("encode");
+        store.propose(batch).await.expect("commit");
+        assert!(service.targets(served.id).await.is_some());
+    }
 
     /// A change stream that cannot be opened does not end the service: it tries again
     /// after a pause and ends only with its term.

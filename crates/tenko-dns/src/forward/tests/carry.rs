@@ -139,6 +139,7 @@ fn catalog(servers: &[&str]) -> Catalog {
             source: None,
             reverse_of: None,
             catalog: false,
+            served: true,
             description: None,
             created: stamp(),
             updated: stamp(),

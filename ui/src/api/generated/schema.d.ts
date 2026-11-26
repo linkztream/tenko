@@ -26667,6 +26667,13 @@ export interface components {
             scopes?: components["schemas"]["ZoneScope"][];
             /** @description How the serial moves. */
             serial?: components["schemas"]["SerialPolicy"];
+            /**
+             * @description Whether this node answers for the zone. An unserved zone is a secondary that a takeover
+             *     run created (ADR 0038): it refreshes from its primaries and takes NOTIFY, and gives no
+             *     answer, transfer, NOTIFY or update until a flip to primary serves it. True when absent.
+             * @default true
+             */
+            served: boolean;
             /** @description The SOA values. */
             soa: components["schemas"]["SoaDefaults"];
             source?: components["schemas"]["SecondarySource"] | null;

@@ -35,6 +35,7 @@ fn zone() -> Zone {
         source: None,
         reverse_of: None,
         catalog: false,
+        served: true,
         description: None,
         created: stamp(),
         updated: stamp(),
@@ -106,12 +107,14 @@ fn a_zone_round_trips_and_defaults_its_policies() {
     );
     // Policies and scopes default when absent.
     let mut object = json;
-    for field in ["scopes", "serial", "transfer", "update", "dnssec"] {
+    for field in ["scopes", "serial", "transfer", "update", "dnssec", "served"] {
         object.as_object_mut().expect("object").remove(field);
     }
+    // A zone without `served`, as every row written before it, is served (data format 8).
     let back: Zone = serde_json::from_value(object).expect("json");
     assert_eq!(back.scopes, vec![ZoneScope::default_scope()]);
     assert!(back.update.require_tsig && !back.update.may_replace_ipam);
+    assert!(back.served);
 }
 
 #[test]
@@ -147,6 +150,30 @@ fn zone_rules_hold() {
         }],
     });
     secondary.validate().expect("valid secondary");
+    // An unserved zone is a secondary and no catalog zone.
+    secondary.served = false;
+    secondary.validate().expect("an unserved secondary");
+    secondary.catalog = true;
+    assert_eq!(
+        secondary
+            .validate()
+            .expect_err("an unserved catalog")
+            .as_coded_error()
+            .params["field"],
+        "served"
+    );
+    let mut unserved = zone();
+    unserved.served = false;
+    assert_eq!(
+        unserved
+            .validate()
+            .expect_err("an unserved primary")
+            .as_coded_error()
+            .params["field"],
+        "served"
+    );
+    secondary.catalog = false;
+    secondary.served = true;
     secondary.dnssec.mode = DnssecMode::Online;
     assert!(secondary.validate().is_err(), "only primaries sign online");
 

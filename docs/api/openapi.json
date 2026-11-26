@@ -92965,6 +92965,11 @@
             "$ref": "#/components/schemas/SerialPolicy",
             "description": "How the serial moves."
           },
+          "served": {
+            "type": "boolean",
+            "description": "Whether this node answers for the zone. An unserved zone is a secondary that a takeover\nrun created (ADR 0038): it refreshes from its primaries and takes NOTIFY, and gives no\nanswer, transfer, NOTIFY or update until a flip to primary serves it. True when absent.",
+            "default": true
+          },
           "soa": {
             "$ref": "#/components/schemas/SoaDefaults",
             "description": "The SOA values."

@@ -256,7 +256,12 @@ impl XfrOut {
             return self.notify_in(message, &request, conn, &signed);
         }
         let zones = self.directory.zones();
-        let Some(zone) = zones.by_apex(request.question.name.as_wire()).cloned() else {
+        // An unserved zone answers as no zone; NOTIFY in above still reaches it.
+        let Some(zone) = zones
+            .by_apex(request.question.name.as_wire())
+            .filter(|zone| zone.served)
+            .cloned()
+        else {
             return First::Reply(Self::reply(short_answer(message, &request, 9), &signed));
         };
         drop(zones);

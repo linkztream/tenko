@@ -427,6 +427,11 @@ fn plan_flip(
     let serial = match flip {
         ZoneFlip::Primary { soa, ns } => {
             check_kind(&before, ZoneKind::Secondary)?;
+            // A primary is always served: the flip serves a takeover run's unserved copy.
+            if !before.served {
+                zone.served = true;
+                draft = draft.with_context("served", "true");
+            }
             let rrsets = scan(view, id, |_| true, usize::MAX)?;
             to_primary(
                 view,

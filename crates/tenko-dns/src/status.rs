@@ -263,8 +263,8 @@ pub struct DnsStatus {
     pub lag: u64,
     /// Zones served.
     pub zones: u32,
-    /// RRsets in the bases of the index (an RRset changed since its zone's base was built
-    /// is counted when the base is next rebuilt).
+    /// RRsets of served zones in the bases of the index (an RRset changed since its zone's
+    /// base was built is counted when the base is next rebuilt).
     pub rrsets: u64,
     /// Octets of the bases of the index, a lower bound of its memory
     /// (`IndexStats::base_bytes`).

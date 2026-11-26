@@ -1182,6 +1182,12 @@ pub struct Zone {
     /// tenant) whose `transfer.allow` is not empty, catalog zones excepted.
     #[serde(default)]
     pub catalog: bool,
+    /// Whether this node answers for the zone. An unserved zone is a secondary that a takeover
+    /// run created (ADR 0038): it refreshes from its primaries and takes NOTIFY, and gives no
+    /// answer, transfer, NOTIFY or update until a flip to primary serves it. True when absent.
+    #[serde(default = "yes")]
+    #[schema(default = true)]
+    pub served: bool,
     /// Free text.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -1200,7 +1206,8 @@ impl Zone {
     /// twice; the SOA values are in bounds; a secondary, stub or forward zone names at
     /// least one server and a primary zone none; `reverse_of` only on a name under
     /// `in-addr.arpa` or `ip6.arpa`; online signing only for a primary zone; the update
-    /// policy's protected labels ([`UpdatePolicy::validate`]).
+    /// policy's protected labels ([`UpdatePolicy::validate`]); an unserved zone is a secondary
+    /// and no catalog zone.
     ///
     /// # Errors
     ///
@@ -1208,6 +1215,12 @@ impl Zone {
     pub fn validate(&self) -> Result<(), DnsError> {
         let invalid =
             |field: &str, reason: &str| Err(DnsError::invalid(codes::ZONE_INVALID, field, reason));
+        if !self.served && (self.kind != ZoneKind::Secondary || self.catalog) {
+            return invalid(
+                "served",
+                "only a secondary zone that is no catalog zone is unserved",
+            );
+        }
         if self.name.is_wildcard() {
             return invalid("name", "a zone apex is not a wildcard");
         }

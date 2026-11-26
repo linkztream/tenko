@@ -2,12 +2,15 @@
 //! in-memory store, the store feed and the catalog the node answers from: every
 //! operation, every prerequisite, TSIG and the access lists, the origin rules, the answer
 //! once the index holds the commit, SERVFAIL when the store refuses the write and when the
-//! index does not follow. The listeners are left out: the tests call what the update sink
-//! runs for each message.
+//! index does not follow. And an unserved zone, which neither the index nor the transfer and
+//! update paths answer for. The listeners are left out: the tests call what the update sink
+//! and the transfer path run for each message.
+
+mod support;
 
 use std::{
     collections::HashMap,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -16,14 +19,18 @@ use std::{
 };
 
 use tenko_core::{
-    RequestCtx, SystemComponent,
+    Principal, RequestCtx, SystemComponent, Timestamp,
     audit::AuditDraft,
     dns::{
-        AclEntry, DnsName, Origin, QueryTransport, RecordData, Rtype, ScopeName, SerialPolicy,
-        SoaDefaults, TsigAlgorithm, UpdatePolicy, Zone, ZoneKind,
+        AclEntry, DnsName, Origin, PrimaryServer, QueryTransport, Rdata, RecordData, Rtype,
+        ScopeName, SecondarySource, SerialPolicy, SoaDefaults, TransferPolicy, TsigAlgorithm,
+        UpdatePolicy, Zone, ZoneKind,
+        tables::{RRSETS, ZONES},
     },
+    testing::wait_until_async,
 };
 use tenko_dns::{
+    MemIndex,
     catalog::{self, CatalogHandle},
     index::{DefaultScopes, Index as _, Lookup},
     respond::{Conn, ReplyPath},
@@ -37,7 +44,11 @@ use tenko_dns::{
         policy::{ProfileCell, UpdateProfile},
     },
     wire::{self, MAX_MESSAGE_LEN},
-    xfr::{Directory, TransferAudit},
+    xfr::{
+        Directory, NotifyHandler, StoreJournal, TransferAudit, TransferSink as _,
+        message::{OPCODE_NOTIFY, OPCODE_QUERY, TYPE_IXFR, TYPE_SOA, write_request as xfr_request},
+        out::XfrOut,
+    },
     zone::{
         NewZone, ZoneChange, ZoneConfig, ZoneService,
         acl::NewAcl,
@@ -1091,4 +1102,207 @@ async fn updates_over_the_admission_bounds_are_refused_before_they_are_copied() 
         .submit(&signed(7), &client("2001:db8:1:3::1"), reply.clone());
     assert_eq!((lab.path.in_flight(), lab.path.refused()), (2, 3));
     lab.stop.cancel();
+}
+
+/// The NOTIFY messages the transfer path hands on, by zone.
+#[derive(Default)]
+struct Notified(Mutex<Vec<tenko_core::dns::ZoneId>>);
+
+impl NotifyHandler for Notified {
+    fn notified(&self, zone: tenko_core::dns::ZoneId, _: IpAddr, _: Option<u32>, _: bool) {
+        self.0.lock().expect("notified").push(zone);
+    }
+}
+
+/// A takeover run's unserved copy `copy.test`, a secondary of 192.0.2.53 whose transfers are
+/// open to anyone, with the rows a refresh writes (its SOA and `www A 192.0.2.9`) once the
+/// index holds them; and the transfer path over the lab's catalog and directory.
+async fn unserved(lab: &Lab) -> (Zone, Arc<XfrOut>, Arc<Notified>) {
+    let (anyone, _) = lab
+        .zones
+        .create_acl(
+            &cx(),
+            NewAcl {
+                name: "anyone".to_owned(),
+                entries: vec![AclEntry::Prefix {
+                    prefix: "0.0.0.0/0".parse().expect("prefix"),
+                    deny: false,
+                }],
+                description: None,
+            },
+        )
+        .await
+        .expect("acl");
+    let primary = PrimaryServer {
+        address: "192.0.2.53".parse().expect("address"),
+        port: 53,
+        key: None,
+        xot: false,
+        tls_name: None,
+    };
+    let zone = lab
+        .zones
+        .create_unserved(
+            &cx(),
+            NewZone {
+                name: name("copy.test"),
+                kind: ZoneKind::Secondary,
+                tenant: None,
+                scopes: Vec::new(),
+                serial: SerialPolicy::default(),
+                soa: SoaDefaults::new(name("ns1.copy.test"), name("hostmaster.copy.test")),
+                name_servers: Vec::new(),
+                transfer: TransferPolicy {
+                    allow: vec![anyone.id],
+                    require_tsig: false,
+                    ..TransferPolicy::default()
+                },
+                update: UpdatePolicy::default(),
+                dnssec: tenko_core::dns::DnssecPolicy::default(),
+                source: Some(SecondarySource {
+                    primaries: vec![primary],
+                }),
+                description: None,
+                reverse_of: None,
+                catalog: false,
+            },
+        )
+        .await
+        .expect("an unserved copy")
+        .zone;
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dns), Timestamp::now());
+    for (owner, data) in [
+        ("copy.test", support::soa("copy.test", 60)),
+        ("www.copy.test", support::a(9)),
+    ] {
+        let set = support::rrset(&zone, &ScopeName::DEFAULT, owner, &[data]);
+        batch.put_typed(&RRSETS, &set.key(), &set).expect("encode");
+    }
+    lab.commit(batch).await;
+    let notified = Arc::new(Notified::default());
+    let path = Arc::new(XfrOut::new(
+        lab.catalog.clone(),
+        Arc::clone(&lab.directory),
+        Arc::new(StoreJournal::new(Arc::clone(&lab.store) as Arc<dyn Store>)),
+        Arc::clone(&lab.refusals) as Arc<dyn TransferAudit>,
+        Some(Arc::clone(&notified) as Arc<dyn NotifyHandler>),
+    ));
+    (zone, path, notified)
+}
+
+impl Lab {
+    /// Commits `batch`, then waits until the index and the directory hold it.
+    async fn commit(&self, batch: WriteBatch) {
+        let revision = self.store.propose(batch).await.expect("commit").revision;
+        wait_until_async("the index holds the commit", || async {
+            self.catalog.revision() >= revision
+        })
+        .await;
+        self.directory
+            .load(&self.zones, &mut HashMap::new())
+            .await
+            .expect("directory");
+    }
+}
+
+/// What the node answers for `copy.test`: whether the index answers `www.copy.test` (the
+/// walk of every query transport, which share one responder) and whether the reference index
+/// does, the RCODE of an IXFR over UDP and the RCODE of an update.
+async fn answers(lab: &Lab, path: &XfrOut) -> (bool, bool, u8, u16) {
+    let www = wire_name("www.copy.test");
+    let answered = |lookup: Lookup<'_>| matches!(lookup, Lookup::Answer { .. });
+    let indexed = answered(
+        lab.catalog
+            .load()
+            .index()
+            .lookup(&DefaultScopes, &www, Rtype::A),
+    );
+    let view = lab.zones.view(None).await.expect("view");
+    let image = store_feed::read_image(view.as_ref()).expect("image");
+    let reference = answered(MemIndex::build(&image).lookup(&DefaultScopes, &www, Rtype::A));
+    let soa = Rdata::from_data(&support::soa("copy.test", 60));
+    let (mut ixfr, mut out) = (Vec::new(), Vec::new());
+    xfr_request(
+        &mut ixfr,
+        1,
+        OPCODE_QUERY,
+        &wire_name("copy.test"),
+        TYPE_IXFR,
+        Some((60, soa.as_bytes())),
+    );
+    assert!(path.datagram(&ixfr, &client("192.0.2.10"), &mut out));
+    let transfer = wire::parse_header(&out).expect("header").rcode;
+    let mut add = Vec::new();
+    push_record(&mut add, &www, 1, CLASS_IN, 60, &A_9);
+    let mut update = Vec::new();
+    write_request(&mut update, 2, &wire_name("copy.test"), (0, &[]), (1, &add));
+    let update = read(
+        &lab.path
+            .answer(&update, &client("192.0.2.10"))
+            .await
+            .expect("an answer"),
+    )
+    .rcode;
+    (indexed, reference, transfer, update)
+}
+
+/// An unserved zone gets no answer to a query on any transport, no transfer out and no
+/// accepted update: each answers as for no zone (NOTAUTH), and the index keeps its rows in the
+/// zone's own tree, none aside. Once the row says served, the same zone answers at once from
+/// the rows the index already held (a secondary still refuses the update). NOTIFY out is
+/// `xfr::notify`'s unit test.
+#[tokio::test]
+async fn an_unserved_zone_answers_no_query_transfer_update_or_notify() {
+    let lab = lab().await;
+    let (zone, path, _) = unserved(&lab).await;
+    assert!(!zone.served);
+    assert_eq!(
+        answers(&lab, &path).await,
+        (false, false, 9, rcode::NOTAUTH)
+    );
+    let stats = lab.catalog.load().index().stats();
+    assert_eq!(
+        (stats.zones, stats.scopes, stats.overlay_nodes, stats.aside),
+        (1, 1, 0, 0),
+        "{stats:?}"
+    );
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Dns), Timestamp::now());
+    batch
+        .put_typed(
+            &ZONES,
+            &zone.id,
+            &Zone {
+                served: true,
+                ..zone
+            },
+        )
+        .expect("encode");
+    lab.commit(batch).await;
+    assert_eq!(answers(&lab, &path).await, (true, true, 0, rcode::REFUSED));
+    let stats = lab.catalog.load().index().stats();
+    assert_eq!(
+        (stats.zones, stats.scopes, stats.overlay_nodes, stats.aside),
+        (2, 2, 2, 0),
+        "{stats:?}"
+    );
+}
+
+/// An unserved zone takes NOTIFY from its primary, which queues its refresh.
+#[tokio::test]
+async fn an_unserved_zone_takes_notify_and_refreshes() {
+    let lab = lab().await;
+    let (zone, path, notified) = unserved(&lab).await;
+    let soa = Rdata::from_data(&support::soa("copy.test", 60));
+    let (mut notify, mut out) = (Vec::new(), Vec::new());
+    xfr_request(
+        &mut notify,
+        3,
+        OPCODE_NOTIFY,
+        &wire_name("copy.test"),
+        TYPE_SOA,
+        Some((60, soa.as_bytes())),
+    );
+    assert!(path.datagram(&notify, &client("192.0.2.53"), &mut out));
+    assert_eq!(wire::parse_header(&out).expect("header").rcode, 0);
+    assert_eq!(notified.0.lock().expect("notified").as_slice(), &[zone.id]);
 }

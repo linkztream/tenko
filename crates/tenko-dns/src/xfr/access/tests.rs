@@ -32,6 +32,7 @@ pub(crate) fn zone(apex: &str) -> Zone {
         source: None,
         reverse_of: None,
         catalog: false,
+        served: true,
         description: None,
         created: stamp.clone(),
         updated: stamp,

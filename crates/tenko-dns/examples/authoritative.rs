@@ -168,6 +168,7 @@ impl Builder {
             source: None,
             reverse_of: None,
             catalog: false,
+            served: true,
             description: None,
             created: stamp.clone(),
             updated: stamp.clone(),

@@ -732,7 +732,11 @@ impl Inner {
     ) -> Answer {
         let client = conn.client.ip();
         let zones = self.directory.zones();
-        let Some(zone) = zones.by_apex(&message.zone.to_wire()).cloned() else {
+        let Some(zone) = zones
+            .by_apex(&message.zone.to_wire())
+            .filter(|zone| zone.served)
+            .cloned()
+        else {
             return Answer::with(
                 rcode::NOTAUTH,
                 ede::NOT_AUTHORITATIVE,

@@ -804,6 +804,7 @@ mod tests {
             source,
             reverse_of: None,
             catalog: false,
+            served: true,
             description: None,
             created: stamp(),
             updated: stamp(),

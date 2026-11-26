@@ -712,8 +712,27 @@ impl ZoneService {
     ///
     /// `dns.zone.invalid`, `dns.zone.exists`, `dns.record.invalid` for a bad name server,
     /// or a store or job error.
-    #[allow(clippy::too_many_lines, reason = "one plan of a new zone")]
     pub async fn create(&self, cx: &RequestCtx, new: NewZone) -> ZoneResult<ZoneWritten> {
+        self.create_with(cx, new, true).await
+    }
+
+    /// Creates an unserved secondary zone, as a takeover run's session does (ADR 0038): it
+    /// refreshes from its primaries and answers nothing until a flip to primary serves it.
+    ///
+    /// # Errors
+    ///
+    /// As [`ZoneService::create`]; `dns.zone.invalid` (`served`) for any other kind.
+    pub async fn create_unserved(&self, cx: &RequestCtx, new: NewZone) -> ZoneResult<ZoneWritten> {
+        self.create_with(cx, new, false).await
+    }
+
+    #[allow(clippy::too_many_lines, reason = "one plan of a new zone")]
+    async fn create_with(
+        &self,
+        cx: &RequestCtx,
+        new: NewZone,
+        served: bool,
+    ) -> ZoneResult<ZoneWritten> {
         let id = ZoneId::generate();
         let stamp = Stamp::new(cx.now, cx.principal.clone());
         let mut scopes = vec![ZoneScope::default_scope()];
@@ -732,6 +751,7 @@ impl ZoneService {
             source: new.source.clone(),
             reverse_of: new.reverse_of,
             catalog: new.catalog,
+            served,
             description: clean_description(new.description.clone()),
             created: stamp.clone(),
             updated: stamp.clone(),
@@ -1409,7 +1429,11 @@ fn stage_acl_refs(batch: &mut WriteBatch, view: &dyn ReadView, zone: &Zone) -> Z
 }
 
 /// 412 when the client's revision is not the row's.
-pub(crate) fn check_expect(expect: Option<Revision>, current: Revision) -> ZoneResult<()> {
+///
+/// # Errors
+///
+/// `sys.store.precondition_failed` (412).
+pub fn check_expect(expect: Option<Revision>, current: Revision) -> ZoneResult<()> {
     match expect {
         Some(expect) if expect != current => Err(ZoneError::new(
             "sys.store.precondition_failed",

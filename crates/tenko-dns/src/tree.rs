@@ -769,6 +769,9 @@ fn later<'a>(a: Option<&'a [u8]>, b: Option<&'a [u8]>) -> Option<&'a [u8]> {
 struct ZoneEntry {
     id: ZoneId,
     kind: ZoneKind,
+    /// An unserved zone keeps its rows here and is skipped by every name lookup; the reads
+    /// by zone id do not skip it, and their callers have filtered already.
+    served: bool,
     apex: Box<[u8]>,
     labels: usize,
     scopes: Vec<(ScopeName, ScopeTree)>,
@@ -780,6 +783,7 @@ impl ZoneEntry {
         Self {
             id: zone.id,
             kind: zone.kind,
+            served: zone.served,
             labels: name::label_count(&apex),
             apex,
             scopes: Vec::new(),
@@ -841,10 +845,11 @@ impl Default for ZoneIndex {
     }
 }
 
-/// What the index holds, for the health view and the measurements.
+/// What the index holds, for the health view and the measurements. The counts cover served
+/// zones; `aside` and `base_bytes` cover every zone.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct IndexStats {
-    /// Zones.
+    /// Served zones.
     pub zones: usize,
     /// Zone scopes with data.
     pub scopes: usize,
@@ -950,19 +955,23 @@ impl ZoneIndex {
     /// Counts what the index holds.
     pub fn stats(&self) -> IndexStats {
         let mut stats = IndexStats {
-            zones: self.apexes.len(),
+            zones: self.apexes.values().filter(|entry| entry.served).count(),
             aside: self.aside.len(),
             ..IndexStats::default()
         };
         for entry in self.apexes.values() {
             for (_, tree) in &entry.scopes {
+                stats.base_bytes += tree.base.memory_bytes();
+                // An unserved zone's rows count as memory only.
+                if !entry.served {
+                    continue;
+                }
                 stats.scopes += 1;
                 stats.base_nodes += tree.base.nodes.len();
                 stats.overlay_nodes += tree.overlay_len();
                 stats.base_rrsets += tree.base.sets.len();
                 stats.base_records += tree.base.rdata.len();
                 stats.name_octets += tree.base.names.len();
-                stats.base_bytes += tree.base.memory_bytes();
             }
         }
         stats
@@ -995,8 +1004,8 @@ impl ZoneIndex {
         let wire = zone.map(|zone| zone.name.to_wire());
         match (self.by_id.get(&id), zone) {
             (Some(apex), Some(zone)) if Some(&apex[..]) == wire.as_deref() => {
-                let kind = zone.kind;
-                self.with_entry(id, |entry| entry.kind = kind);
+                let (kind, served) = (zone.kind, zone.served);
+                self.with_entry(id, |entry| (entry.kind, entry.served) = (kind, served));
                 return;
             }
             (Some(_), _) => self.remove_zone(id),
@@ -1102,6 +1111,7 @@ impl ZoneIndex {
             self.apexes
                 .get(name::suffix(qname, skip))
                 .map(AsRef::as_ref)
+                .filter(|entry| entry.served)
         })
     }
 

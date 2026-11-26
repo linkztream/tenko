@@ -511,6 +511,7 @@ mod tests {
             source: None,
             reverse_of: None,
             catalog: false,
+            served: true,
             description: None,
             created: tenko_core::ipam::Stamp::new(now, Principal::system(SystemComponent::Api)),
             updated: tenko_core::ipam::Stamp::new(now, Principal::system(SystemComponent::Api)),
