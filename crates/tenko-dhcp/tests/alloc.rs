@@ -12,7 +12,8 @@
 //! the test checks too, so the guard is known to bite.
 //!
 //! The allocator counts every thread of the process, so the file has one test that runs
-//! the measured sections one after another.
+//! the measured sections one after another, and the binary is its own harness (`harness =
+//! false` in Cargo.toml), for the reason `crates/tenko-dns/tests/alloc.rs` gives.
 
 // WP8.4: the world of the classes, policies and boot paths.
 mod class_world;
@@ -190,7 +191,44 @@ fn build_overload_and_split(request: &[u8], routes: &[Route], out: &mut [u8]) ->
     len
 }
 
-#[test]
+const TEST_NAME: &str = "the_codec_and_the_dora_path_do_not_allocate";
+
+/// Flags of libtest that take a value, which is not a name filter.
+const VALUED_FLAGS: [&str; 5] = ["--format", "--test-threads", "--color", "--skip", "-Z"];
+
+fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.iter().any(|arg| arg == "--list") {
+        if !args.iter().any(|arg| arg == "--ignored") {
+            println!("{TEST_NAME}: test");
+        }
+        return;
+    }
+    let exact = args.iter().any(|arg| arg == "--exact");
+    let mut after_valued = false;
+    let mut filters = Vec::new();
+    for arg in &args {
+        if after_valued {
+            after_valued = false;
+        } else if arg.starts_with('-') {
+            after_valued = VALUED_FLAGS.contains(&arg.as_str());
+        } else {
+            filters.push(arg.as_str());
+        }
+    }
+    let selected = filters.is_empty()
+        || filters.iter().any(|filter| {
+            (exact && *filter == TEST_NAME) || (!exact && TEST_NAME.contains(filter))
+        });
+    if !selected {
+        println!("\nrunning 0 tests\n\ntest result: ok. 0 passed; 1 filtered out\n");
+        return;
+    }
+    println!("\nrunning 1 test");
+    the_codec_and_the_dora_path_do_not_allocate();
+    println!("test {TEST_NAME} ... ok\n\ntest result: ok. 1 passed; 0 failed\n");
+}
+
 fn the_codec_and_the_dora_path_do_not_allocate() {
     the_codec_does_not_allocate();
     // WP7.3: the engine runs the fixtures and the request corpus (`fixtures/requests`).
