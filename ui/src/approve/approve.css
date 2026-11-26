@@ -1,0 +1,7 @@
+/* The approval page: labels wide enough for their words, whole values that wrap, the result. */
+.ap-facts .kv { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); }
+.ap-list { margin: 0; padding-inline-start: var(--sp-5); }
+#ap-domain { overflow-wrap: anywhere; }
+.ap-result { display: grid; gap: var(--sp-3); }
+.ap-result:empty { display: none; }
+.ap-form { max-inline-size: 36rem; }

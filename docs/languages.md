@@ -31,6 +31,8 @@ Every UI string is a message under a key. The key set is read from the English s
 
 The built-in documents are in the same XLIFF format as a pack, so they double as templates (section 5). A pack with the tag of a built-in language does not replace the language as a whole: for each key the pack lacks, the built-in message of that language is used, then the English one.
 
+No pack changes the texts of the approval page of a takeover script (`/approve`): the UI drops the keys under `approve.`, `errors.auth.approval.` and `errors.tls.no_internal_ca` from every pack and preview, and the page shows its own text for any error it has no words for, so its texts are the built-in English or Swedish ones, and English in any other language. The shell around the page and the sign-in page follow the active pack as everywhere else.
+
 A language is named by its BCP 47 tag, taken from the `trgLang` attribute of the document (section 2.2). The tag decides the writing direction of the UI: the document direction follows the language, right to left for scripts and languages written that way (for example `ar`, `he`, `fa`, `ur`, or an explicit `-Arab` script subtag), and the style sheets use logical properties, so the layout mirrors without anything in the pack. A pack does not declare a direction.
 
 Who may do what:

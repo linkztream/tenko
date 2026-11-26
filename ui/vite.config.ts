@@ -100,6 +100,9 @@ const MESSAGE_PACKS: Record<string, readonly string[]> = {
   dhcp: ["dhcp.", "errors.dhcp."],
   // The migration views of the Windows takeover (WP14.0): a mirror's page and the zone actions.
   migrate: ["migrate.", "errors.migrate."],
+  // The approval of a takeover script, with the error texts of the approval endpoints. An
+  // uploaded language pack never replaces these texts (src/i18n/remote.ts).
+  approve: ["approve.", "errors.auth.approval.", "errors.tls.no_internal_ca"],
   // U2: the words of the rail badges and of the findings in the status bar, loaded with the
   // findings part of the shell after the first page (src/shell/findingsShell.ts).
   findings: ["shell.nav.badge.", "shell.status.findings."],

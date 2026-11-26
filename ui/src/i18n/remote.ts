@@ -35,8 +35,16 @@ export function icuParser(): Promise<IcuParse> {
   return parser;
 }
 
+/**
+ * Keys no pack replaces: the approval page of a takeover script shows only built-in texts, so
+ * node data never puts words on it (docs/languages.md, section 1). shortcut: a third language
+ * shows English on that page; upgrade only if a pack signing scheme ever exists.
+ */
+const BUILT_IN_ONLY = ["approve.", "errors.auth.approval.", "errors.tls.no_internal_ca"];
+
 async function sourceTable(messages: Readonly<Record<string, string>>): Promise<RuntimeTable> {
-  return { kind: "source", messages, parse: await icuParser() };
+  const kept = Object.fromEntries(Object.entries(messages).filter(([key]) => !BUILT_IN_ONLY.some((prefix) => key.startsWith(prefix))));
+  return { kind: "source", messages: kept, parse: await icuParser() };
 }
 
 /** The content hash of the active pack registered per tag. */

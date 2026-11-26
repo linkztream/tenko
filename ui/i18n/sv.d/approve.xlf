@@ -1,0 +1,225 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:2.0" xmlns:mda="urn:oasis:names:tc:xliff:metadata:2.0" version="2.0" srcLang="en" trgLang="sv">
+  <file id="tenko-ui">
+    <group id="approve">
+      <unit id="approve.title">
+        <notes><note category="description">Title of the page where an administrator approves a takeover script, and its entry in the browser tab.</note></notes>
+        <segment><source>Approve a takeover script</source><target>Godkänn ett övertagandeskript</target></segment>
+      </unit>
+      <unit id="approve.lede">
+        <notes><note category="description">Introduction under the title of the approval page.</note></notes>
+        <segment><source>A takeover script on a Windows machine shows a code. Type it here to see what the script asks to do. This page never asks you to run a command or download a file.</source><target>Ett övertagandeskript på en Windows-dator visar en kod. Skriv koden här för att se vad skriptet vill göra. Sidan ber dig aldrig att köra ett kommando eller ladda ned en fil.</target></segment>
+      </unit>
+      <unit id="approve.code.label">
+        <notes><note category="description">Label of the code field, and of the row that shows the typed code.</note></notes>
+        <segment><source>Code from the Windows screen</source><target>Koden på Windows-skärmen</target></segment>
+      </unit>
+      <unit id="approve.code.hint">
+        <notes><note category="description">Help under the code field. The example code is not translated.</note></notes>
+        <segment><source>16 letters and digits, for example K7QD-M2XR-9FHA-T4WB. Case and hyphens do not matter.</source><target>16 bokstäver och siffror, till exempel K7QD-M2XR-9FHA-T4WB. Du kan skriva med stora eller små bokstäver, med eller utan bindestreck.</target></segment>
+      </unit>
+      <unit id="approve.code.invalid">
+        <notes><note category="description">Error under the code field when the typed text cannot be a code.</note></notes>
+        <segment><source>A code has 16 letters and digits. Check the code on the Windows screen.</source><target>Koden ska ha 16 bokstäver och siffror. Kontrollera koden på Windows-skärmen.</target></segment>
+      </unit>
+      <unit id="approve.code.submit">
+        <notes><note category="description">Button that looks up the request of the typed code.</note></notes>
+        <segment><source>Show the request</source><target>Visa begäran</target></segment>
+      </unit>
+      <unit id="approve.check">
+        <notes><note category="description">Warning above the request: the code is the only link between the page and the script on the screen.</note></notes>
+        <segment><source>Approve only a code that you read yourself on the screen of a script you started. Never approve a code that someone sends you. The machine, user, version and plan below come from that script. Only the address was seen by Tenko itself. Approve within five minutes of signing in.</source><target>Godkänn bara en kod som du själv har läst på skärmen där du startade skriptet. Godkänn aldrig en kod som någon skickar till dig. Datorn, användaren, versionen och planen nedan kommer från skriptet. Bara adressen har Tenko själv sett. Godkänn inom fem minuter efter att du loggade in.</target></segment>
+      </unit>
+      <unit id="approve.field.domain">
+        <notes><note category="description">Label: the Active Directory domain the script takes over.</note></notes>
+        <segment><source>Domain</source><target>Domän</target></segment>
+      </unit>
+      <unit id="approve.field.machine">
+        <notes><note category="description">Label: the Windows machine the script runs on, as the script itself reports it.</note></notes>
+        <segment><source>Machine (as the script reports it)</source><target>Dator (enligt skriptet)</target></segment>
+      </unit>
+      <unit id="approve.field.user">
+        <notes><note category="description">Label: the Windows account that runs the script, as the script itself reports it.</note></notes>
+        <segment><source>Windows user (as the script reports it)</source><target>Windows-användare (enligt skriptet)</target></segment>
+      </unit>
+      <unit id="approve.field.version">
+        <notes><note category="description">Label: the version of the script, as the script itself reports it.</note></notes>
+        <segment><source>Script version (as the script reports it)</source><target>Skriptversion (enligt skriptet)</target></segment>
+      </unit>
+      <unit id="approve.field.source">
+        <notes><note category="description">Label: the network address the request came from, which Tenko saw itself.</note></notes>
+        <segment><source>Address the request came from (seen by Tenko)</source><target>Adressen som begäran kom från (sedd av Tenko)</target></segment>
+      </unit>
+      <unit id="approve.field.expires">
+        <notes><note category="description">Label: when the request expires unless the script collects it.</note></notes>
+        <segment><source>Expires</source><target>Går ut</target></segment>
+      </unit>
+      <unit id="approve.field.controllers">
+        <notes><note category="description">Label of the list of domain controllers; count is their number.</note></notes>
+        <segment><source>Domain controllers ({count})</source><target>Domänkontrollanter ({count})</target></segment>
+      </unit>
+      <unit id="approve.field.zones">
+        <notes><note category="description">Label of the list of DNS zones; count is their number.</note></notes>
+        <segment><source>DNS zones ({count})</source><target>DNS-zoner ({count})</target></segment>
+      </unit>
+      <unit id="approve.field.dhcp_servers">
+        <notes><note category="description">Label of the list of DHCP servers; count is their number.</note></notes>
+        <segment><source>DHCP servers ({count})</source><target>DHCP-servrar ({count})</target></segment>
+      </unit>
+      <unit id="approve.field.scopes">
+        <notes><note category="description">Label of the list of DHCP scopes; count is their number.</note></notes>
+        <segment><source>DHCP scopes ({count})</source><target>DHCP-omfång ({count})</target></segment>
+      </unit>
+      <unit id="approve.field.mirror_host">
+        <notes><note category="description">Label: the Windows server that sends the DHCP data to Tenko.</note></notes>
+        <segment><source>Server that sends the DHCP data</source><target>Servern som skickar DHCP-data</target></segment>
+      </unit>
+      <unit id="approve.field.node_name">
+        <notes><note category="description">Label: the name Tenko gets in the domain.</note></notes>
+        <segment><source>Name of Tenko in the domain</source><target>Tenkos namn i domänen</target></segment>
+      </unit>
+      <unit id="approve.field.operations">
+        <notes><note category="description">Label of the list of what the script may do.</note></notes>
+        <segment><source>What the script may do in Tenko</source><target>Vad skriptet får göra i Tenko</target></segment>
+      </unit>
+      <unit id="approve.field.lifetime">
+        <notes><note category="description">Label: how long the access of an approved script lasts.</note></notes>
+        <segment><source>How long the access holds</source><target>Hur länge åtkomsten gäller</target></segment>
+      </unit>
+      <unit id="approve.lifetime">
+        <notes><note category="description">How long the access of an approved script lasts, and where it can be ended. Security and sign-in, Sessions names the account page and its tab.</note></notes>
+        <segment><source>The access ends no later than 8 hours after you approve, or after 15 minutes without use. You can end it earlier under Security and sign-in, Sessions.</source><target>Åtkomsten upphör senast 8 timmar efter godkännandet, eller redan efter 15 minuter utan användning. Du kan avsluta den tidigare under Säkerhet och inloggning, Sessioner.</target></segment>
+      </unit>
+      <unit id="approve.op.mirrors">
+        <notes><note category="description">A step the script may take: Tenko receives a copy of the DHCP data.</note></notes>
+        <segment><source>Receive a copy of the DHCP data of the Windows servers</source><target>Ta emot en kopia av DHCP-data från Windows-servrarna</target></segment>
+      </unit>
+      <unit id="approve.op.secondary_zones">
+        <notes><note category="description">A step the script may take: Tenko copies the zones as secondary zones.</note></notes>
+        <segment><source>Copy the DNS zones, without answering queries for them yet</source><target>Kopiera DNS-zonerna, men svara inte på frågor för dem ännu</target></segment>
+      </unit>
+      <unit id="approve.op.forwarding_rules">
+        <notes><note category="description">A step the script may take: Tenko copies the forwarders of Windows as disabled rules.</note></notes>
+        <segment><source>Copy the forwarding rules of Windows and leave them switched off</source><target>Kopiera vidarebefordringsreglerna från Windows och låt dem vara avstängda</target></segment>
+      </unit>
+      <unit id="approve.op.update_policy">
+        <notes><note category="description">A step the script may take: the update policy of the zones.</note></notes>
+        <segment><source>Set who may update names in the zones</source><target>Ställ in vem som får uppdatera namn i zonerna</target></segment>
+      </unit>
+      <unit id="approve.op.kerberos_adopt">
+        <notes><note category="description">A step the script may take: Tenko adopts its computer account for secure dynamic updates.</note></notes>
+        <segment><source>Take over the computer account of Tenko for secure updates</source><target>Ta över Tenkos datorkonto för säkra uppdateringar</target></segment>
+      </unit>
+      <unit id="approve.op.prepare">
+        <notes><note category="description">A step the script may take: the scopes are prepared but stay inactive.</note></notes>
+        <segment><source>Prepare the scopes, without handing out addresses yet</source><target>Förbered omfången, men dela inte ut adresser ännu</target></segment>
+      </unit>
+      <unit id="approve.op.flip">
+        <notes><note category="description">A step the script may take: the zones become primary zones on Tenko.</note></notes>
+        <segment><source>Answer queries for the zones instead of Windows</source><target>Svara på frågor för zonerna i stället för Windows</target></segment>
+      </unit>
+      <unit id="approve.op.takeover">
+        <notes><note category="description">A step the script may take: Tenko hands out the addresses.</note></notes>
+        <segment><source>Hand out the addresses of the scopes instead of Windows</source><target>Dela ut adresserna i omfången i stället för Windows</target></segment>
+      </unit>
+      <unit id="approve.op.release">
+        <notes><note category="description">A step the script may take: names that were frozen during the takeover may change again.</note></notes>
+        <segment><source>Release the frozen names of the zones</source><target>Släpp de frusna namnen i zonerna</target></segment>
+      </unit>
+      <unit id="approve.action.approve">
+        <notes><note category="description">Button that approves the request.</note></notes>
+        <segment><source>Approve</source><target>Godkänn</target></segment>
+      </unit>
+      <unit id="approve.action.deny">
+        <notes><note category="description">Button that denies the request.</note></notes>
+        <segment><source>Deny</source><target>Neka</target></segment>
+      </unit>
+      <unit id="approve.action.another">
+        <notes><note category="description">Button that returns to an empty code field.</note></notes>
+        <segment><source>Type another code</source><target>Skriv en annan kod</target></segment>
+      </unit>
+      <unit id="approve.approved.title">
+        <notes><note category="description">Title of the notice after an approval.</note></notes>
+        <segment><source>Approved</source><target>Godkänd</target></segment>
+      </unit>
+      <unit id="approve.approved.body">
+        <notes><note category="description">Text of the notice after an approval.</note></notes>
+        <segment><source>Go back to the Windows machine. The script continues by itself within a few seconds.</source><target>Gå tillbaka till Windows-datorn. Skriptet fortsätter själv inom några sekunder.</target></segment>
+      </unit>
+      <unit id="approve.denied.title">
+        <notes><note category="description">Title of the notice after a denial.</note></notes>
+        <segment><source>Denied</source><target>Nekad</target></segment>
+      </unit>
+      <unit id="approve.denied.body">
+        <notes><note category="description">Text of the notice after a denial.</note></notes>
+        <segment><source>The script gets no access. The script on the Windows machine then asks whether you want to start again with a new code.</source><target>Skriptet får ingen åtkomst. Skriptet på Windows-datorn frågar sedan om du vill börja om med en ny kod.</target></segment>
+      </unit>
+      <unit id="approve.none">
+        <notes><note category="description">Value of a list of the request that has no entries.</note></notes>
+        <segment><source>None</source><target>Inga</target></segment>
+      </unit>
+      <unit id="approve.loading">
+        <notes><note category="description">Shown while the request of the typed code is looked up.</note></notes>
+        <segment><source>Loading…</source><target>Läser in…</target></segment>
+      </unit>
+      <unit id="approve.denied_late">
+        <notes><note category="description">Error: a Deny came after another administrator approved the request and its script collected its access. Security and sign-in, Sessions names the account page and its tab; Sign out everywhere names the action on a user's page under Settings, Users.</note></notes>
+        <segment><source>This request was approved and its script already has its access. The administrator who approved it can end that access under Security and sign-in, Sessions. Any administrator can end it with Sign out everywhere on the page of that administrator under Settings, Users.</source><target>Begäran godkändes och skriptet har redan sin åtkomst. Administratören som godkände den kan avsluta åtkomsten under Säkerhet och inloggning, Sessioner. Varje administratör kan också avsluta åtkomsten med Logga ut överallt på sidan för den administratören under Inställningar, Användare.</target></segment>
+      </unit>
+      <unit id="approve.error.other">
+        <notes><note category="description">Error of any kind that the page has no own text for: a network error, a server error or an unexpected refusal.</note></notes>
+        <segment><source>Tenko did not answer as expected, and this page cannot tell whether your decision was made. Type the code again: a request that still waits is shown again.</source><target>Tenko svarade inte som väntat, och sidan kan inte avgöra om ditt beslut gick igenom. Skriv koden igen: en begäran som fortfarande väntar visas igen.</target></segment>
+      </unit>
+      <unit id="approve.step_up.title">
+        <notes><note category="description">Title of the notice when the sign-in is older than five minutes.</note></notes>
+        <segment><source>Your sign-in is too old</source><target>Din inloggning är för gammal</target></segment>
+      </unit>
+      <unit id="approve.step_up.body">
+        <notes><note category="description">Text of the notice when the sign-in is older than five minutes.</note></notes>
+        <segment><source>An approval needs a sign-in within the last five minutes. Sign in again, then type the code again.</source><target>Ett godkännande kräver en inloggning inom de senaste fem minuterna. Logga in igen och skriv sedan in koden på nytt.</target></segment>
+      </unit>
+      <unit id="approve.step_up.sign_in">
+        <notes><note category="description">Button that signs out and opens the sign-in page, which returns to the approval page.</note></notes>
+        <segment><source>Sign in again</source><target>Logga in igen</target></segment>
+      </unit>
+    </group>
+    <group id="errors">
+      <unit id="errors.auth.approval.code">
+        <notes><note category="description">Error: no waiting request has the typed code (wrong, expired, used or denied).</note></notes>
+        <segment><source>No waiting request has this code. Check the code on the Windows screen. A code holds for ten minutes and works once.</source><target>Ingen väntande begäran har den här koden. Kontrollera koden på Windows-skärmen. En kod gäller i tio minuter och kan bara användas en gång.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.expired">
+        <notes><note category="description">Error: the request expired before the decision.</note></notes>
+        <segment><source>The request waited more than ten minutes. The script on the Windows machine asks whether to get a new code.</source><target>Begäran väntade mer än tio minuter. Skriptet på Windows-datorn frågar om du vill ha en ny kod.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.consumed">
+        <notes><note category="description">Error: the request was approved or collected before.</note></notes>
+        <segment><source>This request is already decided. There is nothing more to do here.</source><target>Begäran är redan avgjord. Du behöver inte göra något mer här.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.denied">
+        <notes><note category="description">Error: the request was denied before.</note></notes>
+        <segment><source>This request was denied. The script on the Windows machine asks whether to get a new code.</source><target>Begäran nekades. Skriptet på Windows-datorn frågar om du vill ha en ny kod.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.not_found">
+        <notes><note category="description">Error: the request no longer exists.</note></notes>
+        <segment><source>The request no longer exists. The script on the Windows machine asks whether to get a new code.</source><target>Begäran finns inte längre. Skriptet på Windows-datorn frågar om du vill ha en ny kod.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.ambiguous">
+        <notes><note category="description">Error: the code matches more than one waiting request.</note></notes>
+        <segment><source>This code matches more than one waiting request, so Tenko cannot approve it. Wait until the requests expire after ten minutes.</source><target>Koden hör till flera väntande begäranden, så Tenko kan inte godkänna den. Vänta tills begärandena går ut efter tio minuter.</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.limit">
+        <notes><note category="description">Error: a bound was reached. limit is lookups (too many wrong codes), domain (another takeover of the domain is approved or running) or another bound.</note></notes>
+        <segment><source>{limit, select, lookups {Too many wrong codes. Try again in ten minutes.} domain {Another takeover of this domain is approved or running. Wait until it ends. A stopped script loses its access at the latest 15 minutes after its last request.} other {Too many requests. Wait a minute and try again.}}</source><target>{limit, select, lookups {För många felaktiga koder. Försök igen om tio minuter.} domain {Ett annat övertagande av den här domänen är godkänt eller pågår. Vänta tills det slutar. Ett stoppat skript förlorar sin åtkomst senast 15 minuter efter sin senaste begäran.} other {För många förfrågningar. Vänta en minut och försök igen.}}</target></segment>
+      </unit>
+      <unit id="errors.auth.approval.clock_held">
+        <notes><note category="description">Error: the Tenko controller does not trust its clock yet. The Dashboard offers to confirm the clock.</note></notes>
+        <segment><source>Tenko does not trust the clock of this Tenko controller yet. An administrator must confirm the clock on the Dashboard first. Then try again.</source><target>Tenko litar ännu inte på klockan i den här Tenko-controllern. En administratör måste först bekräfta klockan på sidan Översikt. Försök sedan igen.</target></segment>
+      </unit>
+      <unit id="errors.tls.no_internal_ca">
+        <notes><note category="description">Error: the address in the browser does not serve the certificate of the internal certificate authority of Tenko, which approvals need.</note></notes>
+        <segment><source>Approvals need Tenko to use its own certificate on this address (internal certificate authority). This node uses another TLS mode, so no script can be approved here. Open the address that the script shows.</source><target>Godkännanden kräver att Tenko använder sitt eget certifikat på den här adressen (intern certifikatutfärdare). Den här noden använder ett annat TLS-läge. Därför kan inget skript godkännas här. Öppna adressen som skriptet visar.</target></segment>
+      </unit>
+    </group>
+  </file>
+</xliff>

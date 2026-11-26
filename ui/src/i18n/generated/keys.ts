@@ -338,6 +338,51 @@ export type MessageKey =
   | "account.totp.status_on"
   | "account.totp.title"
   | "account.totp.verify"
+  | "approve.action.another"
+  | "approve.action.approve"
+  | "approve.action.deny"
+  | "approve.approved.body"
+  | "approve.approved.title"
+  | "approve.check"
+  | "approve.code.hint"
+  | "approve.code.invalid"
+  | "approve.code.label"
+  | "approve.code.submit"
+  | "approve.denied.body"
+  | "approve.denied.title"
+  | "approve.denied_late"
+  | "approve.error.other"
+  | "approve.field.controllers"
+  | "approve.field.dhcp_servers"
+  | "approve.field.domain"
+  | "approve.field.expires"
+  | "approve.field.lifetime"
+  | "approve.field.machine"
+  | "approve.field.mirror_host"
+  | "approve.field.node_name"
+  | "approve.field.operations"
+  | "approve.field.scopes"
+  | "approve.field.source"
+  | "approve.field.user"
+  | "approve.field.version"
+  | "approve.field.zones"
+  | "approve.lede"
+  | "approve.lifetime"
+  | "approve.loading"
+  | "approve.none"
+  | "approve.op.flip"
+  | "approve.op.forwarding_rules"
+  | "approve.op.kerberos_adopt"
+  | "approve.op.mirrors"
+  | "approve.op.prepare"
+  | "approve.op.release"
+  | "approve.op.secondary_zones"
+  | "approve.op.takeover"
+  | "approve.op.update_policy"
+  | "approve.step_up.body"
+  | "approve.step_up.sign_in"
+  | "approve.step_up.title"
+  | "approve.title"
   | "audit.action.auth.access.denied"
   | "audit.action.auth.approval.approve"
   | "audit.action.auth.approval.collect"
@@ -4368,6 +4413,14 @@ export type MessageKey =
   | "errors.audit.export.tls_unused"
   | "errors.audit.export.too_many"
   | "errors.audit.export.unknown_sink"
+  | "errors.auth.approval.ambiguous"
+  | "errors.auth.approval.clock_held"
+  | "errors.auth.approval.code"
+  | "errors.auth.approval.consumed"
+  | "errors.auth.approval.denied"
+  | "errors.auth.approval.expired"
+  | "errors.auth.approval.limit"
+  | "errors.auth.approval.not_found"
   | "errors.auth.break_glass.hardware_key_only"
   | "errors.auth.challenge_invalid"
   | "errors.auth.conflict"
@@ -4742,6 +4795,7 @@ export type MessageKey =
   | "errors.sys.shutting_down"
   | "errors.sys.store.no_quorum"
   | "errors.sys.store.precondition_failed"
+  | "errors.tls.no_internal_ca"
   | "errors.update.backup_required"
   | "errors.update.backup_unavailable"
   | "errors.update.check_failed"
@@ -8722,6 +8776,10 @@ export interface MessageArgs {
   "account.tokens.revoke_title": { name: string | number };
   "account.tokens.revoked": { name: string | number };
   "account.totp.params": { algorithm: string | number; digits: string | number; period: string | number };
+  "approve.field.controllers": { count: string | number };
+  "approve.field.dhcp_servers": { count: string | number };
+  "approve.field.scopes": { count: string | number };
+  "approve.field.zones": { count: string | number };
   "audit.chain.broken": { seq: string | number };
   "audit.chain.checked": { time: string | number };
   "audit.chain.detail": { detail: string | number };
@@ -9444,6 +9502,7 @@ export interface MessageArgs {
   "dns.zone.release.more": { count: number; more: string | number };
   "dns.zone.release.title": { name: string | number };
   "dns.zone.serial": { serial: string | number };
+  "errors.auth.approval.limit": { limit: string };
   "errors.auth.password.too_long": { max: string | number };
   "errors.auth.password.too_short": { min: string | number };
   "errors.auth.setup.invalid_host_name": { host_name: string | number };
@@ -10687,6 +10746,51 @@ export const messageKeys: readonly MessageKey[] = [
   "account.totp.status_on",
   "account.totp.title",
   "account.totp.verify",
+  "approve.action.another",
+  "approve.action.approve",
+  "approve.action.deny",
+  "approve.approved.body",
+  "approve.approved.title",
+  "approve.check",
+  "approve.code.hint",
+  "approve.code.invalid",
+  "approve.code.label",
+  "approve.code.submit",
+  "approve.denied.body",
+  "approve.denied.title",
+  "approve.denied_late",
+  "approve.error.other",
+  "approve.field.controllers",
+  "approve.field.dhcp_servers",
+  "approve.field.domain",
+  "approve.field.expires",
+  "approve.field.lifetime",
+  "approve.field.machine",
+  "approve.field.mirror_host",
+  "approve.field.node_name",
+  "approve.field.operations",
+  "approve.field.scopes",
+  "approve.field.source",
+  "approve.field.user",
+  "approve.field.version",
+  "approve.field.zones",
+  "approve.lede",
+  "approve.lifetime",
+  "approve.loading",
+  "approve.none",
+  "approve.op.flip",
+  "approve.op.forwarding_rules",
+  "approve.op.kerberos_adopt",
+  "approve.op.mirrors",
+  "approve.op.prepare",
+  "approve.op.release",
+  "approve.op.secondary_zones",
+  "approve.op.takeover",
+  "approve.op.update_policy",
+  "approve.step_up.body",
+  "approve.step_up.sign_in",
+  "approve.step_up.title",
+  "approve.title",
   "audit.action.auth.access.denied",
   "audit.action.auth.approval.approve",
   "audit.action.auth.approval.collect",
@@ -14717,6 +14821,14 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.audit.export.tls_unused",
   "errors.audit.export.too_many",
   "errors.audit.export.unknown_sink",
+  "errors.auth.approval.ambiguous",
+  "errors.auth.approval.clock_held",
+  "errors.auth.approval.code",
+  "errors.auth.approval.consumed",
+  "errors.auth.approval.denied",
+  "errors.auth.approval.expired",
+  "errors.auth.approval.limit",
+  "errors.auth.approval.not_found",
   "errors.auth.break_glass.hardware_key_only",
   "errors.auth.challenge_invalid",
   "errors.auth.conflict",
@@ -15091,6 +15203,7 @@ export const messageKeys: readonly MessageKey[] = [
   "errors.sys.shutting_down",
   "errors.sys.store.no_quorum",
   "errors.sys.store.precondition_failed",
+  "errors.tls.no_internal_ca",
   "errors.update.backup_required",
   "errors.update.backup_unavailable",
   "errors.update.check_failed",

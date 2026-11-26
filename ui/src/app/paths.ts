@@ -89,6 +89,8 @@ export const paths = {
   settings: (section?: SettingsSection) => (section ? `/settings/${section}` : "/settings"),
   user: (id: string) => `/settings/users/${seg(id)}`,
   account: (section?: AccountSection) => (section ? `/account/${section}` : "/account"),
+  // The approval of a takeover script; the code is typed, never part of the address.
+  approve: () => "/approve",
   // Focused pages
   signIn: (next?: string) => withQuery("/signin", { next: next && next !== "/" ? next : undefined }),
   setup: () => "/setup",

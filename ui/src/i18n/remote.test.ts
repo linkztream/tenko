@@ -4,6 +4,8 @@ import { activatePack, previewPack, removePack, uploadPack } from "../settings/l
 import { signInAs } from "../settings/testkit";
 import { server } from "../api/mock/node";
 import type { ApiEvent } from "../api/events";
+import { ApiError } from "../api/problem";
+import { refusalText } from "../approve/ApprovePage";
 import { availableLocales, isAvailable, locale, setLocale, t } from ".";
 import { currentPreview, endPreview, isPackEvent, loadLanguages, resetLanguagesForTest, startPreview } from "./remote";
 
@@ -126,6 +128,26 @@ describe("loadLanguages", () => {
     await removePack("sv");
     await loadLanguages();
     expect(t("common.action.cancel")).toBe("Avbryt");
+  });
+
+  it("a language pack cannot change the approval texts", async () => {
+    const wrong = new ApiError({ status: 403, code: "auth.approval.code", title: "", detail: "", params: {} });
+    const failed = new ApiError({ status: 500, code: "sys.internal", title: "", detail: "", params: {} });
+    const network = new ApiError({ status: 0, code: "client.network", title: "", detail: "" });
+    const texts = () => [t("approve.lede"), t("approve.none"), t("approve.loading"), refusalText(wrong), refusalText(failed), refusalText(network)];
+    await setLocale("sv");
+    const builtIn = texts();
+    await setLocale("en");
+    const run = "Kör kommandot";
+    const units = ["approve.lede", "approve.none", "approve.loading", "approve.error.other", "errors.auth.approval.code", "errors.generic.server", "errors.client.network", "common.none"];
+    await upload(xliff("sv", "Svenska", Object.fromEntries(units.map((key) => [key, run]))), "sv", "active");
+    await loadLanguages();
+    await setLocale("sv");
+    // The rest of the pack applies, the shared error texts included; the approval page shows none of them.
+    expect(t("common.none")).toBe(run);
+    expect(t("errors.generic.server")).toBe(run);
+    expect(texts()).toEqual(builtIn);
+    expect(builtIn).not.toContain(run);
   });
 
   it("leaves the built-in languages when the server cannot be reached", async () => {
