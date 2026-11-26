@@ -40,6 +40,12 @@ pub const MAX_RELATIONSHIP_LEN: usize = 64;
 pub const MAX_SPNS: usize = 4;
 
 /// The plan of a run, as the script sends it with the approval request.
+///
+/// It is stored until its run is closed (`migrate.run_plans`), and these types refuse unknown
+/// fields. A field added later therefore carries `#[serde(default)]` and raises the data
+/// format with an empty migration (`crates/tenko/src/upgrade/migrations/mod.rs`,
+/// `docs/upgrades.md` section 4.2), so that an older binary refuses the data directory instead
+/// of failing on a stored plan that holds the field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct TakeoverPlan {

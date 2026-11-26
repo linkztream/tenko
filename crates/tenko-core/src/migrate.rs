@@ -18,6 +18,9 @@
 //! | `migrate.snapshots` | [`MirrorId`] | [`Snapshot`] |
 //! | `migrate.takeovers` | [`TakeoverId`] | [`Takeover`] |
 //! | `migrate.loss_acks` | ([`MirrorId`], the entry's key) | [`LossAck`] |
+//! | `migrate.runs` | the run's [`DelegationId`](crate::DelegationId) | [`run::RunRecord`] |
+//! | `migrate.run_plans` | the run's [`DelegationId`](crate::DelegationId) | its [`plan::TakeoverPlan`] |
+//! | `migrate.run_domains` | the domain's name | the open run's [`DelegationId`](crate::DelegationId) |
 //!
 //! These are contracts (WP14.0). WP14.1 builds the push, the freshness, the losses and the
 //! diff on them; WP14.2 the prepare, the takeover and the flip.
@@ -593,9 +596,16 @@ pub mod codes {
     /// Another read of a stored snapshot held the node's one for two seconds (429, with
     /// `Retry-After`). Params: `retry_after`.
     pub const MIRROR_BUSY: &str = "migrate.mirror.busy";
+    /// The domain has an open takeover run with another plan (409). Params: `run`.
+    pub const RUN_PLAN: &str = "migrate.run.plan";
+    /// No such takeover run, or for a delegated session one outside its own run (404).
+    pub const RUN_NOT_FOUND: &str = "migrate.run.not_found";
+    /// The run still has a mirror, which a person deletes before closing it (409). Params:
+    /// `mirrors`.
+    pub const RUN_BUSY: &str = "migrate.run.busy";
 
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 29] = [
+    pub const ALL: [&str; 32] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -625,6 +635,9 @@ pub mod codes {
         MIRROR_SOURCE,
         MIRROR_PARTNER,
         MIRROR_BUSY,
+        RUN_PLAN,
+        RUN_NOT_FOUND,
+        RUN_BUSY,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -810,12 +823,18 @@ pub mod audit {
     /// Loss entries were acknowledged.
     pub const MIRROR_LOSSES_ACK: AuditAction =
         AuditAction::from_static("migrate.mirror.losses_ack");
+    /// A takeover run was created at the first collect of its domain.
+    pub const RUN_CREATE: AuditAction = AuditAction::from_static("migrate.run.create");
+    /// A later collect with an equal plan joined the open run of its domain.
+    pub const RUN_JOIN: AuditAction = AuditAction::from_static("migrate.run.join");
+    /// A person closed a run: its rows and its sittings' sessions are gone.
+    pub const RUN_CLOSE: AuditAction = AuditAction::from_static("migrate.run.close");
 
     /// Every action of the module, for the contracts document and its test. The scope
     /// actions (`dhcp.scope.prepare`, `dhcp.scope.takeover`, `dhcp.scope.revert`) are in
     /// [`crate::dhcp::audit`] and the zone actions (`dns.zone.flip`, `dns.zone.release`) in
     /// [`crate::dns::audit`], in the namespaces of what they change.
-    pub const ALL: [&AuditAction; 7] = [
+    pub const ALL: [&AuditAction; 10] = [
         &MIRROR_CREATE,
         &MIRROR_UPDATE,
         &MIRROR_DELETE,
@@ -823,6 +842,9 @@ pub mod audit {
         &MIRROR_PUSH,
         &MIRROR_REFUSE,
         &MIRROR_LOSSES_ACK,
+        &RUN_CREATE,
+        &RUN_JOIN,
+        &RUN_CLOSE,
     ];
 }
 
@@ -887,9 +909,9 @@ pub mod findings {
 /// The tables of the module (plan section 3.1). All of them are in the replicated store
 /// and none in the node subset: a data-plane node never reads a mirror.
 pub mod tables {
-    use super::{LossAck, Mirror, Snapshot, Takeover};
+    use super::{LossAck, Mirror, Snapshot, Takeover, plan::TakeoverPlan, run::RunRecord};
     use crate::{
-        id::{MirrorId, TakeoverId},
+        id::{DelegationId, MirrorId, TakeoverId},
         names::TableName,
         table::TableDef,
     };
@@ -903,20 +925,31 @@ pub mod tables {
     /// Acknowledged loss entries, by mirror and entry key.
     pub static LOSS_ACKS: TableDef<(MirrorId, String), LossAck> =
         TableDef::new("migrate.loss_acks");
+    /// Open takeover runs, by id ([`super::run`]).
+    pub static RUNS: TableDef<DelegationId, RunRecord> = TableDef::new("migrate.runs");
+    /// The plan of each open run, as its first sitting's approval fixed it.
+    pub static RUN_PLANS: TableDef<DelegationId, TakeoverPlan> = TableDef::new("migrate.run_plans");
+    /// The open run of each domain, by the domain's name: one per domain.
+    pub static RUN_DOMAINS: TableDef<String, DelegationId> = TableDef::new("migrate.run_domains");
 
     /// Every table of the module.
-    pub fn all() -> [&'static TableName; 4] {
+    pub fn all() -> [&'static TableName; 7] {
         [
             MIRRORS.name(),
             SNAPSHOTS.name(),
             TAKEOVERS.name(),
             LOSS_ACKS.name(),
+            RUNS.name(),
+            RUN_PLANS.name(),
+            RUN_DOMAINS.name(),
         ]
     }
 }
 
 // The plan a takeover script asks a person to approve (ADR 0038).
 pub mod plan;
+// The record of a takeover run (ADR 0038).
+pub mod run;
 
 #[cfg(test)]
 mod tests {

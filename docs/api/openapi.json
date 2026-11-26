@@ -87025,7 +87025,7 @@
       },
       "TakeoverPlan": {
         "type": "object",
-        "description": "The plan of a run, as the script sends it with the approval request.",
+        "description": "The plan of a run, as the script sends it with the approval request.\n\nIt is stored until its run is closed (`migrate.run_plans`), and these types refuse unknown\nfields. A field added later therefore carries `#[serde(default)]` and raises the data\nformat with an empty migration (`crates/tenko/src/upgrade/migrations/mod.rs`,\n`docs/upgrades.md` section 4.2), so that an older binary refuses the data directory instead\nof failing on a stored plan that holds the field.",
         "required": [
           "domain",
           "forest_root",
