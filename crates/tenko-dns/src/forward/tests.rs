@@ -177,9 +177,8 @@ fn udp_upstream(behavior: Behavior) -> Upstream {
     }
 }
 
-/// A TCP upstream on `address`'s port, answering every query with `records` records.
-fn tcp_upstream(address: SocketAddr, records: u16) -> Arc<AtomicUsize> {
-    let listener = TcpListener::bind(address).expect("bind tcp");
+/// A TCP upstream on `listener`, answering every query with `records` records.
+fn tcp_upstream(listener: TcpListener, records: u16) -> Arc<AtomicUsize> {
     let count = Arc::new(AtomicUsize::new(0));
     let seen = Arc::clone(&count);
     std::thread::spawn(move || {
@@ -372,8 +371,14 @@ async fn an_answer_with_another_id_is_ignored() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_truncated_answer_is_asked_again_over_tcp() {
-    let upstream = udp_upstream(Behavior::Truncate);
-    let tcp = tcp_upstream(upstream.address, 3);
+    // Another process may hold the UDP upstream's port number for TCP: take a pair that binds both.
+    let (upstream, listener) = loop {
+        let upstream = udp_upstream(Behavior::Truncate);
+        if let Ok(listener) = TcpListener::bind(upstream.address) {
+            break (upstream, listener);
+        }
+    };
+    let tcp = tcp_upstream(listener, 3);
     let (forwarder, stop) = start(vec![upstream.spec()]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(9, Some(1232))).await;
@@ -384,11 +389,9 @@ async fn a_truncated_answer_is_asked_again_over_tcp() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_tcp_only_upstream_is_asked_over_tcp() {
-    let address = TcpListener::bind("127.0.0.1:0")
-        .expect("bind")
-        .local_addr()
-        .expect("address");
-    let tcp = tcp_upstream(address, 2);
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let address = listener.local_addr().expect("address");
+    let tcp = tcp_upstream(listener, 2);
     let (forwarder, stop) = start(vec![plain(address, true)]);
     let peer = Arc::new(Peer::new());
     let answer = peer.ask(&forwarder, query(11, None)).await;

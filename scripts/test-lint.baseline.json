@@ -520,7 +520,6 @@
     {"rule":"deadline","file":"crates/tenko-dns/src/forward/tests.rs","scope":"settings","text":"timeout Duration::from_millis(300)"},
     {"rule":"duration","file":"crates/tenko-dns/src/forward/tests.rs","scope":"a_stale_answer_comes_while_the_upstream_is_silent_then_a_fresh_one","text":"assert!(started.elapsed() < Duration::from_secs(2))"},
     {"rule":"is-err","file":"crates/tenko-dns/src/forward/tests.rs","scope":"an_answer_to_a_full_connection_channel_is_dropped_and_counted","text":"assert!(receiver.try_recv().is_err())"},
-    {"rule":"port","file":"crates/tenko-dns/src/forward/tests.rs","scope":"a_tcp_only_upstream_is_asked_over_tcp","text":"bind(\"127.0.0.1:0\")"},
     {"rule":"sleep","file":"crates/tenko-dns/src/forward/tests.rs","scope":"a_stale_answer_comes_while_the_upstream_is_silent_then_a_fresh_one","text":"tokio::time::sleep(Duration::from_millis(1_200))"},
     {"rule":"deadline","file":"crates/tenko-dns/src/forward/tests/carry.rs","scope":"node_with","text":"timeout Duration::from_millis(1_000)","count":2},
     {"rule":"sleep","file":"crates/tenko-dns/src/forward/tests/carry.rs","scope":"ticks","text":"tokio::time::sleep(Duration::from_millis(450))"},
