@@ -108,6 +108,15 @@ function Get-FakeWorld {
         # names another mirror, a snapshot of another hash.
         partnerDiffers = $false; windowNamesOther = $false; snapshotDiffers = $false
         tenkoRecordsDiffer = $false
+        # Tenko's copy lags the PDC emulator's serial (transferLags); a person changed a zone's
+        # transfer settings (transferChanged); a type the copy cannot render (unrenderedType).
+        transferLags = $false; transferChanged = $false; unrenderedType = $false
+        # Tenko's data of a record by 'name|type' (tenkoData); records a controller cannot read
+        # (txtUnread, dhcidUnread); Tenko's cursors with a trailing newline or the same one
+        # again, or always one more (cursorForm 'malformed', 'repeated', 'endless'); a serial
+        # that moves on the PDC emulator once it was read, which Tenko's copy follows
+        # (serialMoves).
+        tenkoData = @{}; txtUnread = $false; dhcidUnread = $false; cursorForm = ''; serialMoves = $false; pdcSerial = 7
         locator = @{ name = "dc1.$($script:FakeDomain)"; address = '192.0.2.11' }
         addresses = @{ "dc1.$($script:FakeDomain)" = @('192.0.2.11'); "dc2.$($script:FakeDomain)" = @('192.0.2.12') }
         nameUse = @{ Sid = ''; Spns = 0 }
@@ -304,13 +313,17 @@ function Invoke-FakeRemote {
             # Every record answers its time to live, 3600 unless it names its own.
             $z = $w.zones[$a[0]][$s]
             $held = $(if ($z.Type -eq 'Secondary') { Get-FakeLive $a[0] } elseif (-not $z.Ds) { @($w.copies[$a[0]]) } else { @($w.records[$a[0]]) })
-            @($held | Where-Object { $null -ne $_ }) | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; Data = $_.Data; Ttl = $(if ($_.PSObject.Properties['Ttl']) { $_.Ttl } else { '3600' }) } }
+            @($held | Where-Object { $null -ne $_ }) | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; Data = $_.Data; Ttl = $(if ($_.PSObject.Properties['Ttl']) { $_.Ttl } else { '3600' }); Unread = (($w.txtUnread -and $_.Type -eq 'TXT') -or ($w.dhcidUnread -and $_.Type -eq 'DHCID')) } }
             if ($s -eq 'dc1' -and -not $z.Ds -and $w.lateAdds.ContainsKey($a[0])) {
                 $w.tenkoAdds[$a[0]] = @(@($(if ($w.tenkoAdds.ContainsKey($a[0])) { $w.tenkoAdds[$a[0]] })) + @($w.lateAdds[$a[0]]) | Where-Object { $null -ne $_ })
                 $w.lateAdds.Remove($a[0])
             }
         }
-        'ReadSoa' { @{ Mname = "dc1.$domain."; Rname = "hostmaster.$domain."; Timers = $(if ($w.timersTamper -and $w.soaSet.ContainsKey($a[0])) { '1 600 86400 3600 3600' } else { '900 600 86400 3600 3600' }) } }
+        'ReadSoa' {
+            $serial = $w.pdcSerial
+            if ($w.serialMoves -and $w.pdcSerial -lt 8) { $w.pdcSerial++ }
+            @{ Mname = "dc1.$domain."; Rname = "hostmaster.$domain."; Serial = [string]$serial; Timers = $(if ($w.timersTamper -and $w.soaSet.ContainsKey($a[0])) { '1 600 86400 3600 3600' } else { '900 600 86400 3600 3600' }) }
+        }
         'ConvertToSecondary' {
             $z = $w.zones[$a[0]][$s]
             if ($a[3]) { $z.Type = 'Secondary'; $z.Ds = $false; $w.directory = @($w.directory | Where-Object { $_ -ne $a[0] }) }
@@ -389,6 +402,22 @@ function Invoke-FakeRemote {
         'RemoveZoneObject' { }
         default { throw "the fake has no block $Name" }
     }
+}
+
+function ConvertTo-FakeRrSet {
+    # A record of the world as Tenko lists its RRset: the owner absolute, the record typed.
+    param([string]$Zone, [object]$Record)
+    $part = ([string]$Record.Data).Split(' ')
+    $typed = switch ($Record.Type) {
+        'A' { [ordered]@{ type = 'A'; address = $Record.Data } }
+        'AAAA' { [ordered]@{ type = 'AAAA'; address = $Record.Data } }
+        'PTR' { [ordered]@{ type = 'PTR'; target = "$($Record.Data)." } }
+        'SRV' { [ordered]@{ type = 'SRV'; priority = [int]$part[0]; weight = [int]$part[1]; port = [int]$part[2]; target = "$($part[3])." } }
+        'TXT' { [ordered]@{ type = 'TXT'; strings = @($Record.Data) } }
+        'DHCID' { [ordered]@{ type = 'unknown'; rtype = 'TYPE49'; data = (([Convert]::FromBase64String($Record.Data) | ForEach-Object { $_.ToString('x2') }) -join '') } }
+    }
+    $type = $(if ($Record.Type -eq 'DHCID') { 'TYPE49' } else { $Record.Type })
+    return [ordered]@{ scope = 'default'; name = "$(if ($Record.Name -eq '@') { $Zone } else { "$($Record.Name).$Zone" })."; type = $type; ttl = 3600; records = @($typed) }
 }
 
 function Get-FakeJob {
@@ -479,16 +508,27 @@ function Invoke-FakeTenko {
         # Tenko lists every zone of the run; a zone keeps the body that created it.
         '^GET /dns/zones$' { return [ordered]@{ items = @($w.tzones.Values) } }
         '^POST /dns/zones$' { $id = [guid]::NewGuid().ToString(); $w.tzones[$id] = [ordered]@{ id = $id; name = $Body.name; kind = 'secondary'; served = $false; body = [System.Text.Encoding]::UTF8.GetString((ConvertTo-TkJsonByte $Body)) }; return $w.tzones[$id] }
+        # Tenko's copy as typed RRsets, one a page (the cursor its index), with its SOA.
         '^GET /dns/zones/[^/]+/records$' {
             $zone = $w.tzones[$Path.Split('/')[3]].name
-            $items = @($w.records[$zone] | ForEach-Object { [ordered]@{ name = $(if ($_.Name -eq '@') { $zone } else { "$($_.Name).$zone" }); type = $_.Type; data = $_.Data } })
-            if ($w.tenkoRecordsDiffer -and $zone -eq $script:FakeDomain) { $items += [ordered]@{ name = "rogue.$zone"; type = 'A'; data = '203.0.113.9' } }
-            return [ordered]@{ items = $items }
+            $held = @($w.records[$zone] | ForEach-Object { $key = "$($_.Name)|$($_.Type)"; if ($w.tenkoData.ContainsKey($key)) { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; Data = $w.tenkoData[$key] } } else { $_ } })
+            $sets = @(@([pscustomobject]@{ Name = '@'; Type = 'SOA'; Data = '' }) + $held | ForEach-Object { ConvertTo-FakeRrSet $zone $_ })
+            if ($w.tenkoRecordsDiffer -and $zone -eq $script:FakeDomain) { $sets += ConvertTo-FakeRrSet $zone ([pscustomobject]@{ Name = 'rogue'; Type = 'A'; Data = '203.0.113.9' }) }
+            if ($w.unrenderedType -and $zone -eq $script:FakeDomain) { $sets += [ordered]@{ name = "pc1.$zone."; type = 'HINFO'; records = @([ordered]@{ type = 'unknown'; rtype = 'HINFO'; data = '00' }) } }
+            $at = $(if ($query -match 'cursor=(\d+)') { [int]$Matches[1] } else { 0 })
+            $page = [ordered]@{ items = @($sets | Select-Object -Skip $at -First 1) }
+            if ($at + 1 -lt $sets.Count -or $w.cursorForm -eq 'endless') { $page.next_cursor = $(switch ($w.cursorForm) { 'malformed' { "$($at + 1)`n" } 'repeated' { '1' } default { [string]($at + 1) } }) }
+            return $page
         }
-        '^GET /dns/zones/([^/]+)$' { return $w.tzones[$Matches[1]] }
-        '^POST /dns/zones/([^/]+)/flip$' { $w.tzones[$Matches[1]].kind = $Body.to; return [ordered]@{} }
+        '^GET /dns/zones/[^/]+/transfer$' { return [ordered]@{ serial = $(if ($w.transferLags) { 6 } elseif ($w.serialMoves) { 8 } else { 7 }); running = $false } }
+        # A zone's flip; the run's flip to primary refuses a person's transfer settings, as Tenko does.
+        '^POST /dns/zones/([^/]+)/flip$' {
+            if ($w.transferChanged -and $Body.to -eq 'primary') { throw "Tenko refused $Method $Path with 409 migrate.run.transfer: a person changed the transfer settings of this zone" }
+            $w.tzones[$Matches[1]].kind = $Body.to; return [ordered]@{}
+        }
         '^DELETE /dns/zones/(.+)$' { $w.tzones.Remove($Matches[1]); return $null }
-        '^(POST|PATCH) /dns/' { return [ordered]@{} }
+        # The script reads a zone from the list and never changes one: no GET or PATCH of a zone.
+        '^POST /dns/' { return [ordered]@{} }
         '^GET /migrate/runs/' {
             # A person starts the window on the run page while the script waits at the review:
             # it shows from the review's first read on.

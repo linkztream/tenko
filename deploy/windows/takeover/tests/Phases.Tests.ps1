@@ -478,6 +478,118 @@ Describe 'A value from Tenko that Windows contradicts' {
         $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
     }
 
+    It 'phase 4 reads Tenko''s copy as typed records over its pages once it holds the PDC emulator''s serial, and flips without reading or changing a zone' {
+        # The domain zone holds an AAAA, a DHCID and a TXT record too, which the copy renders.
+        $script:world.records['corp.example.test'] += @(
+            [pscustomobject]@{ Name = 'pc1'; Type = 'AAAA'; Data = '2001:db8::120' }
+            [pscustomobject]@{ Name = 'pc1'; Type = 'DHCID'; Data = 'AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA=' }
+            [pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = 'v=spf1 -all' }
+        )
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $calls = @($script:world.tenkoCalls)
+        @($calls | Where-Object { $_ -match '^GET /dns/zones/[^/]+/records\?limit=1000&cursor=\d+$' }).Count | Should -BeGreaterThan 0
+        @($calls | Where-Object { $_ -match '^GET /dns/zones/[^/?]+$' -or $_ -match '^PATCH /dns/zones' }) | Should -BeNullOrEmpty
+        foreach ($zone in @($script:world.tzones.Values)) {
+            $wait = [array]::IndexOf($calls, "GET /dns/zones/$($zone.id)/transfer")
+            $read = [array]::IndexOf($calls, "GET /dns/zones/$($zone.id)/records?limit=1000")
+            $wait | Should -BeGreaterThan ([array]::IndexOf($calls, "POST /dns/zones/$($zone.id)/transfer")) -Because $zone.name
+            $read | Should -BeGreaterThan $wait -Because $zone.name
+        }
+        # Each is compared and kept as rendered.
+        $kept = @((Read-State).values['records.corp.example.test'])
+        $kept | Should -Contain 'pc1.corp.example.test|AAAA|2001:db8::120'
+        $kept | Should -Contain 'note.corp.example.test|TXT|["v=spf1 -all"]'
+        $kept | Should -Contain 'pc1.corp.example.test|DHCID|AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA='
+    }
+
+    It 'phase 4 compares a TXT record string by string as Tenko''s escapes write it, and an address in any form' {
+        $script:world.records['corp.example.test'] += @(
+            [pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('first part', 'second part') }
+            [pscustomobject]@{ Name = 'path'; Type = 'TXT'; Data = @('back\slash', "tab`there") }
+            [pscustomobject]@{ Name = 'pc2'; Type = 'AAAA'; Data = '2001:db8:0:0:1:0:0:1' }
+        )
+        $script:world.tenkoData['path|TXT'] = @('back\\slash', 'tab\009here')
+        $script:world.tenkoData['pc2|AAAA'] = '2001:db8::1:0:0:1'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        $kept = @((Read-State).values['records.corp.example.test'])
+        $kept | Should -Contain 'note.corp.example.test|TXT|["first part","second part"]'
+        $kept | Should -Contain 'path.corp.example.test|TXT|["back\\slash","tab\u0009here"]'
+        $kept | Should -Contain 'pc2.corp.example.test|AAAA|2001:db8::1:0:0:1'
+    }
+
+    It 'phase 4 stops with exit 4 before any change when <case>' -ForEach @(
+        @{ case = 'a TXT record differs in case only'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('v=spf1 -all') }); tenko = @{ 'note|TXT' = @('V=spf1 -all') }; knob = ''; cursor = ''; text = 'differs from dc1\.corp\.example\.test in 2 records' }
+        @{ case = 'a TXT record differs in where its strings end only'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('ab', 'c') }); tenko = @{ 'note|TXT' = @('a', 'bc') }; knob = ''; cursor = ''; text = 'differs from dc1\.corp\.example\.test in 2 records' }
+        @{ case = 'a controller cannot answer a TXT record''s strings'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('v=spf1 -all') }); tenko = @{}; knob = 'txtUnread'; cursor = ''; text = 'the TXT record at note\.corp\.example\.test on dc1\.corp\.example\.test cannot be read in full' }
+        @{ case = 'a controller''s DHCID record cannot be read'; records = @([pscustomobject]@{ Name = 'pc1'; Type = 'DHCID'; Data = 'AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA=' }); tenko = @{}; knob = 'dhcidUnread'; cursor = ''; text = 'the DHCID record at pc1\.corp\.example\.test on dc1\.corp\.example\.test cannot be read in full' }
+        @{ case = 'a type the comparison does not render is among other differences'; records = @(); tenko = @{ '@|A' = '192.0.2.99' }; knob = 'unrenderedType'; cursor = ''; text = 'of a type this script does not compare: HINFO' }
+        @{ case = 'Tenko names a cursor that ends in a newline'; records = @(); tenko = @{}; knob = ''; cursor = 'malformed'; text = 'not of the exact form' }
+        @{ case = 'Tenko names a cursor a second time'; records = @(); tenko = @{}; knob = ''; cursor = 'repeated'; text = 'one it named before' }
+        @{ case = 'Tenko names more pages than a zone the flip takes holds'; records = @(); tenko = @{}; knob = ''; cursor = 'endless'; text = 'more pages of the records of corp\.example\.test' }
+    ) {
+        $script:world.records['corp.example.test'] += $records
+        foreach ($key in $tenko.Keys) { $script:world.tenkoData[$key] = $tenko[$key] }
+        if ($knob) { $script:world[$knob] = $true }
+        $script:world.cursorForm = $cursor
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4 -Because $script:lastError
+        $script:lastError | Should -Match $text
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }) | Should -BeNullOrEmpty
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+        $script:world.calls | Should -Not -Contain 'dc2|ConvertToSecondary'
+    }
+
+    It 'phase 4 reads the PDC emulator''s serial anew each round, so Tenko''s copy of a zone that changed meanwhile is taken' {
+        $script:world.serialMoves = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }).Count | Should -Be $script:world.tzones.Count
+    }
+
+    It 'phase 4 stops with exit 4 before any change when Tenko''s copy does not reach the PDC emulator''s serial' {
+        $script:world.transferLags = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4 -Because $script:lastError
+        $script:lastError | Should -Match 'Tenko did not receive corp\.example\.test from dc1\.corp\.example\.test within a minute'
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'records|flip$' }) | Should -BeNullOrEmpty
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+    }
+
+    It 'phase 4 stops with exit 4 before any change when Tenko''s copy holds a type the comparison does not render' {
+        $script:world.unrenderedType = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4 -Because $script:lastError
+        $script:lastError | Should -Match 'HINFO'
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }) | Should -BeNullOrEmpty
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+    }
+
+    It 'phase 4 meets Tenko''s refusal of a zone''s changed transfer settings before any conversion on Windows' {
+        $script:world.transferChanged = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        $script:lastError | Should -Match 'migrate\.run\.transfer'
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+        $script:world.calls | Should -Not -Contain 'dc2|ConvertToSecondary'
+    }
+
+    It 'phase 4 checks the configuration again when it resumes, after a window a person replaced' {
+        $script:world.failRoute = 'flip$'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        (Read-State).steps['4.configuration'].state | Should -Be 'done'
+        $script:world.snapshotDiffers = $true
+        $script:world.tenkoCalls.Clear()
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 4 -Because $script:lastError
+        $script:lastError | Should -Match 'is not the configuration the window bound'
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }) | Should -BeNullOrEmpty
+    }
+
+    It 'phase 4 resumed after Tenko''s flip does not check the configuration again, whose stop would say that nothing changed' {
+        $script:world.failAt = 'ConvertToSecondary'
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 2
+        (Read-State).steps['4.tenko-flip'].state | Should -Be 'done'
+        $script:world.snapshotDiffers = $true
+        $script:world.tenkoCalls.Clear()
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 3 -Because $script:lastError
+        $script:lastError | Should -Not -Match 'before any change'
+        @($script:world.tenkoCalls | Where-Object { $_ -match '/snapshot$' }) | Should -BeNullOrEmpty
+    }
+
     It 'phase 2 refuses to prepare a run whose window was started, and creates nothing' {
         $script:world.window = [ordered]@{ started_by = 'admin'; started_at = '2026-11-21T10:00:00Z'; mirrors = @() }
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1

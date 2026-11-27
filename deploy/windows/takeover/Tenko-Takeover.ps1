@@ -1630,24 +1630,41 @@ $script:TkRemote = @{
         @{ Exit = $LASTEXITCODE; Text = ($out -join "`n") }
     }
     ReadRecords           = {
-        # Every record of a zone as type and presentation data, SOA left out.
+        # Every record of a zone as type and presentation data, SOA left out, each name
+        # lowercased without its final dot. A TXT record's object holds its first string only,
+        # so a name's TXT records are its strings as this server answers them, as many as the
+        # records it lists. A record whose data no known property or answer gives comes with
+        # Unread.
         param([string]$Zone)
+        $txt = @{}
+        $ttls = @{}
         Get-DnsServerResourceRecord -ZoneName $Zone | Where-Object { $_.RecordType -ne 'SOA' } | ForEach-Object {
             $data = $_.RecordData
-            $text = switch ([string]$_.RecordType) {
+            $owner = ([string]$_.HostName).ToLowerInvariant()
+            $type = ([string]$_.RecordType).ToUpperInvariant()
+            $ttl = [string][int]$_.TimeToLive.TotalSeconds
+            if ($type -eq 'TXT') { $txt[$owner] = 1 + [int]$txt[$owner]; $ttls[$owner] = $ttl; return }
+            $text = switch ($type) {
                 'A' { [string]$data.IPv4Address }
                 'AAAA' { [string]$data.IPv6Address }
-                'CNAME' { ([string]$data.HostNameAlias).ToLowerInvariant().TrimEnd('.') }
-                'NS' { ([string]$data.NameServer).ToLowerInvariant().TrimEnd('.') }
-                'PTR' { ([string]$data.PtrDomainName).ToLowerInvariant().TrimEnd('.') }
-                'MX' { [string]$data.Preference + ' ' + ([string]$data.MailExchange).ToLowerInvariant().TrimEnd('.') }
-                'SRV' { [string]$data.Priority + ' ' + [string]$data.Weight + ' ' + [string]$data.Port + ' ' + ([string]$data.DomainName).ToLowerInvariant().TrimEnd('.') }
-                'TXT' { [string]$data.DescriptiveText }
-                'DNAME' { ([string]$data.DomainNameAlias).ToLowerInvariant().TrimEnd('.') }
+                'CNAME' { ([string]$data.HostNameAlias).ToLowerInvariant() -replace '\.\z' }
+                'NS' { ([string]$data.NameServer).ToLowerInvariant() -replace '\.\z' }
+                'PTR' { ([string]$data.PtrDomainName).ToLowerInvariant() -replace '\.\z' }
+                'MX' { [string]$data.Preference + ' ' + (([string]$data.MailExchange).ToLowerInvariant() -replace '\.\z') }
+                'SRV' { [string]$data.Priority + ' ' + [string]$data.Weight + ' ' + [string]$data.Port + ' ' + (([string]$data.DomainName).ToLowerInvariant() -replace '\.\z') }
+                'DNAME' { ([string]$data.DomainNameAlias).ToLowerInvariant() -replace '\.\z' }
+                'DHCID' { [string]$data.DhcId }
                 # Any other type by every property of its data, so that a change shows.
                 default { (@($data.CimInstanceProperties | ForEach-Object { [string]$_.Name + '=' + [string]$_.Value }) -join ';') }
             }
-            @{ Name = ([string]$_.HostName).ToLowerInvariant(); Type = [string]$_.RecordType; Data = $text; Ttl = [string][int]$_.TimeToLive.TotalSeconds }
+            @{ Name = $owner; Type = $type; Data = $text; Ttl = $ttl; Unread = ($type -eq 'DHCID' -and -not $text) }
+        }
+        foreach ($owner in @($txt.Keys)) {
+            $fqdn = $(if ($owner -eq '@') { $Zone } else { "$owner.$Zone" })
+            # A query that fails answers no string: the count differs and the record is Unread.
+            try { $answers = @(Resolve-DnsName -Name $fqdn -Type TXT -Server 127.0.0.1 -DnsOnly -ErrorAction Stop | Where-Object { [string]$_.Section -eq 'Answer' -and [string]$_.Type -eq 'TXT' }) } catch { $answers = @() }
+            if ($answers.Count -ne $txt[$owner]) { @{ Name = $owner; Type = 'TXT'; Data = @(); Ttl = $ttls[$owner]; Unread = $true }; continue }
+            foreach ($answer in $answers) { @{ Name = $owner; Type = 'TXT'; Data = @($answer.Strings); Ttl = $ttls[$owner]; Unread = $false } }
         }
     }
     ConvertToSecondary    = {
@@ -1672,7 +1689,7 @@ $script:TkRemote = @{
         $soa = Get-DnsServerResourceRecord -ZoneName $Zone -RRType Soa -Name '@' | Select-Object -First 1
         $data = $soa.RecordData
         @{
-            Mname  = ([string]$data.PrimaryServer).ToLowerInvariant(); Rname = ([string]$data.ResponsiblePerson).ToLowerInvariant()
+            Mname  = ([string]$data.PrimaryServer).ToLowerInvariant(); Rname = ([string]$data.ResponsiblePerson).ToLowerInvariant(); Serial = [string][uint32]$data.SerialNumber
             Timers = "$([int]$data.RefreshInterval.TotalSeconds) $([int]$data.RetryDelay.TotalSeconds) $([int]$data.ExpireLimit.TotalSeconds) $([int]$data.MinimumTimeToLive.TotalSeconds) $([int]$soa.TimeToLive.TotalSeconds)"
         }
     }
@@ -1695,7 +1712,8 @@ $script:TkRemote = @{
         param([string]$Zone, [object[]]$Fix, [string]$Mname, [string]$Rname)
         foreach ($name in @($Fix)) {
             if ($null -eq $name) { continue }
-            Get-DnsServerResourceRecord -ZoneName $Zone -Name $name.Name -ErrorAction SilentlyContinue | Where-Object { @($name.Types) -contains [string]$_.RecordType } | Remove-DnsServerResourceRecord -ZoneName $Zone -Force
+            # By name and type: a record object passed back may be left in place without an error.
+            foreach ($type in @($name.Types)) { Remove-DnsServerResourceRecord -ZoneName $Zone -Name $name.Name -RRType $type -Force -ErrorAction SilentlyContinue }
             foreach ($record in @($name.Records)) {
                 $part = ([string]$record.Data).Split(' ')
                 switch ([string]$record.Type) {
@@ -2309,13 +2327,17 @@ function Get-TkRandomSecret {
 }
 
 function Get-TkZoneId {
-    # Tenko's id of a plan zone, found by name among the zones it lists.
-    param([string]$Name)
+    # Tenko's id of a plan zone, found by name among the zones it lists; with -Item the zone as
+    # listed, its kind with it.
+    param([string]$Name, [switch]$Item)
     $page = Invoke-Tenko -Method GET -Path '/dns/zones'
-    foreach ($item in @(Get-TkField $page 'items')) {
-        if ([string](Get-TkField $item 'name') -eq $Name -and [string](Get-TkField $item 'id') -cmatch $script:TkUuidPattern) { return [string]$item.id }
+    foreach ($entry in @(Get-TkField $page 'items')) {
+        if ([string](Get-TkField $entry 'name') -eq $Name -and [string](Get-TkField $entry 'id') -cmatch $script:TkUuidPattern) {
+            if ($Item) { return $entry }
+            return [string]$entry.id
+        }
     }
-    return ''
+    return $(if ($Item) { $null } else { '' })
 }
 
 function Wait-TkJob {
@@ -2833,27 +2855,121 @@ function Test-TkConfiguration {
     }
 }
 
+function ConvertTo-TkAddressText {
+    # An address in the one form .NET writes it, whichever form it was given in.
+    param([string]$Text)
+    $address = $null
+    if ([System.Net.IPAddress]::TryParse($Text, [ref]$address)) { return $address.ToString() }
+    return $Text
+}
+
+function ConvertTo-TkTextList {
+    # A TXT record's strings in order as one ASCII text that keeps each string's bounds and case.
+    param([string[]]$Strings)
+    return [System.Text.Encoding]::ASCII.GetString((ConvertTo-TkJsonByte -Value @($Strings)))
+}
+
+function ConvertFrom-TkEscapedText {
+    # Tenko's text of octets (a backslash as \\, any other octet that is not printable UTF-8 as
+    # \DDD) as the string those octets read as in UTF-8.
+    param([string]$Text)
+    $bytes = [System.Collections.Generic.List[byte]]::new()
+    foreach ($part in [regex]::Split($Text, '(\\\\|\\[0-9]{3})')) {
+        if ($part -ceq '\\') { $bytes.Add(92) }
+        elseif ($part -cmatch '^\\[0-9]{3}\z') { $bytes.Add([byte][int]$part.Substring(1)) }
+        else { $bytes.AddRange([System.Text.Encoding]::UTF8.GetBytes($part)) }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($bytes.ToArray())
+}
+
 function Get-TkWindowsRecord {
-    # A zone's records on one server as 'name|type|data', the name absolute, SOA left out;
-    # with -Ttl each line ends in a tab and the record's time to live.
+    # A zone's records on one server as 'name|type|data', the name absolute, SOA left out, in
+    # the form ConvertTo-TkRecordText gives Tenko's; with -Ttl each line ends in a tab and the
+    # record's time to live. A record whose data cannot be read stops the run.
     param([string]$Server, [string]$Zone, [switch]$Ttl)
-    return , @(Invoke-TkRemote -Server $Server -Name ReadRecords -Arguments @($Zone) | ForEach-Object {
-            $name = $(if ($_.Name -eq '@') { $Zone } else { "$($_.Name).$Zone" })
-            "$name|$($_.Type)|$(([string]$_.Data).ToLowerInvariant())$(if ($Ttl) { "`t$([string]$_.Ttl)" })"
-        } | Sort-Object -Unique)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($record in @(Invoke-TkRemote -Server $Server -Name ReadRecords -Arguments @($Zone))) {
+        $name = $(if ($record.Name -eq '@') { $Zone } else { "$($record.Name).$Zone" })
+        if ($record.Unread) { Exit-TkTakeover 4 "the $(ConvertTo-TkSafeText $record.Type) record at $(ConvertTo-TkSafeText $name) on $Server cannot be read in full, so this script cannot compare it; it stops here" }
+        $data = switch -CaseSensitive ([string]$record.Type) {
+            'TXT' { ConvertTo-TkTextList @($record.Data) }
+            'A' { ConvertTo-TkAddressText $record.Data }
+            'AAAA' { ConvertTo-TkAddressText $record.Data }
+            default { [string]$record.Data }
+        }
+        $lines.Add("$name|$($record.Type)|$data$(if ($Ttl) { "`t$([string]$record.Ttl)" })")
+    }
+    return , @($lines | Sort-Object -Unique -CaseSensitive)
+}
+
+# The fields of Tenko's typed record, per type the comparison renders besides TXT and DHCID, in
+# the order ReadRecords prints them: an address in one form, a name lowercased without its
+# final dot.
+$script:TkRecordFields = @{ A = 'address'; AAAA = 'address'; CNAME = 'target'; DNAME = 'target'; PTR = 'target'; NS = 'host'; MX = 'preference', 'exchange'; SRV = 'priority', 'weight', 'port', 'target' }
+
+function ConvertTo-TkRecordText {
+    # One of Tenko's typed records in the form Get-TkWindowsRecord gives Windows' record of the
+    # type; a type it does not render reads 'unrendered', which no Windows text equals.
+    param([object]$Record, [string]$Type)
+    switch -CaseSensitive ($Type) {
+        # Tenko's strings are escaped; Windows answers them as they are.
+        'TXT' { return ConvertTo-TkTextList @(@(Get-TkField $Record 'strings') | ForEach-Object { ConvertFrom-TkEscapedText ([string]$_) }) }
+        'DHCID' {
+            # The wire data in hexadecimal; Windows shows it in Base64.
+            $hex = [string](Get-TkField $Record 'data')
+            if ($hex -cmatch '^([0-9a-f]{2})+\z') { return [Convert]::ToBase64String((ConvertFrom-TkHex $hex)) }
+        }
+    }
+    if ($script:TkRecordFields.Keys -cnotcontains $Type) { return 'unrendered' }
+    return (@($script:TkRecordFields[$Type] | ForEach-Object { $value = [string](Get-TkField $Record $_); if ($_ -ceq 'address') { ConvertTo-TkAddressText $value } else { $value.ToLowerInvariant() -replace '\.\z' } }) -join ' ')
+}
+
+function Wait-TkZoneCopy {
+    # Tenko's copy of a zone once it holds the PDC emulator's serial, read anew each round so
+    # that a zone that changes is followed, and no transfer runs: a transfer asked for is only
+    # queued.
+    param([hashtable]$State, [string]$Zone, [string]$ZoneId)
+    $pdc = $State.Data.readings.pdc
+    for ($try = 0; $try -lt 30; $try++) {
+        $serial = [string](Invoke-TkRemote -Server $pdc -Name ReadSoa -Arguments @($Zone) | Select-Object -Last 1).Serial
+        $now = Invoke-Tenko -Method GET -Path "/dns/zones/$ZoneId/transfer"
+        if ($serial -and [string](Get-TkField $now 'serial') -ceq $serial -and -not (Get-TkField $now 'running')) { return }
+        Start-Sleep -Seconds 2
+    }
+    Exit-TkTakeover 4 "Tenko did not receive $Zone from $pdc within a minute: the flip is refused and nothing changed on Windows; run the script again"
 }
 
 function Compare-TkZoneCopy {
-    # Tenko's copy of a zone against every controller's records, type by type; the record set
-    # is kept in the state file, for the reverse to compare with.
+    # Tenko's copy of a zone, every page of its typed records, against every controller's
+    # records, type by type; the record set is kept in the state file, for the reverse to
+    # compare with. A zone the flip takes holds at most 20,000 RRsets, at 1,000 a page: a page
+    # past the 21st, or a cursor named twice, stops the run.
     param([hashtable]$State, [string]$Zone, [string]$ZoneId)
-    $page = Invoke-Tenko -Method GET -Path "/dns/zones/$ZoneId/records"
-    $theirs = @(@(Get-TkField $page 'items') | Where-Object { [string](Get-TkField $_ 'type') -ne 'SOA' } | ForEach-Object {
-            "$(([string]$_.name).ToLowerInvariant().TrimEnd('.'))|$([string]$_.type)|$(([string]$_.data).TrimEnd('.').ToLowerInvariant())"
-        } | Sort-Object -Unique)
+    $lines = [System.Collections.Generic.List[string]]::new()
+    $cursors = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $cursor = ''
+    $pages = 0
+    do {
+        if (++$pages -gt 21) { Exit-TkTakeover 4 "Tenko named more pages of the records of $Zone than a zone the flip takes holds; the flip is refused" }
+        $page = Invoke-Tenko -Method GET -Path "/dns/zones/$ZoneId/records?limit=1000$(if ($cursor) { "&cursor=$cursor" })"
+        foreach ($set in @(Get-TkField $page 'items')) {
+            # DHCID has no mnemonic in Tenko's model: its type reads TYPE49.
+            $type = [string](Get-TkField $set 'type') -creplace '^TYPE49\z', 'DHCID'
+            if ($type -eq 'SOA') { continue }
+            $name = ([string](Get-TkField $set 'name')).ToLowerInvariant() -replace '\.\z'
+            foreach ($record in @(Get-TkField $set 'records')) { $lines.Add("$name|$type|$(ConvertTo-TkRecordText -Record $record -Type $type)") }
+        }
+        $cursor = [string](Get-TkField $page 'next_cursor')
+        if ($cursor -cnotmatch '^[A-Za-z0-9_-]{0,4096}\z' -or ($cursor -and -not $cursors.Add($cursor))) { Exit-TkTakeover 4 "Tenko named a page of the records of $Zone that is not of the exact form, or one it named before; the flip is refused" }
+    } while ($cursor)
+    $theirs = @($lines | Sort-Object -Unique -CaseSensitive)
+    $rendered = @($script:TkRecordFields.Keys) + 'TXT', 'DHCID'
     foreach ($controller in $State.Data.readings.controllers) {
-        $diff = @(Compare-Object -ReferenceObject (Get-TkWindowsRecord -Server $controller.name -Zone $Zone) -DifferenceObject $theirs)
-        if ($diff.Count -gt 0) { Exit-TkTakeover 4 "Tenko's copy of $Zone differs from $($controller.name) in $($diff.Count) records (first: $(ConvertTo-TkSafeText $diff[0].InputObject)); the flip is refused" }
+        $diff = @(Compare-Object -CaseSensitive -ReferenceObject (Get-TkWindowsRecord -Server $controller.name -Zone $Zone) -DifferenceObject $theirs)
+        if ($diff.Count -eq 0) { continue }
+        $types = @($diff | ForEach-Object { ([string]$_.InputObject).Split('|')[1] } | Where-Object { $rendered -cnotcontains $_ } | Sort-Object -Unique -CaseSensitive)
+        $unrendered = $(if ($types.Count -gt 0) { "; of a type this script does not compare: $(ConvertTo-TkSafeText ($types -join ', '))" })
+        Exit-TkTakeover 4 "Tenko's copy of $Zone differs from $($controller.name) in $($diff.Count) records (first: $(ConvertTo-TkSafeText $diff[0].InputObject)$unrendered); the flip is refused"
     }
     $State.Data.values["records.$Zone"] = $theirs
     # The start of authority's names as the PDC emulator holds them, for the way back.
@@ -2897,7 +3013,7 @@ function Get-TkZoneReturn {
         # The copy as shown, with every time to live and the start of authority's timers, for
         # the check before the integration.
         $shown = Get-TkWindowsRecord -Server $r.pdc -Zone $zone.name -Ttl
-        $now = @($shown | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique)
+        $now = @($shown | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique -CaseSensitive)
         $flip = @(Get-TkField $State.Data.values "records.$($zone.name)")
         $soa = Invoke-TkRemote -Server $r.pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1
         $result[$zone.name] = @{ Restore = $false; Fix = @(); Expected = $now; Shown = $shown; Timers = [string]$soa.Timers }
@@ -2905,7 +3021,7 @@ function Get-TkZoneReturn {
         $ns = @(@($flip) + $now | Where-Object { $_.Split('|', 3)[1] -eq 'NS' })
         $targets = @($ns | ForEach-Object { $_.Split('|', 3)[2] } | Select-Object -Unique)
         $delegated = @($ns | ForEach-Object { $_.Split('|', 3)[0] } | Where-Object { $_ -ne $zone.name } | Select-Object -Unique)
-        $diff = @(Compare-Object -ReferenceObject $flip -DifferenceObject $now | ForEach-Object {
+        $diff = @(Compare-Object -CaseSensitive -ReferenceObject $flip -DifferenceObject $now | ForEach-Object {
                 $owner, $type, $data = ([string]$_.InputObject).Split('|', 3)
                 @{ Line = [string]$_.InputObject; Owner = $owner; Type = $type; Data = $data; Added = ($_.SideIndicator -eq '=>'); Apart = (Test-TkApartName -Name $owner -Type $type -Zone $zone.name -Controllers $controllers -NsTargets $targets -Delegated $delegated) }
             })
@@ -2940,7 +3056,7 @@ function Get-TkZoneReturn {
             $back = @($flip | Where-Object { $part = $_.Split('|', 3); $part[0] -eq $owner -and $types -contains $part[1] })
             $relative = $(if ($owner -eq $name) { '@' } else { $owner.Substring(0, $owner.Length - $name.Length - 1) })
             $result[$name].Fix += , @{ Name = $relative; Owner = $owner; Types = $types; Records = @($back | ForEach-Object { $part = $_.Split('|', 3); @{ Type = $part[1]; Data = $part[2] } }) }
-            $result[$name].Expected = @(@($result[$name].Expected | Where-Object { $part = $_.Split('|', 3); -not ($part[0] -eq $owner -and $types -contains $part[1]) }) + $back | Sort-Object -Unique)
+            $result[$name].Expected = @(@($result[$name].Expected | Where-Object { $part = $_.Split('|', 3); -not ($part[0] -eq $owner -and $types -contains $part[1]) }) + $back | Sort-Object -Unique -CaseSensitive)
         }
     }
     return $result
@@ -2956,29 +3072,31 @@ function Get-TkPhase4 {
     $others = @($r.controllers | Where-Object { -not $_.pdc })
     $exporterPath = $Payloads.exporter.Path
     return , @(
-        @{ Name = 'configuration'; Do = { Test-TkConfiguration -State $State -ExporterPath $exporterPath } }
+        # Again on every sitting until Tenko's flip is done: a window a person replaced meanwhile
+        # is checked anew, while its stop still comes before any change on Windows.
+        @{ Name = 'configuration'; Again = { $flip = Get-TkField $State.Data.steps '4.tenko-flip'; $null -eq $flip -or $flip.state -ne 'done' }; Do = { Test-TkConfiguration -State $State -ExporterPath $exporterPath } }
         @{ Name = 'replicate'; Do = { $out = Invoke-TkRemote -Server $pdc -Name Replicate | Select-Object -Last 1; if ($out.Exit -ne 0) { throw "repadmin /syncall failed: $(ConvertTo-TkSafeText $out.Text)" } } }
         @{ Name = 'tenko-flip'
             Do = {
                 foreach ($zone in $ordered) {
-                    $id = Get-TkZoneId $zone.name
-                    if (-not $id) { Exit-TkTakeover 4 "Tenko holds no zone $($zone.name)" }
-                    $view = Invoke-Tenko -Method GET -Path "/dns/zones/$id"
-                    if ([string](Get-TkField $view 'kind') -eq 'primary') { continue }
+                    $item = Get-TkZoneId $zone.name -Item
+                    if (-not $item) { Exit-TkTakeover 4 "Tenko holds no zone $($zone.name)" }
+                    if ([string](Get-TkField $item 'kind') -eq 'primary') { continue }
+                    $id = [string]$item.id
                     [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/transfer")
+                    Wait-TkZoneCopy -State $State -Zone $zone.name -ZoneId $id
                     Compare-TkZoneCopy -State $State -Zone $zone.name -ZoneId $id
+                    # Tenko's flip also lets the domain controllers transfer the zone from it.
                     [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/flip" -Body ([ordered]@{ to = 'primary'; soa = [ordered]@{ mname = $node; rname = "hostmaster.$($r.domain)" }; ns = @($node) }))
-                    $addresses = @($r.controllers | ForEach-Object { $_.addresses } | ForEach-Object { $_ })
-                    [void](Invoke-Tenko -Method PATCH -Path "/dns/zones/$id" -Body ([ordered]@{ transfer = [ordered]@{ allow = $addresses; notify = $addresses } }))
                 }
             }
             Undo = {
                 $primary = ($r.controllers | Where-Object { $_.pdc } | Select-Object -First 1).addresses[0]
                 Assert-TkRestoreValue -Readings $r -Value $primary -Class address
                 foreach ($zone in $ordered) {
-                    $id = Get-TkZoneId $zone.name
-                    if ($id -and [string](Get-TkField (Invoke-Tenko -Method GET -Path "/dns/zones/$id") 'kind') -eq 'primary') {
-                        [void](Invoke-Tenko -Method POST -Path "/dns/zones/$id/flip" -Body ([ordered]@{ to = 'secondary'; primaries = @([ordered]@{ address = $primary }) }))
+                    $item = Get-TkZoneId $zone.name -Item
+                    if ($item -and [string](Get-TkField $item 'kind') -eq 'primary') {
+                        [void](Invoke-Tenko -Method POST -Path "/dns/zones/$([string]$item.id)/flip" -Body ([ordered]@{ to = 'secondary'; primaries = @([ordered]@{ address = $primary }) }))
                     }
                 }
             }
@@ -3032,12 +3150,12 @@ function Get-TkPhase4 {
                         [void](Invoke-TkRemote -Server $pdc -Name ApplyZoneFix -Arguments @($zone.name, [object[]]$plan.Fix, $mname, $rname))
                         # Record by record, and every time to live and timer kept as shown.
                         $after = Get-TkWindowsRecord -Server $pdc -Zone $zone.name -Ttl
-                        $diff = @(Compare-Object -ReferenceObject @($plan.Expected) -DifferenceObject @($after | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique))
+                        $diff = @(Compare-Object -CaseSensitive -ReferenceObject @($plan.Expected) -DifferenceObject @($after | ForEach-Object { $_.Split("`t")[0] } | Sort-Object -Unique -CaseSensitive))
                         if ($diff.Count -eq 0) {
                             $setBack = @($plan.Fix | ForEach-Object { $fix = $_; $fix.Types | ForEach-Object { "$($fix.Owner)|$_" } })
                             $shownKept = @($plan.Shown | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
                             $afterKept = @($after | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
-                            $diff = @(Compare-Object -ReferenceObject $shownKept -DifferenceObject $afterKept)
+                            $diff = @(Compare-Object -CaseSensitive -ReferenceObject $shownKept -DifferenceObject $afterKept)
                             $timers = [string](Invoke-TkRemote -Server $pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1).Timers
                             if ($timers -ne $plan.Timers) { $diff += [pscustomobject]@{ InputObject = "start of authority timers $timers, shown $($plan.Timers)" } }
                         }
