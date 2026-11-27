@@ -769,6 +769,7 @@ const ENDPOINTS: &[(&str, &str, &str)] = &[
     ("GET", "/migrate/takeovers/{id}", "get_takeover"),
     ("GET", "/migrate/runs/{id}", "get_run"),
     ("POST", "/migrate/runs/{id}/close", "close_run"),
+    ("POST", "/migrate/runs/{id}/window", "start_run_window"),
     (
         "DELETE",
         "/migrate/runs/{id}/scopes/{cidr}",

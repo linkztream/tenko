@@ -69,7 +69,10 @@ use tenko_core::{
     ir::{MirrorSnapshot, SourceKindLabel},
     migrate::{
         LossAck, Mirror, SkippedItem, Snapshot, TakeoverCounts, TakeoverState, findings,
-        mirror_object, plan::TakeoverPlan, run::RunRecord, takeover_object,
+        mirror_object,
+        plan::TakeoverPlan,
+        run::{RunRecord, WindowEntry},
+        takeover_object,
     },
 };
 pub use tenko_migrate::mirror::{
@@ -1212,6 +1215,67 @@ async fn close_run(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// `POST /migrate/runs/{id}/window`: the configurations a person binds.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowStart {
+    /// For each DHCP server of the plan the run's mirror of it and the configuration hash the
+    /// person was shown (`last_hash` of `GET /migrate/mirrors/{id}`), and no other entry.
+    pub mirrors: Vec<WindowEntry>,
+}
+
+#[utoipa::path(
+    post,
+    path = "/migrate/runs/{id}/window",
+    tag = "migrate",
+    operation_id = "start_run_window",
+    summary = "Start a takeover run's window",
+    description = "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person starts the window of a takeover run (ADR 0038): for each DHCP server of the plan the run's mirror and the configuration hash the person was shown, which must be the stored one and the newest push this controller took since its start, with no open loss entry; the two mirrors of a two-server plan paired with each other; and every zone of the plan created by the run. From then on the run's delegated session creates no mirror and no zone; the script's phase 4 checks the bound configurations before any change. A later call replaces the window; the run's close ends it. Refused under the Hardened profile for a plan that flips the zones. Audited as `migrate.run.window`.",
+    params(("id" = String, Path, description = "Run identifier (UUID)")),
+    request_body(content = WindowStart, content_type = "application/json"),
+    security(("session" = [])),
+    responses(
+        (status = 204, description = "Started"),
+        (status = 400, description = "The request is malformed or has a field the body does not know (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.write`, a token was used, the sign-in is older than five minutes (`auth.step_up_required`), or a takeover script's delegated session (`auth.delegation.refused`, `params.reason` `unlisted`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such open run (`migrate.run.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The run is not ready, `detail` says what to do (`migrate.run.binding`, `params.reason`: `missing` a server without its run mirror or without an entry for it; `hash` a hash that is not the stored one, or not that of the newest push this controller took since its start and within the mirror's stale time; `losses` open loss entries; `pair` mirrors not paired with each other; each with `params.server`; `extra` an entry that names no run mirror of the plan, or a second entry for one, with the plan's number of DHCP servers in `params.servers`; `zones` a plan zone the run did not create, `params.zone`); the Hardened profile refuses the domain controllers' unsigned transfers, `detail` says what to do (`migrate.run.profile`); or the run changed meanwhile (`auth.conflict`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 501, description = "No authentication or mirror service (`sys.not_implemented`)", body = ProblemDetails, content_type = "application/problem+json")
+    )
+)]
+async fn start_run_window(
+    State(app): State<AppState>,
+    mirrors: Mirrors,
+    auth: Option<Extension<Arc<AuthService>>>,
+    Ctx(cx): Ctx,
+    Path(id): Path<String>,
+    ApiJson(body): ApiJson<WindowStart>,
+) -> Result<Response, ApiError> {
+    let route = ("POST", "/migrate/runs/{id}/window");
+    app.authorize(
+        &cx.principal,
+        Action::Update,
+        &anywhere(ObjectKind::Takeover),
+    )?;
+    let id = parse_id::<DelegationId>("id", &id)?;
+    super::needs_a_fresh_session(auth.clone(), &cx, route.1).await?;
+    let auth = runs_of(auth, route.0, route.1)?;
+    let service = service(mirrors, route.0, route.1)?;
+    // What this controller holds of each run mirror: its row, the newest push's hash, the losses.
+    let mut pushed = std::collections::BTreeMap::new();
+    for entry in auth.run(id).await?.0.mirrors {
+        let item = match service.get(entry.mirror).await {
+            Err(MirrorError::NotFound(_)) => continue,
+            found => found?,
+        };
+        let hash = (service.newest(entry.mirror, item.mirror.token)).map(|n| n.hash.clone());
+        pushed.insert(entry.mirror, (item.mirror, hash, item.losses_open));
+    }
+    auth.bind_window(&cx, id, &body.mirrors, &pushed).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
+}
+
 #[utoipa::path(
     delete,
     path = "/migrate/runs/{id}/scopes/{cidr}",
@@ -1361,6 +1425,7 @@ fn scope_and_takeover_routes() -> OpenApiRouter<AppState> {
         .routes(routes!(get_takeover))
         .routes(routes!(get_run))
         .routes(routes!(close_run))
+        .routes(routes!(start_run_window))
         .routes(routes!(remove_run_scope))
 }
 

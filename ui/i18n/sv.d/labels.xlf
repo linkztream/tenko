@@ -1322,6 +1322,10 @@
         <notes><note category="description">What the audit action migrate.run.join is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>Join a sitting to a takeover run</source><target>Lägg till ett pass i en övertagandekörning</target></segment>
       </unit>
+      <unit id="audit.action.migrate.run.window">
+        <notes><note category="description">What the audit action migrate.run.window is called in the audit log, on a record page and on the dashboard.</note></notes>
+        <segment><source>Start the window of a takeover run</source><target>Starta fönstret för en övertagandekörning</target></segment>
+      </unit>
       <unit id="audit.action.auth.directory.revoke">
         <notes><note category="description">What the audit action auth.directory.revoke is called in the audit log, on a record page and on the dashboard.</note></notes>
         <segment><source>End a session or narrow its rights after a directory check</source><target>Avsluta en session eller begränsa dess rättigheter efter en katalogkontroll</target></segment>

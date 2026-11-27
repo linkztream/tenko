@@ -17,6 +17,7 @@ use crate::{
     dns::DnsName,
     id::{ApprovalId, DelegationId, MirrorId, SessionId, UserId},
     net::Fqdn,
+    serde_util::HexBytes,
 };
 
 /// The sittings a run keeps: the newest, the oldest dropped (the audit holds every collect).
@@ -39,6 +40,43 @@ pub struct RunRecord {
     /// The mirrors its sessions created: at most one per DHCP server of the plan.
     #[serde(default)]
     pub mirrors: Vec<RunMirror>,
+    /// The window a person started: from then on the run creates no mirror and no zone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<RunWindow>,
+}
+
+/// The window of a run (plan section 2.16.5): the configuration of each DHCP server the
+/// person bound when they started it. Only a person replaces it; the run's close ends it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct RunWindow {
+    /// The name of the person who started it.
+    pub started_by: String,
+    /// When, on the binding controller's clock.
+    #[schema(value_type = String, format = DateTime)]
+    pub started_at: Timestamp,
+    /// One entry per DHCP server of the plan: the run's mirror of it.
+    pub mirrors: Vec<WindowMirror>,
+}
+
+/// A mirror the window bound, with the configuration hash the person was shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct WindowMirror {
+    /// The run's mirror.
+    #[schema(value_type = String, format = Uuid)]
+    pub mirror: MirrorId,
+    /// Its stored configuration's hash (`last_hash`), lowercase hexadecimal.
+    pub hash: HexBytes,
+}
+
+/// A mirror a person binds (`POST /migrate/runs/{id}/window`): a [`WindowMirror`] that refuses
+/// an unknown field, which the stored one ignores.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WindowEntry {
+    /// The run's mirror.
+    pub mirror: MirrorId,
+    /// The configuration hash the person was shown (`last_hash`), lowercase hexadecimal.
+    pub hash: HexBytes,
 }
 
 /// One sitting of a run: an approval and the delegated session collected for it.
@@ -132,6 +170,7 @@ mod tests {
             created_at: at,
             sittings: Vec::new(),
             mirrors: Vec::new(),
+            window: None,
         };
         let first = sitting(0);
         run.add_sitting(first.clone());
@@ -143,10 +182,21 @@ mod tests {
         let summary = run.summary();
         assert_eq!(summary.sittings, 64);
         assert_eq!(summary.last_source, Some(IpAddr::from([192, 0, 2, 64])));
-        let bytes = super::super::tables::RUNS.encode(&run).expect("cbor");
-        assert_eq!(
-            super::super::tables::RUNS.decode(&bytes).expect("decode"),
-            run
-        );
+        let tables = &super::super::tables::RUNS;
+        let bytes = tables.encode(&run).expect("cbor");
+        assert_eq!(tables.decode(&bytes).expect("decode"), run);
+        // A row written before the window reads without one; a bound window round-trips.
+        run.window = Some(RunWindow {
+            started_by: "admin".to_owned(),
+            started_at: at,
+            mirrors: vec![WindowMirror {
+                mirror: MirrorId::generate(),
+                hash: HexBytes(vec![7; 32]),
+            }],
+        });
+        let bytes = tables.encode(&run).expect("cbor");
+        assert_eq!(tables.decode(&bytes).expect("decode"), run);
+        let json = serde_json::to_value(&run).expect("json");
+        assert_eq!(json["window"]["mirrors"][0]["hash"], "07".repeat(32));
     }
 }

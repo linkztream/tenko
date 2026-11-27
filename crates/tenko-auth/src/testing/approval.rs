@@ -130,7 +130,22 @@ impl TestEnv {
         script: &Script,
         source: std::net::IpAddr,
     ) -> Result<DelegatedSession, AuthError> {
-        let body = script.request();
+        self.delegate_for(admin, script, source, &plan()).await
+    }
+
+    /// As [`TestEnv::delegate`], for `plan`.
+    ///
+    /// # Errors
+    ///
+    /// The first step's refusal.
+    pub async fn delegate_for(
+        &self,
+        admin: &RequestCtx,
+        script: &Script,
+        source: std::net::IpAddr,
+        plan: &Value,
+    ) -> Result<DelegatedSession, AuthError> {
+        let body = script.request_for(plan);
         let from = self.public_ctx().with_source_ip(source);
         let ticket = self
             .service

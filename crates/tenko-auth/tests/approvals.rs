@@ -664,6 +664,90 @@ async fn tokens_and_weak_sessions_never_approve() {
     assert_eq!(tenko_core::Coded::code(&refused), "auth.step_up_required");
 }
 
+/// Under Hardened, which refuses the domain controllers' unsigned transfers, a plan that flips
+/// the domain's zones is not approved, by a passkey session either, so that the script changes
+/// nothing on Windows; the detail says what to do.
+#[tokio::test]
+async fn a_plan_that_flips_is_not_approved_under_hardened() {
+    let (env, session) = TestEnv::installed(Profile::Hardened).await;
+    let secret = SecretString::new(session.secret.expose().to_owned());
+    rewrite_session(&env, &secret, |record| {
+        record.strength = tenko_core::AuthStrength::Passkey;
+    })
+    .await;
+    let ctx = env.session_ctx(&session).await.expect("a session");
+    let refused = env
+        .delegate(
+            &ctx,
+            &Script::default(),
+            CLIENT.parse().expect("an address"),
+        )
+        .await
+        .expect_err("refused");
+    assert_eq!(tenko_core::Coded::code(&refused), "migrate.run.profile");
+    assert_eq!(tenko_core::Coded::http_status(&refused), 409);
+    assert!(refused.to_string().contains("Set the profile to Standard"));
+}
+
+/// Under Hardened only a new run of a plan that flips is refused at the approval: a plan
+/// without the flip is approved, and so is a sitting that joins an open run of a plan that
+/// flips, so that the run can still be reversed.
+#[tokio::test]
+async fn under_hardened_a_plan_without_the_flip_and_a_joining_sitting_are_approved() {
+    let (env, session) = TestEnv::installed(Profile::Hardened).await;
+    let secret = SecretString::new(session.secret.expose().to_owned());
+    rewrite_session(&env, &secret, |record| {
+        record.strength = tenko_core::AuthStrength::Passkey;
+    })
+    .await;
+    let ctx = env.session_ctx(&session).await.expect("a session");
+    let source = |last: u8| std::net::IpAddr::from([192, 0, 2, last]);
+    let script = Script::default();
+    let mut plain = plan();
+    let operations = plain["operations"].as_array_mut().expect("operations");
+    operations.retain(|operation| operation != "flip");
+    let body = script.request_for(&plain);
+    let from = env.public_ctx().with_source_ip(source(81));
+    let request = env.service.request_approval(&from, body.as_bytes()).await;
+    let ticket = request.expect("a request");
+    let code = SecretString::new(script.code(&body, ticket.id));
+    let approved = env
+        .service
+        .approve(&ctx, ticket.id, &code, &ROOT_SHA256)
+        .await;
+    approved.expect("a plan without the flip is approved");
+    env.service
+        .deny_approval(&ctx, ticket.id)
+        .await
+        .expect("withdrawn");
+    // A run of the reference plan, opened under Standard, whose sitting has ended.
+    let profile = async |profile| {
+        let mut settings = env.service.settings();
+        settings.profile = profile;
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Auth), env.now());
+        batch
+            .put_typed(&tenko_auth::model::SETTINGS, &(), &settings)
+            .expect("encode");
+        env.store.propose(batch).await.expect("commit");
+    };
+    profile(Profile::Standard).await;
+    let first = env.delegate(&ctx, &Script::default(), source(82)).await;
+    let first = first.expect("a new run under Standard");
+    let lapsed = env
+        .now()
+        .checked_sub(Duration::from_secs(1))
+        .expect("a time");
+    rewrite_session(&env, &first.secret, |record| {
+        record.idle_expires_at = lapsed;
+    })
+    .await;
+    profile(Profile::Hardened).await;
+    assert_eq!(env.service.settings().profile, Profile::Hardened);
+    let joined = env.delegate(&ctx, &Script::default(), source(83)).await;
+    let joined = joined.expect("a joining sitting is approved under Hardened");
+    assert_eq!(joined.delegation, first.delegation);
+}
+
 /// Overwrites the stored session of `secret` with `edit`.
 async fn rewrite_session(
     env: &TestEnv,

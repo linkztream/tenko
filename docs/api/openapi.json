@@ -3317,7 +3317,7 @@
             }
           },
           "409": {
-            "description": "The approval was decided before (`auth.approval.consumed`), or the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`)",
+            "description": "The approval was decided before (`auth.approval.consumed`), the domain has an open run with another plan; `params.run` names it (`migrate.run.plan`); or, for a new run, the Hardened profile refuses a plan that flips the zones, since the domain controllers cannot sign their transfers; `detail` says what to do (`migrate.run.profile`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -26026,6 +26026,107 @@
           },
           "503": {
             "description": "IPAM not configured (`ipam.unavailable`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/migrate/runs/{id}/window": {
+      "post": {
+        "tags": [
+          "migrate"
+        ],
+        "summary": "Start a takeover run's window",
+        "description": "Scope: `migrate.write`, an interactive session that signed in within five minutes. A person starts the window of a takeover run (ADR 0038): for each DHCP server of the plan the run's mirror and the configuration hash the person was shown, which must be the stored one and the newest push this controller took since its start, with no open loss entry; the two mirrors of a two-server plan paired with each other; and every zone of the plan created by the run. From then on the run's delegated session creates no mirror and no zone; the script's phase 4 checks the bound configurations before any change. A later call replaces the window; the run's close ends it. Refused under the Hardened profile for a plan that flips the zones. Audited as `migrate.run.window`.",
+        "operationId": "start_run_window",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Run identifier (UUID)",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WindowStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Started"
+          },
+          "400": {
+            "description": "The request is malformed or has a field the body does not know (`sys.invalid_request`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The principal lacks the scope `migrate.write`, a token was used, the sign-in is older than five minutes (`auth.step_up_required`), or a takeover script's delegated session (`auth.delegation.refused`, `params.reason` `unlisted`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such open run (`migrate.run.not_found`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The run is not ready, `detail` says what to do (`migrate.run.binding`, `params.reason`: `missing` a server without its run mirror or without an entry for it; `hash` a hash that is not the stored one, or not that of the newest push this controller took since its start and within the mirror's stale time; `losses` open loss entries; `pair` mirrors not paired with each other; each with `params.server`; `extra` an entry that names no run mirror of the plan, or a second entry for one, with the plan's number of DHCP servers in `params.servers`; `zones` a plan zone the run did not create, `params.zone`); the Hardened profile refuses the domain controllers' unsigned transfers, `detail` says what to do (`migrate.run.profile`); or the run changed meanwhile (`auth.conflict`)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "No authentication or mirror service (`sys.not_implemented`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -82067,6 +82168,17 @@
               "$ref": "#/components/schemas/Sitting"
             },
             "description": "Its sittings, oldest first, at most [`MAX_SITTINGS`]."
+          },
+          "window": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RunWindow",
+                "description": "The window a person started: from then on the run creates no mirror and no zone."
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -82131,6 +82243,33 @@
           }
         ],
         "description": "`GET /migrate/runs/{id}`: an open takeover run with its plan."
+      },
+      "RunWindow": {
+        "type": "object",
+        "description": "The window of a run (plan section 2.16.5): the configuration of each DHCP server the\nperson bound when they started it. Only a person replaces it; the run's close ends it.",
+        "required": [
+          "started_by",
+          "started_at",
+          "mirrors"
+        ],
+        "properties": {
+          "mirrors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WindowMirror"
+            },
+            "description": "One entry per DHCP server of the plan: the run's mirror of it."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When, on the binding controller's clock."
+          },
+          "started_by": {
+            "type": "string",
+            "description": "The name of the person who started it."
+          }
+        }
       },
       "ScanArpSweepMethod": {
         "type": "object",
@@ -91904,6 +92043,61 @@
           "manual_record",
           "forward_record"
         ]
+      },
+      "WindowEntry": {
+        "type": "object",
+        "description": "A mirror a person binds (`POST /migrate/runs/{id}/window`): a [`WindowMirror`] that refuses\nan unknown field, which the stored one ignores.",
+        "required": [
+          "mirror",
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "$ref": "#/components/schemas/HexBytes",
+            "description": "The configuration hash the person was shown (`last_hash`), lowercase hexadecimal."
+          },
+          "mirror": {
+            "$ref": "#/components/schemas/MirrorId",
+            "description": "The run's mirror."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WindowMirror": {
+        "type": "object",
+        "description": "A mirror the window bound, with the configuration hash the person was shown.",
+        "required": [
+          "mirror",
+          "hash"
+        ],
+        "properties": {
+          "hash": {
+            "$ref": "#/components/schemas/HexBytes",
+            "description": "Its stored configuration's hash (`last_hash`), lowercase hexadecimal."
+          },
+          "mirror": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run's mirror."
+          }
+        }
+      },
+      "WindowStart": {
+        "type": "object",
+        "description": "`POST /migrate/runs/{id}/window`: the configurations a person binds.",
+        "required": [
+          "mirrors"
+        ],
+        "properties": {
+          "mirrors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WindowEntry"
+            },
+            "description": "For each DHCP server of the plan the run's mirror of it and the configuration hash the\nperson was shown (`last_hash` of `GET /migrate/mirrors/{id}`), and no other entry."
+          }
+        },
+        "additionalProperties": false
       },
       "WlanException": {
         "type": "object",

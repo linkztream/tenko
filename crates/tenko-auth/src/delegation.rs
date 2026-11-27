@@ -67,14 +67,18 @@ pub enum Condition {
     Always,
     /// Within [`MIRROR_WINDOW`] of the approval.
     WithinApproval,
+    /// While no person has started the run's window (a missing run passes, to be refused as
+    /// `run`).
+    BeforeWindow,
 }
 
 impl Condition {
-    /// Whether the condition holds for `delegated` at `now`.
-    pub fn holds(self, delegated: &Delegated, now: Timestamp) -> bool {
+    /// Whether the condition holds for `delegated`, whose run row is `run`, at `now`.
+    pub fn holds(self, delegated: &Delegated, run: Option<&RunRecord>, now: Timestamp) -> bool {
         match self {
             Self::Always => true,
             Self::WithinApproval => within_approval(delegated, now),
+            Self::BeforeWindow => run.is_none_or(|run| run.window.is_none()),
         }
     }
 }
@@ -110,7 +114,8 @@ pub struct Entry {
 }
 
 /// The operations a takeover run's delegated session reaches. The list of zones holds the
-/// run's zones only, a zone it creates is an unserved secondary of its plan, and it deletes an
+/// run's zones only, a zone it creates is an unserved secondary of its plan, created only
+/// before a person started the run's window, as its mirrors are, and it deletes an
 /// unserved zone of its run only (each handler's rule). It reads its run's mirrors, pairs its
 /// two mirrors with each other and deletes them, and nothing else of a mirror. It prepares the
 /// scopes of its plan from its run's mirrors, switched off, and removes such a scope while
@@ -157,7 +162,7 @@ pub const TAKEOVER: &[Entry] = &[
     Entry {
         method: "POST",
         route: "/dns/zones",
-        condition: Condition::Always,
+        condition: Condition::BeforeWindow,
         objects: &[],
     },
     Entry {
@@ -277,7 +282,7 @@ mod tests {
     }
 
     fn admits(delegated: &Delegated, method: &str, route: &str, now: Timestamp) -> bool {
-        entry(method, route).is_some_and(|entry| entry.condition.holds(delegated, now))
+        entry(method, route).is_some_and(|entry| entry.condition.holds(delegated, None, now))
     }
 
     #[test]
@@ -289,6 +294,7 @@ mod tests {
         assert!(admits(&session, "GET", "/migrate/mirrors/{id}", at(30_000)));
         let prepare = "/migrate/mirrors/{id}/scopes/{cidr}/prepare";
         assert!(admits(&session, "POST", prepare, at(30_000)));
+        assert!(admits(&session, "POST", "/dns/zones", at(30_000)));
         for (method, route) in [
             ("PATCH", "/migrate/mirrors/{id}"),
             ("DELETE", "/migrate/mirrors/{id}"),
@@ -321,6 +327,31 @@ mod tests {
                 "{method} {route}"
             );
         }
+    }
+
+    #[test]
+    fn the_window_conditions_hold_with_the_window_only() {
+        let session = delegated(at(1_000));
+        let mut run = RunRecord {
+            id: session.id,
+            domain: "corp.example.test".parse().expect("a name"),
+            created_at: at(1_000),
+            sittings: Vec::new(),
+            mirrors: Vec::new(),
+            window: None,
+        };
+        let create = entry("POST", "/dns/zones").expect("listed");
+        // A missing run passes, for the run's own refusal to answer.
+        assert!(create.condition.holds(&session, None, at(30_000)));
+        assert!(create.condition.holds(&session, Some(&run), at(30_000)));
+        run.window = Some(tenko_core::migrate::run::RunWindow {
+            started_by: "admin".to_owned(),
+            started_at: at(2_000),
+            mirrors: Vec::new(),
+        });
+        assert!(!create.condition.holds(&session, Some(&run), at(1_000)));
+        let always = entry("GET", "/migrate/runs/{id}").expect("listed");
+        assert!(always.condition.holds(&session, Some(&run), at(30_000)));
     }
 
     #[test]
@@ -369,6 +400,7 @@ mod tests {
             created_at: at(1_000),
             sittings: Vec::new(),
             mirrors: Vec::new(),
+            window: None,
         };
         for (server, mirror) in plan.dhcp_servers.iter().zip([one, other]) {
             run.mirrors.push(tenko_core::migrate::run::RunMirror {

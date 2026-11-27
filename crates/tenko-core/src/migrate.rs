@@ -603,9 +603,15 @@ pub mod codes {
     /// The run still has a mirror or an unserved zone, which a person deletes before closing it
     /// (409). Params: `mirrors`, `zones`.
     pub const RUN_BUSY: &str = "migrate.run.busy";
+    /// The run's window cannot be bound to the configurations sent (409); the detail says what
+    /// to do. Params: `reason` (`missing`, `hash`, `losses`, `pair`, `zones`, `extra`) and
+    /// `server`, `zone` or, for `extra`, `servers`.
+    pub const RUN_BINDING: &str = "migrate.run.binding";
+    /// The security profile refuses a plan that serves its zones from Tenko (409).
+    pub const RUN_PROFILE: &str = "migrate.run.profile";
 
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 32] = [
+    pub const ALL: [&str; 34] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -638,6 +644,8 @@ pub mod codes {
         RUN_PLAN,
         RUN_NOT_FOUND,
         RUN_BUSY,
+        RUN_BINDING,
+        RUN_PROFILE,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a
@@ -829,12 +837,14 @@ pub mod audit {
     pub const RUN_JOIN: AuditAction = AuditAction::from_static("migrate.run.join");
     /// A person closed a run: its rows and its sittings' sessions are gone.
     pub const RUN_CLOSE: AuditAction = AuditAction::from_static("migrate.run.close");
+    /// A person started a run's window, binding its mirrors' configurations.
+    pub const RUN_WINDOW: AuditAction = AuditAction::from_static("migrate.run.window");
 
     /// Every action of the module, for the contracts document and its test. The scope
     /// actions (`dhcp.scope.prepare`, `dhcp.scope.takeover`, `dhcp.scope.revert`) are in
     /// [`crate::dhcp::audit`] and the zone actions (`dns.zone.flip`, `dns.zone.release`) in
     /// [`crate::dns::audit`], in the namespaces of what they change.
-    pub const ALL: [&AuditAction; 10] = [
+    pub const ALL: [&AuditAction; 11] = [
         &MIRROR_CREATE,
         &MIRROR_UPDATE,
         &MIRROR_DELETE,
@@ -845,6 +855,7 @@ pub mod audit {
         &RUN_CREATE,
         &RUN_JOIN,
         &RUN_CLOSE,
+        &RUN_WINDOW,
     ];
 }
 

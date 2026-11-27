@@ -109,7 +109,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(schemes["token"]["scheme"], "bearer");
 
     let all = operations();
-    assert_eq!(all.len(), 470, "every operation of the document");
+    assert_eq!(all.len(), 471, "every operation of the document");
     let public: BTreeSet<String> = PUBLIC.iter().map(|key| (*key).to_owned()).collect();
     assert_eq!(with(Requirement::Public), public, "the public operations");
     let until_setup: BTreeSet<String> = PUBLIC_UNTIL_SETUP
@@ -119,7 +119,7 @@ fn every_operation_declares_its_security_requirement() {
     assert_eq!(with(Requirement::PublicUntilSetup), until_setup);
     assert_eq!(
         with(Requirement::Session).len(),
-        110,
+        111,
         "the session-only operations"
     );
     assert_eq!(
@@ -274,7 +274,7 @@ async fn an_anonymous_request_is_refused_on_every_operation_but_the_public_ones(
     }
     assert_eq!(
         refused,
-        470 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
+        471 - PUBLIC.len() - PUBLIC_UNTIL_SETUP.len() - with(Requirement::Certificate).len()
     );
 }
 
@@ -542,7 +542,7 @@ async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
     let routes = routed(&app).await;
     assert_eq!(
         routes.len(),
-        474,
+        475,
         "every route of the router: decide whether a delegated session reaches a new one \
          (tenko_auth::delegation::TAKEOVER) and count it here"
     );
@@ -947,6 +947,7 @@ async fn put_run(env: &TestEnv, plan: &Value) -> tenko_core::DelegationId {
         created_at: Timestamp::now(),
         sittings: Vec::new(),
         mirrors: Vec::new(),
+        window: None,
     };
     let mut batch = tenko_store::WriteBatch::new(
         tenko_core::Principal::system(tenko_core::SystemComponent::Auth),
@@ -1308,4 +1309,5 @@ async fn a_person_closes_a_run_once_its_mirrors_are_gone() {
 
 mod mirrors;
 mod prepare;
+mod window;
 mod zones;

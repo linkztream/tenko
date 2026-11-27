@@ -159,8 +159,8 @@ impl AuthService {
     /// # Errors
     ///
     /// [`Refusal::NotFound`], [`Refusal::Expired`], [`Refusal::Code`], [`Refusal::Denied`],
-    /// [`Refusal::Consumed`], [`Refusal::Limit`], [`AuthError::RunPlan`], and the errors of
-    /// the approver's checks.
+    /// [`Refusal::Consumed`], [`Refusal::Limit`], [`AuthError::RunPlan`],
+    /// [`AuthError::RunProfile`] for a new run, and the errors of the approver's checks.
     pub async fn approve(
         &self,
         ctx: &RequestCtx,
@@ -200,8 +200,10 @@ impl AuthService {
         }
         let plan = plan_of(view.as_ref(), id)?;
         let run = open_run(view.as_ref(), &record.domain)?.map(|(run, _)| run);
-        if let Some(run) = &run {
-            same_plan(view.as_ref(), run.id, &plan)?;
+        // A joining sitting, a reverse's included, passes: the window keeps its own refusal.
+        match &run {
+            Some(run) => same_plan(view.as_ref(), run.id, &plan)?,
+            None => self.refuse_profile(&plan)?,
         }
         let strength = ctx.principal.strength().ok_or(AuthError::Unauthenticated)?;
         let (account, _) = view
@@ -438,9 +440,9 @@ impl AuthService {
     ///
     /// # Errors
     ///
-    /// [`AuthError::DelegationRefused`] past the window (`condition`), without an open run
-    /// (`run`), for a name that is no DHCP server of the plan (`plan`), or for a server whose
-    /// mirror exists (`taken`).
+    /// [`AuthError::DelegationRefused`] past five minutes after the approval or once a person
+    /// started the run's window (`condition`), without an open run (`run`), for a name that is
+    /// no DHCP server of the plan (`plan`), or for a server whose mirror exists (`taken`).
     pub(super) fn stage_delegated_mirror(
         ctx: &RequestCtx,
         view: &dyn ReadView,
@@ -458,6 +460,10 @@ impl AuthService {
         let (mut run, revision) = view
             .get_typed(&RUNS, &delegated.id)?
             .ok_or_else(|| refused("run"))?;
+        // Once a person bound the window, no mirror joins the run (the batch expects the row).
+        if run.window.is_some() {
+            return Err(refused("condition"));
+        }
         let server = view
             .get_typed(&RUN_PLANS, &delegated.id)?
             .ok_or_else(|| refused("run"))?
@@ -730,6 +736,7 @@ fn stage_sitting(
             created_at: at,
             sittings: vec![sitting],
             mirrors: Vec::new(),
+            window: None,
         };
         batch.expect_typed(&RUNS, &run, None);
         // A domain row whose run is gone is replaced, never a lasting block of its domain.

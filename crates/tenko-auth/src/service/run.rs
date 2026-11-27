@@ -1,18 +1,18 @@
 //! The takeover runs (ADR 0038, `tenko_core::migrate::run`): the one check of a delegated
 //! session's request, the read of a run, and a person's close of a run.
 
-use std::net::IpAddr;
+use std::{collections::BTreeMap, net::IpAddr};
 
 use tenko_core::{
     Authenticated, DelegationId, MirrorId, ObjectRef, Principal, RequestCtx, Timestamp,
     audit::AuditDraft,
     auth::Delegated,
-    dns::{ZoneId, tables::ZONES},
+    dns::{Zone, ZoneId, tables::ZONES},
     migrate::{
-        audit::RUN_CLOSE,
+        audit::{RUN_CLOSE, RUN_WINDOW},
         codes,
-        plan::TakeoverPlan,
-        run::RunRecord,
+        plan::{PlanOperation, TakeoverPlan},
+        run::{RunRecord, RunWindow, WindowEntry, WindowMirror},
         tables::{MIRRORS, RUN_DOMAINS, RUN_PLANS, RUNS},
     },
 };
@@ -23,6 +23,8 @@ use crate::{
     approval::actions,
     delegation::{self, Object},
     error::AuthError,
+    model::USERS,
+    settings::Profile,
 };
 
 /// The answer for a run that does not exist and, to a delegated session, for another run.
@@ -117,13 +119,14 @@ impl AuthService {
         let Some(entry) = route.and_then(|route| delegation::entry(method, route)) else {
             return refused("unlisted");
         };
-        if !entry.condition.holds(delegated, now) {
+        let view = self.view().await?;
+        let run = view.get_typed(&RUNS, &delegated.id)?.map(|(run, _)| run);
+        if !entry.condition.holds(delegated, run.as_ref(), now) {
             return refused("condition");
         }
-        let view = self.view().await?;
         // A session without a run may still end itself.
         let sign_out = entry.method == "POST" && entry.route == "/auth/logout";
-        if !sign_out && view.get_typed(&RUNS, &delegated.id)?.is_none() {
+        if !sign_out && run.is_none() {
             return refused("run");
         }
         for (name, object) in entry.objects {
@@ -209,11 +212,10 @@ impl AuthService {
             }
         }
         // A served zone of the run is what the run produced; an unserved one is its copy.
-        let zones: Vec<String> = view
-            .scan_typed(&ZONES, KeyRange::all(), usize::MAX, false)?
+        let zones: Vec<String> = run_zones(view.as_ref(), id)?
             .into_iter()
-            .filter(|(_, zone, _)| !zone.served && zone.created.by.delegation() == Some(id))
-            .map(|(_, zone, _)| zone.name.as_str().to_owned())
+            .filter(|zone| !zone.served)
+            .map(|zone| zone.name.as_str().to_owned())
             .collect();
         if !mirrors.is_empty() || !zones.is_empty() {
             return Err(AuthError::RunBusy {
@@ -244,4 +246,110 @@ impl AuthService {
         self.commit(batch).await?;
         Ok(())
     }
+
+    /// `POST /migrate/runs/{id}/window`: a person starts the window of the run `id`, binding
+    /// for each DHCP server of the plan the entry of `mirrors` that names the run's mirror of
+    /// it, with the configuration hash the person was shown; the window holds exactly these
+    /// entries. `pushed` holds, per run mirror the caller found, its row, the configuration
+    /// hash of the newest push this controller took (none when it took none since its start or
+    /// within the mirror's stale time) and its open loss entries. A later call replaces the
+    /// window. The caller has checked the person's right and fresh sign-in.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::NoObject`] (`migrate.run.not_found`), [`AuthError::RunProfile`],
+    /// [`AuthError::RunBinding`] in this order: `missing` (a server without its run mirror,
+    /// without an entry for it in `mirrors`, or whose mirror the caller did not find), `hash`
+    /// (the bound hash is not the stored one or not the newest push's, which is none when this
+    /// controller took no push of it), `losses`, `extra` (an entry that names no run mirror of
+    /// the plan's servers, or a second entry for one), `pair` (two mirrors not paired with
+    /// each other), `zones` (a plan zone the run did not create); [`AuthError::Conflict`] when
+    /// the run changed meanwhile, or a store error.
+    pub async fn bind_window(
+        &self,
+        ctx: &RequestCtx,
+        id: DelegationId,
+        mirrors: &[WindowEntry],
+        pushed: &BTreeMap<MirrorId, (tenko_core::migrate::Mirror, Option<Vec<u8>>, u32)>,
+    ) -> Result<(), AuthError> {
+        let view = self.view().await?;
+        let (mut run, revision) = view.get_typed(&RUNS, &id)?.ok_or(NO_RUN)?;
+        let (plan, _) = view.get_typed(&RUN_PLANS, &id)?.ok_or(NO_RUN)?;
+        self.refuse_profile(&plan)?;
+        let refuse = |reason, key, name: &str| AuthError::RunBinding(reason, key, name.to_owned());
+        let (mut rows, mut window) = (Vec::new(), Vec::new());
+        for server in &plan.dhcp_servers {
+            let name = server.name.as_str();
+            let entry = run.mirrors.iter().find(|entry| entry.server == server.name);
+            let bound = entry.and_then(|entry| mirrors.iter().find(|m| m.mirror == entry.mirror));
+            let facts = bound.and_then(|bound| Some((bound.clone(), pushed.get(&bound.mirror)?)));
+            let Some((WindowEntry { mirror, hash }, (row, newest, losses))) = facts else {
+                return Err(refuse("missing", "server", name));
+            };
+            if row.last_hash.as_ref() != Some(&hash) || newest.as_ref() != Some(&hash.0) {
+                return Err(refuse("hash", "server", name));
+            }
+            if *losses > 0 {
+                return Err(refuse("losses", "server", name));
+            }
+            rows.push(row);
+            window.push(WindowMirror { mirror, hash });
+        }
+        // Each entry bound is the first for its mirror, one per server: any other is extra.
+        if mirrors.len() > window.len() {
+            return Err(refuse("extra", "servers", &window.len().to_string()));
+        }
+        if let [one, other] = rows.as_slice()
+            && (one.partner != Some(other.id) || other.partner != Some(one.id))
+        {
+            return Err(refuse("pair", "server", plan.dhcp_servers[0].name.as_str()));
+        }
+        let zones = run_zones(view.as_ref(), id)?;
+        let unmade = (plan.zones.iter()).find(|name| !zones.iter().any(|zone| zone.name == **name));
+        if let Some(name) = unmade {
+            return Err(refuse("zones", "zone", name.as_str()));
+        }
+        let user = ctx.principal.user().ok_or(AuthError::Unauthenticated)?;
+        let (account, _) = (view.get_typed(&USERS, &user)?).ok_or(AuthError::Unauthenticated)?;
+        let audited: Vec<String> = (window.iter())
+            .map(|bound| format!("{}:{}", bound.mirror, bound.hash))
+            .collect();
+        run.window = Some(RunWindow {
+            started_by: account.name,
+            started_at: ctx.now,
+            mirrors: window,
+        });
+        let mut batch = WriteBatch::for_request(ctx);
+        batch.expect_typed(&RUNS, &id, Some(revision));
+        batch.put_typed(&RUNS, &id, &run)?;
+        batch.audit(
+            Self::audit(RUN_WINDOW, Vec::new(), ctx)
+                .with_context("run", id.to_string())
+                .with_context("mirrors", audited.join(",")),
+        );
+        self.commit(batch).await?;
+        Ok(())
+    }
+
+    /// Refuses (409 `migrate.run.profile`) a plan that flips the domain's zones to Tenko under
+    /// the Hardened profile, which refuses the domain controllers' unsigned transfers: at the
+    /// approval of a new run, before the script changes anything on Windows, and at the window.
+    pub(super) fn refuse_profile(&self, plan: &TakeoverPlan) -> Result<(), AuthError> {
+        if self.settings().profile == Profile::Hardened
+            && plan.operations.contains(&PlanOperation::Flip)
+        {
+            return Err(AuthError::RunProfile);
+        }
+        Ok(())
+    }
+}
+
+/// The DNS zones the run `id` created (their stamp names it).
+fn run_zones(view: &dyn tenko_store::ReadView, id: DelegationId) -> Result<Vec<Zone>, AuthError> {
+    Ok(view
+        .scan_typed(&ZONES, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .filter(|(_, zone, _)| zone.created.by.delegation() == Some(id))
+        .map(|(_, zone, _)| zone)
+        .collect())
 }

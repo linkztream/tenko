@@ -121,8 +121,9 @@ pub const FORMATS: &[FormatInfo] = &[
         since: "0.0.12",
         summary: "the format in which a DNS zone records whether it is served, raised so that a \
                   format 7 binary refuses a data directory that may hold a DNS zone a takeover \
-                  run created unserved (dns.zones, served), which it would answer for; the \
-                  migration changes no row",
+                  run created unserved (dns.zones, served), which it would answer for; a \
+                  takeover run records its window (migrate.runs, window); the migration \
+                  changes no row",
     },
 ];
 

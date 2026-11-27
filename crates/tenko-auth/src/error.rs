@@ -213,6 +213,17 @@ pub enum AuthError {
         /// The names of the unserved zones, comma-separated.
         zones: String,
     },
+    /// A takeover run's window cannot be bound: what is not ready (`missing`, `hash`, `losses`,
+    /// `pair`, `zones`, `extra`), the parameter that names the plan's object (`server`, `zone`)
+    /// or, for `extra`, the plan's number of DHCP servers (`servers`), and its value. The
+    /// detail is one sentence per reason that says what to do.
+    #[error("{}", binding_detail(.0))]
+    RunBinding(&'static str, &'static str, String),
+    /// The Hardened profile refuses a takeover that serves the domain's zones from Tenko.
+    #[error(
+        "The security profile is Hardened, which refuses unsigned zone transfers, and the domain controllers cannot sign theirs: after the DNS window they would lose their zones. Set the profile to Standard for the takeover."
+    )]
+    RunProfile,
     /// An approval of a takeover script was refused (ADR 0038).
     #[error("{0}")]
     Approval(crate::approval::Refusal),
@@ -225,6 +236,18 @@ pub enum AuthError {
     /// An unexpected internal failure. Never carries secrets.
     #[error("internal authentication error: {0}")]
     Internal(Cow<'static, str>),
+}
+
+/// What a person does about a window's binding refusal, per reason.
+fn binding_detail(reason: &str) -> &'static str {
+    match reason {
+        "missing" => "Send the run's mirror of this server; phase 2 of the script creates it.",
+        "hash" => "Wait for the next push, about one push interval, then read the hashes again.",
+        "losses" => "Acknowledge the open loss entries of this server's mirror.",
+        "pair" => "Pair the two mirrors with each other.",
+        "zones" => "Run phase 2 of the script again; it creates this zone of the plan.",
+        _ => "Send one entry for each DHCP server of the plan, and no other.",
+    }
 }
 
 impl AuthError {
@@ -314,6 +337,8 @@ impl Coded for AuthError {
             Self::NoObject { code } => code,
             Self::RunPlan { .. } => tenko_core::migrate::codes::RUN_PLAN,
             Self::RunBusy { .. } => tenko_core::migrate::codes::RUN_BUSY,
+            Self::RunBinding(..) => tenko_core::migrate::codes::RUN_BINDING,
+            Self::RunProfile => tenko_core::migrate::codes::RUN_PROFILE,
             Self::Approval(refusal) => refusal.code(),
             Self::Unavailable(_) => "auth.unavailable",
             Self::Store(error) => error.code(),
@@ -359,7 +384,9 @@ impl Coded for AuthError {
             | Self::PreferenceLimit { .. }
             | Self::TokenLimit { .. }
             | Self::RunPlan { .. }
-            | Self::RunBusy { .. } => 409,
+            | Self::RunBusy { .. }
+            | Self::RunBinding(..)
+            | Self::RunProfile => 409,
             Self::PreferenceTooLarge { .. } => 413,
             Self::BreachCheckUnavailable | Self::Unavailable(_) | Self::ScopeUnavailable => 503,
             Self::Store(error) => error.http_status(),
@@ -387,6 +414,9 @@ impl Coded for AuthError {
             Self::RunPlan { run } => BTreeMap::from([("run", run.to_string())]),
             Self::RunBusy { mirrors, zones } => {
                 BTreeMap::from([("mirrors", mirrors.clone()), ("zones", zones.clone())])
+            }
+            Self::RunBinding(reason, key, name) => {
+                BTreeMap::from([("reason", (*reason).to_owned()), (*key, name.clone())])
             }
             Self::TokenLimit { max } => BTreeMap::from([("max", max.to_string())]),
             Self::NotFound { kind } => BTreeMap::from([("kind", (*kind).to_owned())]),
