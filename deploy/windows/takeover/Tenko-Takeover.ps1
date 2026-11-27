@@ -1662,7 +1662,8 @@ $script:TkRemote = @{
         foreach ($owner in @($txt.Keys)) {
             $fqdn = $(if ($owner -eq '@') { $Zone } else { "$owner.$Zone" })
             # A query that fails answers no string: the count differs and the record is Unread.
-            try { $answers = @(Resolve-DnsName -Name $fqdn -Type TXT -Server 127.0.0.1 -DnsOnly -ErrorAction Stop | Where-Object { [string]$_.Section -eq 'Answer' -and [string]$_.Type -eq 'TXT' }) } catch { $answers = @() }
+            # So does an answer for another owner, such as a DNAME's target.
+            try { $answers = @(Resolve-DnsName -Name $fqdn -Type TXT -Server 127.0.0.1 -DnsOnly -ErrorAction Stop | Where-Object { [string]$_.Section -eq 'Answer' -and [string]$_.Type -eq 'TXT' -and ([string]$_.Name -replace '\.\z') -eq $fqdn }) } catch { $answers = @() }
             if ($answers.Count -ne $txt[$owner]) { @{ Name = $owner; Type = 'TXT'; Data = @(); Ttl = $ttls[$owner]; Unread = $true }; continue }
             foreach ($answer in $answers) { @{ Name = $owner; Type = 'TXT'; Data = @($answer.Strings); Ttl = $ttls[$owner]; Unread = $false } }
         }
@@ -2871,7 +2872,8 @@ function ConvertTo-TkTextList {
 
 function ConvertFrom-TkEscapedText {
     # Tenko's text of octets (a backslash as \\, any other octet that is not printable UTF-8 as
-    # \DDD) as the string those octets read as in UTF-8.
+    # \DDD) as the string those octets read as in UTF-8; octets that are not UTF-8, or that read
+    # as U+FFFD, throw.
     param([string]$Text)
     $bytes = [System.Collections.Generic.List[byte]]::new()
     foreach ($part in [regex]::Split($Text, '(\\\\|\\[0-9]{3})')) {
@@ -2879,7 +2881,11 @@ function ConvertFrom-TkEscapedText {
         elseif ($part -cmatch '^\\[0-9]{3}\z') { $bytes.Add([byte][int]$part.Substring(1)) }
         else { $bytes.AddRange([System.Text.Encoding]::UTF8.GetBytes($part)) }
     }
-    return [System.Text.Encoding]::UTF8.GetString($bytes.ToArray())
+    $text = [System.Text.UTF8Encoding]::new($false, $true).GetString($bytes.ToArray())
+    # Windows answers an octet it cannot read as U+FFFD, so a string that holds it, a lone
+    # surrogate's encoding included, compares as nothing.
+    if ($text.Contains([char]0xFFFD)) { throw 'a TXT string holds U+FFFD' }
+    return $text
 }
 
 function Get-TkWindowsRecord {
@@ -2912,8 +2918,9 @@ function ConvertTo-TkRecordText {
     # type; a type it does not render reads 'unrendered', which no Windows text equals.
     param([object]$Record, [string]$Type)
     switch -CaseSensitive ($Type) {
-        # Tenko's strings are escaped; Windows answers them as they are.
-        'TXT' { return ConvertTo-TkTextList @(@(Get-TkField $Record 'strings') | ForEach-Object { ConvertFrom-TkEscapedText ([string]$_) }) }
+        # Tenko's strings are escaped; Windows answers them as they are. A string that is not
+        # UTF-8 has no text to compare.
+        'TXT' { try { return ConvertTo-TkTextList @(@(Get-TkField $Record 'strings') | ForEach-Object { ConvertFrom-TkEscapedText ([string]$_) }) } catch { return 'unrendered: octets that are not UTF-8' } }
         'DHCID' {
             # The wire data in hexadecimal; Windows shows it in Base64.
             $hex = [string](Get-TkField $Record 'data')
@@ -2974,6 +2981,7 @@ function Compare-TkZoneCopy {
     $State.Data.values["records.$Zone"] = $theirs
     # The start of authority's names as the PDC emulator holds them, for the way back.
     $soa = Invoke-TkRemote -Server $State.Data.readings.pdc -Name ReadSoa -Arguments @($Zone) | Select-Object -Last 1
+    if (-not $soa.Mname -or -not $soa.Rname) { Exit-TkTakeover 4 "the start of authority of $Zone on $($State.Data.readings.pdc) cannot be read; the flip is refused" }
     $State.Data.values["soa.$Zone"] = [ordered]@{ mname = [string]$soa.Mname; rname = [string]$soa.Rname }
     Save-TkState $State
 }
@@ -3156,8 +3164,11 @@ function Get-TkPhase4 {
                             $shownKept = @($plan.Shown | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
                             $afterKept = @($after | Where-Object { $part = $_.Split('|', 3); $setBack -notcontains "$($part[0])|$($part[1])" })
                             $diff = @(Compare-Object -CaseSensitive -ReferenceObject $shownKept -DifferenceObject $afterKept)
-                            $timers = [string](Invoke-TkRemote -Server $pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1).Timers
+                            $soaNow = Invoke-TkRemote -Server $pdc -Name ReadSoa -Arguments @($zone.name) | Select-Object -Last 1
+                            $timers = [string]$soaNow.Timers
                             if ($timers -ne $plan.Timers) { $diff += [pscustomobject]@{ InputObject = "start of authority timers $timers, shown $($plan.Timers)" } }
+                            # The object form of a record write may leave the record as it was without an error.
+                            if ($mname -and ([string]$soaNow.Mname -cne $mname -or [string]$soaNow.Rname -cne $rname)) { $diff += [pscustomobject]@{ InputObject = "start of authority names $([string]$soaNow.Mname) $([string]$soaNow.Rname), recorded $mname $rname" } }
                         }
                         if ($diff.Count -gt 0) { Exit-TkTakeover 4 "the copy of $($zone.name) on $pdc differs from what was shown in $($diff.Count) records (first: $(ConvertTo-TkSafeText (([string]$diff[0].InputObject) -replace "`t", ' ttl '))); nothing of it reached the directory" }
                     }

@@ -85,7 +85,7 @@ function Get-FakeWorld {
         gpo = ''; gpoMark = ''
         # The PDC emulator's file-backed copies, records Tenko adds once read (lateAdds), a
         # restore that stops after the removal, a fix-up that writes nothing.
-        copies = @{}; lateAdds = @{}; restoreBreaks = $false; restoreBroken = $false; fixIgnored = $false; soaSet = @{}
+        copies = @{}; lateAdds = @{}; restoreBreaks = $false; restoreBroken = $false; fixIgnored = $false; soaIgnored = $false; soaUnread = $false; soaSet = @{}
         twoScopes = $false; staleReads = 0; staleList = @(); restartFailsOn = ''
         reverts = 0; revertFailAt = 0; resumeFails = ''; resumeCalls = 0
         tenkoAcl = ''; srvDelegation = $false
@@ -322,7 +322,9 @@ function Invoke-FakeRemote {
         'ReadSoa' {
             $serial = $w.pdcSerial
             if ($w.serialMoves -and $w.pdcSerial -lt 8) { $w.pdcSerial++ }
-            @{ Mname = "dc1.$domain."; Rname = "hostmaster.$domain."; Serial = [string]$serial; Timers = $(if ($w.timersTamper -and $w.soaSet.ContainsKey($a[0])) { '1 600 86400 3600 3600' } else { '900 600 86400 3600 3600' }) }
+            # A set of the start of authority's names that leaves Tenko's in place (soaIgnored); a
+            # read that answers no primary server (soaUnread).
+            @{ Mname = $(if ($w.soaUnread) { '' } elseif ($w.soaIgnored -and $w.soaSet.ContainsKey($a[0])) { "tenko.$domain." } else { "dc1.$domain." }); Rname = "hostmaster.$domain."; Serial = [string]$serial; Timers = $(if ($w.timersTamper -and $w.soaSet.ContainsKey($a[0])) { '1 600 86400 3600 3600' } else { '900 600 86400 3600 3600' }) }
         }
         'ConvertToSecondary' {
             $z = $w.zones[$a[0]][$s]

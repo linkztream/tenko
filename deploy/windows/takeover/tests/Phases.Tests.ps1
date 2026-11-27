@@ -520,6 +520,9 @@ Describe 'A value from Tenko that Windows contradicts' {
     It 'phase 4 stops with exit 4 before any change when <case>' -ForEach @(
         @{ case = 'a TXT record differs in case only'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('v=spf1 -all') }); tenko = @{ 'note|TXT' = @('V=spf1 -all') }; knob = ''; cursor = ''; text = 'differs from dc1\.corp\.example\.test in 2 records' }
         @{ case = 'a TXT record differs in where its strings end only'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('ab', 'c') }); tenko = @{ 'note|TXT' = @('a', 'bc') }; knob = ''; cursor = ''; text = 'differs from dc1\.corp\.example\.test in 2 records' }
+        @{ case = 'Tenko''s TXT string is not UTF-8 and would read as Windows'' text once its octets were replaced'; records = @([pscustomobject]@{ Name = 'bin'; Type = 'TXT'; Data = @("a$([char]0xFFFD)") }); tenko = @{ 'bin|TXT' = @('a\255') }; knob = ''; cursor = ''; text = 'in 2 records \(first: bin\.corp\.example\.test\|TXT\|unrendered: octets' }
+        @{ case = 'Tenko''s TXT string holds the character Windows shows for an octet it cannot read'; records = @([pscustomobject]@{ Name = 'bin'; Type = 'TXT'; Data = @("a$([char]0xFFFD)") }); tenko = @{ 'bin|TXT' = @("a$([char]0xFFFD)") }; knob = ''; cursor = ''; text = 'in 2 records \(first: bin\.corp\.example\.test\|TXT\|unrendered: octets' }
+        @{ case = 'the PDC emulator answers no start of authority names'; records = @(); tenko = @{}; knob = 'soaUnread'; cursor = ''; text = 'the start of authority of \S+ on dc1\.corp\.example\.test cannot be read; the flip is refused' }
         @{ case = 'a controller cannot answer a TXT record''s strings'; records = @([pscustomobject]@{ Name = 'note'; Type = 'TXT'; Data = @('v=spf1 -all') }); tenko = @{}; knob = 'txtUnread'; cursor = ''; text = 'the TXT record at note\.corp\.example\.test on dc1\.corp\.example\.test cannot be read in full' }
         @{ case = 'a controller''s DHCID record cannot be read'; records = @([pscustomobject]@{ Name = 'pc1'; Type = 'DHCID'; Data = 'AAIBY2/AuCccgoJbsaxcQc9TUapptP69lOjxfNuVAA2kjEA=' }); tenko = @{}; knob = 'dhcidUnread'; cursor = ''; text = 'the DHCID record at pc1\.corp\.example\.test on dc1\.corp\.example\.test cannot be read in full' }
         @{ case = 'a type the comparison does not render is among other differences'; records = @(); tenko = @{ '@|A' = '192.0.2.99' }; knob = 'unrenderedType'; cursor = ''; text = 'of a type this script does not compare: HINFO' }
@@ -1409,6 +1412,14 @@ Describe 'The DNS reverse' {
         $script:world.ttlTamper = $false; $script:world.timersTamper = $true
         Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no') | Should -Be 4
         $script:lastError | Should -Match 'start of authority timers 1 600 86400 3600 3600, shown 900 600 86400 3600 3600'
+    }
+
+    It 'integrates nothing whose start of authority keeps Tenko''s names after it was set back' {
+        $script:world.soaIgnored = $true
+        $script:world.calls.Clear()
+        Invoke-FakeRun -Reverse -Answers @('corp.example.test', 'no') | Should -Be 4
+        $script:lastError | Should -Match 'start of authority names tenko\.corp\.example\.test\. hostmaster\.corp\.example\.test\., recorded dc1\.corp\.example\.test\. hostmaster\.corp\.example\.test\.'
+        $script:world.calls | Should -Not -Contain 'dc1|IntegrateZone'
     }
 
     It 'puts each zone back into the partition the discovery read' {
