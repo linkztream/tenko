@@ -305,6 +305,8 @@ jobs:
         with:
           name: playwright-report
           path: ui/e2e/.artifacts/
+          # The directory name starts with a dot, which the action skips by default.
+          include-hidden-files: true
           retention-days: 14
 
   rust-embedded-ui:
