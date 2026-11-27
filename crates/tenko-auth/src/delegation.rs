@@ -39,10 +39,12 @@
 use std::time::Duration;
 
 use ipnet::IpNet;
+use serde_json::json;
 use tenko_core::{
-    MirrorId, Principal, Timestamp,
+    DelegationId, MirrorId, Principal, Timestamp,
     auth::Delegated,
     clock::stands_before,
+    dns::{Acl, AclId, TransferPolicy, ZoneFlip},
     ipam::Stamp,
     migrate::{
         plan::{PlanOperation, TakeoverPlan},
@@ -70,6 +72,9 @@ pub enum Condition {
     /// While no person has started the run's window (a missing run passes, to be refused as
     /// `run`).
     BeforeWindow,
+    /// Once a person has started the run's window (a missing run passes, to be refused as
+    /// `run`).
+    AfterWindow,
 }
 
 impl Condition {
@@ -79,6 +84,7 @@ impl Condition {
             Self::Always => true,
             Self::WithinApproval => within_approval(delegated, now),
             Self::BeforeWindow => run.is_none_or(|run| run.window.is_none()),
+            Self::AfterWindow => run.is_none_or(|run| run.window.is_some()),
         }
     }
 }
@@ -119,9 +125,10 @@ pub struct Entry {
 /// unserved zone of its run only (each handler's rule). It reads its run's mirrors, pairs its
 /// two mirrors with each other and deletes them, and nothing else of a mirror. It prepares the
 /// scopes of its plan from its run's mirrors, switched off, and removes such a scope while
-/// nobody else touched it ([`scope_in_plan`] and the handlers' rules). The reads of its
-/// jobs and the operations of the run's later phases join with their plan checks and the run's
-/// stages; the flip and the takeover only after the window started.
+/// nobody else touched it ([`scope_in_plan`] and the handlers' rules). Once a person started
+/// the run's window it reads its zones' records and transfer state, has them transferred,
+/// reads its mirrors' snapshots, and flips its zones with its plan's values only
+/// ([`flip_in_plan`]), which writes the run's transfer list ([`run_lists`]).
 pub const TAKEOVER: &[Entry] = &[
     Entry {
         method: "GET",
@@ -172,9 +179,39 @@ pub const TAKEOVER: &[Entry] = &[
         objects: &[("id", Object::Zone)],
     },
     Entry {
+        method: "POST",
+        route: "/dns/zones/{id}/flip",
+        condition: Condition::AfterWindow,
+        objects: &[("id", Object::Zone)],
+    },
+    Entry {
+        method: "GET",
+        route: "/dns/zones/{id}/records",
+        condition: Condition::AfterWindow,
+        objects: &[("id", Object::Zone)],
+    },
+    Entry {
+        method: "GET",
+        route: "/dns/zones/{id}/transfer",
+        condition: Condition::AfterWindow,
+        objects: &[("id", Object::Zone)],
+    },
+    Entry {
+        method: "POST",
+        route: "/dns/zones/{id}/transfer",
+        condition: Condition::AfterWindow,
+        objects: &[("id", Object::Zone)],
+    },
+    Entry {
         method: "GET",
         route: "/migrate/mirrors/{id}",
         condition: Condition::Always,
+        objects: &[("id", Object::Mirror)],
+    },
+    Entry {
+        method: "GET",
+        route: "/migrate/mirrors/{id}/snapshot",
+        condition: Condition::AfterWindow,
         objects: &[("id", Object::Mirror)],
     },
     Entry {
@@ -253,6 +290,44 @@ pub fn scope_in_plan(plan: &TakeoverPlan, cidr: IpNet) -> bool {
         && matches!(cidr, IpNet::V4(net) if plan.scopes.contains(&net))
 }
 
+/// Whether a flip of a run's zone is its plan's: the plan flips, and the body is the one of its
+/// direction that the zone's create implies (the node under the domain as the SOA's primary
+/// name and the one name server; the PDC emulator's first address), compared as a whole, so
+/// that no SOA value, name server, primary, port or key of the caller's passes.
+pub fn flip_in_plan(plan: &TakeoverPlan, flip: &ZoneFlip) -> bool {
+    let (node, domain) = (plan.node_name.as_str(), plan.domain.as_str());
+    let pdc = plan.controllers.iter().find(|controller| controller.pdc);
+    let planned = match flip {
+        ZoneFlip::Primary { .. } => json!({
+            "to": "primary",
+            "soa": { "mname": format!("{node}.{domain}"), "rname": format!("hostmaster.{domain}") },
+            "ns": [format!("{node}.{domain}")],
+        }),
+        ZoneFlip::Secondary { .. } => json!({
+            "to": "secondary",
+            "primaries": [{ "address": pdc.and_then(|pdc| pdc.addresses.first()) }],
+        }),
+    };
+    plan.operations.contains(&PlanOperation::Flip)
+        && serde_json::from_value::<ZoneFlip>(planned).is_ok_and(|planned| planned == *flip)
+}
+
+/// What a run's flip to primary writes for the transfers to the domain controllers: the list
+/// `takeover-<run>`, whose id is the run's, with one host prefix per address of the plan's
+/// controllers, and the zone's transfer settings that allow it and notify each address,
+/// unsigned, since the controllers' secondaries cannot sign (plan section 2.11).
+pub fn run_lists(plan: &TakeoverPlan, run: DelegationId) -> Option<(Acl, TransferPolicy)> {
+    let addresses: Vec<_> = plan.controllers.iter().flat_map(|c| &c.addresses).collect();
+    let (id, name) = (AclId::from_uuid(run.uuid()), format!("takeover-{run}"));
+    let entries: Vec<_> = (addresses.iter())
+        .map(|a| json!({ "kind": "prefix", "prefix": IpNet::from(**a).to_string() }))
+        .collect();
+    let notify: Vec<_> = addresses.iter().map(|a| json!({ "address": a })).collect();
+    let acl = serde_json::from_value(json!({ "id": id, "name": name, "entries": entries }));
+    let transfer = json!({ "allow": [id], "notify": notify, "require_tsig": false });
+    Some((acl.ok()?, serde_json::from_value(transfer).ok()?))
+}
+
 /// The partner a run's mirror `id` may be paired with: the run's other mirror, in a plan of
 /// exactly two DHCP servers (paired whether or not they share a failover relationship).
 pub fn run_partner(plan: &TakeoverPlan, run: &RunRecord, id: MirrorId) -> Option<MirrorId> {
@@ -316,7 +391,8 @@ mod tests {
             ("DELETE", "/auth/sessions/{id}"),
             ("POST", "/system/ca-root"),
             ("get", "/system/ca-root"),
-            ("POST", "/dns/zones/{id}/flip"),
+            ("GET", "/dns/zones/{id}"),
+            ("PATCH", "/dns/zones/{id}"),
             ("POST", "/migrate/mirrors/{id}/scopes/{cidr}/takeover"),
             ("GET", "/migrate/runs"),
             ("POST", "/migrate/runs/{id}/close"),
@@ -341,15 +417,32 @@ mod tests {
             window: None,
         };
         let create = entry("POST", "/dns/zones").expect("listed");
+        let after = [
+            ("POST", "/dns/zones/{id}/flip"),
+            ("GET", "/dns/zones/{id}/records"),
+            ("GET", "/dns/zones/{id}/transfer"),
+            ("POST", "/dns/zones/{id}/transfer"),
+            ("GET", "/migrate/mirrors/{id}/snapshot"),
+        ]
+        .map(|(method, route)| entry(method, route).expect("listed"));
         // A missing run passes, for the run's own refusal to answer.
         assert!(create.condition.holds(&session, None, at(30_000)));
         assert!(create.condition.holds(&session, Some(&run), at(30_000)));
+        for entry in after {
+            assert!(entry.condition.holds(&session, None, at(30_000)));
+            assert!(!entry.condition.holds(&session, Some(&run), at(30_000)));
+        }
         run.window = Some(tenko_core::migrate::run::RunWindow {
             started_by: "admin".to_owned(),
             started_at: at(2_000),
             mirrors: Vec::new(),
         });
         assert!(!create.condition.holds(&session, Some(&run), at(1_000)));
+        for entry in after {
+            let (method, route) = (entry.method, entry.route);
+            let open = entry.condition.holds(&session, Some(&run), at(30_000));
+            assert!(open, "{method} {route}");
+        }
         let always = entry("GET", "/migrate/runs/{id}").expect("listed");
         assert!(always.condition.holds(&session, Some(&run), at(30_000)));
     }
@@ -387,6 +480,77 @@ mod tests {
         plan.operations
             .retain(|operation| *operation != PlanOperation::Prepare);
         assert!(!scope_in_plan(&plan, net("192.0.2.0/24")));
+    }
+
+    #[test]
+    fn a_flip_is_in_the_plan_with_the_plans_values_only() {
+        let mut plan: TakeoverPlan =
+            serde_json::from_value(crate::testing::approval::plan()).expect("a plan");
+        let flip =
+            |body: serde_json::Value| -> ZoneFlip { serde_json::from_value(body).expect("a flip") };
+        let soa =
+            json!({ "mname": "tenko.corp.example.test", "rname": "hostmaster.corp.example.test" });
+        let to_primary = json!({ "to": "primary", "soa": soa, "ns": ["tenko.corp.example.test"] });
+        let back = json!({ "to": "secondary", "primaries": [{ "address": "192.0.2.11" }] });
+        assert!(flip_in_plan(&plan, &flip(to_primary.clone())));
+        assert!(flip_in_plan(&plan, &flip(back.clone())));
+        for (mut body, pointer, value) in [
+            (
+                to_primary.clone(),
+                "/soa/mname",
+                json!("ns1.corp.example.test"),
+            ),
+            (to_primary.clone(), "/soa/refresh", json!(60)),
+            (to_primary.clone(), "/ns/1", json!("ns1.corp.example.test")),
+            (back.clone(), "/primaries/0/address", json!("192.0.2.12")),
+            (back.clone(), "/primaries/0/port", json!(5353)),
+            (
+                back.clone(),
+                "/primaries/0/key",
+                json!("xfr.corp.example.test"),
+            ),
+            (
+                back.clone(),
+                "/primaries/1",
+                json!({ "address": "192.0.2.11" }),
+            ),
+        ] {
+            let (parent, field) = pointer.rsplit_once('/').expect("a pointer");
+            let target = body.pointer_mut(parent).expect("the parent");
+            match target {
+                serde_json::Value::Array(items) => items.push(value),
+                _ => target[field] = value,
+            }
+            assert!(!flip_in_plan(&plan, &flip(body)), "{pointer}");
+        }
+        plan.operations
+            .retain(|operation| *operation != PlanOperation::Flip);
+        assert!(!flip_in_plan(&plan, &flip(to_primary)));
+        assert!(!flip_in_plan(&plan, &flip(back)));
+    }
+
+    #[test]
+    fn a_runs_list_holds_the_plans_controllers_only() {
+        let plan: TakeoverPlan =
+            serde_json::from_value(crate::testing::approval::plan()).expect("a plan");
+        let run = DelegationId::generate();
+        let (acl, transfer) = run_lists(&plan, run).expect("the run's lists");
+        assert_eq!(acl.id.uuid(), run.uuid());
+        assert_eq!(acl.name, format!("takeover-{run}"));
+        let entries = serde_json::to_value(&acl.entries).expect("JSON");
+        let expected = json!([
+            { "kind": "prefix", "prefix": "192.0.2.11/32", "deny": false },
+            { "kind": "prefix", "prefix": "192.0.2.12/32", "deny": false }
+        ]);
+        assert_eq!(entries, expected);
+        let transfer = serde_json::to_value(&transfer).expect("JSON");
+        let expected = json!({
+            "allow": [acl.id],
+            "notify": [{ "address": "192.0.2.11", "port": 53 }, { "address": "192.0.2.12", "port": 53 }],
+            "require_tsig": false,
+            "xot": false
+        });
+        assert_eq!(transfer, expected);
     }
 
     #[test]

@@ -813,14 +813,14 @@ async fn replace_mirror_token(
     tag = "migrate",
     operation_id = "get_mirror_snapshot",
     summary = "Get the latest snapshot of a mirrored source",
-    description = "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change.",
+    description = "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a mirror its run created only; any other id answers 404, whether or not such a mirror exists.",
     params(("id" = String, Path, description = "Mirror identifier (UUID)")),
     responses(
         (status = 200, description = "The snapshot", body = Snapshot),
         (status = 400, description = "The request is malformed (`sys.invalid_request`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `migrate.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `migrate.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such mirror (for a delegated session not one its run created), or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "Another read of a stored snapshot held the node's one for 2 s (`migrate.mirror.busy`, `Retry-After`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

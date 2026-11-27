@@ -454,3 +454,5 @@ async fn signed_in_at(env: &TestEnv, secret: &str, at: Timestamp) {
     batch.put_typed(&SESSIONS, &hash, &record).expect("encode");
     env.store.propose(batch).await.expect("commit");
 }
+
+mod flip;

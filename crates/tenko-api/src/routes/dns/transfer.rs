@@ -84,14 +84,14 @@ fn status(zone: ZoneId, state: TransferState) -> TransferStatus {
     tag = "dns",
     operation_id = "get_dns_zone_transfer",
     summary = "Get the transfer state of a zone",
-    description = "Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store.",
+    description = "Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
     params(("id" = String, Path, description = "Zone identifier (UUID)")),
     responses(
         (status = 200, description = "The serial, the sources and the refresh timers", body = TransferStatus),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn get_dns_zone_transfer(
@@ -117,14 +117,14 @@ pub(super) async fn get_dns_zone_transfer(
     tag = "dns",
     operation_id = "trigger_dns_zone_transfer",
     summary = "Transfer a secondary zone now",
-    description = "Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued.",
+    description = "Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
     params(("id" = String, Path, description = "Zone identifier (UUID)")),
     responses(
         (status = 202, description = "The transfer is queued", body = TransferStatus),
         (status = 400, description = "The request is malformed (`sys.invalid_request`, `sys.invalid_value`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 409, description = "The zone is not a secondary zone (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]

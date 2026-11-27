@@ -289,7 +289,7 @@ impl Lab {
             ns: vec![name("tenko1.corp.example.test")],
         };
         self.zones
-            .flip(&cx(), self.zone(apex).id, &flip)
+            .flip(&cx(), self.zone(apex).id, &flip, None)
             .await
             .expect("the flip to primary")
     }
@@ -571,6 +571,7 @@ async fn the_ad_zones_flip_take_updates_release_and_flip_back() {
                 ),
                 ns: vec![name("tenko1.corp.example.test")],
             },
+            None,
         )
         .await
         .expect_err("a primary does not flip to primary");
@@ -586,6 +587,7 @@ async fn the_ad_zones_flip_take_updates_release_and_flip_back() {
             &ZoneFlip::Secondary {
                 primaries: lab.source.primaries.clone(),
             },
+            None,
         )
         .await
         .expect("the flip to secondary");
@@ -652,6 +654,7 @@ async fn a_catalog_zone_and_a_zone_without_a_copy_are_refused() {
                     tls_name: None,
                 }],
             },
+            None,
         )
         .await
         .expect_err("refused");
@@ -692,6 +695,7 @@ async fn a_catalog_zone_and_a_zone_without_a_copy_are_refused() {
                 soa: SoaDefaults::new(name("ns1.example.test"), name("hostmaster.example.test")),
                 ns: vec![name("ns1.example.test")],
             },
+            None,
         )
         .await
         .expect_err("refused");
@@ -937,7 +941,12 @@ async fn a_flip_freezes_dhcp_names_only() {
     )
     .await;
     zones
-        .flip(&cx(), forward.id, &to_primary_with("ns1.fwd.example.test"))
+        .flip(
+            &cx(),
+            forward.id,
+            &to_primary_with("ns1.fwd.example.test"),
+            None,
+        )
         .await
         .expect("flip");
     for (owner, rtype, origin) in [
@@ -964,7 +973,12 @@ async fn a_flip_freezes_dhcp_names_only() {
         "the flipped zone left its catalog"
     );
     zones
-        .flip(&cx(), reverse.id, &to_primary_with("ns1.fwd.example.test"))
+        .flip(
+            &cx(),
+            reverse.id,
+            &to_primary_with("ns1.fwd.example.test"),
+            None,
+        )
         .await
         .expect("flip");
     assert_eq!(
@@ -1011,7 +1025,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     .await;
     refused(
         zones
-            .flip(&cx(), signed.id, &to_primary_with("ns1.example.test"))
+            .flip(&cx(), signed.id, &to_primary_with("ns1.example.test"), None)
             .await
             .expect_err("signed"),
         "dnssec",
@@ -1034,7 +1048,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
         .await;
         refused(
             zones
-                .flip(&cx(), zone.id, &to_primary_with("ns1.example.test"))
+                .flip(&cx(), zone.id, &to_primary_with("ns1.example.test"), None)
                 .await
                 .expect_err("signed"),
             "dnssec",
@@ -1078,7 +1092,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
         write_copy(&store, &zone, &rows, now, Origin::Transfer).await;
         refused(
             zones
-                .flip(&cx(), zone.id, &to_primary_with("ns1.example.test"))
+                .flip(&cx(), zone.id, &to_primary_with("ns1.example.test"), None)
                 .await
                 .expect_err("past a bound"),
             "rrsets",
@@ -1116,7 +1130,12 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     store.propose(batch).await.expect("write");
     refused(
         zones
-            .flip(&cx(), partial.id, &to_primary_with("ns1.example.test"))
+            .flip(
+                &cx(),
+                partial.id,
+                &to_primary_with("ns1.example.test"),
+                None,
+            )
             .await
             .expect_err("partial"),
         "kind",
@@ -1126,7 +1145,12 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     store.propose(batch).await.expect("write");
     refused(
         zones
-            .flip(&cx(), partial.id, &to_primary_with("ns1.example.test"))
+            .flip(
+                &cx(),
+                partial.id,
+                &to_primary_with("ns1.example.test"),
+                None,
+            )
             .await
             .expect_err("no stamp"),
         "kind",
@@ -1141,7 +1165,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     .await;
     refused(
         zones
-            .flip(&cx(), scoped.id, &to_primary_with("ns1.example.test"))
+            .flip(&cx(), scoped.id, &to_primary_with("ns1.example.test"), None)
             .await
             .expect_err("scopes"),
         "scopes",
@@ -1159,7 +1183,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     write_copy(&store, &large, &hosts, now, Origin::Transfer).await;
     refused(
         zones
-            .flip(&cx(), large.id, &to_primary_with("ns1.example.test"))
+            .flip(&cx(), large.id, &to_primary_with("ns1.example.test"), None)
             .await
             .expect_err("too large"),
         "rrsets",
@@ -1213,7 +1237,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     };
     refused(
         zones
-            .flip(&cx(), kerberos.id, &back)
+            .flip(&cx(), kerberos.id, &back, None)
             .await
             .expect_err("kerberos"),
         "update.kerberos",
@@ -1224,7 +1248,7 @@ async fn a_flip_refuses_what_it_cannot_keep() {
     .await;
     refused(
         zones
-            .flip(&cx(), online.id, &back)
+            .flip(&cx(), online.id, &back, None)
             .await
             .expect_err("online"),
         "dnssec.mode",
@@ -1265,6 +1289,7 @@ async fn a_flip_to_secondary_removes_the_owners_and_says_so() {
             &ZoneFlip::Secondary {
                 primaries: vec![primary_at("192.0.2.5")],
             },
+            None,
         )
         .await
         .expect("flip");
@@ -1328,6 +1353,7 @@ async fn a_flip_to_secondary_refuses_more_owners_than_one_change_set() {
             &ZoneFlip::Secondary {
                 primaries: vec![primary_at("192.0.2.5")],
             },
+            None,
         )
         .await
         .expect_err("too many owners");

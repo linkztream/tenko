@@ -17364,7 +17364,7 @@
           "dns"
         ],
         "summary": "Flip a zone between secondary and primary in place",
-        "description": "Scope: `dns.write`, an interactive session that signed in within five minutes. `{\"to\": \"primary\", \"soa\": {...}, \"ns\": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets of a name that holds a DHCID RRset and nothing but A, AAAA and DHCID, and the PTR records pointing at such names in a zone of the same tenant, stay `transfer`, frozen for the takeover; every other RRset of the copy becomes `ad`, WT-Q9). `{\"to\": \"secondary\", \"primaries\": [...]}` turns a primary zone back into a secondary of the named primaries: the next transfer replaces every record, whatever its serial, and the owners of its names are removed; a primary's address passes the egress policy of server-side fetches and a key needs `dns.keys`. One change set per zone of at most 20,000 RRsets, 50,000 records and 8 MiB, only a zone with the scope `default` alone, and one flip or release at a time on a node; audited as `dns.zone.flip` with the RRsets by origin. A catalog zone is refused.",
+        "description": "Scope: `dns.write`, an interactive session that signed in within five minutes. `{\"to\": \"primary\", \"soa\": {...}, \"ns\": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets of a name that holds a DHCID RRset and nothing but A, AAAA and DHCID, and the PTR records pointing at such names in a zone of the same tenant, stay `transfer`, frozen for the takeover; every other RRset of the copy becomes `ad`, WT-Q9). `{\"to\": \"secondary\", \"primaries\": [...]}` turns a primary zone back into a secondary of the named primaries: the next transfer replaces every record, whatever its serial, and the owners of its names are removed; a primary's address passes the egress policy of server-side fetches and a key needs `dns.keys`. One change set per zone of at most 20,000 RRsets, 50,000 records and 8 MiB, only a zone with the scope `default` alone, and one flip or release at a time on a node; audited as `dns.zone.flip` with the RRsets by origin. A catalog zone is refused. A takeover script's delegated session (ADR 0038) flips a zone its run created once a person started the run's window, in a plan whose operations hold `flip`, with only the body the plan implies: `{\"to\": \"primary\", \"soa\": {\"mname\": \"<node_name>.<domain>\", \"rname\": \"hostmaster.<domain>\"}, \"ns\": [\"<node_name>.<domain>\"]}` or `{\"to\": \"secondary\", \"primaries\": [{\"address\": <the PDC emulator's first address>}]}`. Its flip to primary writes in the same change set the access list `takeover-<run id>`, one host prefix per address of the plan's domain controllers (created when absent and audited as `dns.acl.create`), and the zone's `transfer`: that list allowed, each address notified, `require_tsig` false; the audit record names the list in `transfer`. Its flip to secondary sets `served` false, so that the session may delete the zone.",
         "operationId": "flip_dns_zone",
         "parameters": [
           {
@@ -17419,7 +17419,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.write` (or `dns.keys` for a key it names), or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)",
+            "description": "The principal lacks the scope `dns.write` (or `dns.keys` for a key it names), or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` before the run's window, `plan` for another body or a plan without `flip`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17439,7 +17439,7 @@
             }
           },
           "409": {
-            "description": "The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`)",
+            "description": "The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`); for a takeover script's delegated session, a zone whose transfer settings a person changed (`migrate.run.transfer`, `params.zone`), the run's access list holding other entries, or a person's list holding its name (`migrate.run.acl`, `params.name`), or a flip to primary under the Hardened profile (`migrate.run.profile`); each `detail` says what to do",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17925,7 +17925,7 @@
           "dns"
         ],
         "summary": "List the RRsets of a zone",
-        "description": "Scope: `dns.read`. The RRsets of one scope in canonical name order (RFC 4034), types ascending; `name` keeps the owners whose name relative to the apex (or whole name) starts with the text, `@` the apex.",
+        "description": "Scope: `dns.read`. The RRsets of one scope in canonical name order (RFC 4034), types ascending; `name` keeps the owners whose name relative to the apex (or whole name) starts with the text, `@` the apex. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
         "operationId": "list_dns_records",
         "parameters": [
           {
@@ -18026,7 +18026,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.read`",
+            "description": "The principal lacks the scope `dns.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18036,7 +18036,7 @@
             }
           },
           "404": {
-            "description": "No such zone (`dns.zone.not_found`)",
+            "description": "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18493,7 +18493,7 @@
           "dns"
         ],
         "summary": "Get the transfer state of a zone",
-        "description": "Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store.",
+        "description": "Scope: `dns.read`. The serial held, each primary's last success and the stable code of its last failure (`dns.transfer.failed`, `dns.transfer.tsig`, `dns.transfer.refused`), the next refresh and the expiry, as the leader's transfer service sees them; a zone it has not seen shows the serial in the store. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
         "operationId": "get_dns_zone_transfer",
         "parameters": [
           {
@@ -18538,7 +18538,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.read`",
+            "description": "The principal lacks the scope `dns.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18548,7 +18548,7 @@
             }
           },
           "404": {
-            "description": "No such zone (`dns.zone.not_found`)",
+            "description": "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18564,7 +18564,7 @@
           "dns"
         ],
         "summary": "Transfer a secondary zone now",
-        "description": "Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued.",
+        "description": "Scope: `dns.write`. Queues a refresh of a secondary zone on the leader's transfer service at once (IXFR with the AXFR fallback), audited as `dns.transfer.trigger`; the answer is the state when the refresh was queued. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
         "operationId": "trigger_dns_zone_transfer",
         "parameters": [
           {
@@ -18609,7 +18609,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `dns.write`",
+            "description": "The principal lacks the scope `dns.write`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18619,7 +18619,7 @@
             }
           },
           "404": {
-            "description": "No such zone (`dns.zone.not_found`)",
+            "description": "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25447,7 +25447,7 @@
           "migrate"
         ],
         "summary": "Get the latest snapshot of a mirrored source",
-        "description": "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change.",
+        "description": "Scope: `migrate.read`. The envelope as stored at its last change, with its sequence, the hash of its content and the time it was accepted; its `taken_at` is that of the last change. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a mirror its run created only; any other id answers 404, whether or not such a mirror exists.",
         "operationId": "get_mirror_snapshot",
         "parameters": [
           {
@@ -25492,7 +25492,7 @@
             }
           },
           "403": {
-            "description": "The principal lacks the scope `migrate.read`",
+            "description": "The principal lacks the scope `migrate.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25502,7 +25502,7 @@
             }
           },
           "404": {
-            "description": "No such mirror, or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)",
+            "description": "No such mirror (for a delegated session not one its run created), or no push yet (`migrate.mirror.not_found`, `migrate.mirror.no_snapshot`)",
             "content": {
               "application/problem+json": {
                 "schema": {

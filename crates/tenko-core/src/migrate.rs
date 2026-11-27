@@ -609,9 +609,16 @@ pub mod codes {
     pub const RUN_BINDING: &str = "migrate.run.binding";
     /// The security profile refuses a plan that serves its zones from Tenko (409).
     pub const RUN_PROFILE: &str = "migrate.run.profile";
+    /// The run's access list `takeover-<run>` holds other entries than the addresses of the
+    /// plan's domain controllers, or a person's list holds its name, so the run's flip does not
+    /// use it (409); the detail says what to do. Params: `name`.
+    pub const RUN_ACL: &str = "migrate.run.acl";
+    /// A person changed the transfer settings of a zone the run created, which the run's flip
+    /// does not write over (409); the detail says what to do. Params: `zone`.
+    pub const RUN_TRANSFER: &str = "migrate.run.transfer";
 
     /// Every code of the module, for the contracts document and its test.
-    pub const ALL: [&str; 34] = [
+    pub const ALL: [&str; 36] = [
         MIRROR_NOT_FOUND,
         MIRROR_EXISTS,
         MIRROR_INVALID_SETTINGS,
@@ -646,6 +653,8 @@ pub mod codes {
         RUN_BUSY,
         RUN_BINDING,
         RUN_PROFILE,
+        RUN_ACL,
+        RUN_TRANSFER,
     ];
 
     /// The reasons a takeover skips an item (plan section 2.8), the `code` of a

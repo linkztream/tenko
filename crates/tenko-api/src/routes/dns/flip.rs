@@ -13,6 +13,11 @@
 //! scope alone. A flip to secondary names the servers the node will connect to, so their
 //! addresses pass the egress policy of server-side fetches and their TSIG keys need
 //! `dns.keys`, by the same checks as a zone's `source`.
+//!
+//! A takeover script's delegated session (ADR 0038) needs no fresh sign-in: it flips its run's
+//! zones once a person started the run's window, with only the body its plan implies, and its
+//! flip writes the run's transfer list ([`tenko_auth::delegation::flip_in_plan`],
+//! [`tenko_auth::delegation::run_lists`]).
 
 use std::sync::Arc;
 
@@ -22,7 +27,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use tenko_auth::AuthService;
+use tenko_auth::{AuthError, AuthService, delegation};
 use tenko_core::{
     Action, ObjectRef,
     dns::{SecondarySource, ZoneFlip, ZoneId, ZoneRelease},
@@ -49,7 +54,7 @@ type Auth = Option<Extension<Arc<AuthService>>>;
     tag = "dns",
     operation_id = "flip_dns_zone",
     summary = "Flip a zone between secondary and primary in place",
-    description = "Scope: `dns.write`, an interactive session that signed in within five minutes. `{\"to\": \"primary\", \"soa\": {...}, \"ns\": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets of a name that holds a DHCID RRset and nothing but A, AAAA and DHCID, and the PTR records pointing at such names in a zone of the same tenant, stay `transfer`, frozen for the takeover; every other RRset of the copy becomes `ad`, WT-Q9). `{\"to\": \"secondary\", \"primaries\": [...]}` turns a primary zone back into a secondary of the named primaries: the next transfer replaces every record, whatever its serial, and the owners of its names are removed; a primary's address passes the egress policy of server-side fetches and a key needs `dns.keys`. One change set per zone of at most 20,000 RRsets, 50,000 records and 8 MiB, only a zone with the scope `default` alone, and one flip or release at a time on a node; audited as `dns.zone.flip` with the RRsets by origin. A catalog zone is refused.",
+    description = "Scope: `dns.write`, an interactive session that signed in within five minutes. `{\"to\": \"primary\", \"soa\": {...}, \"ns\": [...]}` turns a secondary zone into a primary zone: the transfer service stops refreshing it, the SOA `mname` and `rname` and the apex NS set become the given values, the serial continues from the copy's, and the records stay with their provenance (the A, AAAA and DHCID RRsets of a name that holds a DHCID RRset and nothing but A, AAAA and DHCID, and the PTR records pointing at such names in a zone of the same tenant, stay `transfer`, frozen for the takeover; every other RRset of the copy becomes `ad`, WT-Q9). `{\"to\": \"secondary\", \"primaries\": [...]}` turns a primary zone back into a secondary of the named primaries: the next transfer replaces every record, whatever its serial, and the owners of its names are removed; a primary's address passes the egress policy of server-side fetches and a key needs `dns.keys`. One change set per zone of at most 20,000 RRsets, 50,000 records and 8 MiB, only a zone with the scope `default` alone, and one flip or release at a time on a node; audited as `dns.zone.flip` with the RRsets by origin. A catalog zone is refused. A takeover script's delegated session (ADR 0038) flips a zone its run created once a person started the run's window, in a plan whose operations hold `flip`, with only the body the plan implies: `{\"to\": \"primary\", \"soa\": {\"mname\": \"<node_name>.<domain>\", \"rname\": \"hostmaster.<domain>\"}, \"ns\": [\"<node_name>.<domain>\"]}` or `{\"to\": \"secondary\", \"primaries\": [{\"address\": <the PDC emulator's first address>}]}`. Its flip to primary writes in the same change set the access list `takeover-<run id>`, one host prefix per address of the plan's domain controllers (created when absent and audited as `dns.acl.create`), and the zone's `transfer`: that list allowed, each address notified, `require_tsig` false; the audit record names the list in `transfer`. Its flip to secondary sets `served` false, so that the session may delete the zone.",
     params(("id" = String, Path, description = "Zone identifier (UUID)")),
     request_body(content = ZoneFlip, content_type = "application/json"),
     security(("session" = [])),
@@ -57,9 +62,9 @@ type Auth = Option<Extension<Arc<AuthService>>>;
         (status = 200, description = "The zone's kind, serial and RRsets by origin after the flip", body = tenko_core::dns::ZoneFlipReport),
         (status = 400, description = "The request is malformed, or the values are invalid (`sys.invalid_request`, `dns.zone.invalid`; `source.primaries` for an address the egress policy refuses, `scopes` for a zone with other scopes, `rrsets` for a zone past one change set, `dnssec` for a signed copy, `kind` for a copy that is missing or written in part, `update.kerberos` and `dnssec.mode` for a setting a secondary zone cannot keep)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.write` (or `dns.keys` for a key it names), or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 403, description = "The principal lacks the scope `dns.write` (or `dns.keys` for a key it names), or a token was used (`auth.forbidden`), or the sign-in is older than five minutes (`auth.step_up_required`); a takeover script's delegated session (`auth.delegation.refused`, `params.reason`): `condition` before the run's window, `plan` for another body or a plan without `flip`", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 404, description = "No such zone or key (`dns.zone.not_found`, `dns.key.not_found`)", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 409, description = "The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 409, description = "The zone is not of the kind the flip starts from, or is a catalog zone (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`, `dns.zone.flip.catalog`); for a takeover script's delegated session, a zone whose transfer settings a person changed (`migrate.run.transfer`, `params.zone`), the run's access list holding other entries, or a person's list holding its name (`migrate.run.acl`, `params.name`), or a flip to primary under the Hardened profile (`migrate.run.profile`); each `detail` says what to do", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 429, description = "A flip or a release runs on this node (`dns.zone.flip.busy`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
@@ -74,7 +79,25 @@ pub(super) async fn flip_dns_zone(
 ) -> Result<Response, ApiError> {
     let id = parse_id::<ZoneId>(&id)?;
     app.authorize(&cx.principal, Action::Execute, &ObjectRef::from(id))?;
-    needs_a_fresh_session(auth, &cx, "/dns/zones/{id}/flip").await?;
+    // ADR 0038: a takeover run's session flips its zones after the window (the check's
+    // condition), with its plan's values only, and writes the run's transfer list.
+    let run = if let Some(run) = cx.principal.delegation() {
+        let refused = || ApiError::from(AuthError::DelegationRefused { reason: "plan" });
+        let auth = auth.ok_or_else(refused)?;
+        let plan = auth.delegation_plan(&cx).await?;
+        if matches!(body, ZoneFlip::Primary { .. }) {
+            auth.refuse_profile(&plan)?;
+        }
+        if !delegation::flip_in_plan(&plan, &body) {
+            return Err(refused());
+        }
+        // The lists are built from the stored plan alone: no caller's value can fail them.
+        let internal = || ApiError::new(tenko_core::error::codes::INTERNAL, 500, "the run's lists");
+        Some(delegation::run_lists(&plan, run).ok_or_else(internal)?)
+    } else {
+        needs_a_fresh_session(auth, &cx, "/dns/zones/{id}/flip").await?;
+        None
+    };
     body.validate()?;
     let service = zones.get()?;
     if let ZoneFlip::Secondary { primaries } = &body {
@@ -85,7 +108,7 @@ pub(super) async fn flip_dns_zone(
         };
         check_primaries(&policy, Some(&source))?;
     }
-    let report = service.flip(&cx, id, &body).await?;
+    let report = service.flip(&cx, id, &body, run.as_ref()).await?;
     Ok((StatusCode::OK, Json(report)).into_response())
 }
 

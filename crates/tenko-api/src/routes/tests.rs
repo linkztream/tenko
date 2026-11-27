@@ -14,7 +14,10 @@ use tenko_store::Store;
 
 use super::auth::testkit::{Credential, Credential::*, Harness, Reply};
 use crate::{API_BASE, modules::ModuleSet};
-use tenko_auth::testing::approval::{ROOT_SHA256, Script};
+use tenko_auth::{
+    delegation::Condition,
+    testing::approval::{ROOT_SHA256, Script},
+};
 
 /// The operations anybody may call: their handlers take no `Ctx`.
 const PUBLIC: [&str; 22] = [
@@ -530,9 +533,9 @@ async fn delegated(
 /// `unlisted`, on every route of the served router that the allow-list does not list, the
 /// routes outside the OpenAPI document and every account self-service route among them; a
 /// listed route is not refused for being delegated. Every entry is one route of the router,
-/// listed once, with its object parameters in its template. A new route fails the count here
-/// until its author has decided whether a delegated session reaches it. Its own sign-out
-/// ends the session.
+/// listed once, with its object parameters in its template; a route listed for after the window
+/// answers `condition` before it. A new route fails the count here until its author has decided
+/// whether a delegated session reaches it. Its own sign-out ends the session.
 #[tokio::test]
 async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
     let (env, admin, app) = served().await;
@@ -573,10 +576,15 @@ async fn a_delegated_session_reaches_its_allow_list_and_nothing_else() {
         let body = matches!(method, "POST" | "PUT" | "PATCH").then_some("{}");
         let path = fill(template, &run);
         let reply = send(&app, from(SCRIPT, method, &path, Bearer(&secret), body)).await;
-        let unlisted = delegation_refused(&reply) && reply.body["params"]["reason"] == "unlisted";
+        let reason = &reply.body["params"]["reason"];
+        let unlisted = delegation_refused(&reply) && reason == "unlisted";
+        // A route open after the window only answers `condition` while no window was started.
+        let after = tenko_auth::delegation::entry(method, template)
+            .is_some_and(|entry| entry.condition == Condition::AfterWindow);
         match (listed.contains(key), unlisted, delegation_refused(&reply)) {
             (false, true, _) => refused += 1,
             (true, false, false) => {}
+            (true, false, true) if after && reason == "condition" => {}
             _ => wrong.push(format!("{key}: {} {}", reply.status, reply.text)),
         }
     }

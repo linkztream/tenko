@@ -61,14 +61,14 @@ pub(crate) fn rrset_item(rrset: &RrSet) -> Result<RrSetItem, ApiError> {
     tag = "dns",
     operation_id = "list_dns_records",
     summary = "List the RRsets of a zone",
-    description = "Scope: `dns.read`. The RRsets of one scope in canonical name order (RFC 4034), types ascending; `name` keeps the owners whose name relative to the apex (or whole name) starts with the text, `@` the apex.",
+    description = "Scope: `dns.read`. The RRsets of one scope in canonical name order (RFC 4034), types ascending; `name` keeps the owners whose name relative to the apex (or whole name) starts with the text, `@` the apex. A takeover script's delegated session (ADR 0038) calls it after a person started the run's window, for a zone its run created only; any other id answers 404, whether or not such a zone exists.",
     params(("id" = String, Path, description = "Zone identifier (UUID)"), RecordFilters),
     responses(
         (status = 200, description = "A page of RRsets in name and type order", body = Page<RrSetItem>),
         (status = 400, description = "The request is malformed (`sys.invalid_query`, `sys.invalid_cursor`), or the scope does not exist (`dns.zone.invalid`)", body = ProblemDetails, content_type = "application/problem+json"),
         (status = 401, description = "No valid session or token", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 403, description = "The principal lacks the scope `dns.read`", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 404, description = "No such zone (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 403, description = "The principal lacks the scope `dns.read`; a takeover script's delegated session before the run's window (`auth.delegation.refused`, `params.reason` `condition`) or whose run is not open (`run`)", body = ProblemDetails, content_type = "application/problem+json"),
+        (status = 404, description = "No such zone, or for a delegated session not one its run created (`dns.zone.not_found`)", body = ProblemDetails, content_type = "application/problem+json")
     )
 )]
 pub(super) async fn list_dns_records(

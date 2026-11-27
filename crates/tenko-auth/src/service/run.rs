@@ -333,8 +333,13 @@ impl AuthService {
 
     /// Refuses (409 `migrate.run.profile`) a plan that flips the domain's zones to Tenko under
     /// the Hardened profile, which refuses the domain controllers' unsigned transfers: at the
-    /// approval of a new run, before the script changes anything on Windows, and at the window.
-    pub(super) fn refuse_profile(&self, plan: &TakeoverPlan) -> Result<(), AuthError> {
+    /// approval of a new run, before the script changes anything on Windows, at the window,
+    /// and at the run's flip of a zone to primary.
+    ///
+    /// # Errors
+    ///
+    /// [`AuthError::RunProfile`].
+    pub fn refuse_profile(&self, plan: &TakeoverPlan) -> Result<(), AuthError> {
         if self.settings().profile == Profile::Hardened
             && plan.operations.contains(&PlanOperation::Flip)
         {

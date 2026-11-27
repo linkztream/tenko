@@ -10,10 +10,11 @@ use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        Acl, AclEntry, AclId, View, Zone, audit, codes,
+        Acl, AclEntry, AclId, TransferPolicy, View, Zone, audit, codes,
         tables::{ACLS, VIEWS, ZONES},
     },
     error::codes as sys,
+    migrate::codes::{RUN_ACL, RUN_TRANSFER},
 };
 use tenko_store::{KeyRange, ReadView, ReadViewExt, WriteBatch};
 
@@ -172,13 +173,7 @@ impl ZoneService {
             .execute(cx, |view| {
                 unique_name(view, &acl)?;
                 let mut batch = WriteBatch::for_request(cx);
-                batch.expect_typed(&ACLS, &acl.id, None);
-                batch.put_typed(&ACLS, &acl.id, &acl)?;
-                batch.audit(
-                    AuditDraft::success(audit::ACL_CREATE, vec![ObjectRef::from(acl.id)])
-                        .with_source_ip(cx.source_ip)
-                        .with_context("name", acl.name.clone()),
-                );
+                stage_create(cx, &mut batch, &acl)?;
                 Ok(Planned::write(
                     acl.clone(),
                     batch,
@@ -328,13 +323,68 @@ fn recursion_views(view: &dyn ReadView) -> ZoneResult<Vec<View>> {
         .collect())
 }
 
+/// The refusal of a run's flip whose zone holds a person's transfer settings.
+const CHANGED: &str = "a person changed the transfer settings of this zone, which the takeover run's flip does not write over: set them back to no access lists, no notify targets and signed transfers, then run the script again";
+
+/// The refusal of a run's flip whose list holds a person's entries.
+const OTHER_ENTRIES: &str = "the takeover run's access list holds other entries than the addresses of the plan's domain controllers: set its entries back to those addresses, then run the script again";
+
+/// The refusal of a run's flip whose list's name a person's list holds; `{name}` is the name.
+const TAKEN: &str = "a person's access list has the name {name}, which the takeover run's flip gives its own list: rename that list, then run the script again";
+
+/// Stages into a takeover run's flip to primary ([`super::flip`]) the run's list and the zone's
+/// transfer settings `run`: the list is created with its audit record when absent, else read
+/// with the run's entries and expected as read; the zone's settings replace only the ones its
+/// create gave it, or the run's own. Returns the list's name as stored.
+pub(super) fn stage_run(
+    view: &dyn ReadView,
+    cx: &RequestCtx,
+    batch: &mut WriteBatch,
+    (zone, (acl, transfer)): (&mut Zone, &(Acl, TransferPolicy)),
+) -> ZoneResult<String> {
+    if ![TransferPolicy::default(), transfer.clone()].contains(&zone.transfer) {
+        let refused = ZoneError::new(RUN_TRANSFER, 409, CHANGED);
+        return Err(refused.param("zone", zone.name.as_str()));
+    }
+    zone.transfer = transfer.clone();
+    let Some((stored, revision)) = view.get_typed(&ACLS, &acl.id)? else {
+        check(acl)?;
+        if name_taken(view, acl)? {
+            let refused = ZoneError::new(RUN_ACL, 409, TAKEN.replace("{name}", &acl.name));
+            return Err(refused.param("name", acl.name.clone()));
+        }
+        stage_create(cx, batch, acl)?;
+        return Ok(acl.name.clone());
+    };
+    if stored.entries != acl.entries {
+        return Err(ZoneError::new(RUN_ACL, 409, OTHER_ENTRIES).param("name", stored.name));
+    }
+    batch.expect_typed(&ACLS, &acl.id, Some(revision));
+    Ok(stored.name)
+}
+
+/// Stages the creation of `acl` with its audit record.
+fn stage_create(cx: &RequestCtx, batch: &mut WriteBatch, acl: &Acl) -> ZoneResult<()> {
+    batch.expect_typed(&ACLS, &acl.id, None);
+    batch.put_typed(&ACLS, &acl.id, acl)?;
+    batch.audit(
+        AuditDraft::success(audit::ACL_CREATE, vec![ObjectRef::from(acl.id)])
+            .with_source_ip(cx.source_ip)
+            .with_context("name", acl.name.clone()),
+    );
+    Ok(())
+}
+
 fn unique_name(view: &dyn ReadView, acl: &Acl) -> ZoneResult<()> {
-    let taken = view
-        .scan_typed(&ACLS, KeyRange::all(), usize::MAX, false)?
-        .into_iter()
-        .any(|(id, other, _)| id != acl.id && other.name.to_lowercase() == acl.name.to_lowercase());
-    if taken {
+    if name_taken(view, acl)? {
         return Err(invalid("name", "an access list of this name exists"));
     }
     Ok(())
+}
+
+fn name_taken(view: &dyn ReadView, acl: &Acl) -> ZoneResult<bool> {
+    Ok(view
+        .scan_typed(&ACLS, KeyRange::all(), usize::MAX, false)?
+        .into_iter()
+        .any(|(id, other, _)| id != acl.id && other.name.to_lowercase() == acl.name.to_lowercase()))
 }

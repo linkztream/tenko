@@ -23,6 +23,10 @@
 //! (a copy whose SOA a transfer did not write is fetched whole, whatever its serial), and
 //! the owners of its names go, since a secondary takes no updates.
 //!
+//! A takeover run's flip ([`ZoneService::flip`] with `run`) to primary also writes the run's
+//! access list and the zone's transfer settings to the domain controllers, never over a
+//! person's; its flip to secondary unserves the zone again.
+//!
 //! Both directions refuse a catalog zone (`dns.zone.flip.catalog`), a zone of the other
 //! kind (`dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`), a zone with scopes
 //! besides `default` (transfers fill that scope only) and a zone past the bounds of one
@@ -41,9 +45,9 @@ use tenko_core::{
     ObjectRef, RequestCtx, Revision,
     audit::AuditDraft,
     dns::{
-        DnsName, DnssecMode, FlipOriginCount, Origin, RecordData, RrSet, Rtype, ScopeName,
-        SecondarySource, Zone, ZoneFlip, ZoneFlipReport, ZoneId, ZoneKind, ZoneRelease,
-        ZoneReleaseReport, audit, codes,
+        Acl, DnsName, DnssecMode, FlipOriginCount, Origin, RecordData, RrSet, Rtype, ScopeName,
+        SecondarySource, TransferPolicy, Zone, ZoneFlip, ZoneFlipReport, ZoneId, ZoneKind,
+        ZoneRelease, ZoneReleaseReport, audit, codes,
         tables::{RRSETS, TRANSFER_STATE, ZONES},
     },
     ipam::Stamp,
@@ -396,13 +400,13 @@ fn to_primary(
     Ok(step.to)
 }
 
-/// Plans a flip (the module's rules).
+/// Plans a flip (the module's rules), with `run` for a takeover run's own.
 #[allow(clippy::too_many_lines, reason = "one plan of a flip, both directions")]
 fn plan_flip(
     view: &dyn ReadView,
     cx: &RequestCtx,
     id: ZoneId,
-    flip: &ZoneFlip,
+    (flip, run): (&ZoneFlip, Option<&(Acl, TransferPolicy)>),
     limits: JournalLimits,
 ) -> ZoneResult<Planned<Flipped>> {
     let row = ZoneService::zone(view, id)?;
@@ -427,6 +431,10 @@ fn plan_flip(
     let serial = match flip {
         ZoneFlip::Primary { soa, ns } => {
             check_kind(&before, ZoneKind::Secondary)?;
+            if let Some(run) = run {
+                let name = super::acl::stage_run(view, cx, &mut batch, (&mut zone, run))?;
+                draft = draft.with_context("transfer", name);
+            }
             // A primary is always served: the flip serves a takeover run's unserved copy.
             if !before.served {
                 zone.served = true;
@@ -460,6 +468,11 @@ fn plan_flip(
             zone.source = Some(SecondarySource {
                 primaries: primaries.clone(),
             });
+            // A run's copy is unserved again, for the reverse of its phase 2 to delete it.
+            if run.is_some() && zone.served {
+                zone.served = false;
+                draft = draft.with_context("served", "false");
+            }
             zone.validate()?;
             // The counters, not a scan: a zone that grew past the bounds since its flip still
             // flips back, and its records stay as they are until the next transfer.
@@ -647,28 +660,34 @@ async fn blocking<T: Send + 'static>(
 }
 
 impl ZoneService {
-    /// Flips a zone between secondary and primary in place (the module's rules).
+    /// Flips a zone between secondary and primary in place (the module's rules). With `run`,
+    /// a takeover run's access list and transfer settings, the flip is the run's own: to
+    /// primary it writes them in the same batch (the list created when absent, audited as
+    /// `dns.acl.create`), to secondary it unserves the zone.
     ///
     /// # Errors
     ///
     /// `dns.zone.not_found`, `dns.zone.invalid` (the request, a zone with other scopes, a
     /// signed or partly written copy, a setting a secondary cannot keep, a zone past the
     /// bounds), `dns.zone.flip.not_secondary`, `dns.zone.flip.not_primary`,
-    /// `dns.zone.flip.catalog`, [`FLIP_BUSY`], or a store or job error.
+    /// `dns.zone.flip.catalog`, [`FLIP_BUSY`], or a store or job error; for a run's flip
+    /// `migrate.run.transfer` when a person changed the zone's transfer settings and
+    /// `migrate.run.acl` when the run's list holds other entries or a person's list its name.
     pub async fn flip(
         &self,
         cx: &RequestCtx,
         id: ZoneId,
         flip: &ZoneFlip,
+        run: Option<&(Acl, TransferPolicy)>,
     ) -> ZoneResult<ZoneFlipReport> {
         flip.validate()?;
         let permit = self.flips.take(false)?;
         let limits = self.config.journal;
         let ((kind, serial, origins), written) = self
             .execute_async(cx, |view| {
-                let (cx, flip) = (cx.clone(), flip.clone());
+                let (cx, flip, run) = (cx.clone(), flip.clone(), run.cloned());
                 blocking(&permit, move || {
-                    plan_flip(view.as_ref(), &cx, id, &flip, limits)
+                    plan_flip(view.as_ref(), &cx, id, (&flip, run.as_ref()), limits)
                 })
             })
             .await?;

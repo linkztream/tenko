@@ -7,6 +7,7 @@ use std::{
 };
 
 use ipnet::Ipv4Net;
+use tenko_core::egress::EgressPolicy;
 use tenko_core::migrate::plan::{
     MAX_ADDRESSES, MAX_CONTROLLERS, MAX_DHCP_SERVERS, MAX_FORWARDERS, MAX_RELATIONSHIP_LEN,
     MAX_SCOPES, MAX_SPNS, MAX_ZONES, PlanKerberos, PlanOperation, TakeoverPlan,
@@ -29,6 +30,8 @@ const NEVER_SCOPES: [Ipv4Net; 3] = [
 /// - The counts: 1 to 64 zones, 1 to 16 controllers with exactly one PDC emulator, at most 32
 ///   DHCP servers, 256 scopes and 64 forwarders, each controller and forwarder with 1 to 8
 ///   addresses, at least one operation; no name, scope or operation twice.
+/// - A controller's addresses, which may transfer the zones from Tenko after the flip, are
+///   unicast addresses the egress policy's classes allow, and none is IPv4-mapped.
 /// - The domain is the forest root or below it.
 /// - The zones are the domain, `_msdcs.<forest root>` and reverse zones that cover a scope's
 ///   network or lie inside one, nothing else.
@@ -71,8 +74,8 @@ pub fn check_plan(plan: &TakeoverPlan) -> Result<(), &'static str> {
         return Err("controllers: exactly one PDC emulator");
     }
     let addresses = |list: &[IpAddr]| within(list.len(), MAX_ADDRESSES) && distinct(list);
-    if !plan.controllers.iter().all(|c| addresses(&c.addresses)) {
-        return Err("controllers.addresses: 1 to 8, each once");
+    if !plan.controllers.iter().all(|c| routable(&c.addresses)) {
+        return Err("controllers.addresses: 1 to 8 routable unicast addresses, each once");
     }
     if !plan.forwarders.iter().all(|f| addresses(&f.servers)) {
         return Err("forwarders.servers: 1 to 8, each once");
@@ -187,6 +190,14 @@ fn check_kerberos(plan: &TakeoverPlan, kerberos: &PlanKerberos) -> Result<(), &'
         return Err("kerberos.spns: 1 to 4 of DNS/<the node's name>, each once");
     }
     Ok(())
+}
+
+/// A controller's addresses, which may transfer the zones from Tenko after the flip: 1 to 8,
+/// each once, none of a class the egress policy refuses (unspecified, loopback, link-local,
+/// multicast, broadcast) and none IPv4-mapped.
+fn routable(list: &[IpAddr]) -> bool {
+    let unicast = |a: &IpAddr| EgressPolicy::default().check(*a).is_ok() && a.to_canonical() == *a;
+    (1..=MAX_ADDRESSES).contains(&list.len()) && distinct(list) && list.iter().all(unicast)
 }
 
 fn distinct<T: Ord>(items: impl IntoIterator<Item = T>) -> bool {
@@ -352,7 +363,8 @@ mod tests {
                 |plan| plan["mirror_host"]["address"] = json!("192.0.2.11"),
                 "mirror_host",
             ),
-            // A controller's IPv4 address in its IPv4-mapped IPv6 form, either way round.
+            // A controller's IPv4 address in its IPv4-mapped IPv6 form as the mirror host's; a
+            // controller's own address in that form is refused by its class.
             (
                 |plan| plan["mirror_host"]["address"] = json!("::ffff:192.0.2.11"),
                 "mirror_host",
@@ -361,7 +373,7 @@ mod tests {
                 |plan| {
                     plan["controllers"][0]["addresses"] = json!(["::ffff:192.0.2.30"]);
                 },
-                "mirror_host",
+                "controllers.addresses",
             ),
             (
                 |plan| {
@@ -386,5 +398,28 @@ mod tests {
             checked(|plan| plan["scopes"] = json!(scopes)),
             Err("scopes: at most 256")
         );
+    }
+
+    #[test]
+    fn a_controller_address_of_a_special_class_is_refused() {
+        let special = [
+            "0.0.0.0",
+            "::",
+            "127.0.0.1",
+            "::1",
+            "169.254.10.1",
+            "fe80::12",
+            "224.0.0.251",
+            "ff02::fb",
+            "255.255.255.255",
+            "::ffff:192.0.2.12",
+        ];
+        for address in special {
+            let found = checked(|plan| plan["controllers"][1]["addresses"] = json!([address]));
+            assert!(
+                found.is_err_and(|found| found.starts_with("controllers.addresses")),
+                "{address}"
+            );
+        }
     }
 }

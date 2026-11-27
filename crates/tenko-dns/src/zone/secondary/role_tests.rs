@@ -569,7 +569,7 @@ async fn a_zone_flipped_to_primary_is_neither_transferred_into_nor_expired() {
     };
     let flipped = lab
         .zones
-        .flip(&system(), lab.zone.id, &flip)
+        .flip(&system(), lab.zone.id, &flip, None)
         .await
         .expect("flip");
     primary.answer(Answer::Zone(9));
@@ -620,14 +620,14 @@ async fn a_transfer_that_runs_across_a_flip_and_its_reverse_writes_nothing() {
     };
     let flipped = lab
         .zones
-        .flip(&system(), lab.zone.id, &to_primary)
+        .flip(&system(), lab.zone.id, &to_primary, None)
         .await
         .expect("flip");
     let back = ZoneFlip::Secondary {
         primaries: lab.zone.source.clone().expect("source").primaries,
     };
     lab.zones
-        .flip(&system(), lab.zone.id, &back)
+        .flip(&system(), lab.zone.id, &back, None)
         .await
         .expect("the flip back");
     primary.release.notify_one();
@@ -668,14 +668,14 @@ async fn a_current_copy_found_across_a_flip_and_its_reverse_is_not_recorded() {
         ns: vec![name("ns1.example.test")],
     };
     lab.zones
-        .flip(&system(), lab.zone.id, &to_primary)
+        .flip(&system(), lab.zone.id, &to_primary, None)
         .await
         .expect("flip");
     let back = ZoneFlip::Secondary {
         primaries: lab.zone.source.clone().expect("source").primaries,
     };
     lab.zones
-        .flip(&system(), lab.zone.id, &back)
+        .flip(&system(), lab.zone.id, &back, None)
         .await
         .expect("the flip back");
     primary.release.notify_one();

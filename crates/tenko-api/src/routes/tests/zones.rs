@@ -64,7 +64,7 @@ async fn put_zone(env: &TestEnv, zone: &Zone) {
     env.store.propose(batch).await.expect("commit");
 }
 
-async fn zone(env: &TestEnv, id: &str) -> Zone {
+pub(super) async fn zone(env: &TestEnv, id: &str) -> Zone {
     let view = env
         .store
         .read(ReadConsistency::Local)
@@ -77,8 +77,16 @@ async fn zone(env: &TestEnv, id: &str) -> Zone {
         .0
 }
 
-/// A person flips the zone `id` to primary, once it holds the copy a refresh writes (its SOA).
+/// A person flips the zone `id` to primary, once it holds the copy a refresh writes.
 async fn flip(env: &TestEnv, app: &axum::Router, admin: &str, id: &str) -> Reply {
+    hold_copy(env, id).await;
+    let to = json!({"to": "primary", "soa": {"mname": "tenko.corp.example.test", "rname": "hostmaster.corp.example.test"}, "ns": ["tenko.corp.example.test"]});
+    let path = format!("/dns/zones/{id}/flip");
+    call(app, "POST", &path, Cookie(admin), Some(&to.to_string())).await
+}
+
+/// Writes into the zone `id` the copy a refresh writes: its SOA, serial 1.
+pub(super) async fn hold_copy(env: &TestEnv, id: &str) {
     let zone = zone(env, id).await;
     let soa = RecordData::Soa {
         mname: zone.soa.mname.clone(),
@@ -106,9 +114,6 @@ async fn flip(env: &TestEnv, app: &axum::Router, admin: &str, id: &str) -> Reply
         .put_typed(&tables::RRSETS, &set.key(), &set)
         .expect("encode");
     env.store.propose(batch).await.expect("commit");
-    let to = json!({"to": "primary", "soa": {"mname": "tenko.corp.example.test", "rname": "hostmaster.corp.example.test"}, "ns": ["tenko.corp.example.test"]});
-    let path = format!("/dns/zones/{id}/flip");
-    call(app, "POST", &path, Cookie(admin), Some(&to.to_string())).await
 }
 
 /// The plan's zones only, each with exactly the body the server builds, and each unserved and
@@ -374,7 +379,8 @@ async fn a_run_with_unserved_zones_is_not_closed() {
 
 /// A person creates a served zone as before, a change keeps a zone unserved, an unserved zone
 /// never becomes a catalog zone, and a person's flip of an unserved run zone serves it and says
-/// so in its audit record.
+/// so in its audit record, writes no access list or transfer settings, and keeps serving the
+/// zone on its way back.
 #[tokio::test]
 async fn a_persons_zone_routes_are_unchanged() {
     let (env, admin, app) = zones().await;
@@ -398,6 +404,14 @@ async fn a_persons_zone_routes_are_unchanged() {
     );
     let flipped = flip(&env, &app, &admin, &id).await;
     flipped.assert_status(200);
+    let primary = zone(&env, &id).await;
+    assert!(primary.served);
+    // A person's flip writes no transfer list or settings, and its way back keeps serving.
+    assert_eq!(primary.transfer, tenko_core::dns::TransferPolicy::default());
+    let back = json!({"to": "secondary", "primaries": [{"address": "192.0.2.11"}]}).to_string();
+    let path = format!("/dns/zones/{id}/flip");
+    let reply = call(&app, "POST", &path, Cookie(&admin), Some(&back)).await;
+    reply.assert_status(200);
     assert!(zone(&env, &id).await.served);
     let view = env
         .store
@@ -412,6 +426,12 @@ async fn a_persons_zone_routes_are_unchanged() {
             false,
         )
         .expect("the audit");
+    let lists = view.scan_typed(&tables::ACLS, tenko_store::KeyRange::all(), 1, false);
+    assert_eq!(
+        lists.expect("the lists").len(),
+        0,
+        "a person's flip writes no list"
+    );
     assert!(audit.iter().any(|(_, record, _)| {
         record.draft.action.as_str() == "dns.zone.flip"
             && record
