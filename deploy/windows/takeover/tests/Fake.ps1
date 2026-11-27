@@ -104,6 +104,9 @@ function Get-FakeWorld {
         written = [System.Collections.ArrayList]@()
         raw = (Get-FakeRaw)
         configChanged = $false
+        # Tenko's answers that contradict what the window bound: another partner, a window that
+        # names another mirror, a snapshot of another hash.
+        partnerDiffers = $false; windowNamesOther = $false; snapshotDiffers = $false
         tenkoRecordsDiffer = $false
         locator = @{ name = "dc1.$($script:FakeDomain)"; address = '192.0.2.11' }
         addresses = @{ "dc1.$($script:FakeDomain)" = @('192.0.2.11'); "dc2.$($script:FakeDomain)" = @('192.0.2.12') }
@@ -124,6 +127,17 @@ function Get-FakeWorld {
         answers = [System.Collections.ArrayList]@()
         unreachable = $false; disabled = $null; leaveOpen = $false; gpoMembers = @(); restartFails = $false
     }
+}
+
+# The hash of a mirror's snapshot as Tenko reports it: 64 lowercase hex digits per mirror.
+function Get-FakeSnapshotHash { param([string]$Id) return (($Id -replace '-', '') * 2) }
+
+function Get-FakeWindow {
+    # The window a person binds on the run page: one entry per mirror, with the hash of its snapshot.
+    $mirrors = @($script:world.runMirrors.Values | ForEach-Object {
+            [ordered]@{ mirror = $(if ($script:world.windowNamesOther) { [guid]::NewGuid().ToString() } else { $_.mirror }); hash = (Get-FakeSnapshotHash $_.mirror) }
+        })
+    return [ordered]@{ started_by = 'admin'; started_at = '2026-11-21T10:00:00Z'; mirrors = $mirrors }
 }
 
 function Get-FakeShort { param([string]$Server) return $Server.Split('.')[0] }
@@ -410,15 +424,21 @@ function Invoke-FakeTenko {
         }
         '^DELETE /migrate/mirrors/(.+)$' { $w.mirrors.Remove($Matches[1]); return $null }
         '^PATCH /migrate/mirrors/([^/]+)$' {
+            # Set on both mirrors at once, as Tenko does.
             $w.mirrors[$Matches[1]].partner = $Body.partner
+            $w.mirrors[$Body.partner].partner = $Matches[1]
             $w.pairBody = [System.Text.Encoding]::UTF8.GetString((ConvertTo-TkJsonByte $Body))
             [void]$w.calls.Add('tenko|pair'); return [ordered]@{}
         }
         '^GET /migrate/mirrors/[^/]+/snapshot$' {
             $exporter = Join-Path (Join-Path (Join-Path (Join-Path $PSScriptRoot '..') '..') 'mirror') 'Tenko-DhcpMirror.ps1'
-            return (Get-TkMappedSnapshot -Raw $w.raw -Server ($w.mirrors[$Path.Split('/')[3]].name) -ExporterPath $exporter)
+            $id = $Path.Split('/')[3]
+            return [ordered]@{ mirror = $id; sequence = 1; hash = $(if ($w.snapshotDiffers) { '0' * 64 } else { Get-FakeSnapshotHash $id }); received = '2026-11-21T09:59:00Z'; envelope = (Get-TkMappedSnapshot -Raw $w.raw -Server ($w.mirrors[$id].name) -ExporterPath $exporter) }
         }
-        '^GET /migrate/mirrors/([^/]+)$' { return [ordered]@{ last_sequence = (Get-TkField $w.mirrors[$Matches[1]] 'last_sequence') } }
+        '^GET /migrate/mirrors/([^/]+)$' {
+            $partner = Get-TkField $w.mirrors[$Matches[1]] 'partner'
+            return [ordered]@{ last_sequence = (Get-TkField $w.mirrors[$Matches[1]] 'last_sequence'); partner = $(if ($w.partnerDiffers) { [guid]::NewGuid().ToString() } else { $partner }) }
+        }
         '^POST /migrate/mirrors/[^/]+/scopes/[^/]+/revert$' {
             $w.reverts++
             if ($w.revertFailAt -eq $w.reverts) { throw "Tenko refused $Method $Path with 503 injected" }
@@ -469,7 +489,12 @@ function Invoke-FakeTenko {
         '^POST /dns/zones/([^/]+)/flip$' { $w.tzones[$Matches[1]].kind = $Body.to; return [ordered]@{} }
         '^DELETE /dns/zones/(.+)$' { $w.tzones.Remove($Matches[1]); return $null }
         '^(POST|PATCH) /dns/' { return [ordered]@{} }
-        '^GET /migrate/runs/' { return [ordered]@{ window = $w.window; mirrors = @($w.runMirrors.Values) } }
+        '^GET /migrate/runs/' {
+            # A person starts the window on the run page while the script waits at the review:
+            # it shows from the review's first read on.
+            if ($null -eq $w.window -and (Get-PSCallStack).FunctionName -contains 'Confirm-TkWindow') { $w.window = Get-FakeWindow }
+            return [ordered]@{ window = $w.window; mirrors = @($w.runMirrors.Values) }
+        }
         '^PUT /migrate/runs/' { return [ordered]@{} }
         '^GET /migrate/takeovers$' {
             # One item per takeover job with its scope's ACK counter (acksByScope, the world's
@@ -564,7 +589,6 @@ function Install-FakeWorld {
         $picked = @($Choices | Where-Object { ($_ -replace '&', '') -eq $next })
         return $(if ($picked.Count -eq 1) { $picked[0] } else { $Choices[$Default] })
     }
-    $script:world.window = [ordered]@{ started_by = 'admin'; started_at = '2026-11-21T10:00:00Z' }
 }
 
 function Invoke-FakeRun {

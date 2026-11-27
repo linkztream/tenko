@@ -450,6 +450,53 @@ Describe 'A value from Tenko that Windows contradicts' {
         @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }) | Should -BeNullOrEmpty
     }
 
+    It 'phase 4 stops with exit 4 before any change when <case>' -ForEach @(
+        @{ case = 'the mirror''s partner is not the other server''s mirror'; knob = 'partnerDiffers'; text = 'is not paired with the other DHCP server''s mirror'; last = '^GET /migrate/mirrors/[^/]+$' }
+        @{ case = 'the window names another mirror for a server'; knob = 'windowNamesOther'; text = 'names no mirror of dc1\.corp\.example\.test'; last = '^GET /migrate/mirrors/[^/]+$' }
+        @{ case = 'the snapshot is not the configuration the window bound'; knob = 'snapshotDiffers'; text = 'snapshot of dc1\.corp\.example\.test is not the configuration the window bound'; last = '^GET /migrate/mirrors/[^/]+/snapshot$' }
+    ) {
+        $script:world[$knob] = $true
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 4 -Because $script:lastError
+        $script:lastError | Should -Match $text
+        $script:world.tenkoCalls[-1] | Should -Match $last
+        $script:world.calls | Should -Not -Contain 'dc1|Replicate'
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+        @($script:world.tenkoCalls | Where-Object { $_ -match 'flip$' }) | Should -BeNullOrEmpty
+    }
+
+    It 'phase 4 stops with exit 1 before any change when the state file holds no mirror of a plan server' {
+        Invoke-FakeRun -Answers @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'no') | Should -Be 3
+        $path = Join-Path (Get-TkStateDir 'corp.example.test') 'state.json'
+        $data = ConvertFrom-TkJson -Chars ([System.IO.File]::ReadAllText($path)).ToCharArray()
+        $data.mirrors = [ordered]@{}
+        [System.IO.File]::WriteAllBytes($path, (ConvertTo-TkJsonByte $data))
+        $script:world.tenkoCalls.Clear()
+        Invoke-FakeRun -Answers @('c', 'corp.example.test') | Should -Be 1 -Because $script:lastError
+        $script:lastError | Should -Match 'holds no mirror of dc1\.corp\.example\.test from this script: run -Reverse and start again'
+        $script:world.tenkoCalls[-1] | Should -Match '^GET /migrate/runs/'
+        $script:world.calls | Should -Not -Contain 'dc1|Replicate'
+        $script:world.calls | Should -Not -Contain 'dc1|ConvertToSecondary'
+    }
+
+    It 'phase 2 refuses to prepare a run whose window was started, and creates nothing' {
+        $script:world.window = [ordered]@{ started_by = 'admin'; started_at = '2026-11-21T10:00:00Z'; mirrors = @() }
+        Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 1
+        $script:lastError | Should -Be "the run's window was started: this run prepares nothing again; run -Reverse to its start, have a person close the run, then start a new one"
+        @($script:world.mirrors.Keys) | Should -BeNullOrEmpty
+        @($script:world.tzones.Keys) | Should -BeNullOrEmpty
+        $script:world.calls | Should -Not -Contain 'tenko|mirror'
+    }
+
+    It 'the reverse of phase 2 deletes the run''s mirrors and zones although its window was started' {
+        Invoke-FakeRun -Answers @('corp.example.test', 'y', '1', 'tenko.corp.example.test', 'corp.example.test', 'no') | Should -Be 3
+        $script:world.window | Should -Not -BeNullOrEmpty
+        @($script:world.mirrors.Keys).Count | Should -Be 2
+        foreach ($phase in 3, 2) { Invoke-FakeRun -Reverse | Should -Be 5 -Because "phase $phase is reversed ($script:lastError)" }
+        @($script:world.mirrors.Keys) | Should -BeNullOrEmpty
+        @($script:world.tzones.Keys) | Should -BeNullOrEmpty
+        (Read-State).phases['2'] | Should -Be 'reversed'
+    }
+
     It 'different leases do not stop the window' {
         $script:world.raw.leases = @{ '192.0.2.0' = @([pscustomobject]@{ IPAddress = [pscustomobject]@{ IPAddressToString = '192.0.2.101' }; ClientId = '00-00-5e-00-53-11'; HostName = 'pc9'; AddressState = 'Active'; LeaseExpiryTime = '2026-11-21T12:00:00Z' }) }
         Invoke-FakeRun -Answers $script:FirstSitting | Should -Be 3 -Because $script:lastError

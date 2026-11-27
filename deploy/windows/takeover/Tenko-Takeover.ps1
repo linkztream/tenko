@@ -2350,11 +2350,13 @@ function Assert-TkSid {
 
 function Get-TkRunMirror {
     # The run's mirrors as Tenko lists them, by server, each id of its exact form. They serve the
-    # deletes alone, so that a create whose answer was lost holds no server.
-    param([hashtable]$State)
+    # deletes alone, so that a create whose answer was lost holds no server. A caller that has
+    # read the run passes it.
+    param([hashtable]$State, [object]$Run)
     $listed = @{}
     if ($script:TkOffline) { return $listed }
-    foreach ($entry in @(Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)") 'mirrors')) {
+    if ($null -eq $Run) { $Run = Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)" }
+    foreach ($entry in @(Get-TkField $Run 'mirrors')) {
         $id = [string](Get-TkField $entry 'mirror')
         if ($id -cmatch $script:TkUuidPattern) { $listed[[string](Get-TkField $entry 'server')] = $id }
     }
@@ -2495,7 +2497,10 @@ function Get-TkPhase2 {
             Again = { $installed = Get-TkField $State.Data.steps '2.exporter'; $null -eq $installed -or $installed.state -ne 'done' }
             UndoFirst = $true
             Do = {
-                $listed = Get-TkRunMirror -State $State
+                # A started window bound the configuration of these mirrors: nothing is prepared again.
+                $run = Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)"
+                if ($null -ne (Get-TkField $run 'window')) { Exit-TkTakeover 1 "the run's window was started: this run prepares nothing again; run -Reverse to its start, have a person close the run, then start a new one" }
+                $listed = Get-TkRunMirror -State $State -Run $run
                 foreach ($server in $r.dhcp) { if (-not $script:TkTokens.ContainsKey($server.name)) { Get-TkMirrorToken -State $State -Server $server -Listed $listed[$server.name] } }
                 $ids = @($State.Data.mirrors.Values)
                 if ($ids.Count -eq 2) { [void](Invoke-Tenko -Method PATCH -Path "/migrate/mirrors/$($ids[0])" -Body ([ordered]@{ partner = $ids[1] })) }
@@ -2795,14 +2800,34 @@ function Get-TkMappedSnapshot {
 
 function Test-TkConfiguration {
     # Each DHCP server's configuration as Windows reports it now, mapped here, against the
-    # configuration of the push the window bound. Leases are not compared.
+    # configuration of the push the window bound. Leases are not compared. Before any of it, each
+    # server's mirror is the one this script made and paired, and its snapshot is the one the
+    # window bound by hash.
     param([hashtable]$State, [string]$ExporterPath)
     $r = $State.Data.readings
+    $window = Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/runs/$($State.Data.run)") 'window'
+    $ids = @{}
     foreach ($server in $r.dhcp) {
+        $id = [string](Get-TkField $State.Data.mirrors $server.name)
+        if ($id -cnotmatch $script:TkUuidPattern) { Exit-TkTakeover 1 "the run holds no mirror of $($server.name) from this script: run -Reverse and start again" }
+        $ids[$server.name] = $id
+    }
+    foreach ($server in $r.dhcp) {
+        $id = $ids[$server.name]
+        $other = @($r.dhcp | Where-Object { $_.name -ne $server.name })
+        if ($other.Count -eq 1 -and [string](Get-TkField (Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id") 'partner') -cne $ids[$other[0].name]) {
+            Exit-TkTakeover 4 "the mirror of $($server.name) is not paired with the other DHCP server's mirror: the window stops before any change; review the run page again"
+        }
+        $entry = @(@(Get-TkField $window 'mirrors') | Where-Object { [string](Get-TkField $_ 'mirror') -ceq $id })
+        if ($entry.Count -ne 1) { Exit-TkTakeover 4 "the window names no mirror of $($server.name) that this script made: the window stops before any change; review the run page again" }
+        $stored = Invoke-Tenko -Method GET -Path "/migrate/mirrors/$id/snapshot"
+        $hash = [string](Get-TkField $stored 'hash')
+        if ($hash -cnotmatch '^[0-9a-f]{64}$' -or $hash -cne [string](Get-TkField $entry[0] 'hash')) {
+            Exit-TkTakeover 4 "the snapshot of $($server.name) is not the configuration the window bound: the window stops before any change; review the run page again"
+        }
         $raw = Invoke-TkRemote -Server $server.name -Name ReadDhcpConfiguration -Arguments @($script:TkDhcpReadProperties) | Select-Object -Last 1
         $mine = Get-TkMappedSnapshot -Raw $raw -Server $server.name -ExporterPath $ExporterPath
-        $stored = Invoke-Tenko -Method GET -Path "/migrate/mirrors/$($State.Data.mirrors[$server.name])/snapshot"
-        if ((Get-TkConfigurationDigest $mine) -ne (Get-TkConfigurationDigest $stored)) {
+        if ((Get-TkConfigurationDigest $mine) -ne (Get-TkConfigurationDigest (Get-TkField $stored 'envelope'))) {
             Exit-TkTakeover 4 "the configuration of $($server.name) differs from the one the window bound: the window stops before any change; review the run page again"
         }
     }
