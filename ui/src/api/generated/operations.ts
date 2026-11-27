@@ -303,6 +303,7 @@ export const apiOperations = [
   { id: "get_run", method: "get", path: "/api/v1/migrate/runs/{id}", tags: ["migrate"], summary: "Get a takeover run" },
   { id: "close_run", method: "post", path: "/api/v1/migrate/runs/{id}/close", tags: ["migrate"], summary: "Close a takeover run" },
   { id: "remove_run_scope", method: "delete", path: "/api/v1/migrate/runs/{id}/scopes/{cidr}", tags: ["migrate"], summary: "Remove a run's switched-off scope" },
+  { id: "start_run_window", method: "post", path: "/api/v1/migrate/runs/{id}/window", tags: ["migrate"], summary: "Start a takeover run's window" },
   { id: "list_takeovers", method: "get", path: "/api/v1/migrate/takeovers", tags: ["migrate"], summary: "List takeover records" },
   { id: "get_takeover", method: "get", path: "/api/v1/migrate/takeovers/{id}", tags: ["migrate"], summary: "Get a takeover record" },
   { id: "create_move", method: "post", path: "/api/v1/moves", tags: ["moves"], summary: "Preview or start a move to another network" },

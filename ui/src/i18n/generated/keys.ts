@@ -677,6 +677,7 @@ export type MessageKey =
   | "audit.action.migrate.run.close"
   | "audit.action.migrate.run.create"
   | "audit.action.migrate.run.join"
+  | "audit.action.migrate.run.window"
   | "audit.action.nodes.roles"
   | "audit.action.scan.config.offer"
   | "audit.action.scan.config.update"
@@ -11095,6 +11096,7 @@ export const messageKeys: readonly MessageKey[] = [
   "audit.action.migrate.run.close",
   "audit.action.migrate.run.create",
   "audit.action.migrate.run.join",
+  "audit.action.migrate.run.window",
   "audit.action.nodes.roles",
   "audit.action.scan.config.offer",
   "audit.action.scan.config.update",
