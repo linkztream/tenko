@@ -245,7 +245,7 @@ impl MirrorService {
                     return Ok(ScopePrepared { prefix: prefix.id });
                 }
             }
-            if delegation::made_by_sitting(sitting, &prefix.meta.created) {
+            if delegation::made_by_sitting(sitting, &cx.principal, &prefix.meta.created) {
                 return Err(same_sitting());
             }
             if let Some(item) = touched(view.as_ref(), sitting.id, &prefix)? {
@@ -349,7 +349,7 @@ impl MirrorService {
             }
         }
         if let Some(sitting) = sitting {
-            if delegation::made_by_sitting(sitting, &prefix.meta.created) {
+            if delegation::made_by_sitting(sitting, &cx.principal, &prefix.meta.created) {
                 return Err(same_sitting());
             }
             if let Some(item) = touched(view.as_ref(), run, &prefix)? {

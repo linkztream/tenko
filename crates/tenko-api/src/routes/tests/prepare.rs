@@ -157,9 +157,26 @@ impl Run {
         self.env.store.propose(batch).await.expect("commit");
     }
 
-    /// A later sitting of the run: its session's approval is now, after what it prepared.
+    /// A later sitting of the run: its session's approval is now, and what the run prepared
+    /// names another session of the run, the earlier sitting's.
     async fn sit_again(&self) {
         approve_at(&self.env, &self.secret, Timestamp::now()).await;
+        let view = self.view().await;
+        let rows = view.scan_typed(&PREFIXES, KeyRange::all(), usize::MAX, false);
+        let mut batch = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+        for (id, mut prefix, _) in rows.expect("the prefixes") {
+            if let Principal::User {
+                session,
+                delegation: Some(run),
+                ..
+            } = &mut prefix.meta.created.by
+                && *run == self.id
+            {
+                *session = tenko_core::SessionId::generate();
+                batch.put_typed(&PREFIXES, &id, &prefix).expect("encode");
+            }
+        }
+        self.env.store.propose(batch).await.expect("commit");
     }
 
     async fn view(&self) -> Arc<dyn ReadView> {
@@ -904,4 +921,33 @@ async fn a_run_removes_its_switched_off_scope_only() {
     assert_eq!(theirs.text, missing.text);
     approve_at(&run.env, &run.secret, six_minutes_ago()).await;
     assert_refused(&run.remove(Bearer(&run.secret)).await, "condition");
+}
+
+/// A sitting never rebuilds or removes the scope its own session prepared, also when the
+/// prefix's stamp lies up to the clock tolerance before the approval (a clock set back); a
+/// later sitting rebuilds it.
+#[tokio::test]
+async fn a_sitting_never_rebuilds_or_removes_the_scope_its_session_prepared() {
+    let run = run().await;
+    let prefix = prefix_of(&run.prepare().await);
+    run.store(envelope(2, |envelope| {
+        pool(envelope, "192.0.2.100", "192.0.2.149");
+    }))
+    .await;
+    let approved = Timestamp::now();
+    approve_at(&run.env, &run.secret, approved).await;
+    let view = run.view().await;
+    let (mut row, _) = (view.get_typed(&PREFIXES, &prefix).expect("read")).expect("a row");
+    row.meta.created.at = approved
+        .checked_sub(Duration::from_secs(3))
+        .expect("a time");
+    let mut batch = WriteBatch::new(Principal::system(SystemComponent::Api), Timestamp::now());
+    batch.put_typed(&PREFIXES, &prefix, &row).expect("encode");
+    run.env.store.propose(batch).await.expect("commit");
+    let before = run.revision();
+    assert_refused(&run.prepare().await, "condition");
+    assert_refused(&run.remove(Bearer(&run.secret)).await, "condition");
+    assert_eq!(run.revision(), before);
+    run.sit_again().await;
+    assert_ne!(prefix_of(&run.prepare().await), prefix);
 }

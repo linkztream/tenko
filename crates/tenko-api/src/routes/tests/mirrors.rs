@@ -183,6 +183,33 @@ async fn a_run_pairs_its_two_mirrors_and_nothing_else() {
     assert_eq!(renamed.body["name"], "dhcp1");
 }
 
+/// A sitting never deletes the mirror its own session made, also when the mirror's stamp lies
+/// up to the clock tolerance before the approval (a clock set back); a mirror another session
+/// of the run made at the same time is deleted.
+#[tokio::test]
+async fn a_sitting_never_deletes_the_mirror_its_session_made() {
+    let (env, admin, app) = served().await;
+    let session = delegated(&env, &admin, SCRIPT).await;
+    let secret = session.secret.expose().to_owned();
+    let (id, _) = create(&app, Bearer(&secret), DHCP1).await;
+    let path = format!("/migrate/mirrors/{id}");
+    let delete = || from(SCRIPT, "DELETE", &path, Bearer(&secret), None);
+    let approved = Timestamp::now();
+    approve_at(&env, &secret, approved).await;
+    let before = approved
+        .checked_sub(Duration::from_secs(3))
+        .expect("a time");
+    rewrite(&env, &id, |mirror| mirror.created.at = before).await;
+    assert_refused(&send(&app, delete()).await, "condition");
+    rewrite(&env, &id, |mirror| {
+        if let Principal::User { session, .. } = &mut mirror.created.by {
+            *session = tenko_core::SessionId::generate();
+        }
+    })
+    .await;
+    send(&app, delete()).await.assert_status(204);
+}
+
 /// The session deletes a mirror of its run that an earlier sitting made, within five minutes
 /// of its approval: the old token's push is refused, and the server's mirror is made again. It
 /// never deletes a mirror its own sitting made, and a person deletes a run mirror at any time.
@@ -197,11 +224,14 @@ async fn a_run_deletes_its_mirrors_within_five_minutes_of_an_approval() {
     let kept = || from(SCRIPT, "GET", &path, Cookie(&admin), None);
     assert_refused(&send(&app, delete(&path)).await, "condition");
     send(&app, kept()).await.assert_status(200);
-    // As an earlier sitting made it, an hour ago.
+    // As an earlier sitting of the run made it, an hour ago.
     rewrite(&env, &id, |mirror| {
         mirror.created.at = Timestamp::now()
             .checked_sub(Duration::from_secs(3_600))
             .expect("a time");
+        if let Principal::User { session, .. } = &mut mirror.created.by {
+            *session = tenko_core::SessionId::generate();
+        }
     })
     .await;
     approve_at(&env, &secret, six_minutes_ago()).await;

@@ -76,8 +76,8 @@ impl AuthService {
         let Some(delegated) = who.flags.delegation else {
             return Ok(());
         };
-        let Err((refusal, outcome)) = self.judge(&delegated, method, route, params, now).await?
-        else {
+        let judged = self.judge((&delegated, &who.principal), method, route, params, now);
+        let Err((refusal, outcome)) = judged.await? else {
             return Ok(());
         };
         let Principal::User { id, session, .. } = who.principal else {
@@ -107,7 +107,7 @@ impl AuthService {
     /// The steps of [`AuthService::admit_delegated`]: the refusal, if any, with its outcome.
     async fn judge(
         &self,
-        delegated: &Delegated,
+        (delegated, principal): (&Delegated, &Principal),
         method: &str,
         route: Option<&str>,
         params: &[(&str, &str)],
@@ -159,7 +159,7 @@ impl AuthService {
                     // it may hold, nor one made again after a deletion.
                     if method == "DELETE"
                         && row.is_some_and(|mirror| {
-                            delegation::made_by_sitting(delegated, &mirror.created)
+                            delegation::made_by_sitting(delegated, principal, &mirror.created)
                         })
                     {
                         return refused("condition");

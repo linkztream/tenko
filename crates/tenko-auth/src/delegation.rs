@@ -40,7 +40,7 @@ use std::time::Duration;
 
 use ipnet::IpNet;
 use tenko_core::{
-    MirrorId, Timestamp,
+    MirrorId, Principal, Timestamp,
     auth::Delegated,
     clock::stands_before,
     ipam::Stamp,
@@ -214,11 +214,14 @@ pub fn within_approval(delegated: &Delegated, now: Timestamp) -> bool {
         && now.saturating_since(delegated.approved_at) <= MIRROR_WINDOW
 }
 
-/// Whether the sitting of `delegated` made what `created` stamps: its run, at or after its
-/// approval. Such an object is never deleted, removed or rebuilt in the same sitting (403
-/// `condition`): a mirror whose token the sitting may hold, or a scope it prepared.
-pub fn made_by_sitting(delegated: &Delegated, created: &Stamp) -> bool {
-    created.by.delegation() == Some(delegated.id) && created.at >= delegated.approved_at
+/// Whether the sitting of `delegated`, acting as `principal`, made what `created` stamps: its
+/// session, or its run at or after its approval (a clock set back within the tolerance
+/// still names the session). Such an object is never deleted, removed or rebuilt in the same
+/// sitting (403 `condition`): a mirror whose token the sitting may hold, or a scope it
+/// prepared.
+pub fn made_by_sitting(delegated: &Delegated, principal: &Principal, created: &Stamp) -> bool {
+    created.by == *principal
+        || (created.by.delegation() == Some(delegated.id) && created.at >= delegated.approved_at)
 }
 
 /// Whether a mirror a delegated session creates stays inside its plan: the Windows DHCP
@@ -318,6 +321,27 @@ mod tests {
                 "{method} {route}"
             );
         }
+    }
+
+    #[test]
+    fn a_sitting_made_what_its_session_stamped_whatever_the_clock() {
+        let session = delegated(at(1_000));
+        let principal = |delegation| Principal::User {
+            id: tenko_core::UserId::generate(),
+            session: tenko_core::SessionId::generate(),
+            strength: tenko_core::AuthStrength::Password,
+            delegation: Some(delegation),
+        };
+        let (own, other) = (principal(session.id), principal(session.id));
+        let stamp = |by: &Principal, secs| Stamp::new(at(secs), by.clone());
+        // The session's own stamp, at and 3 s before the approval (a clock set back).
+        assert!(made_by_sitting(&session, &own, &stamp(&own, 1_000)));
+        assert!(made_by_sitting(&session, &own, &stamp(&own, 997)));
+        // Another session of the run: its stamp after the approval only.
+        assert!(made_by_sitting(&session, &own, &stamp(&other, 1_000)));
+        assert!(!made_by_sitting(&session, &own, &stamp(&other, 997)));
+        let foreign = principal(DelegationId::generate());
+        assert!(!made_by_sitting(&session, &own, &stamp(&foreign, 1_000)));
     }
 
     #[test]
