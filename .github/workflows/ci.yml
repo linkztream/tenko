@@ -284,6 +284,9 @@ jobs:
           path: ui/dist
       - name: Build the server with the real UI
         run: cargo build -p tenko --locked
+      - name: Strip the debug information of the server
+        # A release asset may be at most 512 MiB and the install tests offer this binary as one.
+        run: ls -l target/debug/tenko && strip --strip-debug target/debug/tenko && ls -l target/debug/tenko
       - name: Install dependencies
         working-directory: ui
         run: npm ci

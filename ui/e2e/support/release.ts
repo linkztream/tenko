@@ -71,6 +71,9 @@ export async function digestFile(path: string): Promise<{ sha256: string; size: 
   return { sha256: hash.digest("hex"), size: (await stat(path)).size };
 }
 
+/** The most the server accepts for one release file (`MAX_ASSET_BYTES` in crates/tenko-api/src/dto/release.rs). */
+const MAX_ASSET_BYTES = 512 * 1024 * 1024;
+
 /** The release file of this build for `version`: name, path, digest and size. */
 export async function buildAsset(version: string): Promise<ManifestAsset & { path: string }> {
   const path = tenkoBinary();
@@ -78,6 +81,9 @@ export async function buildAsset(version: string): Promise<ManifestAsset & { pat
   const platform = currentPlatform();
   const name = `tenko-${version}-${platform}${extension}`;
   const { sha256, size } = await digestFile(path);
+  if (size > MAX_ASSET_BYTES) {
+    throw new Error(`${path} is ${size} bytes, over the ${MAX_ASSET_BYTES} bytes of a release asset: run strip --strip-debug ${path}`);
+  }
   // Relative to the manifest's own URL, as the release workflow may write it.
   return { platform, name, url: name, sha256, size, path };
 }
